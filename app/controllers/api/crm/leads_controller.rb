@@ -347,6 +347,16 @@ module Api
 
         @lead.destroy!
         head :no_content
+      rescue ActiveRecord::InvalidForeignKey => e
+        # A child table with a foreign key to leads and no dependent option on
+        # the association. The delete used to surface as a bare 500, which reads
+        # as "you can't do this" and sent Tom hunting through admin roles for a
+        # permission problem that was never there. Name the table instead.
+        table = e.message[/on table "([^"]+)"/, 1]
+        Rails.logger.error("[LeadsController#destroy] FK blocked delete of lead #{@lead.id}: #{e.message}")
+        render json: {
+          errors: ["This lead still has linked #{(table || 'records').humanize.downcase} and can't be deleted yet."]
+        }, status: :unprocessable_entity
       end
 
       # POST /api/crm/leads/bulk_reassign

@@ -49,6 +49,19 @@ class Lead < ApplicationRecord
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
   has_many :tracked_links, as: :entity, dependent: :destroy
 
+  # Both of these have a foreign key to leads with no ON DELETE behaviour, so
+  # without a dependent option here the database refuses the delete and the
+  # request dies as a 500 PG::ForeignKeyViolation. That is what made a lead
+  # created from an intake form undeletable.
+  #
+  # nullify, not destroy, for submissions: the submission is the record of what
+  # the visitor actually sent us. It outlives the lead we happened to make from
+  # it, and lead_id is nullable precisely because a submission exists before any
+  # lead does. A task about a deleted lead has nothing to point at, and its
+  # lead_id is NOT NULL, so it goes.
+  has_many :intake_submissions, dependent: :nullify
+  has_many :lead_tasks,         dependent: :destroy
+
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
 
