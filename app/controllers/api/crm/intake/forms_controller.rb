@@ -24,9 +24,16 @@ module Api
           render json: @forms.map(&:as_json)
         end
         
-        # Get available CRM lead fields for mapping
+        # Get available CRM lead fields for mapping.
+        #
+        # The standard columns below are the same for every tenant. The custom
+        # fields are not: a dealer who collects "Are you wanting to finance or
+        # buy in cash?" on their intake form had nowhere to map the answer, so
+        # it only ever survived as free text in the lead's notes and no report
+        # could ever see it. Evangeline alone has 28 lead custom fields that
+        # this list never offered.
         def lead_fields
-          fields = [
+          standard = [
             { name: 'first_name', label: 'First Name', type: 'text', required: true, group: 'Basic Info' },
             { name: 'last_name', label: 'Last Name', type: 'text', required: false, group: 'Basic Info' },
             { name: 'email', label: 'Email', type: 'email', required: false, group: 'Contact Info' },
@@ -39,8 +46,29 @@ module Api
             { name: 'zip', label: 'ZIP Code', type: 'text', required: false, group: 'Address' },
             { name: 'notes', label: 'Notes', type: 'textarea', required: false, group: 'Additional Info' }
           ]
-          
-          render json: { fields: fields }
+
+          # Namespaced with `custom:` because a custom field key is free to
+          # collide with a real Lead column — company 17 has a lead custom
+          # field keyed `email` — and an unprefixed collision would quietly
+          # shadow the standard mapping with whichever entry the UI listed
+          # last. The prefix is also what tells IntakeSubmission to write the
+          # answer into custom_field_values instead of an attribute.
+          custom = @company.custom_fields
+                           .where(module: 'leads', is_active: true)
+                           .map do |cf|
+            {
+              name: "#{IntakeForm::CUSTOM_FIELD_PREFIX}#{cf.field_key}",
+              label: cf.label.presence || cf.name.presence || cf.field_key.to_s.humanize,
+              type: cf.field_type,
+              required: !!cf.required,
+              group: 'Custom Fields'
+            }
+          end
+
+          # Sorted by label within each group so a 28-entry list is scannable.
+          # The standard block keeps its hand-ordered shape (first name before
+          # last name, street before city), which alphabetising would scramble.
+          render json: { fields: standard + custom.sort_by { |f| f[:label].to_s.downcase } }
         end
 
         def show

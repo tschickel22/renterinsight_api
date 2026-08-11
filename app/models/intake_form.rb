@@ -1,4 +1,13 @@
 class IntakeForm < ApplicationRecord
+  # A field mapping whose target starts with this prefix points at one of the
+  # company's lead custom fields rather than a Lead column. Custom field keys
+  # are free to collide with real column names (company 17 has one keyed
+  # `email`), so the namespace is what keeps a custom answer from silently
+  # overwriting the standard mapping — and it is how IntakeSubmission knows to
+  # write into custom_field_values instead of calling an attribute writer that
+  # does not exist.
+  CUSTOM_FIELD_PREFIX = 'custom:'
+
   belongs_to :company
   belongs_to :source, class_name: 'Source', foreign_key: 'source_id', optional: true
   belongs_to :notified_user, class_name: 'User', foreign_key: 'notified_user_id', optional: true

@@ -39,6 +39,34 @@ module MergeHelper
 
       existing = record.public_send(attr)
 
+      # A JSONB bag (custom_field_values) holds many answers, not one value.
+      # Treated as a single attribute, a lead that already had ANY custom
+      # answer counted as "not blank", so every custom answer on a repeat
+      # submission was reported as one whole-hash conflict and dropped. Merge
+      # key by key under the same fill-empty rule instead.
+      if existing.is_a?(Hash) && value.is_a?(Hash)
+        merged = existing.dup
+        touched = false
+
+        value.each do |sub_key, sub_value|
+          next if sub_value.nil? || (sub_value.respond_to?(:empty?) && sub_value.empty?)
+          k = sub_key.to_s
+
+          if merged[k].blank?
+            merged[k] = sub_value
+            applied[k] = sub_value
+            touched = true
+          elsif normalize(merged[k]) != normalize(sub_value)
+            conflicts << { field: k, existing: merged[k], incoming: sub_value }
+          else
+            skipped << k
+          end
+        end
+
+        record.public_send("#{attr}=", merged) if touched
+        next
+      end
+
       if existing.blank?
         record.public_send("#{attr}=", value)
         applied[attr] = value

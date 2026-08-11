@@ -127,7 +127,12 @@ class IntakeSubmission < ApplicationRecord
     end
     
     unmapped_data = {}
-    
+    # Answers mapped to one of the company's lead custom fields. These are
+    # collected separately and folded into custom_field_values at the end,
+    # because assigning them onto lead_data would be an attribute writer that
+    # doesn't exist and would take the whole lead down with it.
+    custom_values = {}
+
     Rails.logger.info "[IntakeSubmission] Form fields: #{form.fields.inspect}"
     Rails.logger.info "[IntakeSubmission] Submission data: #{submission_data.inspect}"
     
@@ -150,7 +155,7 @@ class IntakeSubmission < ApplicationRecord
           next if mapped_lead_field.blank?
           sub_value = sub_values[sub_key.to_s]
           if sub_value.present?
-            lead_data[mapped_lead_field.to_sym] = sub_value
+            assign_mapped_value(lead_data, custom_values, mapped_lead_field, sub_value)
             Rails.logger.info "[IntakeSubmission] Mapped #{field_name}.#{sub_key} -> #{mapped_lead_field} = #{sub_value}"
           end
         end
@@ -162,11 +167,19 @@ class IntakeSubmission < ApplicationRecord
           unmapped_data["#{field_name}_#{sub_key}"] = sub_value
         end
       elsif lead_field.present? && value.present?
-        lead_data[lead_field.to_sym] = value
+        assign_mapped_value(lead_data, custom_values, lead_field, value)
         Rails.logger.info "[IntakeSubmission] Mapped #{field_name} -> #{lead_field} = #{value}"
       elsif value.present?
         unmapped_data[field_name] = value
       end
+    end
+
+    # String keys throughout: a JSONB column round-trips as strings, and symbol
+    # keys written on the way in produce a hash that never matches on the way
+    # out (see the metadata rule in CLAUDE.md).
+    if custom_values.any?
+      lead_data[:custom_field_values] = custom_values.deep_stringify_keys
+      Rails.logger.info "[IntakeSubmission] Custom field values: #{lead_data[:custom_field_values].inspect}"
     end
     
     # Smart field detection: If no explicit mappings found contact info,
@@ -299,6 +312,23 @@ class IntakeSubmission < ApplicationRecord
   # fields (never overwrite good data), log the full submission as a note
   # (including any conflicting values), link this submission to that lead, and
   # notify the designated user that an EXISTING lead was updated.
+  # Route one mapped answer to the right place. A target namespaced with
+  # `custom:` is one of the company's lead custom fields and belongs in the
+  # custom_field_values JSONB; anything else is a Lead column.
+  #
+  # Without the split, mapping a form field to a custom field raised
+  # UnknownAttributeError on Lead.create! and lost the entire submission, not
+  # just the one answer — which is why the mapping list only ever offered the
+  # eleven standard columns.
+  def assign_mapped_value(lead_data, custom_values, target, value)
+    target = target.to_s
+    if target.start_with?(IntakeForm::CUSTOM_FIELD_PREFIX)
+      custom_values[target.delete_prefix(IntakeForm::CUSTOM_FIELD_PREFIX)] = value
+    else
+      lead_data[target.to_sym] = value
+    end
+  end
+
   def absorb_into_existing_lead(existing_lead, lead_data, submission_data, unmapped_data, form)
     Rails.logger.info "[IntakeSubmission] Absorbing into existing lead ##{existing_lead.id} (fill-empty merge)"
 
