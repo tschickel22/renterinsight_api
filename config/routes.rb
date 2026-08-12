@@ -225,6 +225,10 @@ Rails.application.routes.draw do
       # Lightweight auth/token health check
       get 'health/ping', to: 'health#ping'
 
+      # Resolve a deep-linked record to the company/location it lives in, so an
+      # emailed link can put the user in the right context automatically.
+      get 'deep_links/resolve', to: 'deep_links#resolve'
+
       # ==================== CATALOG SUBSCRIPTIONS (Surface A — dealer opt-in) ====================
       resources :catalog_subscriptions, only: %i[index create destroy]
 
