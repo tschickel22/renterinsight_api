@@ -97,6 +97,55 @@ RSpec.describe Campaigns::RecipientEngagement do
     expect(engaged_ids).not_to include(cold.id)
   end
 
+  # The Recipients tab shows who a campaign reached; where each of them sits in
+  # the pipeline is the thing that decides who to call next. Kept separate from
+  # :status, which is the enrollment's (sent/bounced/unsubscribed) and would be
+  # a silent mix-up if the two shared a key.
+  describe 'lead status' do
+    it 'reports the pipeline status of a lead recipient' do
+      lead.update!(status: 'qualified')
+
+      item = result[:items].find { |i| i[:recipient_id] == lead.id }
+      expect(item[:lead_status]).to eq('qualified')
+    end
+
+    it 'keeps it distinct from the enrollment status' do
+      lead.update!(status: 'qualified')
+      enrollment.update!(status: 'unsubscribed')
+
+      item = result[:items].find { |i| i[:recipient_id] == lead.id }
+      expect(item[:lead_status]).to eq('qualified')
+      expect(item[:status]).to eq('unsubscribed')
+    end
+
+    it 'carries a tenant-defined status through untouched' do
+      lead.update!(status: 'sold_awaiting_delivery')
+
+      item = result[:items].find { |i| i[:recipient_id] == lead.id }
+      expect(item[:lead_status]).to eq('sold_awaiting_delivery')
+    end
+
+    it 'omits it for a recipient type that has no pipeline status' do
+      contact = Contact.create!(company: company, first_name: 'Con', last_name: 'Tact',
+                                email: "c-#{SecureRandom.hex(4)}@example.com")
+      contact_campaign = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'C2',
+                                          campaign_type: 'blast', from_identity_type: 'User',
+                                          from_identity_id: user.id, throttle_per_day: 100)
+      contact_step = contact_campaign.campaign_steps.create!(position: 0, is_active: true, channel: 'email',
+                                                             subject: 'S', body_blocks: [{ 'type' => 'text', 'html' => 'x' }])
+      contact_enr = CampaignEnrollment.create!(company_id: company.id, campaign_id: contact_campaign.id,
+                                               recipient_type: 'Contact', recipient_id: contact.id,
+                                               email_address_snapshot: contact.email)
+      CampaignSend.create!(company_id: company.id, campaign_id: contact_campaign.id,
+                           campaign_step_id: contact_step.id, campaign_enrollment_id: contact_enr.id,
+                           sent_at: 1.hour.ago)
+
+      item = described_class.new(campaign: contact_campaign).call[:items].first
+      expect(item[:recipient_type]).to eq('Contact')
+      expect(item[:lead_status]).to be_nil
+    end
+  end
+
   it 'excludes test sends from the engagement list' do
     test_enr = CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id, recipient_type: "User",
                                           recipient_id: user.id, email_address_snapshot: user.email,

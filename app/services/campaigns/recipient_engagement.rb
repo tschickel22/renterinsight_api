@@ -89,7 +89,7 @@ module Campaigns
           "TRIM(COALESCE(r.first_name,'') || ' ' || COALESCE(r.last_name,''))"
         end
 
-      [
+      columns = [
         'campaign_enrollments.id AS enrollment_id',
         'campaign_enrollments.recipient_id AS recipient_id',
         'campaign_enrollments.email_address_snapshot AS email',
@@ -101,7 +101,15 @@ module Campaigns
         'agg.last_open_at AS last_open_at', 'agg.last_click_at AS last_click_at',
         'agg.last_sent_at AS last_sent_at', 'agg.send_count AS send_count',
         'agg.last_engagement_at AS last_engagement_at'
-      ].join(', ')
+      ]
+
+      # Where the recipient sits in the pipeline right now. Note that
+      # `status` above is the ENROLLMENT's status (sent, bounced, unsubscribed),
+      # which is a different thing entirely, so this gets its own name rather
+      # than overloading one the UI already reads.
+      columns << 'r.status AS lead_status' if recipient_type == 'Lead'
+
+      columns.join(', ')
     end
 
     def filtered_relation(table)
@@ -221,6 +229,10 @@ module Campaigns
         email:              r.email,
         phone:              r.phone,
         status:             r.status,
+        # Only present for Lead campaigns. Sent as the raw key so the UI can
+        # render it through the same badge (and tenant labels/colours) the CRM
+        # uses, rather than this service growing its own copy of that mapping.
+        lead_status:        (r.lead_status if recipient_type == 'Lead'),
         owner_id:           r.owner_id,
         owner_name:         (owners[r.owner_id] if r.owner_id),
         opens:              r.opens.to_i,
