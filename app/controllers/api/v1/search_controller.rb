@@ -3,6 +3,21 @@ class Api::V1::SearchController < ApplicationController
 
   before_action :set_company_scope
 
+  # Rows returned per entity type. Was 5, which is fine when a query is
+  # distinctive and useless when it is not: a first name is not distinctive, and
+  # a dealer with 3,000 leads has a dozen people called Brad, all ranking
+  # identically. At 5 the one being looked for was the ninth and never appeared
+  # until enough of the surname was typed to narrow the set. Ten is still a
+  # dropdown a dropdown. When a type fills those ten, the response also carries
+  # how many there really are, so the caller can say "10 of 23" and offer to
+  # fetch the rest rather than leaving the user to guess whether the record
+  # exists at all.
+  PER_TYPE_LIMIT = 10
+
+  # Ceiling for the expanded view. Past this the honest answer is a filtered
+  # list page, not a longer dropdown.
+  MAX_PER_TYPE_LIMIT = 50
+
   def global
     # Skip authorization - search is a fundamental feature available to all users
     # Results are already scoped to @company and each module has its own RBAC
@@ -15,15 +30,34 @@ class Api::V1::SearchController < ApplicationController
     like = person_name_like(query)
     results = []
 
+    # Per-type totals, filled in only for a type that came back full. A type
+    # under the limit is complete and needs no count, so the common case pays
+    # for no extra query.
+    limit = per_type_limit
+    totals = {}
+
     # CRM - Leads (use is_converted, not is_deleted)
+    #
+    # Status is deliberately NOT filtered. It used to hide lost, unqualified and
+    # dead leads: 1,351 records on the largest tenant, 14% of their leads.
+    # Search is how someone answers "have we dealt with this person before?",
+    # and the answer matters most when the last conversation ended badly. Coming
+    # up empty on an email address reads as "not in the system" and the lead
+    # gets entered a second time. The status rides along as the badge, so a dead
+    # lead still reads as dead.
+    #
+    # Converted leads stay out: they exist as a contact, which this same search
+    # covers, so including both would show every converted person twice.
     begin
-      leads = @company.leads
-                     .where(is_converted: [false, nil])
-                     .where.not(status: %w[lost unqualified dead])
-                     .where(person_name_where('leads', extra: %w[email phone company_name]),
-                            q: like)
-                     .order(Arel.sql(person_name_order('leads', query)))
-                     .limit(5)
+      leads_scope = @company.leads
+                            .where(is_converted: [false, nil])
+                            .where(person_name_where('leads', extra: %w[email phone company_name]),
+                                   q: like)
+      leads = leads_scope
+              .order(Arel.sql(person_name_order('leads', query,
+                                                tiebreak: 'leads.last_activity_at DESC NULLS LAST')))
+              .limit(limit)
+      totals['lead'] = leads_scope.count if leads.size >= limit
 
       results += leads.map do |lead|
         full_name = lead.full_name.presence || "#{lead.first_name} #{lead.last_name}".strip
@@ -42,10 +76,13 @@ class Api::V1::SearchController < ApplicationController
     
     # CRM - Contacts (has first_name, last_name - NOT name; NO is_deleted column)
     begin
-      contacts = @company.contacts
-                        .where(person_name_where('contacts', extra: %w[email phone]), q: like)
-                        .order(Arel.sql(person_name_order('contacts', query)))
-                        .limit(5)
+      # No last_activity_at on contacts to tie-break with, so id DESC stands.
+      contacts_scope = @company.contacts
+                               .where(person_name_where('contacts', extra: %w[email phone]), q: like)
+      contacts = contacts_scope
+                 .order(Arel.sql(person_name_order('contacts', query)))
+                 .limit(limit)
+      totals['contact'] = contacts_scope.count if contacts.size >= limit
 
       results += contacts.map do |contact|
         {
@@ -406,11 +443,13 @@ class Api::V1::SearchController < ApplicationController
 
     # Sort by relevance score (higher = better match)
     results.sort_by! { |r| -r[:score] }
-    
+
     # Limit total results to 30
     results = results.take(30)
-    
-    render json: { results: results }
+
+    # totals carries the real match count for any type that filled its slots, so
+    # the caller can say "10 of 23" and offer the rest.
+    render json: { results: results, totals: totals, limit: limit }
   end
 
   # Types #related will search, in the order they're grouped for the caller.
@@ -611,6 +650,17 @@ class Api::V1::SearchController < ApplicationController
   end
 
   private
+
+  # Rows per type to return. Defaults to the dropdown size; the caller raises it
+  # when the user asks to see the rest. Clamped so a hand-edited URL cannot ask
+  # for the whole table.
+  def per_type_limit
+    requested = params[:limit].presence&.to_i
+    return PER_TYPE_LIMIT if requested.nil? || requested <= 0
+
+    [requested, MAX_PER_TYPE_LIMIT].min
+  end
+
 
   # For each vehicle in `vehicles_scope`, find linked deals whose contact or
   # account name matches `query` and return { vehicle_id => [{name:, deal_id:}, ...] }.

@@ -47,7 +47,13 @@ module PersonNameSearch
 
   # ORDER BY fragment (already sanitized — wrap in Arel.sql at the call site).
   # Lower rank sorts first; id breaks ties so paging is stable.
-  def person_name_order(table, query, email_column: 'email')
+  # @param tiebreak [String, nil] SQL ordering applied within a rank band, before
+  #   id. A first name is not a distinguishing match: a dealer with 3,000 leads
+  #   has a dozen people called Brad, all of them ranked 0, and ordering those
+  #   purely by id DESC means the LIMIT keeps the most recently imported rather
+  #   than the most likely. Pass something meaningful (last activity) so the
+  #   ones the user has actually dealt with float up.
+  def person_name_order(table, query, email_column: 'email', tiebreak: nil)
     first = "LOWER(COALESCE(#{table}.first_name, ''))"
     last  = "LOWER(COALESCE(#{table}.last_name, ''))"
     full  = "(#{first} || ' ' || #{last})"
@@ -57,7 +63,10 @@ module PersonNameSearch
     exact  = rankable.map { |c| "#{c} = :exact" }.join(' OR ')
     prefix = rankable.map { |c| "#{c} LIKE :prefix" }.join(' OR ')
 
-    sql = "CASE WHEN #{exact} THEN 0 WHEN #{prefix} THEN 1 ELSE 2 END, #{table}.id DESC"
+    sql = +"CASE WHEN #{exact} THEN 0 WHEN #{prefix} THEN 1 ELSE 2 END"
+    sql << ", #{tiebreak}" if tiebreak.present?
+    sql << ", #{table}.id DESC"
+
     ActiveRecord::Base.sanitize_sql_array(
       [sql, { exact: query.to_s.downcase, prefix: "#{escape_like(query.to_s.downcase)}%" }]
     )
