@@ -797,11 +797,19 @@ class WorkqueueService
     campaign_q = campaign_q.where("campaign_sends.#{campaign_field} < ?", before) if before
     campaign_pairs = campaign_q.pluck("campaign_enrollments.recipient_id, campaign_sends.#{campaign_field}")
 
+    # The join to leads exists to answer "did this mail actually go to the
+    # lead?". Without it a rep opening the intake alert filed on a lead's
+    # timeline counted as the lead opening email, and the recency ordering then
+    # put that lead at the top of this queue as the hottest prospect in it.
     comm_q = CommunicationEvent
                .joins(:communication)
+               .joins('INNER JOIN leads ON leads.id = communications.communicable_id')
                .where(event_type: event)
                .where(communications: { communicable_type: 'Lead', company_id: @company.id })
                .where('communication_events.occurred_at >= ?', since)
+               .merge(Communication.without_internal_notifications(
+                        email_expression: 'leads.email', phone_expression: 'leads.phone'
+                      ))
     comm_q = comm_q.where('communication_events.occurred_at < ?', before) if before
     comm_pairs = comm_q.pluck('communications.communicable_id, communication_events.occurred_at')
 
@@ -873,11 +881,17 @@ class WorkqueueService
   end
 
   def engagement_contact_recency(event:, since:, before: nil)
+    # Same guard as the Lead side: an internal alert filed on a contact is not
+    # that contact engaging with us.
     comm_q = CommunicationEvent
                .joins(:communication)
+               .joins('INNER JOIN contacts ON contacts.id = communications.communicable_id')
                .where(event_type: event)
                .where(communications: { communicable_type: 'Contact', company_id: @company.id })
                .where('communication_events.occurred_at >= ?', since)
+               .merge(Communication.without_internal_notifications(
+                        email_expression: 'contacts.email', phone_expression: 'contacts.phone'
+                      ))
     comm_q = comm_q.where('communication_events.occurred_at < ?', before) if before
 
     comm_q.pluck('communications.communicable_id, communication_events.occurred_at')

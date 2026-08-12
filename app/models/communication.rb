@@ -86,7 +86,77 @@ class Communication < ApplicationRecord
   scope :scheduled, -> { where(scheduled_status: 'scheduled') }
   scope :ready_to_send, -> { where(scheduled_status: 'scheduled').where('scheduled_for <= ?', Time.current) }
   scope :upcoming, -> { where(scheduled_status: 'scheduled').where('scheduled_for > ?', Time.current).order(:scheduled_for) }
-  
+
+  # ==== Internal staff notifications ====
+  #
+  # Some platform mail is addressed to a staff member but filed on the
+  # customer's record: intake form alerts ("you have a new lead"), existing
+  # customer pings. The row therefore sits on the customer's timeline looking
+  # exactly like correspondence with the customer, and every consumer of that
+  # timeline inherits the lie. It made a lead's Communication Center claim we
+  # had emailed someone we never emailed, and worse, a rep opening his own
+  # alert registered as the customer opening email and pushed that lead to the
+  # top of the "Opened Email Today" workqueue as a hot prospect.
+  #
+  # This is the one definition. Everything that has to tell the two apart calls
+  # it, so the rule cannot drift between the timeline, the stats tiles and the
+  # engagement queues.
+  #
+  # Deliberately conservative: it fires only when the mail is platform
+  # generated AND provably did not reach the record's own address. Hiding
+  # genuine customer correspondence is far worse than leaving one alert
+  # visible. Of 109 system-category rows in production exactly one had gone to
+  # the lead, and that one stays.
+  #
+  # @param email_expression [String] SQL for the record's own email address
+  # @param phone_expression [String] SQL for the record's own phone number
+  def self.internal_notification_sql(email_expression:, phone_expression:)
+    <<~SQL.squish
+      COALESCE(communications.direction, '') = 'outbound'
+      AND COALESCE(#{metadata_category_sql}, '') = 'system'
+      AND COALESCE(TRIM(communications.to_address), '') <> ''
+      AND CASE WHEN communications.channel = 'sms' THEN
+        #{normalized_phone_sql(phone_expression)} = ''
+        OR #{normalized_phone_sql('communications.to_address')} <> #{normalized_phone_sql(phone_expression)}
+      ELSE
+        COALESCE(TRIM(#{email_expression}), '') = ''
+        OR LOWER(TRIM(communications.to_address)) <> LOWER(TRIM(COALESCE(#{email_expression}, '')))
+      END
+    SQL
+  end
+
+  scope :internal_notifications, lambda { |email_expression:, phone_expression:|
+    where(internal_notification_sql(email_expression: email_expression, phone_expression: phone_expression))
+  }
+
+  # Every branch of the predicate is COALESCEd to a non-null value so negating
+  # it stays honest. A NULL inside would make NOT(...) NULL and silently drop
+  # the row from the very lists this is meant to keep intact.
+  scope :without_internal_notifications, lambda { |email_expression:, phone_expression:|
+    where("NOT (#{internal_notification_sql(email_expression: email_expression, phone_expression: phone_expression)})")
+  }
+
+  # Compared on the last 10 digits so formatting and a country code prefix do
+  # not read as a different recipient.
+  def self.normalized_phone_sql(expression)
+    "RIGHT(REGEXP_REPLACE(COALESCE(#{expression}, ''), '[^0-9]', '', 'g'), 10)"
+  end
+
+  # metadata is jsonb on the deployed databases but text in db/schema.rb, so a
+  # local database cannot be queried with ->>. Fall back to matching the
+  # serialized form rather than letting development blow up on the operator.
+  def self.metadata_category_sql
+    if columns_hash['metadata']&.type == :jsonb
+      "communications.metadata->>'category'"
+    else
+      <<~SQL.squish
+        CASE WHEN communications.metadata LIKE '%"category"=>"system"%'
+                  OR communications.metadata LIKE '%"category":"system"%'
+             THEN 'system' END
+      SQL
+    end
+  end
+
   # Thread management
   before_create :assign_to_thread
   after_create :update_thread_timestamp
