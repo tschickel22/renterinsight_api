@@ -62,10 +62,33 @@ module Messaging
         end
       end
 
+      # The tenant-wide ceiling, sitting above every campaign they are running.
+      # Checked last: it is the most expensive of these and the least often hit.
+      tenant_cap = Messaging::TenantSendCap.check(
+        company: @campaign.company,
+        channel: @campaign.sms_channel? ? 'sms' : 'email',
+        now: @now
+      )
+      if tenant_cap.exceeded?
+        Rails.logger.info(
+          "[ThrottleChecker] company #{@campaign.company_id} is at its daily #{tenant_cap.channel} cap " \
+          "(#{tenant_cap.sent_today}/#{tenant_cap.cap})"
+        )
+        return throttled("tenant_daily_#{tenant_cap.channel}", oldest_tenant_send_in_window, 86_400)
+      end
+
       Result.new(status: :ok)
     end
 
     private
+
+    # Retry when the oldest send in the tenant's rolling day ages out, the same
+    # way the mailbox windows do, rather than parking everything for a flat 24h.
+    def oldest_tenant_send_in_window
+      CampaignSend.where(company_id: @campaign.company_id)
+                  .where('sent_at >= ?', @now - 24.hours)
+                  .minimum(:sent_at)
+    end
 
     def limits
       @limits ||= Messaging::SendRateLimits.for(connection_key: @connection_key)

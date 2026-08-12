@@ -655,6 +655,10 @@ module Api
           :owner_phone,
           :send_invitation,  # NEW: Allow sending invitation immediately
           :sms_provisioning_mode,  # Phase 0: platform/dedicated/disabled
+          # Daily CAMPAIGN send ceilings through our shared AWS/Twilio accounts.
+          # Blank clears the override and falls back to the platform default.
+          :daily_campaign_email_cap,
+          :daily_campaign_sms_cap,
           :industry,               # Industry classification — drives labels + module visibility
           # New subscription params (extracted separately in create)
           :subscription_plan_id,
@@ -663,6 +667,16 @@ module Api
         )
       end
       
+      def campaign_sends_last_24h(tenant, channel)
+        CampaignSend.joins(:campaign_step)
+                    .where(company_id: tenant.id, campaign_steps: { channel: channel })
+                    .where('campaign_sends.sent_at >= ?', 24.hours.ago)
+                    .count
+      rescue StandardError => e
+        Rails.logger.warn("[TenantsController] usage count failed for #{tenant.id}/#{channel}: #{e.message}")
+        nil
+      end
+
       def serialize_tenant(tenant, detailed: false)
         base = {
           id: tenant.id,
@@ -676,9 +690,26 @@ module Api
           users_count: tenant.users.count,
           sms_provisioning_mode: tenant.try(:sms_provisioning_mode) || 'platform',
           industry: tenant.try(:industry),
+          # Send ceilings, with what has actually gone out in the last 24h.
+          # The number alone is unreadable: "cap 500" answers nothing, and
+          # "312 of 500" answers both "is this tight?" and "why did my campaign
+          # stop?". Usage is only counted on the detailed view, so the tenant
+          # LIST does not run two counts per row.
+          daily_campaign_email_cap: tenant.daily_campaign_email_cap,
+          daily_campaign_sms_cap: tenant.daily_campaign_sms_cap,
+          effective_daily_campaign_email_cap: tenant.effective_daily_campaign_email_cap,
+          effective_daily_campaign_sms_cap: tenant.effective_daily_campaign_sms_cap,
+          sms_cap_applies: Messaging::TenantSendCap.applies_to?(company: tenant, channel: 'sms'),
           created_at: tenant.created_at,
           updated_at: tenant.updated_at
         }
+
+        if detailed
+          base[:campaign_sends_last_24h] = {
+            email: campaign_sends_last_24h(tenant, 'email'),
+            sms: campaign_sends_last_24h(tenant, 'sms')
+          }
+        end
         
         # Include subscription info if tenant has a subscription
         if tenant.respond_to?(:tenant_subscription) && tenant.tenant_subscription.present?

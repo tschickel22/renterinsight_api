@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_12_162247) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_12_204918) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1320,6 +1320,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_12_162247) do
     t.index ["campaign_enrollment_id"], name: "index_campaign_sends_on_campaign_enrollment_id"
     t.index ["campaign_id", "sent_at"], name: "index_campaign_sends_on_campaign_id_and_sent_at"
     t.index ["communication_id"], name: "index_campaign_sends_on_communication_id"
+    t.index ["company_id", "sent_at"], name: "index_campaign_sends_on_company_and_sent_at"
     t.index ["company_id"], name: "index_campaign_sends_on_company_id"
     t.index ["sending_connection_key", "sent_at"], name: "idx_campaign_sends_connection_rate"
   end
@@ -1961,6 +1962,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_12_162247) do
     t.string "account_number"
     t.jsonb "tracking_settings", default: {}, null: false
     t.integer "email_monthly_limit", default: 10000, null: false
+    t.integer "daily_campaign_email_cap"
+    t.integer "daily_campaign_sms_cap"
     t.index ["account_number"], name: "index_companies_on_account_number", unique: true
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"

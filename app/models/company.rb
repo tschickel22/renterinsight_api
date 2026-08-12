@@ -290,7 +290,19 @@ class Company < ApplicationRecord
   def sms_platform?
     sms_provisioning_mode == 'platform'
   end
-  
+
+  # Daily ceilings on CAMPAIGN traffic through our shared provider accounts.
+  # nil means "whatever the platform default is", so raising that default later
+  # reaches every tenant who never had an opinion. See Messaging::TenantSendCap
+  # for what is and is not counted; transactional mail and texts never are.
+  def effective_daily_campaign_email_cap
+    daily_campaign_email_cap || Messaging::TenantSendCap::DEFAULT_EMAIL_CAP
+  end
+
+  def effective_daily_campaign_sms_cap
+    daily_campaign_sms_cap || Messaging::TenantSendCap::DEFAULT_SMS_CAP
+  end
+
   # Fiscal year validation (1-12 for January-December)
   validates :fiscal_year_start_month, 
             inclusion: { in: 1..12 }, 
