@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_08_233811) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_12_162247) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7690,6 +7690,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_08_233811) do
     t.index ["key"], name: "index_workflow_templates_on_key", unique: true
   end
 
+  create_table "workqueue_dismissals", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id", null: false
+    t.datetime "dismissed_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_workqueue_dismissals_on_company_id"
+    t.index ["user_id", "entity_type", "dismissed_at"], name: "index_workqueue_dismissals_on_user_type_and_time"
+    t.index ["user_id", "entity_type", "entity_id"], name: "index_workqueue_dismissals_on_user_and_entity", unique: true
+    t.index ["user_id"], name: "index_workqueue_dismissals_on_user_id"
+  end
+
   add_foreign_key "account_links", "chart_of_accounts"
   add_foreign_key "account_links", "companies"
   add_foreign_key "accounting_imports", "companies"
@@ -8306,4 +8320,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_08_233811) do
   add_foreign_key "workflow_runs", "workflow_runs", column: "parent_run_id"
   add_foreign_key "workflow_subscriptions", "companies"
   add_foreign_key "workflow_subscriptions", "workflow_rules"
+  add_foreign_key "workqueue_dismissals", "companies"
+  add_foreign_key "workqueue_dismissals", "users"
 end

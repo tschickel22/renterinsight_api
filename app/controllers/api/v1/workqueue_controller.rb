@@ -29,6 +29,45 @@ module Api
 
         render json: service.items
       end
+
+      # POST /api/v1/workqueue/dismiss
+      #
+      # "I have dealt with this one for now." Marks the record handled at this
+      # moment, for this user only. Queues compare that moment against the
+      # freshness of whatever put the row there, so a reply, a click or a new
+      # task brings it back without the user having to undo anything.
+      def dismiss
+        entity_type = params[:entity_type].to_s.camelize
+        entity_id = params[:entity_id].presence
+
+        unless WorkqueueDismissal::ENTITY_TYPES.include?(entity_type)
+          return render json: { error: "Unsupported entity type: #{params[:entity_type]}" },
+                        status: :bad_request
+        end
+
+        return render json: { error: 'entity_id required' }, status: :bad_request if entity_id.blank?
+
+        dismissal = WorkqueueDismissal.dismiss!(
+          company: @company, user: current_user,
+          entity_type: entity_type, entity_id: entity_id.to_i
+        )
+
+        render json: {
+          entityType: dismissal.entity_type,
+          entityId: dismissal.entity_id,
+          dismissedAt: dismissal.dismissed_at.iso8601
+        }, status: :created
+      end
+
+      # DELETE /api/v1/workqueue/dismiss — undo, for a row set aside by mistake.
+      def undismiss
+        WorkqueueDismissal.for_user(current_user)
+                          .where(entity_type: params[:entity_type].to_s.camelize,
+                                 entity_id: params[:entity_id].to_i)
+                          .destroy_all
+
+        head :no_content
+      end
     end
   end
 end

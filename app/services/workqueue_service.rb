@@ -260,10 +260,60 @@ class WorkqueueService
     @hash_queue_cache ||= {}
     @hash_queue_cache[queue_id] ||= begin
       method = QUEUES[queue_id]
-      method ? Array(send(method)) : []
+      method ? reject_dismissed_hash_items(Array(send(method))) : []
     rescue => e
       Rails.logger.warn "[WorkqueueService] hash_queue_items(#{queue_id}) failed: #{e.message}"
       []
+    end
+  end
+
+  # Hash rows already carry the signal that put them here in :last_activity_at
+  # (the click, the view), so the comparison is exact: a dismissal only hides
+  # the row while it is at or after that signal. The next click is newer and
+  # the row returns without anyone undoing anything.
+  def reject_dismissed_hash_items(items)
+    return items if items.empty?
+
+    dismissals = dismissals_for(items.map { |it| [it[:entity_type].to_s, it[:entity_id]] })
+    return items if dismissals.empty?
+
+    items.reject do |item|
+      dismissed_at = dismissals[[normalize_entity_type(item[:entity_type]), item[:entity_id].to_i]]
+      dismissed_at && item[:last_activity_at] && dismissed_at >= item[:last_activity_at]
+    end
+  end
+
+  # {[EntityType, id] => dismissed_at} for this user, over the pairs asked for.
+  def dismissals_for(pairs)
+    normalized = pairs.map { |type, id| [normalize_entity_type(type), id.to_i] }.uniq
+    return {} if normalized.empty?
+
+    WorkqueueDismissal
+      .for_user(@user)
+      .where(entity_type: normalized.map(&:first).uniq, entity_id: normalized.map(&:last).uniq)
+      .pluck(:entity_type, :entity_id, :dismissed_at)
+      .each_with_object({}) { |(type, id, at), memo| memo[[type, id]] = at }
+  end
+
+  # Hash rows carry 'lead'/'contact'; the table stores model names.
+  def normalize_entity_type(type)
+    type.to_s.camelize
+  end
+
+  # Drop ids the user set aside more recently than the signal that would put
+  # them back. Shared by every queue built from a {id => timestamp} map, which
+  # is where the comparison can be made against the real engagement moment
+  # rather than a proxy for it.
+  def reject_dismissed_recency(recency_by_id, entity_type)
+    @dismissals_applied = true
+    return recency_by_id if recency_by_id.empty?
+
+    dismissals = dismissals_for(recency_by_id.keys.map { |id| [entity_type, id] })
+    return recency_by_id if dismissals.empty?
+
+    recency_by_id.reject do |id, occurred_at|
+      dismissed_at = dismissals[[entity_type, id.to_i]]
+      dismissed_at && occurred_at && dismissed_at >= occurred_at
     end
   end
 
@@ -365,8 +415,19 @@ class WorkqueueService
     method_name = QUEUES[queue_id]
     return nil unless method_name
 
+    # Reset per call. Queues built from a recency map compare the dismissal
+    # against the actual engagement moment and set this, and the generic filter
+    # below must not then re-filter them against the record's last activity —
+    # an email opened this morning is a reason to resurface a lead whether or
+    # not anyone has touched the record since. Flagging it from the helper
+    # rather than listing queue ids here means a new engagement queue is
+    # covered the moment it routes through that helper.
+    @dismissals_applied = false
+
     scope = send(method_name)
     return nil unless scope
+
+    scope = reject_dismissed_scope(scope) unless @dismissals_applied
 
     # Deliberately NOT applying Current.location_id — Workqueue is a personal
     # cross-location inbox: whatever is assigned to me (mine) should surface
@@ -377,6 +438,55 @@ class WorkqueueService
   rescue => e
     Rails.logger.warn "[WorkqueueService] build_scope(#{queue_id}) failed: #{e.message}"
     nil
+  end
+
+  # How a row of each kind identifies the record a user dismisses, and what
+  # counts as that row being fresh again.
+  #
+  # Activity rows point at their parent, because that is the record the rep
+  # acted on when they cleared it. Their freshness is the activity's own
+  # updated_at, so logging a NEW task against a dismissed lead still surfaces:
+  # the new row is newer than the dismissal even though the lead is not.
+  def dismissal_binding_for(klass)
+    table = klass.table_name
+
+    if klass == WorkqueueActivity
+      { type_sql: "#{table}.parent_type", id_sql: "#{table}.parent_id", freshness: "#{table}.updated_at" }
+    elsif klass.column_names.include?('last_activity_at')
+      { type: klass.name, id_sql: "#{table}.id",
+        freshness: "GREATEST(#{table}.updated_at, COALESCE(#{table}.last_activity_at, #{table}.updated_at))" }
+    else
+      { type: klass.name, id_sql: "#{table}.id", freshness: "#{table}.updated_at" }
+    end
+  end
+
+  # Hide rows the user set aside, until something newer than the dismissal
+  # happens to them. Written as NOT EXISTS so a record with no dismissal costs
+  # an index probe and nothing else.
+  def reject_dismissed_scope(scope)
+    klass = scope.klass
+    return scope unless klass.respond_to?(:table_name) && klass.table_name.present?
+
+    binding = dismissal_binding_for(klass)
+    return scope unless WorkqueueDismissal::ENTITY_TYPES.include?(binding[:type]) || binding[:type_sql]
+
+    type_condition = binding[:type_sql] ? "d.entity_type = #{binding[:type_sql]}" : 'd.entity_type = :type'
+
+    scope.where(
+      "NOT EXISTS (
+         SELECT 1 FROM workqueue_dismissals d
+         WHERE d.user_id = :user_id
+           AND #{type_condition}
+           AND d.entity_id = #{binding[:id_sql]}
+           AND d.dismissed_at >= #{binding[:freshness]}
+       )",
+      user_id: @user.id, type: binding[:type]
+    )
+  rescue => e
+    # A queue that cannot be filtered should still render. Showing a row the
+    # user dismissed is a smaller failure than an empty Workqueue.
+    Rails.logger.warn "[WorkqueueService] dismissal filter skipped for #{scope.klass}: #{e.message}"
+    scope
   end
 
   # ─── Activity queues ─────────────────────────────────────────────
@@ -600,6 +710,9 @@ class WorkqueueService
         title:            entity_name,
         subtitle:         "Viewed #{vehicle_name} #{link.click_count}x (#{time_ago_h}h ago)",
         status:           'hot_interest',
+        # :status above says why the row is here, not where the person is in
+        # the pipeline. Both matter, so carry the pipeline status separately.
+        lead_status:      (entity&.status if link.entity_type == 'Lead'),
         priority:         link.click_count >= 4 ? 'high' : 'medium',
         badge:            "🔥 #{link.click_count} views",
         amount:           nil,
@@ -695,6 +808,9 @@ class WorkqueueService
         title:            entity_name,
         subtitle:         "#{opened_text}#{top_text} (#{when_text})",
         status:           'brochure_interest',
+        # :status above says why the row is here, not where the person is in
+        # the pipeline. Both matter, so carry the pipeline status separately.
+        lead_status:      (entity&.status if entity_type == 'Lead'),
         priority:         clicks >= 3 ? 'high' : 'medium',
         badge:            if home_clicks.positive?
                             "🏠 #{home_clicks} home #{'click'.pluralize(home_clicks)}"
@@ -849,6 +965,7 @@ class WorkqueueService
   end
 
   def engagement_scope_for(recency_by_lead)
+    recency_by_lead = reject_dismissed_recency(recency_by_lead, 'Lead')
     return @company.leads.none if recency_by_lead.empty?
 
     ordered_ids = recency_by_lead.sort_by { |_, ts| -(ts ? ts.to_f : 0) }.map { |id, _| id.to_i }
@@ -900,6 +1017,7 @@ class WorkqueueService
   end
 
   def engagement_contact_scope_for(recency_by_contact)
+    recency_by_contact = reject_dismissed_recency(recency_by_contact, 'Contact')
     return @company.contacts.none if recency_by_contact.empty?
 
     ordered_ids = recency_by_contact.sort_by { |_, ts| -(ts ? ts.to_f : 0) }.map { |id, _| id.to_i }
@@ -1113,6 +1231,11 @@ class WorkqueueService
       title:                 full_name || 'Unnamed Lead',
       subtitle:              r.email,
       status:                r.status,
+      # The same value as :status here, but named for what it is. :status
+      # carries a row-kind marker on some queues ('hot_interest'), so the badge
+      # needs a key that always means the lead's pipeline status, never a
+      # description of why the row is in the list.
+      lead_status:           r.status,
       priority:              nil,
       badge:                 r.try(:source)&.try(:name),
       amount:                nil,
@@ -1465,10 +1588,13 @@ class WorkqueueService
       entity_name:        parent_info[:name],
       entity_phone:       parent_info[:phone],
       entity_email:       parent_info[:email],
+      # Only leads have a pipeline status. Other parents leave this nil and the
+      # UI shows nothing rather than an empty badge.
+      lead_status:        (parent_info[:status] if r.parent_type == 'Lead'),
     }
   end
 
-  EMPTY_PARENT_INFO = { name: nil, phone: nil, email: nil }.freeze
+  EMPTY_PARENT_INFO = { name: nil, phone: nil, email: nil, status: nil }.freeze
 
   # Looks up cached parent info populated by preload_activity_parents. Falls
   # back to an empty hash so callers can always safely chain into [:name] etc.
@@ -1495,8 +1621,10 @@ class WorkqueueService
       @activity_parents[parent_type] =
         case parent_type
         when 'Lead'
-          Lead.where(id: ids).pluck(:id, :first_name, :last_name, :phone, :email).each_with_object({}) do |(id, fn, ln, ph, em), h|
-            h[id] = { name: [fn, ln].compact.reject(&:blank?).join(' ').presence, phone: ph, email: em }
+          # status rides along so a task row can show that its lead is already
+          # unqualified — the reason to close the task rather than work it.
+          Lead.where(id: ids).pluck(:id, :first_name, :last_name, :phone, :email, :status).each_with_object({}) do |(id, fn, ln, ph, em, st), h|
+            h[id] = { name: [fn, ln].compact.reject(&:blank?).join(' ').presence, phone: ph, email: em, status: st }
           end
         when 'Contact'
           Contact.where(id: ids).pluck(:id, :first_name, :last_name, :phone, :email).each_with_object({}) do |(id, fn, ln, ph, em), h|

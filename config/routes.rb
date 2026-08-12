@@ -631,6 +631,11 @@ Rails.application.routes.draw do
       get 'workqueue/summary', to: 'workqueue#summary'
       get 'workqueue/items',   to: 'workqueue#items'
 
+      # Set a record aside while working the queue. Reversible, and undone on
+      # its own by anything newer than the dismissal.
+      post   'workqueue/dismiss', to: 'workqueue#dismiss'
+      delete 'workqueue/dismiss', to: 'workqueue#undismiss'
+
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
