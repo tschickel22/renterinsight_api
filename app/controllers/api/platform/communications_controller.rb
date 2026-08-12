@@ -1279,9 +1279,67 @@ module Api
           readAt: comm.read_at&.iso8601,
           source: metadata_obj['source'] || 'manual',
           metadata: metadata_obj,
+          toAddress: comm.to_address,
+          internal: internal_notification?(comm),
           createdAt: comm.created_at&.iso8601,
           updatedAt: comm.updated_at&.iso8601
         }.compact
+      end
+
+      # True when this row is a platform notification sent to a staff member
+      # that happens to be filed on the customer's timeline (intake form alerts,
+      # existing-customer pings). It renders identically to real correspondence,
+      # so the customer's record reads as though we emailed them when we did
+      # not. Flag it here and let the client label it plainly.
+      #
+      # Conservative on purpose: labelling a genuine customer email "internal,
+      # customer did not receive this" is far worse than missing one. It only
+      # fires when the mail is platform-generated AND provably did not go to the
+      # entity's own address.
+      def internal_notification?(comm)
+        return false unless comm.direction.to_s == 'outbound'
+
+        return false unless metadata_hash(comm)['category'].to_s == 'system'
+
+        recipient = normalize_address(comm.to_address, comm.channel)
+        return false if recipient.blank?
+
+        own_address = normalize_address(entity_own_address(comm.channel), comm.channel)
+        # Nothing to compare against means the entity has no address on file and
+        # so cannot have been the recipient of a mail that clearly reached one.
+        return true if own_address.blank?
+
+        recipient != own_address
+      end
+
+      # communications.metadata is jsonb on the deployed databases but text in
+      # db/schema.rb, so a local record hands back the raw string. Read through
+      # both rather than silently treating a text row as having no category.
+      def metadata_hash(comm)
+        raw = comm.metadata
+        return raw if raw.is_a?(Hash)
+        return {} if raw.blank?
+
+        begin
+          parsed = JSON.parse(raw)
+          parsed.is_a?(Hash) ? parsed : {}
+        rescue JSON::ParserError
+          {}
+        end
+      end
+
+      def entity_own_address(channel)
+        return nil unless @entity
+
+        channel.to_s == 'sms' ? @entity.try(:phone) : @entity.try(:email)
+      end
+
+      # Phone numbers are compared on their last 10 digits so formatting and a
+      # country code prefix do not read as a different recipient.
+      def normalize_address(value, channel)
+        return '' if value.blank?
+
+        channel.to_s == 'sms' ? value.to_s.gsub(/\D/, '').last(10).to_s : value.to_s.strip.downcase
       end
       
       # Create communication record before sending (to get ID for tracking)
