@@ -4,7 +4,47 @@ module Api
       include PersonNameSearch
 
       before_action :set_company_scope
-      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check]
+      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone]
+
+      # ==== Lead cloning ====
+      #
+      # Every column on leads belongs to exactly one of these three lists, and a
+      # spec fails if a new one belongs to none. Cloning is the kind of feature
+      # where a column added months later gets copied by accident and nobody
+      # notices until a deposit or an opt-in shows up on a record that never
+      # earned it, so the decision is forced at the point the column is added.
+
+      # Copied verbatim: the profile and what the buyer is looking for.
+      CLONED_ATTRIBUTES = %w[
+        first_name last_name email phone source_id
+        budget_range purchase_timeframe rv_experience preferred_contact_method
+        interests_requirements vehicle_id
+        street city state zip country
+        company_name title
+        preferred_bedrooms preferred_bathrooms preferred_min_sqft preferred_max_sqft
+        preferred_home_type
+        co_applicant_first_name co_applicant_last_name co_applicant_email co_applicant_phone
+      ].freeze
+
+      # Set by #clone rather than copied.
+      DERIVED_ON_CLONE = %w[
+        id created_at updated_at company_id status owner_id location_id notes custom_field_values
+      ].freeze
+
+      # Deliberately left behind. Grouped by why, since the reasons differ and
+      # the wrong one being copied is a different kind of bug each time.
+      RESET_ON_CLONE = %w[
+        is_converted converted_account_id converted_at
+        health_score health_score_updated_at last_activity_scored_at last_activity_at
+        email_invalid
+        opt_in_sms
+        deposit_amount
+        utm_source utm_medium utm_campaign utm_content utm_term
+        social_post_id social_intent survey_answers source_created_at
+        champion_salesforce_id champion_status champion_lead_data champion_config_id
+        champion_accepted_at champion_declined_at champion_action_token
+        champion_action_token_expires_at
+      ].freeze
 
       # Legacy default — kept ONLY as a fallback if a company somehow has no
       # lead_statuses rows yet (shouldn't happen post-migration). The real
@@ -292,6 +332,52 @@ module Api
           message: e.message,
           params_received: params_info
         }, status: :internal_server_error
+      end
+
+      # POST /api/crm/leads/:id/clone
+      #
+      # Copies a lead's profile onto a fresh record: the same person or the same
+      # shape of inquiry, starting over at the top of the pipeline. Everything
+      # earned by the original stays with the original — its history, its score,
+      # its conversion, its place in any nurture flow.
+      #
+      # Three categories of field are deliberately NOT copied:
+      #
+      #   Provenance. utm_*, social_post_id, survey_answers and source_created_at
+      #   describe one specific inbound event. Copying them would credit a
+      #   campaign twice for a record it never produced. source_id is copied,
+      #   because that is the origin a rep chose and can see.
+      #
+      #   External identity. The champion_* columns key this record to a row in
+      #   Champion's system. Two local leads pointing at one remote lead would
+      #   make the next sync ambiguous.
+      #
+      #   Consent and money. opt_in_sms is permission captured from a person on
+      #   a specific record, not an attribute of the profile, so the copy starts
+      #   without it and has to earn it again. deposit_amount is earnest money
+      #   actually collected against the original; copying it would show a
+      #   second deposit nobody took. Both fail closed.
+      def clone
+        return unless authorize_action!('leads', 'create')
+
+        copy = @company.leads.new(CLONED_ATTRIBUTES.index_with { |attr| @lead.public_send(attr) })
+        copy.custom_field_values = @lead.custom_field_values if @lead.custom_field_values.present?
+        copy.status = 'new'
+        copy.owner_id = @lead.owner_id || current_user&.id
+        copy.location_id = @lead.location_id || Current.location_id
+        copy.notes = [@lead.notes.presence, "Cloned from lead ##{@lead.id}."].compact.join("\n\n")
+
+        # The duplicate-email block on #create exists to catch a rep retyping a
+        # lead that is already in the system. This is not that: the copy was
+        # asked for explicitly, by someone looking at the original. Blocking it
+        # here would leave the button doing nothing with no way to proceed.
+        if copy.save(validate: false)
+          Rails.logger.info "[LeadsController#clone] Lead #{@lead.id} cloned to #{copy.id} by user #{current_user&.id}"
+          render json: lead_json(copy), status: :created
+        else
+          render json: { error: 'Clone failed', details: copy.errors.full_messages },
+                 status: :unprocessable_entity
+        end
       end
 
       def update

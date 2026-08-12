@@ -2495,7 +2495,10 @@ Rails.application.routes.draw do
           
           # Conversion
           post :convert
-          
+
+          # Copy the profile onto a fresh lead at the top of the pipeline.
+          post :clone
+
           # Scoring
           get :score, to: 'lead_scores#show'
           post 'score/calculate', to: 'lead_scores#calculate'
