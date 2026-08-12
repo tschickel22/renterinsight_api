@@ -96,6 +96,69 @@ RSpec.describe Ses::EventProcessor do
       })
     end
 
+    # SES reports a dead domain as Transient because DNS can come back, and it
+    # retries for hours before giving up. Taking that at face value left the
+    # address live for three more attempts, each one another bounce against the
+    # account rate. Verbatim payload from prod 2026-08-11 (alabamahomesite.com,
+    # which publishes no MX, A or SOA on any public resolver).
+    describe 'a domain that does not resolve' do
+      let(:dns_expired) do
+        event('Bounce', 'bounce' => {
+          'bounceType' => 'Transient', 'bounceSubType' => 'General',
+          'bouncedRecipients' => [{
+            'emailAddress' => lead.email,
+            'status' => '4.4.7',
+            'diagnosticCode' => 'smtp; 550 4.4.7 Message expired: unable to deliver in 840 minutes.' \
+                                '<421 4.4.0 Unable to lookup DNS for alabamahomesite.com>'
+          }]
+        })
+      end
+
+      it 'treats it as hard once SES has exhausted its own retries' do
+        described_class.process(dns_expired)
+
+        expect(campaign_send.reload.bounce_type).to eq('hard')
+        expect(CampaignSuppression.find_by(company_id: company.id, email_address: lead.email).reason)
+          .to eq('bounce_hard')
+        expect(enrollment.reload.status).to eq('bounced')
+      end
+
+      it 'notes that we escalated rather than that SES called it permanent' do
+        described_class.process(dns_expired)
+
+        event_row = CampaignEvent.where(campaign_id: campaign.id, event_type: 'bounced_async').last
+        expect(event_row.payload['ses_bounce_type']).to eq('Transient')
+        expect(event_row.payload['hard_bounce_reason']).to eq('dns_failure_after_retries')
+      end
+
+      it 'leaves a DNS failure that has NOT exhausted retries soft' do
+        described_class.process(event('Bounce', 'bounce' => {
+          'bounceType' => 'Transient', 'bounceSubType' => 'General',
+          'bouncedRecipients' => [{
+            'emailAddress' => lead.email,
+            'diagnosticCode' => 'smtp; 421 4.4.0 Unable to lookup DNS for slow-dealer.com'
+          }]
+        }))
+
+        expect(campaign_send.reload.bounce_type).to eq('soft')
+        expect(CampaignSuppression.find_by(company_id: company.id, email_address: lead.email)).to be_nil
+        expect(enrollment.reload.status).to eq('active')
+      end
+
+      it 'leaves an expiry with no DNS cause soft, since the mailbox may be real' do
+        described_class.process(event('Bounce', 'bounce' => {
+          'bounceType' => 'Transient', 'bounceSubType' => 'General',
+          'bouncedRecipients' => [{
+            'emailAddress' => lead.email,
+            'diagnosticCode' => 'smtp; 550 4.4.7 Message expired: unable to deliver in 840 minutes.'
+          }]
+        }))
+
+        expect(campaign_send.reload.bounce_type).to eq('soft')
+        expect(enrollment.reload.status).to eq('active')
+      end
+    end
+
     it 'marks a permanent bounce hard and suppresses the address' do
       described_class.process(permanent)
 

@@ -17,6 +17,28 @@ module Ses
     # address is cheaper than suppressing a real customer on a guess.
     HARD_BOUNCE_TYPE = 'Permanent'
 
+    # One exception to trusting SES's own classification.
+    #
+    # SES calls a bounce Transient when it could not resolve the recipient's
+    # domain, because DNS can come back, and it retries for hours before giving
+    # up with "Message expired". But "transient" there describes SES's retry
+    # policy, not the address: a domain with no DNS does not start resolving
+    # because we sent to it again. Left soft, the address survives three more
+    # attempts, and each one is another bounce counted against the account-wide
+    # rate AWS reviews on.
+    #
+    # Seen on prod 2026-08-11: info@alabamahomesite.com returned
+    # Transient/General carrying "550 4.4.7 Message expired: unable to deliver
+    # in 840 minutes.<421 4.4.0 Unable to lookup DNS for alabamahomesite.com>".
+    # That domain publishes no MX, no A and no SOA on any public resolver.
+    #
+    # Both halves are required before escalating. A DNS hiccup alone stays soft,
+    # because a real dealer's mail server can be briefly unreachable. Only once
+    # SES has exhausted its own retry window AND the reason was the domain
+    # itself is the address treated as permanently undeliverable.
+    DNS_FAILURE_DIAGNOSTIC = /unable to lookup dns|dns lookup failed|no such domain|domain not found|host or domain name not found/i
+    RETRIES_EXHAUSTED_DIAGNOSTIC = /message expired|unable to deliver in \d+ minutes/i
+
     def self.process(message)
       new(message).process
     end
@@ -89,7 +111,8 @@ module Ses
 
     def handle_bounce(communication, send_record)
       bounce = message['bounce'] || {}
-      hard = bounce['bounceType'] == HARD_BOUNCE_TYPE
+      dns_escalated = permanently_undeliverable_domain?(bounce)
+      hard = bounce['bounceType'] == HARD_BOUNCE_TYPE || dns_escalated
       payload = {
         'bounce_type' => hard ? 'hard' : 'soft',
         'ses_bounce_type' => bounce['bounceType'],
@@ -97,6 +120,9 @@ module Ses
         'diagnostic' => bounce.dig('bouncedRecipients', 0, 'diagnosticCode').to_s[0, 500],
         'source' => 'ses_notification'
       }
+      # Records that WE overrode SES rather than that SES said Permanent, so a
+      # later look at this row can tell the difference.
+      payload['hard_bounce_reason'] = 'dns_failure_after_retries' if dns_escalated
 
       ActiveRecord::Base.transaction do
         communication.track_event('bounced', provider_data: message)
@@ -178,6 +204,15 @@ module Ses
       attrs = { status: status, failure_reason: reason.to_s[0, 200] }
       attrs[:bounced_at] = Time.current if status == 'bounced' && enrollment.respond_to?(:bounced_at)
       enrollment.update!(attrs)
+    end
+
+    # True when SES gave up retrying AND the reason it could not deliver was
+    # that the recipient's domain does not resolve. See the constants above.
+    def permanently_undeliverable_domain?(bounce)
+      diagnostic = bounce.dig('bouncedRecipients', 0, 'diagnosticCode').to_s
+      return false if diagnostic.blank?
+
+      DNS_FAILURE_DIAGNOSTIC.match?(diagnostic) && RETRIES_EXHAUSTED_DIAGNOSTIC.match?(diagnostic)
     end
 
     def count_soft_bounce(send_record, payload)
