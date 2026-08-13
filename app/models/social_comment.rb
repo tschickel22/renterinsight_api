@@ -13,6 +13,10 @@ class SocialComment < ApplicationRecord
   # Everything still moderatable: hiding a comment must not make it vanish, or
   # the Unhide button is unreachable the moment the page reloads.
   scope :visible,    -> { where(is_deleted: [false, nil], status: %w[active hidden]) }
+  # Kept, not erased. A comment removed here is only hidden on Facebook unless
+  # we wrote it, and a hidden comment looks untouched to whoever left it, so
+  # this list is the only place that records the dealer acted at all.
+  scope :removed,    -> { where(status: 'deleted') }
   scope :unread,     -> { where(read_at: nil, is_from_page: false) }
   scope :top_level,  -> { where(parent_comment_id: nil) }
   scope :replies_to, ->(comment_id) { where(parent_comment_id: comment_id) }

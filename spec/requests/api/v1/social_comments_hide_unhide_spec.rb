@@ -142,4 +142,75 @@ RSpec.describe 'Api::V1::SocialComments hide and unhide', type: :request do
       expect(JSON.parse(response.body)['comments']).to be_empty
     end
   end
+
+  # A comment removed here is only hidden on Facebook unless we wrote it, and a
+  # hidden comment looks completely untouched to whoever left it. If we erase
+  # our own row too, nothing anywhere records that the dealer acted.
+  describe 'removing a comment' do
+    it "hides someone else's comment on Facebook and records that" do
+      expect(MetaGraphApi).to receive(:hide_comment).with('c_1', 'page-token').and_return({ 'success' => true })
+      expect(MetaGraphApi).not_to receive(:delete_comment)
+
+      delete "/api/v1/social-comments/#{comment.id}", headers: headers
+
+      expect(response).to have_http_status(:no_content)
+      comment.reload
+      expect(comment.status).to eq('deleted')
+      expect(comment.metadata.deep_stringify_keys.dig('moderation', 'on_facebook')).to eq('hide')
+    end
+
+    it 'really deletes our own reply, which Facebook does allow' do
+      ours = company.social_comments.create!(
+        social_post: social_post, external_comment_id: 'c_2',
+        external_post_id: '55501_900', platform: 'facebook',
+        author_name: 'Test Page', message: 'Thanks!', is_from_page: true,
+        status: 'active', commented_at: 5.minutes.ago
+      )
+      expect(MetaGraphApi).to receive(:delete_comment).with('c_2', 'page-token').and_return({ 'success' => true })
+
+      delete "/api/v1/social-comments/#{ours.id}", headers: headers
+
+      expect(ours.reload.metadata.deep_stringify_keys.dig('moderation', 'on_facebook')).to eq('delete')
+    end
+
+    it 'keeps the row when Facebook refuses, rather than claiming it is gone' do
+      allow(MetaGraphApi).to receive(:hide_comment)
+        .and_raise(MetaGraphApi::Error.new('(#200) Permissions error'))
+
+      delete "/api/v1/social-comments/#{comment.id}", headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(comment.reload.status).to eq('active')
+    end
+
+    it 'lists what was removed, so the dealer can see what they acted on' do
+      allow(MetaGraphApi).to receive(:hide_comment).and_return({ 'success' => true })
+      delete "/api/v1/social-comments/#{comment.id}", headers: headers
+
+      get '/api/v1/social-comments?status=removed', headers: headers
+
+      body = JSON.parse(response.body)['comments']
+      expect(body.map { |c| c['id'] }).to eq([comment.id])
+      expect(body.first.dig('moderation', 'on_facebook')).to eq('hide')
+    end
+
+    it 'does not put a removed comment back in the default list' do
+      allow(MetaGraphApi).to receive(:hide_comment).and_return({ 'success' => true })
+      delete "/api/v1/social-comments/#{comment.id}", headers: headers
+
+      get '/api/v1/social-comments', headers: headers
+
+      expect(JSON.parse(response.body)['comments']).to be_empty
+    end
+
+    it 'records that Facebook had already lost it, not that we removed it' do
+      allow(MetaGraphApi).to receive(:hide_comment)
+        .and_raise(MetaGraphApi::NotFoundError.new('does not exist'))
+
+      delete "/api/v1/social-comments/#{comment.id}", headers: headers
+
+      expect(response).to have_http_status(:no_content)
+      expect(comment.reload.metadata.deep_stringify_keys.dig('moderation', 'on_facebook')).to eq('already_gone')
+    end
+  end
 end

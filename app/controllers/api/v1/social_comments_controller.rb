@@ -17,12 +17,14 @@ class Api::V1::SocialCommentsController < ApplicationController
     # The default list now carries hidden comments too, badged and offering
     # Unhide. `status=hidden` isolates them; Unread deliberately does not, since
     # a comment you have already hidden is not waiting on a reply.
-    scope = if params[:status] == 'hidden'
-              @company.social_comments.hidden
-            elsif params[:unread] == 'true'
-              @company.social_comments.active
+    # `status=removed` lists what has been taken down. Nothing is erased, so a
+    # dealer can still see what they acted on, which Facebook itself will not
+    # show them.
+    scope = case params[:status]
+            when 'hidden'  then @company.social_comments.hidden
+            when 'removed' then @company.social_comments.removed
             else
-              @company.social_comments.visible
+              params[:unread] == 'true' ? @company.social_comments.active : @company.social_comments.visible
             end
     scope = scope.where(social_post_id: params[:post_id]) if params[:post_id].present?
     scope = scope.unread                                   if params[:unread] == 'true'
@@ -110,23 +112,27 @@ class Api::V1::SocialCommentsController < ApplicationController
   end
 
   # DELETE /api/v1/social-comments/:id
+  #
+  # Facebook only lets a Page delete its own comments. Somebody else's is
+  # hidden instead, which is the strongest action available to us, so Delete
+  # means two different things depending on who wrote the comment. There is no
+  # choice to offer: it is decided by authorship, not preference.
+  #
+  # Which of the two happened is recorded, because a hidden comment still looks
+  # completely normal on Facebook to the person who wrote it. Without a record
+  # there is nothing anywhere that says the dealer acted on it.
   def destroy
     return unless authorize_action!('social_posts', 'delete')
 
-    integration = FacebookIntegration.current_for(@company)
-    if integration
-      begin
-        if @comment.is_from_page?
-          MetaGraphApi.delete_comment(@comment.external_comment_id, integration.page_access_token)
-        else
-          MetaGraphApi.hide_comment(@comment.external_comment_id, integration.page_access_token)
-        end
-      rescue MetaGraphApi::Error => e
-        Rails.logger.warn "[SocialComments#destroy] Meta call failed (continuing soft-delete): #{e.message}"
-      end
-    end
+    remote = @comment.is_from_page? ? :delete : :hide
+    result = moderate_on_facebook(@comment, remote)
+    return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
 
-    @comment.update!(status: 'deleted', is_deleted: true)
+    @comment.update!(
+      status:     'deleted',
+      is_deleted: true,
+      metadata:   moderation_metadata(@comment, remote: result[:already_gone] ? :already_gone : remote)
+    )
     head :no_content
   end
 
@@ -142,10 +148,10 @@ class Api::V1::SocialCommentsController < ApplicationController
   def hide
     return unless authorize_action!('social_posts', 'update')
 
-    result = set_comment_hidden(@comment, true)
+    result = moderate_on_facebook(@comment, :hide)
     return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
 
-    @comment.update!(status: 'hidden')
+    @comment.update!(status: 'hidden', metadata: moderation_metadata(@comment, remote: :hide))
     render json: comment_json(@comment)
   end
 
@@ -157,14 +163,13 @@ class Api::V1::SocialCommentsController < ApplicationController
   def unhide
     return unless authorize_action!('social_posts', 'update')
 
-    result = set_comment_hidden(@comment, false)
+    result = moderate_on_facebook(@comment, :unhide)
     return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
 
-    @comment.update!(status: 'active')
+    @comment.update!(status: 'active', metadata: moderation_metadata(@comment, remote: :unhide))
     render json: comment_json(@comment)
   end
 
-  # POST /api/v1/social-comments/mark_all_read
   # POST /api/v1/social-comments/sync
   #
   # The background sweep runs every 15 minutes, so a comment left just now is
@@ -193,6 +198,7 @@ class Api::V1::SocialCommentsController < ApplicationController
     }
   end
 
+  # POST /api/v1/social-comments/mark_all_read
   def mark_all_read
     return unless authorize_action!('social_posts', 'read')
 
@@ -207,27 +213,44 @@ class Api::V1::SocialCommentsController < ApplicationController
     render json: { error: 'Not found' }, status: :not_found unless @comment
   end
 
-  # Flips a comment's hidden state on Facebook. Returns {ok:} / {ok:, error:}
-  # so the caller can refuse the local change rather than claim a moderation
-  # action that never reached the Page.
-  def set_comment_hidden(comment, hidden)
+  # Performs a moderation action on Facebook. Returns {ok:} / {ok:, error:} so
+  # a caller can refuse the local change rather than claim an action that never
+  # reached the Page.
+  def moderate_on_facebook(comment, action)
     integration = FacebookIntegration.current_for(@company)
     return { ok: false, error: 'No Facebook page connected. Reconnect in Settings > Integrations.' } unless integration
 
-    if hidden
-      MetaGraphApi.hide_comment(comment.external_comment_id, integration.page_access_token)
-    else
-      MetaGraphApi.unhide_comment(comment.external_comment_id, integration.page_access_token)
+    token = integration.page_access_token
+    case action
+    when :hide   then MetaGraphApi.hide_comment(comment.external_comment_id, token)
+    when :unhide then MetaGraphApi.unhide_comment(comment.external_comment_id, token)
+    when :delete then MetaGraphApi.delete_comment(comment.external_comment_id, token)
     end
     { ok: true }
   rescue MetaGraphApi::ExpiredTokenError
     integration&.update(status: 'expired')
     { ok: false, error: 'Facebook token expired. Reconnect in Settings > Integrations.' }
   rescue MetaGraphApi::NotFoundError
-    { ok: false, error: 'That comment no longer exists on Facebook.' }
+    # Already gone on Facebook, so the two sides agree. Not a failure, but the
+    # record should not claim we were the ones who removed it.
+    { ok: true, already_gone: true }
   rescue MetaGraphApi::Error => e
-    verb = hidden ? 'hide' : 'unhide'
-    { ok: false, error: "Facebook refused to #{verb} the comment: #{e.message}" }
+    { ok: false, error: "Facebook refused to #{action} the comment: #{e.message}" }
+  end
+
+  # What we did and when, kept on the row so the app can say so later. A hidden
+  # comment is invisible as such on Facebook (its author still sees it exactly
+  # as before), so this is the only place the action is recorded at all.
+  def moderation_metadata(comment, remote:)
+    base = comment.metadata.is_a?(Hash) ? comment.metadata.deep_stringify_keys : {}
+    base.merge(
+      'moderation' => {
+        'on_facebook' => remote.to_s,
+        'at'          => Time.current.iso8601,
+        'by_user_id'  => current_user&.id,
+        'by_name'     => current_user&.full_name || current_user&.email
+      }
+    ).deep_stringify_keys
   end
 
   def comment_json(c)
@@ -245,6 +268,7 @@ class Api::V1::SocialCommentsController < ApplicationController
       is_reply:            c.is_reply,
       is_from_page:        c.is_from_page,
       status:              c.status,
+      moderation:          moderation_json(c),
       replied_by_user:     serialize_user(c.replied_by_user),
       commented_at:        c.commented_at,
       read_at:             c.read_at,
@@ -252,6 +276,12 @@ class Api::V1::SocialCommentsController < ApplicationController
       post_headline:       c.social_post&.headline,
       reply_count:         c.is_reply ? 0 : @company.social_comments.active.replies_to(c.external_comment_id).count
     }
+  end
+
+  def moderation_json(comment)
+    meta = comment.metadata.is_a?(Hash) ? comment.metadata.deep_stringify_keys : {}
+    entry = meta['moderation']
+    entry.is_a?(Hash) ? entry : nil
   end
 
   def serialize_user(user)
