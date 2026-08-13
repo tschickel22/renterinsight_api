@@ -118,6 +118,22 @@ class MetaGraphApi
       post("/#{page_id}/feed", access_token, **params)
     end
 
+    # The id to remember for a post we just published.
+    #
+    # /photos returns both: "id" is the photo object, "post_id" is the story it
+    # created on the Page. The story id is the one everything downstream needs.
+    # It is what /{page-id}/posts returns, what the comments edge hangs off, and
+    # what the Page strip matches a card against, so prefer it. /feed and
+    # /videos only return "id", which is already the story.
+    #
+    # Preferring "id" is why photo posts stored a bare photo id: their comments
+    # were read off the wrong node and the Page strip could never match them.
+    def published_post_id(result)
+      return nil unless result.is_a?(Hash)
+
+      result['post_id'].presence || result['id'].presence
+    end
+
     # Publish a video to a Facebook Page.
     #
     # Meta pulls the file from `video_url` itself rather than us streaming bytes

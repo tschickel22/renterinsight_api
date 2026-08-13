@@ -39,7 +39,7 @@ class PublishSocialPostJob < ApplicationJob
       return
     end
 
-    external_id = result.is_a?(Hash) ? (result['id'] || result['post_id']) : nil
+    external_id = MetaGraphApi.published_post_id(result)
 
     post.update!(
       status:           'published',
