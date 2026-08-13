@@ -360,7 +360,7 @@ class Api::V1::SocialPostsController < ApplicationController
     render json: {
       industry:         @company.try(:industry),
       family:           profile.family.to_s,
-      subject_label:    profile.subject_label,
+      subject_label:    subject_label_for(profile),
       default_rotation: profile.default_rotation,
       requires_subject: profile.family == :dealer,
       # The tenant's own logo, offered in the composer as an opt-in fallback when
@@ -563,6 +563,24 @@ class Api::V1::SocialPostsController < ApplicationController
       total_deals: scope.sum(:deal_count),
       attributed_revenue: scope.sum(:attributed_revenue)
     }
+  end
+
+  # What this tenant calls the thing a post can be about.
+  #
+  # The intent catalog only knows the broad family, so every dealer got the
+  # generic 'unit', which the composer rendered as "Vehicle". A manufactured
+  # housing dealer sells homes, and the label system already says so: the
+  # 'vehicle' key resolves to "Home" for that industry, and a tenant can
+  # override it under Settings > Labels. Use that rather than a second,
+  # disagreeing name for the same thing.
+  #
+  # Non-dealer families keep the catalog's wording ("product or feature",
+  # "offering"), which has no inventory behind it to label.
+  def subject_label_for(profile)
+    return profile.subject_label unless profile.family == :dealer
+    return profile.subject_label unless @company.respond_to?(:resolved_labels)
+
+    @company.resolved_labels['vehicle'].presence || profile.subject_label
   end
 
   # ------------------------------------------------------------------
