@@ -152,4 +152,54 @@ RSpec.describe BrandHealthService do
       expect(result[:insights]['posts_30d']).to eq(1)
     end
   end
+
+  # The Page strip's cards link out to Facebook. The posts query never asked for
+  # permalink_url and the payload never carried a link, so the frontend fell
+  # back to href="#" and every card just scrolled the dashboard to the top.
+  describe 'recent post links' do
+    def stub_posts(posts)
+      allow(MetaGraphApi).to receive(:get).with('/page-1', anything, any_args).and_return(page_data)
+      allow(MetaGraphApi).to receive(:get).with('/page-1/insights', anything, any_args)
+                                          .and_return({ 'data' => [] })
+      allow(MetaGraphApi).to receive(:get).with('/page-1/posts', anything, any_args)
+                                          .and_return({ 'data' => posts })
+    end
+
+    it 'asks Meta for the permalink' do
+      seen = nil
+      allow(MetaGraphApi).to receive(:get) do |path, _token, **params|
+        seen = params[:fields] if path == '/page-1/posts'
+        path == '/page-1' ? page_data : { 'data' => [] }
+      end
+
+      described_class.fetch_for_company(company)
+
+      expect(seen).to include('permalink_url')
+    end
+
+    it 'carries the permalink through to the dashboard payload' do
+      stub_posts([{ 'id' => 'page-1_900', 'created_time' => 1.day.ago.iso8601,
+                    'permalink_url' => 'https://www.facebook.com/dealertide/posts/900' }])
+
+      post = described_class.fetch_for_company(company)[:recent_posts].first
+
+      expect(post[:link]).to eq('https://www.facebook.com/dealertide/posts/900')
+    end
+
+    it 'falls back to the post id when Meta returns no permalink' do
+      stub_posts([{ 'id' => 'page-1_900', 'created_time' => 1.day.ago.iso8601 }])
+
+      post = described_class.fetch_for_company(company)[:recent_posts].first
+
+      expect(post[:link]).to eq('https://www.facebook.com/page-1_900')
+    end
+
+    it 'leaves the link empty rather than inventing one when there is no id' do
+      stub_posts([{ 'created_time' => 1.day.ago.iso8601 }])
+
+      post = described_class.fetch_for_company(company)[:recent_posts].first
+
+      expect(post[:link]).to be_nil
+    end
+  end
 end

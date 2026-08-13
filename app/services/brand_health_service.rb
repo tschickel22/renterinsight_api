@@ -38,7 +38,7 @@ class BrandHealthService
       # the dashboard still only renders the first handful.
       posts_resp = begin
         MetaGraphApi.get("/#{page_id}/posts", token,
-          fields: 'id,message,created_time,full_picture,likes.summary(true),comments.summary(true),shares',
+          fields: 'id,message,created_time,permalink_url,full_picture,likes.summary(true),comments.summary(true),shares',
           limit:  25)
       rescue MetaGraphApi::Error => e
         Rails.logger.warn "[BrandHealthService] company=#{company.id} posts skipped: #{e.message}"
@@ -119,6 +119,15 @@ class BrandHealthService
       end
     end
 
+    # Fallback for a post Graph returns without a permalink. A page post id is
+    # "{page_id}_{post_id}", which facebook.com resolves directly — the same
+    # shape SocialCommentMailer already links to.
+    def facebook_post_url(post_id)
+      return nil if post_id.blank?
+
+      "https://www.facebook.com/#{post_id}"
+    end
+
     def count_last_30_days(posts)
       cutoff = 30.days.ago
       posts.count do |p|
@@ -142,6 +151,10 @@ class BrandHealthService
         id:           p['id'],
         message:      p['message']&.truncate(150),
         created_time: p['created_time'],
+        # Where the card's View link points. Without it the frontend fell back
+        # to href="#", so every card on the Page strip just jumped to the top of
+        # the dashboard instead of opening the post.
+        link:         p['permalink_url'].presence || facebook_post_url(p['id']),
         image_url:    p['full_picture'],
         likes:        p.dig('likes', 'summary', 'total_count') || 0,
         comments:     p.dig('comments', 'summary', 'total_count') || 0,
