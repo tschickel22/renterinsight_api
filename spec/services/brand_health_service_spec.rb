@@ -202,4 +202,70 @@ RSpec.describe BrandHealthService do
       expect(post[:link]).to be_nil
     end
   end
+
+  # The comment count on a Page card opens our Comments tab rather than sending
+  # the user to Facebook to moderate, but only for a post we published: those
+  # are the only ones SyncSocialCommentsJob pulls comments for.
+  describe 'linking a Page post back to ours' do
+    def stub_posts(posts)
+      allow(MetaGraphApi).to receive(:get).with('/page-1', anything, any_args).and_return(page_data)
+      allow(MetaGraphApi).to receive(:get).with('/page-1/insights', anything, any_args)
+                                          .and_return({ 'data' => [] })
+      allow(MetaGraphApi).to receive(:get).with('/page-1/posts', anything, any_args)
+                                          .and_return({ 'data' => posts })
+    end
+
+    let!(:ours) do
+      company.social_posts.create!(platform: 'facebook', status: 'published',
+                                   caption: 'Ours', external_post_id: 'page-1_500',
+                                   published_at: 1.day.ago)
+    end
+
+    it 'names our post so the card can open its comments here' do
+      stub_posts([{ 'id' => 'page-1_500', 'created_time' => 1.day.ago.iso8601 }])
+
+      post = described_class.fetch_for_company(company)[:recent_posts].first
+
+      expect(post[:social_post_id]).to eq(ours.id)
+    end
+
+    it 'leaves an organic Page post unlinked, since we hold no comments for it' do
+      stub_posts([{ 'id' => 'page-1_999', 'created_time' => 1.day.ago.iso8601 }])
+
+      post = described_class.fetch_for_company(company)[:recent_posts].first
+
+      expect(post[:social_post_id]).to be_nil
+    end
+
+    it 'never claims another company post as ours' do
+      other = Company.create!(name: "Other-#{SecureRandom.hex(3)}")
+      other.social_posts.create!(platform: 'facebook', status: 'published',
+                                 caption: 'Theirs', external_post_id: 'page-1_777',
+                                 published_at: 1.day.ago)
+      stub_posts([{ 'id' => 'page-1_777', 'created_time' => 1.day.ago.iso8601 }])
+
+      post = described_class.fetch_for_company(company)[:recent_posts].first
+
+      expect(post[:social_post_id]).to be_nil
+    end
+
+    it 'resolves the whole strip in a single query' do
+      stub_posts([
+        { 'id' => 'page-1_500', 'created_time' => 1.day.ago.iso8601 },
+        { 'id' => 'page-1_501', 'created_time' => 2.days.ago.iso8601 },
+        { 'id' => 'page-1_502', 'created_time' => 3.days.ago.iso8601 }
+      ])
+
+      queries = 0
+      counter = ->(_n, _s, _f, _i, payload) do
+        queries += 1 if payload[:sql]&.include?('social_posts')
+      end
+
+      ActiveSupport::Notifications.subscribed(counter, 'sql.active_record') do
+        described_class.fetch_for_company(company)
+      end
+
+      expect(queries).to eq(1)
+    end
+  end
 end

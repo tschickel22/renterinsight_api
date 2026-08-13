@@ -46,15 +46,32 @@ class BrandHealthService
       end
 
       posts = Array(posts_resp['data'])
+      owned = owned_post_ids(company, posts)
 
       {
         page:         page_payload(page_data),
         insights:     extract_insights(insights_resp).merge('posts_30d' => count_last_30_days(posts)),
-        recent_posts: posts.map { |p| post_payload(p) }
+        recent_posts: posts.map { |p| post_payload(p, owned) }
       }
     end
 
     private
+
+    # Maps a Facebook post id back to the SocialPost we published it from, so a
+    # card can offer to open its comments here instead of sending the user to
+    # Facebook to moderate. A post made directly on the Page has no row and is
+    # deliberately absent: we hold no comments for it to show.
+    #
+    # One query for the whole strip rather than a lookup per card.
+    def owned_post_ids(company, posts)
+      ids = posts.filter_map { |p| p['id'].presence }
+      return {} if ids.empty?
+
+      company.social_posts
+             .where(external_post_id: ids)
+             .pluck(:external_post_id, :id)
+             .to_h
+    end
 
     def fetch_insights(company, page_id, token)
       request_insights(page_id, token, METRICS)
@@ -146,9 +163,12 @@ class BrandHealthService
       end
     end
 
-    def post_payload(p)
+    def post_payload(p, owned = {})
       {
         id:           p['id'],
+        # Present only for a post we published, which is the only kind whose
+        # comments we sync. Drives the card's link into the Comments tab.
+        social_post_id: owned[p['id']],
         message:      p['message']&.truncate(150),
         created_time: p['created_time'],
         # Where the card's View link points. Without it the frontend fell back
