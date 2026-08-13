@@ -167,7 +167,9 @@ class Api::V1::MetaCatalogController < ApplicationController
   def build_title(v, bedrooms, bathrooms)
     parts = [v.try(:year), v.try(:make), v.try(:model)].compact.map(&:to_s).reject(&:blank?).join(' ')
     spec  = [bedrooms.present? ? "#{bedrooms}BR" : nil, bathrooms.present? ? "#{bathrooms}BA" : nil].compact.join('/')
-    spec.present? ? "#{parts} — #{spec}" : parts
+    # No dash: this title is the product name shown in the dealer's ads and on
+    # Marketplace, which is customer-facing copy.
+    spec.present? ? "#{parts} (#{spec})" : parts
   end
 
   def build_description(v, bedrooms, bathrooms)
