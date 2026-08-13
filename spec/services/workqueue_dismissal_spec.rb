@@ -86,6 +86,55 @@ RSpec.describe 'Workqueue dismissals', type: :model do
     end
   end
 
+  # The sidebar badge is cached for a minute while the item list is live. Before
+  # the cache key knew about dismissals, clearing a queue emptied the list and
+  # left the badge reading 2, which reads as "the feature did not work".
+  #
+  # Asserted on the cache key rather than on #summary, because #summary touches
+  # every queue and two of those cannot run in the test database at all: the
+  # workqueue_activities VIEW is absent from schema.rb (backlog B12) and
+  # quotes_awaiting_response sorts by a column quotes do not have (B10). Either
+  # one aborts the transaction and takes the rest of the summary with it.
+  describe 'the cached sidebar summary' do
+    def cache_key(as: user)
+      WorkqueueService.new(company: company, user: as).send(:summary_cache_key)
+    end
+
+    it 'is invalidated the moment a record is set aside' do
+      before_key = cache_key
+
+      dismiss!(at: 1.minute.ago)
+
+      expect(cache_key).not_to eq(before_key)
+    end
+
+    it 'is invalidated again when the dismissal is undone' do
+      dismiss!(at: 1.minute.ago)
+      dismissed_key = cache_key
+
+      WorkqueueDismissal.for_user(user).destroy_all
+
+      expect(cache_key).not_to eq(dismissed_key)
+    end
+
+    it 'changes when a dismissal is moved forward, not just added' do
+      dismiss!(at: 2.hours.ago)
+      first_key = cache_key
+
+      travel_to(1.hour.from_now) { dismiss!(at: Time.current) }
+
+      expect(cache_key).not_to eq(first_key)
+    end
+
+    it "is unaffected by another user's dismissals" do
+      before_key = cache_key
+
+      dismiss!(at: 1.minute.ago, as: other_user)
+
+      expect(cache_key).to eq(before_key)
+    end
+  end
+
   describe WorkqueueDismissal do
     it 'moves the marker forward instead of duplicating the row' do
       first = dismiss!(at: 2.hours.ago)

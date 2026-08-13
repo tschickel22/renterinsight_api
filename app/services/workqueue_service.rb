@@ -368,7 +368,27 @@ class WorkqueueService
     # No Current.location_id in the key — the Workqueue is a personal,
     # cross-location inbox, so its result set is the same regardless of the
     # location picker.
-    "workqueue_summary:#{@company.id}:#{@user.id}:#{prefs_digest}"
+    "workqueue_summary:#{@company.id}:#{@user.id}:#{prefs_digest}:#{dismissal_fingerprint}"
+  end
+
+  # Setting a record aside changes every count in the sidebar, but the summary
+  # is cached for a minute while the item list is live, so the two disagreed:
+  # the list emptied immediately and the badge still read 2. Keying on the
+  # user's dismissals drops the cache the moment one is written.
+  #
+  # Both halves are needed. The timestamp catches a new or re-dated dismissal;
+  # the count catches an undismissal, where the newest remaining row is older
+  # than the one that was deleted. Written as one query on a table that holds a
+  # handful of rows per user.
+  def dismissal_fingerprint
+    latest, total = WorkqueueDismissal.for_user(@user)
+                                      .pick(Arel.sql('MAX(updated_at), COUNT(*)'))
+    "#{latest.to_i}-#{total.to_i}"
+  rescue StandardError => e
+    # A summary that cannot read dismissals should still render. Falling back
+    # to a per-minute key means a stale badge, not a broken sidebar.
+    Rails.logger.warn("[WorkqueueService] dismissal fingerprint failed: #{e.message}")
+    'na'
   end
 
   # Dynamic labels that reflect the current threshold values.
