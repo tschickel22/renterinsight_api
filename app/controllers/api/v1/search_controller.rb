@@ -70,6 +70,8 @@ class Api::V1::SearchController < ApplicationController
           score: calculate_score(query, full_name, lead.first_name, lead.last_name, lead.email)
         }
       end
+
+      results += note_fallback_results('lead', like) if leads.empty?
     rescue => e
       Rails.logger.error("Search leads error: #{e.message}")
     end
@@ -94,6 +96,8 @@ class Api::V1::SearchController < ApplicationController
           score: calculate_score(query, contact.full_name, contact.first_name, contact.last_name, contact.email)
         }
       end
+
+      results += note_fallback_results('contact', like) if contacts.empty?
     rescue => e
       Rails.logger.error("Search contacts error: #{e.message}")
     end
@@ -659,6 +663,57 @@ class Api::V1::SearchController < ApplicationController
     return PER_TYPE_LIMIT if requested.nil? || requested <= 0
 
     [requested, MAX_PER_TYPE_LIMIT].min
+  end
+
+  # Rows a notes-only fallback may add. Small on purpose: this is a last resort
+  # for "I know that name is in here somewhere", not a way to browse notes.
+  NOTE_FALLBACK_LIMIT = 5
+
+  # Last-resort lookup: find records whose NOTES mention the query, for a type
+  # that matched nothing by name, email or phone.
+  #
+  # An inbound Facebook/Zapier inquiry that dedupes to an existing record is
+  # recorded as a note on that record — the inquirer's own name never becomes a
+  # column anywhere. Searching for that person then returned nothing, which
+  # reads as "the lead was lost" when in fact it was absorbed. This finds it.
+  #
+  # Only runs when the primary search for that type came back empty, so a normal
+  # search costs nothing extra and common words ("Facebook", which appears in
+  # every inbound note) can't flood real name matches.
+  def note_fallback_results(type, like)
+    return [] if like.blank?
+
+    scope = type == 'lead' ? @company.leads.where(is_converted: [false, nil]) : @company.contacts
+
+    # Two places a note can live: the record's own notes column, and the
+    # polymorphic notes table behind the Notes tab.
+    note_ids = Note.where(entity_type: type)
+                   .where('notes.content ILIKE :q', q: like)
+                   .order(created_at: :desc)
+                   .limit(NOTE_FALLBACK_LIMIT * 10)
+                   .pluck(:entity_id)
+
+    records = scope.where("#{scope.table_name}.notes ILIKE :q", q: like)
+                   .or(scope.where(id: note_ids))
+                   .order(id: :desc)
+                   .limit(NOTE_FALLBACK_LIMIT)
+
+    records.map do |record|
+      name = record.full_name.presence || "#{record.first_name} #{record.last_name}".strip
+      {
+        id: record.id,
+        type: type,
+        title: name.presence || "#{type.titleize} ##{record.id}",
+        subtitle: 'Mentioned in notes',
+        badge: type == 'lead' ? record.status&.titleize : record.try(:account)&.name,
+        matchedVia: 'note',
+        # Below every real name match, never above one.
+        score: 0
+      }
+    end
+  rescue => e
+    Rails.logger.error("Search #{type} note-fallback error: #{e.message}")
+    []
   end
 
 
