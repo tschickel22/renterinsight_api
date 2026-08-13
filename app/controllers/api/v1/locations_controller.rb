@@ -636,6 +636,12 @@ module Api
           delivery_radius_miles: location.delivery_radius_miles,
           business_hours: location.business_hours,
           active: location.active,
+          # Which location the app should assume for someone who has not picked
+          # one. These flags are the only record of that, and they were never
+          # serialized — so the selector had nothing to go on and fell back to
+          # blocking every multi-location company behind a manual choice.
+          is_default: location.is_default,
+          is_corporate: location.is_corporate,
           allowed_form_states: location.respond_to?(:allowed_form_states) ? (location.allowed_form_states || []) : [],
           linked_inventory_location_ids: linked_peer_ids,
           created_at: location.created_at,
