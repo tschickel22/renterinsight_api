@@ -21,6 +21,12 @@ class Api::V1::MetaCatalogController < ApplicationController
     custom_label_0 custom_label_1 custom_label_2 custom_label_3 custom_label_4
   ].freeze
 
+  # Meta rejects a whole item if any of these is empty, and reports it back in
+  # the feed's issue log rather than just ignoring it. Sending a row we already
+  # know is incomplete buys nothing but an error report, so hold it back and
+  # tell the dealer instead.
+  REQUIRED_FEED_FIELDS = %i[id title description availability condition price link image_link].freeze
+
   SETTING_KEY        = 'meta_catalog_settings'
   ALLOWED_STATUSES   = %w[available available_to_order reserved sold pending in_transit delivered].freeze
   DEFAULT_STATUSES   = %w[available].freeze
@@ -31,12 +37,26 @@ class Api::V1::MetaCatalogController < ApplicationController
 
     token = @company.meta_catalog_token
     statuses = catalog_statuses
-    vehicle_count = @company.vehicles.where(is_deleted: false, status: statuses).count
+    base_url = intake_form_url(@company)
+    vehicles = @company.vehicles.where(is_deleted: false, status: statuses).order(id: :asc)
+
+    # Same serialization the feed runs, so the count here is what Meta will
+    # actually accept rather than how many rows we would send.
+    items    = vehicles.map { |v| serialize(v, company: @company, base_url: base_url) }
+    excluded = items.filter_map do |item|
+      missing = missing_feed_fields(item)
+      next if missing.empty?
+
+      { id: item[:id], title: item[:title].presence || item[:id], missing: missing.map(&:to_s) }
+    end
 
     render json: {
       catalog: {
         token:         token,
-        active_count:  vehicle_count,
+        active_count:  items.length - excluded.length,
+        excluded_count: excluded.length,
+        # Capped: this is a nudge to go fix the records, not a report.
+        excluded:      excluded.first(25),
         feed_url:      token.present? ? catalog_feed_url : nil,
         last_sync_at:  nil,
         statuses:      statuses,
@@ -99,6 +119,7 @@ class Api::V1::MetaCatalogController < ApplicationController
                       .order(id: :asc)
 
     items = vehicles.map { |v| serialize(v, company: company, base_url: base_url) }
+                    .select { |item| missing_feed_fields(item).empty? }
 
     # JSON stays available for our own preview and debugging; CSV is the default
     # because it is what Meta can actually read.
@@ -183,7 +204,9 @@ class Api::V1::MetaCatalogController < ApplicationController
       title:          build_title(v, bedrooms, bathrooms),
       description:    build_description(v, bedrooms, bathrooms),
       availability:   availability(v),
-      condition:      (v.try(:condition) || 'new').to_s,
+      # An empty string is truthy, so `||` left a blank condition blank and Meta
+      # rejected the item for a missing required value.
+      condition:      (v.try(:condition).presence || 'new').to_s,
       price:          format_price(v.try(:sale_price)),
       link:           tagged_link(base_url, v),
       image_link:     primary_image_url(v),
@@ -194,7 +217,7 @@ class Api::V1::MetaCatalogController < ApplicationController
       custom_label_1: custom_label_1(bedrooms),
       custom_label_2: custom_label_2(v.try(:sale_price)),
       custom_label_3: custom_label_3(v),
-      custom_label_4: (v.try(:condition) || 'new').to_s
+      custom_label_4: (v.try(:condition).presence || 'new').to_s
     }.compact
   end
 
@@ -215,6 +238,11 @@ class Api::V1::MetaCatalogController < ApplicationController
     bits << "Stock ##{v.try(:stock_number)}" if v.try(:stock_number).present?
     bits << "VIN #{v.try(:vin)}" if v.try(:vin).present?
     bits.reject(&:blank?).join(' · ')
+  end
+
+  # Which of Meta's required fields this item cannot fill.
+  def missing_feed_fields(item)
+    REQUIRED_FEED_FIELDS.reject { |field| item[field].to_s.strip.present? }
   end
 
   def availability(v)

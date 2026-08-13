@@ -10,10 +10,17 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
   let(:company) do
     Company.create!(name: "Co-#{SecureRandom.hex(4)}", industry: 'manufactured_housing')
   end
+  # Meta requires a link and an image on every item, so a home without both is
+  # deliberately held back. This one is complete.
+  let!(:intake_form) do
+    company.intake_forms.create!(name: 'Get Info', is_active: true, schema: {})
+  end
+
   let!(:home) do
     company.vehicles.create!(
       year: 2024, make: 'Clayton', model: 'Ridgeview',
       vin: "VIN#{SecureRandom.hex(6).upcase}",
+      photo_url: 'https://example.com/ridgeview.jpg',
       status: 'available', sale_price: 129_900, is_deleted: false
     )
   end
@@ -78,5 +85,48 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
     feed_get('.csv', { token: 'nope' })
 
     expect(response).to have_http_status(:unauthorized)
+  end
+
+  # Meta rejects a whole item for one empty required field and reports it back
+  # in the feed's issue log. Sending a row we already know is incomplete only
+  # produces an error report, so it is held back and surfaced in settings.
+  describe 'incomplete homes' do
+    it 'leaves out a home with no price' do
+      company.vehicles.create!(
+        year: 2026, make: 'Fairmont', model: 'Asdfds',
+        vin: "VIN#{SecureRandom.hex(6).upcase}",
+        photo_url: 'https://example.com/fairmont.jpg',
+        status: 'available', sale_price: nil, is_deleted: false
+      )
+
+      feed_get
+
+      ids = CSV.parse(response.body, headers: true).map { |r| r['id'] }
+      expect(ids).to eq(["unit-#{home.id}"])
+    end
+
+    it 'leaves out a home with no image' do
+      no_image = company.vehicles.create!(
+        year: 2026, make: 'Skyline', model: 'Prairie Dune',
+        vin: "VIN#{SecureRandom.hex(6).upcase}",
+        status: 'available', sale_price: 90_000, is_deleted: false
+      )
+
+      feed_get
+
+      ids = CSV.parse(response.body, headers: true).map { |r| r['id'] }
+      expect(ids).not_to include("unit-#{no_image.id}")
+    end
+
+    # An empty string is truthy in Ruby, so `condition || 'new'` left it blank
+    # and Meta rejected the item for a missing required value.
+    it 'falls back to new when condition is an empty string' do
+      home.update_column(:condition, '')
+
+      feed_get
+
+      row = CSV.parse(response.body, headers: true).find { |r| r['id'] == "unit-#{home.id}" }
+      expect(row['condition']).to eq('new')
+    end
   end
 end
