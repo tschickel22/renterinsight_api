@@ -2,7 +2,7 @@
 
 class Api::V1::SocialCommentsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_comment, only: %i[show reply destroy hide]
+  before_action :set_comment, only: %i[show reply destroy hide unhide]
 
   MAX_PER_PAGE = 100
 
@@ -10,7 +10,10 @@ class Api::V1::SocialCommentsController < ApplicationController
   def index
     return unless authorize_action!('social_posts', 'read')
 
-    scope = @company.social_comments.active
+    # Hiding used to drop a comment out of every view, because `active` means
+    # status 'active' and hide sets 'hidden'. There was then no way to find it
+    # again, let alone unhide it. `status=hidden` makes them reachable.
+    scope = params[:status] == 'hidden' ? @company.social_comments.hidden : @company.social_comments.active
     scope = scope.where(social_post_id: params[:post_id]) if params[:post_id].present?
     scope = scope.unread                                   if params[:unread] == 'true'
     scope = scope.top_level                                if params[:top_level] == 'true'
@@ -118,19 +121,36 @@ class Api::V1::SocialCommentsController < ApplicationController
   end
 
   # POST /api/v1/social-comments/:id/hide
+  #
+  # Hiding is a moderation action on Facebook, not a local flag. It used to
+  # swallow a Graph failure and mark the row hidden anyway, which told the user
+  # a comment was hidden while it was still public on the Page.
+  #
+  # Worth knowing when testing: Facebook keeps a hidden comment visible to its
+  # author and their friends. Checking as the person who wrote it will always
+  # look like nothing happened.
   def hide
     return unless authorize_action!('social_posts', 'update')
 
-    integration = FacebookIntegration.current_for(@company)
-    if integration
-      begin
-        MetaGraphApi.hide_comment(@comment.external_comment_id, integration.page_access_token)
-      rescue MetaGraphApi::Error => e
-        Rails.logger.warn "[SocialComments#hide] Meta hide failed (continuing): #{e.message}"
-      end
-    end
+    result = set_comment_hidden(@comment, true)
+    return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
 
     @comment.update!(status: 'hidden')
+    render json: comment_json(@comment)
+  end
+
+  # POST /api/v1/social-comments/:id/unhide
+  #
+  # The counterpart hide never had. MetaGraphApi.unhide_comment existed but
+  # nothing called it, and a hidden comment dropped out of every list, so
+  # hiding one was irreversible from inside the app.
+  def unhide
+    return unless authorize_action!('social_posts', 'update')
+
+    result = set_comment_hidden(@comment, false)
+    return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
+
+    @comment.update!(status: 'active')
     render json: comment_json(@comment)
   end
 
@@ -175,6 +195,29 @@ class Api::V1::SocialCommentsController < ApplicationController
   def set_comment
     @comment = @company.social_comments.find_by(id: params[:id])
     render json: { error: 'Not found' }, status: :not_found unless @comment
+  end
+
+  # Flips a comment's hidden state on Facebook. Returns {ok:} / {ok:, error:}
+  # so the caller can refuse the local change rather than claim a moderation
+  # action that never reached the Page.
+  def set_comment_hidden(comment, hidden)
+    integration = FacebookIntegration.current_for(@company)
+    return { ok: false, error: 'No Facebook page connected. Reconnect in Settings > Integrations.' } unless integration
+
+    if hidden
+      MetaGraphApi.hide_comment(comment.external_comment_id, integration.page_access_token)
+    else
+      MetaGraphApi.unhide_comment(comment.external_comment_id, integration.page_access_token)
+    end
+    { ok: true }
+  rescue MetaGraphApi::ExpiredTokenError
+    integration&.update(status: 'expired')
+    { ok: false, error: 'Facebook token expired. Reconnect in Settings > Integrations.' }
+  rescue MetaGraphApi::NotFoundError
+    { ok: false, error: 'That comment no longer exists on Facebook.' }
+  rescue MetaGraphApi::Error => e
+    verb = hidden ? 'hide' : 'unhide'
+    { ok: false, error: "Facebook refused to #{verb} the comment: #{e.message}" }
   end
 
   def comment_json(c)

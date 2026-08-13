@@ -1760,6 +1760,7 @@ Rails.application.routes.draw do
         member do
           post :reply
           post :hide
+          post :unhide
         end
         collection do
           post :mark_all_read
