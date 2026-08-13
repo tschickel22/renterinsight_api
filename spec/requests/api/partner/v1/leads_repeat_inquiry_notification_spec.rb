@@ -75,4 +75,28 @@ RSpec.describe 'Api::Partner::V1 Leads repeat-inquiry notification', type: :requ
     expect(body['data']).to be_nil
     expect(body.dig('deduped_to', 'id')).to eq(existing_lead.id)
   end
+
+  # Dedupe matches on email/phone, so a shared household phone folds one
+  # person's inquiry into another person's lead. Naming only the matched record
+  # made the person who actually filled out the form invisible — the dealer
+  # sees "Bob Smith" and no trace of the name they're searching for.
+  context 'when the inquiry is from a different person than the matched record' do
+    let!(:shared_phone_lead) do
+      Lead.create!(company_id: company.id, location_id: location.id, owner_id: owner.id,
+                   first_name: 'Bob', last_name: 'Smith',
+                   phone: '(303) 555-1212', status: 'engaged')
+    end
+
+    it 'names the inquirer and the record it matched' do
+      post '/api/partner/v1/leads',
+           params: { full_name: 'Tia May', phone: '3035551212' }.to_json,
+           headers: headers_for(key)
+
+      expect(response).to have_http_status(:accepted)
+      activity = LeadActivity.find_by(lead_id: shared_phone_lead.id, activity_type: 'reminder')
+      expect(activity.subject).to eq(
+        'Repeat Inquiry on Existing Lead: Tia May (matched to existing record: Bob Smith)'
+      )
+    end
+  end
 end
