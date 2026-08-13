@@ -34,9 +34,15 @@ class AdCampaign < ApplicationRecord
                      fb: FACEBOOK_SOURCE_PATTERN
                    )
 
+    # Must mirror matched_leads_scope, or a lead that a campaign now claims is
+    # still counted here as accounted for by nobody. utm_campaign carries the
+    # id as often as the name, since that is what Meta's {{campaign.id}} puts
+    # there.
+    campaign_keys = (names + ids).uniq
+
     # NOT IN alone would drop rows with a NULL utm — which are exactly the
     # unattributed leads this is counting.
-    scope = scope.where('leads.utm_campaign IS NULL OR leads.utm_campaign NOT IN (?)', names) if names.any?
+    scope = scope.where('leads.utm_campaign IS NULL OR leads.utm_campaign NOT IN (?)', campaign_keys) if campaign_keys.any?
     scope = scope.where('leads.utm_content IS NULL OR leads.utm_content NOT IN (?)', ids) if ids.any?
     scope
   end
@@ -69,9 +75,16 @@ class AdCampaign < ApplicationRecord
 
   private
 
-  # Leads are attributed to this campaign when either their utm_campaign
-  # matches the human-readable name, OR their utm_content matches the Meta
-  # campaign id (which we also auto-tag on scheduled posts).
+  # Leads are attributed to this campaign when their utm_campaign matches
+  # either the human-readable name or the Meta campaign id, or their utm_content
+  # matches the campaign id.
+  #
+  # utm_campaign used to be compared against the name alone, which missed the
+  # most common case there is. Meta's own dynamic URL parameters put
+  # {{campaign.id}} in utm_campaign, so an ad tagged the standard way arrives
+  # carrying the id and matched nothing. Our own Lead Ads job falls back to
+  # campaign_id when Meta returns no campaign_name, and missed for the same
+  # reason.
   #
   # Bounded by when the campaign ran. Without a window a campaign that stopped
   # a year ago keeps claiming every new lead whose utm_campaign still matches
@@ -79,9 +92,20 @@ class AdCampaign < ApplicationRecord
   # that predate the columns and on campaigns Meta reports no dates for — those
   # stay unbounded rather than dropping to zero leads.
   def matched_leads_scope
-    scope = company.leads
-                   .where('utm_campaign = :n OR utm_content = :e', n: name.to_s, e: external_campaign_id.to_s)
+    external_id = external_campaign_id.to_s.strip.presence
+    # Blank keys would match every lead whose utm is an empty string.
+    keys = [name.to_s.strip.presence, external_id].compact.uniq
+    return company.leads.none if keys.empty?
 
+    clauses = ['utm_campaign IN (:keys)']
+    binds   = { keys: keys }
+
+    if external_id
+      clauses << 'utm_content = :external_id'
+      binds[:external_id] = external_id
+    end
+
+    scope = company.leads.where(clauses.join(' OR '), binds)
     scope = scope.where(created_at: attribution_window) if attribution_window
     scope
   end
