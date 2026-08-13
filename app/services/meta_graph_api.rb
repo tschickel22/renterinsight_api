@@ -210,6 +210,25 @@ class MetaGraphApi
       delete("/#{comment_id}", access_token)
     end
 
+    # ------------------------------------------------------------------
+    # Page Likes on Page content
+    # ------------------------------------------------------------------
+    #
+    # With a Page access token the actor is the Page itself, so these put the
+    # dealership's own Like on its own post or comment. Needs
+    # pages_manage_engagement, which is what "create and delete your own Page's
+    # Likes to Page content" in Meta's permission refers to.
+    #
+    # Whether the Page has already liked something comes back on a read as
+    # likes.summary(true).has_liked — there is no separate endpoint for it.
+    def like_object(object_id, access_token)
+      post("/#{object_id}/likes", access_token)
+    end
+
+    def unlike_object(object_id, access_token)
+      delete("/#{object_id}/likes", access_token)
+    end
+
     def hide_comment(comment_id, access_token)
       post("/#{comment_id}", access_token, is_hidden: true)
     end

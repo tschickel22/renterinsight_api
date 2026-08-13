@@ -1748,6 +1748,12 @@ Rails.application.routes.draw do
 
       # ==================== BRAND HEALTH ====================
       get 'brand-health', to: 'brand_health#show'
+      # A page post id is "{page_id}_{post_id}", so the param has to allow the
+      # underscore and must not be split on a dot.
+      post   'brand-health/posts/:post_id/like', to: 'brand_health#like',
+             constraints: { post_id: %r{[0-9_]+} }
+      delete 'brand-health/posts/:post_id/like', to: 'brand_health#unlike',
+             constraints: { post_id: %r{[0-9_]+} }
 
       # ==================== SOCIAL COMMENTS ====================
       resources :social_comments, path: 'social-comments' do

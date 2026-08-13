@@ -177,6 +177,10 @@ class BrandHealthService
         link:         p['permalink_url'].presence || facebook_post_url(p['id']),
         image_url:    p['full_picture'],
         likes:        p.dig('likes', 'summary', 'total_count') || 0,
+        # Whether the Page itself has already liked this, so the button knows
+        # which way it toggles. Comes back on the read, there is no endpoint
+        # that answers it separately.
+        has_liked:    p.dig('likes', 'summary', 'has_liked') || false,
         comments:     p.dig('comments', 'summary', 'total_count') || 0,
         shares:       p.dig('shares', 'count') || 0
       }
