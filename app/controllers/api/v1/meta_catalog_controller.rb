@@ -35,28 +35,54 @@ class Api::V1::MetaCatalogController < ApplicationController
   def info
     return unless authorize_action!('integrations', 'read')
 
-    token = @company.meta_catalog_token
+    token    = @company.meta_catalog_token
     statuses = catalog_statuses
     base_url = intake_form_url(@company)
-    vehicles = @company.vehicles.where(is_deleted: false, status: statuses).order(id: :asc)
 
-    # Same serialization the feed runs, so the count here is what Meta will
-    # actually accept rather than how many rows we would send.
-    items    = vehicles.map { |v| serialize(v, company: @company, base_url: base_url) }
-    excluded = items.filter_map do |item|
+    # Counted across every status the dealer could pick, not just the selected
+    # ones, so the warning against a status is visible before it is ticked. An
+    # Available to Order home usually has no price yet, and would never reach
+    # the catalog however the feed is configured.
+    vehicles = @company.vehicles.where(is_deleted: false, status: ALLOWED_STATUSES).order(id: :asc)
+
+    excluded          = []
+    excluded_by_status = Hash.new(0)
+    eligible_by_status = Hash.new(0)
+
+    # Same serialization the feed runs, so these counts are what Meta will
+    # accept rather than how many rows we would send.
+    vehicles.each do |v|
+      item    = serialize(v, company: @company, base_url: base_url)
       missing = missing_feed_fields(item)
-      next if missing.empty?
+      status  = v.status.to_s
 
-      { id: item[:id], title: item[:title].presence || item[:id], missing: missing.map(&:to_s) }
+      if missing.empty?
+        eligible_by_status[status] += 1
+        next
+      end
+
+      excluded_by_status[status] += 1
+      next unless statuses.include?(status)
+
+      excluded << {
+        id:      item[:id],
+        title:   item[:title].presence || item[:id],
+        status:  status,
+        missing: missing.map(&:to_s)
+      }
     end
+
+    selected_eligible = statuses.sum { |st| eligible_by_status[st] }
 
     render json: {
       catalog: {
         token:         token,
-        active_count:  items.length - excluded.length,
+        active_count:  selected_eligible,
         excluded_count: excluded.length,
         # Capped: this is a nudge to go fix the records, not a report.
         excluded:      excluded.first(25),
+        excluded_by_status: excluded_by_status,
+        eligible_by_status: eligible_by_status,
         feed_url:      token.present? ? catalog_feed_url : nil,
         last_sync_at:  nil,
         statuses:      statuses,

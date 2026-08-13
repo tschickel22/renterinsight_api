@@ -129,4 +129,57 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
       expect(row['condition']).to eq('new')
     end
   end
+
+  # A dealer should know a status will send nothing before ticking it, not
+  # after Meta bounces the items. Available to Order homes rarely have a price.
+  describe 'GET /api/v1/meta/catalog/info' do
+    let(:user) do
+      User.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: 'T', last_name: 'U',
+                   password: 'Pass1234!', company_id: company.id, role: 'platform_admin')
+    end
+    let(:auth) do
+      { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id)}",
+        'Content-Type' => 'application/json' }
+    end
+
+    let!(:no_price) do
+      company.vehicles.create!(
+        year: 2026, make: 'Fairmont', model: 'Asdfds',
+        vin: "VIN#{SecureRandom.hex(6).upcase}",
+        photo_url: 'https://example.com/f.jpg',
+        status: 'available_to_order', sale_price: nil, is_deleted: false
+      )
+    end
+
+    it 'counts what cannot be sent against the status it belongs to' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      catalog = JSON.parse(response.body)['catalog']
+      expect(catalog['excluded_by_status']['available_to_order']).to eq(1)
+      expect(catalog['eligible_by_status']['available_to_order'].to_i).to eq(0)
+    end
+
+    # Counted across every status, not just the selected ones, or the warning
+    # only appears once the damage is done.
+    it 'counts a status the dealer has not selected' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      catalog = JSON.parse(response.body)['catalog']
+      expect(catalog['statuses']).not_to include('available_to_order')
+      expect(catalog['excluded_by_status']['available_to_order']).to eq(1)
+    end
+
+    it 'counts only selected statuses as active' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      expect(JSON.parse(response.body)['catalog']['active_count']).to eq(1)
+    end
+
+    it 'lists held-back homes only for the selected statuses' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      ids = JSON.parse(response.body)['catalog']['excluded'].map { |e| e['id'] }
+      expect(ids).not_to include("unit-#{no_price.id}")
+    end
+  end
 end
