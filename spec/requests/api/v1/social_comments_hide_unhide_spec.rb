@@ -96,10 +96,26 @@ RSpec.describe 'Api::V1::SocialComments hide and unhide', type: :request do
   describe 'finding a hidden comment again' do
     before { comment.update!(status: 'hidden') }
 
-    it 'is absent from the default list, as before' do
+    # It used to drop out of the default list, so a reload took the Unhide
+    # button away with it and the comment was gone for good.
+    it 'stays in the default list so it can still be unhidden' do
       get '/api/v1/social-comments', headers: headers
 
+      body = JSON.parse(response.body)['comments']
+      expect(body.map { |c| c['id'] }).to eq([comment.id])
+      expect(body.first['status']).to eq('hidden')
+    end
+
+    it 'is left out of Unread, since a hidden comment is not awaiting a reply' do
+      get '/api/v1/social-comments?unread=true', headers: headers
+
       expect(JSON.parse(response.body)['comments']).to be_empty
+    end
+
+    it 'does not count towards unread' do
+      get '/api/v1/social-comments', headers: headers
+
+      expect(JSON.parse(response.body)['meta']['unread_count']).to eq(0)
     end
 
     it 'is reachable with status=hidden, so it can be unhidden' do
@@ -114,6 +130,14 @@ RSpec.describe 'Api::V1::SocialComments hide and unhide', type: :request do
       comment.update!(status: 'deleted', is_deleted: true)
 
       get '/api/v1/social-comments?status=hidden', headers: headers
+
+      expect(JSON.parse(response.body)['comments']).to be_empty
+    end
+
+    it 'keeps a deleted comment out of the default list too' do
+      comment.update!(status: 'deleted', is_deleted: true)
+
+      get '/api/v1/social-comments', headers: headers
 
       expect(JSON.parse(response.body)['comments']).to be_empty
     end

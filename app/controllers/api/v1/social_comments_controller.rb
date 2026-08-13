@@ -11,9 +11,19 @@ class Api::V1::SocialCommentsController < ApplicationController
     return unless authorize_action!('social_posts', 'read')
 
     # Hiding used to drop a comment out of every view, because `active` means
-    # status 'active' and hide sets 'hidden'. There was then no way to find it
-    # again, let alone unhide it. `status=hidden` makes them reachable.
-    scope = params[:status] == 'hidden' ? @company.social_comments.hidden : @company.social_comments.active
+    # status 'active' and hide sets 'hidden'. The comment vanished on the next
+    # reload and its Unhide button went with it.
+    #
+    # The default list now carries hidden comments too, badged and offering
+    # Unhide. `status=hidden` isolates them; Unread deliberately does not, since
+    # a comment you have already hidden is not waiting on a reply.
+    scope = if params[:status] == 'hidden'
+              @company.social_comments.hidden
+            elsif params[:unread] == 'true'
+              @company.social_comments.active
+            else
+              @company.social_comments.visible
+            end
     scope = scope.where(social_post_id: params[:post_id]) if params[:post_id].present?
     scope = scope.unread                                   if params[:unread] == 'true'
     scope = scope.top_level                                if params[:top_level] == 'true'
