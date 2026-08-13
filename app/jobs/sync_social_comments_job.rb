@@ -10,6 +10,9 @@ class SyncSocialCommentsJob < ApplicationJob
   LOOKBACK_DAYS = 30
   MAX_COMMENTS_PER_POST = 100
 
+  # How many posts an on-demand sync will look at, newest first.
+  ON_DEMAND_POST_LIMIT = 15
+
   def perform
     company_ids = FacebookIntegration.active.distinct.pluck(:company_id)
 
@@ -35,9 +38,25 @@ class SyncSocialCommentsJob < ApplicationJob
     Rails.logger.info "[SyncSocialCommentsJob] synced=#{total_synced} new=#{total_new} failed=#{failed}"
   end
 
+  # Sync one company on demand, from the Comments tab's "Sync now" button.
+  # Runs in the request, so it is bounded to the most recent posts: someone
+  # watching the inbox for a comment they just saw is looking at a recent post,
+  # and a request must not fan out into dozens of Graph calls.
+  #
+  # Unlike the cron this ignores comment_sync_enabled. That setting governs the
+  # background sweep; an explicit click is the user asking for it regardless.
+  # Notification preferences are still honoured, they have their own flags.
+  def sync_now(company)
+    integration = FacebookIntegration.current_for(company)
+    return [0, 0] unless integration
+
+    settings = SocialMediaSettingsService.for_company(company)
+    sync_company(company, integration, settings, limit: ON_DEMAND_POST_LIMIT)
+  end
+
   private
 
-  def sync_company(company, integration, settings)
+  def sync_company(company, integration, settings, limit: nil)
     synced = 0
     new_count = 0
 
@@ -45,15 +64,25 @@ class SyncSocialCommentsJob < ApplicationJob
                          .where.not(external_post_id: nil)
                          .where('published_at >= ?', LOOKBACK_DAYS.days.ago)
 
-    posts_scope.find_each do |post|
+    # find_each ignores order and rejects a limit, so the bounded path has to
+    # load its own slice.
+    posts = if limit
+              posts_scope.order(published_at: :desc).limit(limit).to_a
+            else
+              posts_scope
+            end
+
+    posts.each do |post|
       begin
         response = MetaGraphApi.get_post_comments(post.external_post_id, integration.page_access_token, limit: MAX_COMMENTS_PER_POST)
       rescue MetaGraphApi::ExpiredTokenError => e
         integration.update(status: 'expired')
         Rails.logger.warn "[SyncSocialCommentsJob] company=#{company.id} token expired: #{e.message}"
+        raise if limit # on demand: the caller shows the user why nothing synced
         return [synced, new_count]
       rescue MetaGraphApi::RateLimitError => e
         Rails.logger.warn "[SyncSocialCommentsJob] company=#{company.id} rate limited: #{e.message}"
+        raise if limit
         return [synced, new_count]
       rescue MetaGraphApi::NotFoundError
         next

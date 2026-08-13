@@ -135,6 +135,34 @@ class Api::V1::SocialCommentsController < ApplicationController
   end
 
   # POST /api/v1/social-comments/mark_all_read
+  # POST /api/v1/social-comments/sync
+  #
+  # The background sweep runs every 15 minutes, so a comment left just now is
+  # not in the inbox yet even though the Page card already counts it (that
+  # count is read live from Graph). This pulls the recent posts immediately.
+  def sync
+    return unless authorize_action!('social_posts', 'read')
+
+    integration = FacebookIntegration.current_for(@company)
+    return render json: { error: 'No Facebook page connected' }, status: :unprocessable_entity unless integration
+
+    begin
+      synced, new_count = SyncSocialCommentsJob.new.sync_now(@company)
+    rescue MetaGraphApi::ExpiredTokenError
+      return render json: { error: 'Facebook token expired. Reconnect in Settings.' }, status: :unprocessable_entity
+    rescue MetaGraphApi::RateLimitError
+      return render json: { error: 'Facebook is rate limiting us. Try again in a few minutes.' }, status: :too_many_requests
+    rescue MetaGraphApi::Error => e
+      return render json: { error: "Could not reach Facebook: #{e.message}" }, status: :unprocessable_entity
+    end
+
+    render json: {
+      synced:      synced,
+      new:         new_count,
+      unread_count: @company.social_comments.active.unread.count
+    }
+  end
+
   def mark_all_read
     return unless authorize_action!('social_posts', 'read')
 

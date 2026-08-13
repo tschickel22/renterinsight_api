@@ -1763,6 +1763,7 @@ Rails.application.routes.draw do
         end
         collection do
           post :mark_all_read
+          post :sync
         end
       end
 
