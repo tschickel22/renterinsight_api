@@ -157,6 +157,31 @@ class MetaGraphApi
       post("/#{ig_user_id}/media_publish", access_token, creation_id: container_id)
     end
 
+    # ------------------------------------------------------------------
+    # Editing and removing published posts
+    # ------------------------------------------------------------------
+
+    # Remove a published Page post.
+    #
+    # Takes either a feed-post id or a photo id — deleting a photo takes its
+    # story down with it — which matters because a photo post stores the photo
+    # id rather than the story id (see the /photos path in publish_page_post).
+    #
+    # Instagram has no counterpart: the Graph API cannot delete IG media.
+    def delete_page_post(post_id, access_token)
+      delete("/#{post_id}", access_token)
+    end
+
+    # Edit the text of a published Page post.
+    #
+    # The message is the only mutable part. Attachments (photos, videos,
+    # carousels, the link preview) are fixed at publish time, so changing one
+    # means deleting the post and publishing again. Callers must only send this
+    # for a plain /feed post.
+    def update_page_post_message(post_id, access_token, message:)
+      post("/#{post_id}", access_token, message: message)
+    end
+
     def get_post_insights(post_id, access_token)
       get("/#{post_id}/insights", access_token,
           metric: 'post_impressions,post_reach,post_clicks,post_engaged_users')

@@ -84,8 +84,18 @@ class Api::V1::SocialPostsController < ApplicationController
   end
 
   # PATCH/PUT /api/v1/social-posts/:id
+  #
+  # Once a post is published it is a live object on the Page as well as a row
+  # here, so an edit has to reach the Page or not happen at all. A local-only
+  # edit leaves our copy asserting something the Page does not say, with
+  # nothing in the UI to reveal the drift.
+  #
+  # Graph only lets us change the message, so attachments are frozen after
+  # publish and the caller is told to delete and repost instead.
   def update
     return unless authorize_action!('social_posts', 'update')
+
+    caption_before = build_post_caption(@post)
 
     # hashtags has no column — it lives inside generation_context (mirrors #create)
     @post.assign_attributes(permitted_params.except(:hashtags))
@@ -96,6 +106,24 @@ class Api::V1::SocialPostsController < ApplicationController
       @post.generation_context = ctx
     end
 
+    if live_on_platform?(@post)
+      frozen = frozen_attachment_changes(@post)
+      if frozen.any?
+        return render json: {
+          error: "The #{frozen.to_sentence} of a published post cannot be changed. Delete this post and create a new one."
+        }, status: :unprocessable_entity
+      end
+
+      # Only reach out when the text the Page is showing actually changed —
+      # editing bookkeeping fields (vehicle, utm_campaign) must not need a
+      # round trip, or a photo post could never be re-tagged.
+      caption_after = build_post_caption(@post)
+      if caption_after != caption_before
+        result = push_caption_to_platform(@post, caption_after)
+        return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
+      end
+    end
+
     if @post.save
       render json: serialize(@post, detailed: true)
     else
@@ -104,8 +132,26 @@ class Api::V1::SocialPostsController < ApplicationController
   end
 
   # DELETE /api/v1/social-posts/:id
+  #
+  # A published post lives on the Page too, and removing only our row leaves it
+  # up on Facebook while it vanishes from the app — the reporter deleted a test
+  # post here and it stayed live there. So the remote delete has to succeed
+  # before we soft-delete.
+  #
+  # `force=true` is the deliberate override for the cases the API cannot cover:
+  # the post was already removed by hand on Facebook, the page is disconnected
+  # for good, or it is an Instagram post (which Graph cannot delete at all).
   def destroy
     return unless authorize_action!('social_posts', 'delete')
+
+    result = delete_remote_post(@post)
+
+    if result && !result[:ok] && !truthy_param?(params[:force])
+      return render json: {
+        error:                result[:error],
+        remote_delete_failed: true
+      }, status: :unprocessable_entity
+    end
 
     @post.update!(is_deleted: true)
     head :no_content
@@ -517,6 +563,116 @@ class Api::V1::SocialPostsController < ApplicationController
       total_deals: scope.sum(:deal_count),
       attributed_revenue: scope.sum(:attributed_revenue)
     }
+  end
+
+  # ------------------------------------------------------------------
+  # Keeping a published post and the live Page post in step
+  # ------------------------------------------------------------------
+
+  # Attributes that describe the attachment Facebook has already rendered.
+  # Graph cannot change any of them after publish, so an edit that touches one
+  # is a request we have to refuse rather than silently apply locally.
+  IMMUTABLE_ONCE_PUBLISHED = {
+    'image_urls' => 'images',
+    'video_url'  => 'video',
+    'platform'   => 'platform',
+    'tagged_url' => 'link'
+  }.freeze
+
+  # Is there a real post on the platform behind this row?
+  def live_on_platform?(post)
+    post.status.to_s == 'published' && post.external_post_id.present?
+  end
+
+  # Dirty tracking alone is too eager here. The compose form re-sends the whole
+  # payload on every save, so a post stored with a NULL image_urls comes back as
+  # [] and reads as "changed" — which would refuse a plain caption edit on a
+  # text post. Only a real difference should block.
+  def frozen_attachment_changes(post)
+    IMMUTABLE_ONCE_PUBLISHED.filter_map do |attr, label|
+      next unless post.changed.include?(attr)
+
+      before, after = post.changes[attr]
+      next if normalized_attachment(before) == normalized_attachment(after)
+
+      label
+    end
+  end
+
+  # nil, [], and [''] all describe a post with no attachment.
+  def normalized_attachment(value)
+    case value
+    when nil   then nil
+    when Array then value.map { |v| v.to_s.strip }.reject(&:blank?).presence
+    else value.to_s.strip.presence
+    end
+  end
+
+  # A post published through /feed — no photo, no video. It is the only shape
+  # whose message Graph will edit, and the only one where external_post_id is a
+  # story id rather than a photo id.
+  def plain_feed_post?(post)
+    post.video_url.blank? &&
+      Array(post.image_urls).map { |u| u.to_s.strip }.reject(&:blank?).empty?
+  end
+
+  # Push an edited caption to the live post. Returns {ok:} / {ok:, error:}
+  # rather than raising so the caller can refuse the save cleanly.
+  def push_caption_to_platform(post, caption)
+    if post.platform.to_s == 'instagram'
+      return { ok: false, error: 'Instagram does not allow editing a published post through its API. Delete this post and create a new one.' }
+    end
+
+    unless plain_feed_post?(post)
+      return { ok: false, error: 'Facebook does not allow editing the text of a published post that has a photo or video. Delete this post and create a new one.' }
+    end
+
+    integration = FacebookIntegration.current_for(@company)
+    return { ok: false, error: 'No Facebook page connected, so the live post cannot be updated. Reconnect in Settings > Integrations.' } unless integration
+
+    MetaGraphApi.update_page_post_message(
+      post.external_post_id,
+      integration.page_access_token,
+      message: caption
+    )
+    { ok: true }
+  rescue MetaGraphApi::ExpiredTokenError
+    integration&.update(status: 'expired')
+    { ok: false, error: 'Facebook token expired. Please reconnect in Settings > Integrations.' }
+  rescue MetaGraphApi::NotFoundError
+    { ok: false, error: 'That post no longer exists on Facebook. It may have been deleted there already.' }
+  rescue MetaGraphApi::Error => e
+    { ok: false, error: "Facebook rejected the edit: #{e.message}" }
+  end
+
+  # Remove the live post from the platform. Returns nil when there is nothing
+  # out there to remove (a draft, or a publish that never got an id), which the
+  # caller reads as "just soft-delete".
+  def delete_remote_post(post)
+    return nil unless live_on_platform?(post)
+
+    if post.platform.to_s == 'instagram'
+      return { ok: false, error: 'Instagram does not allow deleting a post through its API. Remove it in the Instagram app first, then delete it here.' }
+    end
+
+    integration = FacebookIntegration.current_for(@company)
+    return { ok: false, error: 'No Facebook page connected, so the live post cannot be removed. Reconnect in Settings > Integrations.' } unless integration
+
+    MetaGraphApi.delete_page_post(post.external_post_id, integration.page_access_token)
+    { ok: true }
+  rescue MetaGraphApi::NotFoundError
+    # Already gone on Facebook — somebody deleted it there by hand. The two
+    # sides agree, so this is a success, not something to make the user force.
+    { ok: true }
+  rescue MetaGraphApi::ExpiredTokenError
+    integration&.update(status: 'expired')
+    { ok: false, error: 'Facebook token expired, so the live post could not be removed. Reconnect in Settings > Integrations.' }
+  rescue MetaGraphApi::Error => e
+    { ok: false, error: "Facebook refused to delete the post: #{e.message}" }
+  end
+
+  def truthy_param?(value)
+    ActiveModel::Type::Boolean.new.cast(value) == true
   end
 
   # Persist a publish failure (status + human-readable reason) so the UI can
