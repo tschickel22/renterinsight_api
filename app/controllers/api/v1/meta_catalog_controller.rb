@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'csv'
+
 # Public inventory feed for Meta Dynamic Ads. Meta polls this URL.
 # Auth is via a company-scoped token (Authorization: Bearer <token>, or ?token=).
 class Api::V1::MetaCatalogController < ApplicationController
@@ -9,6 +11,15 @@ class Api::V1::MetaCatalogController < ApplicationController
   MAX_EXTRA_IMAGES = 9
   DEFAULT_MEDIUM   = 'catalog_ad'
   DEFAULT_CAMPAIGN = 'rotating_inventory'
+
+  # Meta accepts CSV, TSV, XML (RSS/ATOM) or XLSX for a scheduled feed. It does
+  # not accept JSON, and it validates the URL before fetching, so the link we
+  # hand the dealer has to end in .csv or Commerce Manager rejects it outright.
+  FEED_COLUMNS = %w[
+    id title description availability condition price link image_link
+    additional_image_link brand inventory
+    custom_label_0 custom_label_1 custom_label_2 custom_label_3 custom_label_4
+  ].freeze
 
   SETTING_KEY        = 'meta_catalog_settings'
   ALLOWED_STATUSES   = %w[available available_to_order reserved sold pending in_transit delivered].freeze
@@ -89,7 +100,16 @@ class Api::V1::MetaCatalogController < ApplicationController
 
     items = vehicles.map { |v| serialize(v, company: company, base_url: base_url) }
 
-    render json: items
+    # JSON stays available for our own preview and debugging; CSV is the default
+    # because it is what Meta can actually read.
+    if params[:format].to_s.casecmp('json').zero?
+      render json: items
+    else
+      send_data feed_csv(items),
+                type:        'text/csv; charset=utf-8',
+                disposition: 'inline',
+                filename:    "inventory-#{company.id}.csv"
+    end
   end
 
   private
@@ -131,7 +151,21 @@ class Api::V1::MetaCatalogController < ApplicationController
 
   def catalog_feed_url
     base = ENV['API_BASE_URL'] || request.base_url
-    "#{base}/api/v1/meta/catalog/#{@company.id}/feed?token=#{@company.meta_catalog_token}"
+    "#{base}/api/v1/meta/catalog/#{@company.id}/feed.csv?token=#{@company.meta_catalog_token}"
+  end
+
+  # One row per home, in Meta's column order. Multiple image URLs go in a single
+  # comma-separated field, which CSV quoting keeps intact.
+  def feed_csv(items)
+    CSV.generate do |csv|
+      csv << FEED_COLUMNS
+      items.each do |item|
+        csv << FEED_COLUMNS.map do |column|
+          value = item[column.to_sym]
+          value.is_a?(Array) ? value.join(',') : value
+        end
+      end
+    end
   end
 
   def intake_form_url(company)
