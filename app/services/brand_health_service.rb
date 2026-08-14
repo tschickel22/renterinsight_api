@@ -10,11 +10,23 @@ class BrandHealthService
   # deprecated name silently zeroes the entire dashboard. `page_engaged_users`
   # and `page_views_total` were both removed in Meta's 2024 Page Insights
   # cull — page_post_engagements is the current stand-in for engagement.
-  METRICS = %w[page_impressions page_post_engagements page_fans].freeze
+  #
+  # page_impressions_unique is reach: the number of people who saw the page,
+  # counted once each. page_impressions counts every view. The dashboard used
+  # to label impressions as "Reach", which reads as a much bigger audience than
+  # the page has and disagrees with the same figure in Meta Business Suite.
+  METRICS = %w[page_impressions_unique page_impressions page_post_engagements page_fans].freeze
 
   # Metric deprecation is continuous, so one bad name shouldn't cost us
-  # everything. If the batch is rejected, retry with the least likely to move.
-  FALLBACK_METRICS = %w[page_fans].freeze
+  # everything. If the batch is rejected, step down rather than straight to the
+  # floor: losing reach shouldn't also cost engagement and followers.
+  METRIC_LADDER = [
+    METRICS,
+    %w[page_impressions page_post_engagements page_fans],
+    %w[page_fans]
+  ].freeze
+
+  FALLBACK_METRICS = METRIC_LADDER.last
 
   class << self
     def fetch_for_company(company)
@@ -74,15 +86,18 @@ class BrandHealthService
     end
 
     def fetch_insights(company, page_id, token)
-      request_insights(page_id, token, METRICS)
-    rescue MetaGraphApi::Error => e
-      Rails.logger.warn "[BrandHealthService] company=#{company.id} insights retry after: #{e.message}"
-      begin
-        request_insights(page_id, token, FALLBACK_METRICS)
-      rescue MetaGraphApi::Error => retry_error
-        Rails.logger.warn "[BrandHealthService] company=#{company.id} insights skipped: #{retry_error.message}"
-        { 'data' => [] }
+      last_error = nil
+
+      METRIC_LADDER.each do |metrics|
+        return request_insights(page_id, token, metrics)
+      rescue MetaGraphApi::Error => e
+        last_error = e
+        Rails.logger.warn "[BrandHealthService] company=#{company.id} " \
+                          "insights rejected for [#{metrics.join(',')}]: #{e.message}"
       end
+
+      Rails.logger.warn "[BrandHealthService] company=#{company.id} insights skipped: #{last_error&.message}"
+      { 'data' => [] }
     end
 
     def request_insights(page_id, token, metrics)
@@ -102,27 +117,24 @@ class BrandHealthService
       }
     end
 
-    # Daily counters — the number people mean by "reach" or "engagement" is the
-    # sum across the window, not the last day's reading. page_fans is a running
-    # total instead, so its latest value is the answer.
-    CUMULATIVE_METRICS = %w[page_impressions page_post_engagements].freeze
-
     # Returns plain numbers keyed by metric name. This used to return
     # { latest:, total_28d: } per metric, which the dashboard read straight into
     # Number() — every tile rendered NaN and displayed as 0 no matter what Meta
     # actually returned.
+    #
+    # The most recent value is the answer, never the sum. We request
+    # period=days_28, so each entry Meta returns is ALREADY the 28-day total
+    # ending on its own end_time, and the response carries two or three such
+    # windows. Adding them together counted most of the same 28 days two or
+    # three times over, which is why the dashboard read far higher than the same
+    # figures in Meta Business Suite. (Summing would be right for period=day.)
     def extract_insights(response)
       rows = Array(response['data'])
       METRICS.each_with_object({}) do |metric, out|
         row = rows.find { |r| r['name'] == metric }
         values = Array(row && row['values'])
 
-        out[metric] =
-          if CUMULATIVE_METRICS.include?(metric)
-            values.sum { |v| numeric_value(v) }
-          else
-            values.last.is_a?(Hash) ? numeric_value(values.last) : 0
-          end
+        out[metric] = values.last.is_a?(Hash) ? numeric_value(values.last) : 0
       end
     end
 

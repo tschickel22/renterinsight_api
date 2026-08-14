@@ -42,8 +42,9 @@ RSpec.describe BrandHealthService do
   end
 
   # Metric deprecation is continuous — one unknown name shouldn't cost the
-  # whole dashboard, so a rejected batch retries with the stable subset.
-  it 'retries with the fallback metrics when the batch is rejected' do
+  # whole dashboard, so a rejected batch steps down a rung rather than dropping
+  # straight to the floor. Losing reach must not also cost engagement.
+  it 'retries with the next rung when the batch is rejected' do
     attempts = []
     stub_graph(insights: lambda { |metric|
       attempts << metric
@@ -55,8 +56,24 @@ RSpec.describe BrandHealthService do
     result = described_class.fetch_for_company(company)
 
     expect(attempts.length).to eq(2)
-    expect(attempts.last).to eq(described_class::FALLBACK_METRICS.join(','))
+    expect(attempts.last).to eq(described_class::METRIC_LADDER[1].join(','))
+    expect(attempts.last).to include('page_post_engagements')
     expect(result).not_to be_nil
+  end
+
+  it 'drops to the floor only once every richer rung is refused' do
+    attempts = []
+    stub_graph(insights: lambda { |metric|
+      attempts << metric
+      raise MetaGraphApi::Error, '(#100) unknown metric' if attempts.size < 3
+
+      { 'data' => [{ 'name' => 'page_fans', 'values' => [{ 'value' => 10 }] }] }
+    })
+
+    described_class.fetch_for_company(company)
+
+    expect(attempts.length).to eq(3)
+    expect(attempts.last).to eq(described_class::FALLBACK_METRICS.join(','))
   end
 
   it 'still returns page data when insights fail entirely' do
@@ -82,15 +99,30 @@ RSpec.describe BrandHealthService do
       ])
 
       expect(result['page_impressions']).to be_a(Numeric)
-      expect(Float(result['page_impressions'])).to eq(25)
+      expect(Float(result['page_impressions'])).to eq(15)
     end
 
-    it 'sums daily counters across the window' do
+    # We ask for period=days_28, so EACH value Meta returns is already the
+    # 28-day total ending on its own end_time, and it sends two or three such
+    # windows. Adding them counted most of the same 28 days twice or three
+    # times, which is why the dashboard read far higher than Meta Business
+    # Suite for the same page. The most recent window is the answer.
+    it 'takes the most recent window rather than summing overlapping ones' do
       result = extract([
         { 'name' => 'page_post_engagements',
           'values' => [{ 'value' => 3 }, { 'value' => 4 }, { 'value' => 5 }] }
       ])
-      expect(result['page_post_engagements']).to eq(12)
+      expect(result['page_post_engagements']).to eq(5)
+    end
+
+    it 'reports reach from the unique metric, not from impressions' do
+      result = extract([
+        { 'name' => 'page_impressions_unique', 'values' => [{ 'value' => 40 }] },
+        { 'name' => 'page_impressions', 'values' => [{ 'value' => 120 }] }
+      ])
+
+      expect(result['page_impressions_unique']).to eq(40)
+      expect(result['page_impressions']).to eq(120)
     end
 
     it 'takes the latest reading for a running total' do
