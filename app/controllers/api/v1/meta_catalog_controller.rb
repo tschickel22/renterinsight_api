@@ -84,6 +84,10 @@ class Api::V1::MetaCatalogController < ApplicationController
         excluded_by_status: excluded_by_status,
         eligible_by_status: eligible_by_status,
         feed_url:      token.present? ? catalog_feed_url : nil,
+        # A home in the feed is only viewable publicly while this is on. With it
+        # off there is no home-specific page for an ad click to land on, and the
+        # card says so rather than leaving it to be discovered from a 403.
+        public_inventory_enabled: @company.public_inventory_enabled,
         last_sync_at:  nil,
         statuses:      statuses,
         allowed_statuses: ALLOWED_STATUSES

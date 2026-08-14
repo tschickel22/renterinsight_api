@@ -181,5 +181,22 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
       ids = JSON.parse(response.body)['catalog']['excluded'].map { |e| e['id'] }
       expect(ids).not_to include("unit-#{no_price.id}")
     end
+
+    # The feed can look perfectly healthy while every ad click 403s, because
+    # homes are only viewable publicly while this flag is on. Surfacing it in
+    # settings beats discovering it from a shopper hitting an error.
+    it 'reports whether public inventory is switched on' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      expect(JSON.parse(response.body)['catalog']).to have_key('public_inventory_enabled')
+    end
+
+    it 'reports it as off when the company has it disabled' do
+      company.update!(public_inventory_enabled: false)
+
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      expect(JSON.parse(response.body)['catalog']['public_inventory_enabled']).to be false
+    end
   end
 end
