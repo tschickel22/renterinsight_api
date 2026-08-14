@@ -25,6 +25,31 @@ module Websites
     # Campaign and channel forms. Real, but wrong for a contact block.
     CAMPAIGN_SPECIFIC = /facebook|google|instagram|tiktok|special|promo|sale|event|test/i
 
+    # A form that collects neither an email nor a phone number produces a lead
+    # nobody can reply to. A name says nothing about this: the demo lot's
+    # "Contact Us" reads as the ideal general form and asks for a first name and
+    # a budget, so picking on the name alone chose the one form guaranteed to
+    # waste every enquiry it received.
+    CONTACT_LEAD_FIELDS = %w[email phone mobile_phone work_phone].freeze
+    CONTACT_TYPES       = %w[email tel phone].freeze
+    CONTACT_NAMES       = /e-?mail|phone|mobile|cell/i
+
+    # Forms are written by hand across several vintages, so check the mapping,
+    # the input type and the wording rather than trusting any one of them.
+    def self.reachable?(form)
+      Array(form&.schema).any? do |field|
+        f = field.respond_to?(:deep_stringify_keys) ? field.deep_stringify_keys : {}
+        next false if f['isActive'] == false
+
+        CONTACT_LEAD_FIELDS.include?(f['leadField'].to_s.downcase) ||
+          CONTACT_TYPES.include?(f['type'].to_s.downcase) ||
+          CONTACT_NAMES.match?(f['name'].to_s) ||
+          CONTACT_NAMES.match?(f['label'].to_s)
+      end
+    rescue StandardError
+      false
+    end
+
     # The form created when a company has nothing suitable. leadField values are
     # the ones already in use across real forms, so a submission maps onto a
     # Lead exactly as every other form's does.
@@ -53,7 +78,7 @@ module Websites
       return nil if company.nil?
 
       existing = new(company).call
-      return existing if existing && GENERAL_PURPOSE.match?(existing.name.to_s)
+      return existing if existing && GENERAL_PURPOSE.match?(existing.name.to_s) && reachable?(existing)
 
       create_basic(company)
     rescue StandardError => e
@@ -96,9 +121,14 @@ module Websites
       forms = active_forms
       return nil if forms.empty?
 
-      forms.find { |f| GENERAL_PURPOSE.match?(f.name.to_s) } ||
-        forms.find { |f| !CAMPAIGN_SPECIFIC.match?(f.name.to_s) } ||
-        forms.first
+      # A campaign-named form that collects a phone number beats a beautifully
+      # named one that collects nothing. Only fall back to the unreachable ones
+      # when there is no alternative, since something still beats nothing.
+      pool = forms.select { |f| self.class.reachable?(f) }.presence || forms
+
+      pool.find { |f| GENERAL_PURPOSE.match?(f.name.to_s) } ||
+        pool.find { |f| !CAMPAIGN_SPECIFIC.match?(f.name.to_s) } ||
+        pool.first
     end
 
     private

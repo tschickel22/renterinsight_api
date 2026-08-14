@@ -1,11 +1,15 @@
 # frozen_string_literal: true
 
-# Gives every company a contact form, so an inventory ad has somewhere to land.
+# Gives every company a contact form a shopper can actually be reached through.
 #
-# A Meta catalog item must carry a link. Without a form there is no destination,
-# so the feed sends no link, Meta rejects the item, and the dealer's entire feed
-# is empty for a reason nothing on screen explains. New companies now get one at
-# creation; this is for the ones that already exist.
+# Two problems, one fix. A company with no form at all gives a catalog item no
+# link, so Meta rejects every home and the feed is empty for a reason nothing on
+# screen explains. A company whose only general form collects neither an email
+# nor a phone number is worse: the feed works, ads run, and every enquiry
+# arrives with no way to answer it.
+#
+# New companies get a form at creation; this is for the ones that already
+# exist.
 #
 # Reuses Websites::DefaultLeadForm.ensure_for, which returns an existing
 # general-purpose form rather than making a second one, so this is safe to run
@@ -14,35 +18,38 @@
 #   bin/rails intake:backfill_default_forms           # dry run
 #   bin/rails intake:backfill_default_forms APPLY=1   # create them
 namespace :intake do
-  desc 'Create a contact form for every company that has none (APPLY=1 to write)'
+  desc 'Create a contact form for any company lacking a reachable one (APPLY=1 to write)'
   task backfill_default_forms: :environment do
     apply = ENV['APPLY'].present?
 
-    without_form = Company.where.not(
-      id: IntakeForm.select(:company_id).distinct
-    ).order(:id)
+    needs_form = Company.order(:id).select do |company|
+      current = Websites::DefaultLeadForm.for(company)
+      current.nil? || !Websites::DefaultLeadForm.reachable?(current)
+    end
 
-    if without_form.empty?
-      puts 'every company already has at least one intake form'
+    if needs_form.empty?
+      puts 'every company already has a form that collects an email or a phone number'
       next
     end
 
-    puts "#{without_form.count} companies have no intake form"
+    puts "#{needs_form.length} companies need a reachable contact form"
 
     created = 0
     skipped = 0
 
-    without_form.find_each do |company|
+    needs_form.each do |company|
       label = "#{company.id} #{company.name}"
+      current = Websites::DefaultLeadForm.for(company)
+      reason = current ? "best form ##{current.id} \"#{current.name}\" collects no email or phone" : 'no form at all'
 
       unless apply
-        puts "  would create a contact form for #{label}"
+        puts "  would create a contact form for #{label} (#{reason})"
         next
       end
 
       form = Websites::DefaultLeadForm.ensure_for(company)
 
-      if form
+      if form && form.id != current&.id
         created += 1
         puts "  #{label}: created form ##{form.id} (public_id #{form.public_id})"
       else
