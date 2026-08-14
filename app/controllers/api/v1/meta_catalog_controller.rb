@@ -37,13 +37,14 @@ class Api::V1::MetaCatalogController < ApplicationController
 
     token    = @company.meta_catalog_token
     statuses = catalog_statuses
-    base_url = intake_form_url(@company)
+    form = default_intake_form(@company)
 
     # Counted across every status the dealer could pick, not just the selected
     # ones, so the warning against a status is visible before it is ticked. An
     # Available to Order home usually has no price yet, and would never reach
     # the catalog however the feed is configured.
-    vehicles = @company.vehicles.where(is_deleted: false, status: ALLOWED_STATUSES).order(id: :asc)
+    vehicles = @company.vehicles.includes(:location)
+                        .where(is_deleted: false, status: ALLOWED_STATUSES).order(id: :asc)
 
     excluded          = []
     excluded_by_status = Hash.new(0)
@@ -52,7 +53,7 @@ class Api::V1::MetaCatalogController < ApplicationController
     # Same serialization the feed runs, so these counts are what Meta will
     # accept rather than how many rows we would send.
     vehicles.each do |v|
-      item    = serialize(v, company: @company, base_url: base_url)
+      item    = serialize(v, company: @company, form: form)
       missing = missing_feed_fields(item)
       status  = v.status.to_s
 
@@ -142,13 +143,16 @@ class Api::V1::MetaCatalogController < ApplicationController
       return head :unauthorized
     end
 
-    base_url = intake_form_url(company)
+    form     = default_intake_form(company)
     statuses = statuses_for(company)
+    # includes(:location): custom_label_3 reads the location name, and without
+    # this the feed fires one query per home.
     vehicles = company.vehicles
+                      .includes(:location)
                       .where(is_deleted: false, status: statuses)
                       .order(id: :asc)
 
-    items = vehicles.map { |v| serialize(v, company: company, base_url: base_url) }
+    items = vehicles.map { |v| serialize(v, company: company, form: form) }
                     .select { |item| missing_feed_fields(item).empty? }
 
     # JSON stays available for our own preview and debugging; CSV is the default
@@ -219,13 +223,7 @@ class Api::V1::MetaCatalogController < ApplicationController
     end
   end
 
-  def intake_form_url(company)
-    form = company.intake_forms.respond_to?(:where) ? company.intake_forms.where(is_active: true).order(:id).first : nil
-    form ||= company.intake_forms.order(:id).first rescue nil
-    form&.public_url
-  end
-
-  def serialize(v, company:, base_url:)
+  def serialize(v, company:, form:)
     bedrooms  = v.try(:bedrooms)
     bathrooms = v.try(:bathrooms)
 
@@ -238,7 +236,7 @@ class Api::V1::MetaCatalogController < ApplicationController
       # rejected the item for a missing required value.
       condition:      (v.try(:condition).presence || 'new').to_s,
       price:          format_price(v.try(:sale_price)),
-      link:           tagged_link(base_url, v),
+      link:           item_link(company, v, form),
       image_link:     primary_image_url(v),
       additional_image_link: additional_image_urls(v),
       brand:          v.try(:make).to_s,
@@ -287,12 +285,52 @@ class Api::V1::MetaCatalogController < ApplicationController
     "#{rounded} USD"
   end
 
-  def tagged_link(base_url, v)
+  # Where an ad click lands.
+  #
+  # Every home used to point at the same bare enquiry form, so someone who
+  # clicked a specific home arrived somewhere that never mentioned it. A home
+  # has its own public page carrying its photos, specs and a lead form, which
+  # is the destination a catalog item is supposed to have.
+  #
+  # Falls back to the enquiry form when the tenant has public inventory switched
+  # off, because the page would answer 403 and the click would be wasted.
+  def item_link(company, vehicle, form)
+    origin = app_origin
+
+    if origin.present? && company.public_inventory_enabled && company.public_inventory_token.present?
+      extra = { 'token' => company.public_inventory_token, 'company_id' => company.id.to_s }
+      # The form rides along so the page shows it inline rather than making the
+      # buyer hunt for a way to get in touch.
+      extra['lead_form_id'] = form.id.to_s if form
+
+      return tagged_link("#{origin}/public/inventory/#{vehicle.id}", vehicle, extra)
+    end
+
+    tagged_link(form&.public_url, vehicle)
+  end
+
+  # Same chain IntakeForm#public_url uses, so a home page and an enquiry form
+  # are always served from the same host.
+  def app_origin
+    ENV['APP_URL'].presence || ENV['FRONTEND_URL'].presence
+  end
+
+  # The same resolver a generated site uses for its contact block, which
+  # prefers a general "get in touch" form over a campaign-specific one. A form
+  # named "Facebook Lead Intake — Spring Promo" is a real form and the wrong
+  # one to put under a home someone just clicked.
+  def default_intake_form(company)
+    Websites::DefaultLeadForm.for(company)
+  rescue StandardError
+    nil
+  end
+
+  def tagged_link(base_url, v, extra = {})
     return nil if base_url.blank?
 
     uri = URI.parse(base_url)
     existing = URI.decode_www_form(uri.query.to_s).to_h
-    merged = existing.merge(
+    merged = existing.merge(extra).merge(
       'utm_source'   => 'facebook',
       'utm_medium'   => DEFAULT_MEDIUM,
       'utm_campaign' => DEFAULT_CAMPAIGN,
@@ -342,9 +380,12 @@ class Api::V1::MetaCatalogController < ApplicationController
     '150k_plus'
   end
 
+  # The rooftop, so a dealer can build a product set per location in Commerce
+  # Manager and run a campaign against one store. Read the location itself
+  # rather than location_city, which is populated on almost no home.
   def custom_label_3(v)
-    city = v.try(:location_city).to_s.strip
-    return nil if city.blank?
-    city.downcase.gsub(/[^a-z0-9]+/, '_').gsub(/^_|_$/, '')
+    name = v.location&.name.presence || v.try(:location_city).to_s
+    slug = name.to_s.strip.downcase.gsub(/[^a-z0-9]+/, '_').gsub(/^_|_$/, '')
+    slug.presence
   end
 end

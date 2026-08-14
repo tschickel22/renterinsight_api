@@ -199,4 +199,75 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
       expect(JSON.parse(response.body)['catalog']['public_inventory_enabled']).to be false
     end
   end
+
+  # Every home used to point at the same bare enquiry form, so a shopper who
+  # clicked a specific home landed somewhere that never mentioned it.
+  describe 'where an ad click lands' do
+    before { company.update!(public_inventory_enabled: true, public_inventory_token: 'inv-token') }
+
+    def link_for(id = home.id)
+      feed_get
+      CSV.parse(response.body, headers: true).find { |r| r['id'] == "unit-#{id}" }&.fetch('link')
+    end
+
+    it 'points at the home its own public page' do
+      expect(link_for).to include("/public/inventory/#{home.id}")
+    end
+
+    it 'carries what that page needs to load' do
+      link = link_for
+      expect(link).to include('token=inv-token')
+      expect(link).to include("company_id=#{company.id}")
+    end
+
+    it 'attaches a lead form so the page shows it inline' do
+      expect(link_for).to match(/lead_form_id=\d+/)
+    end
+
+    it 'keeps the campaign UTMs, so attribution is unaffected' do
+      link = link_for
+      expect(link).to include('utm_source=facebook')
+      expect(link).to include('utm_medium=catalog_ad')
+    end
+
+    # The page answers 403 with public inventory off, so the click would be
+    # wasted. Better a generic form than an error.
+    it 'falls back to the enquiry form when public inventory is off' do
+      company.update!(public_inventory_enabled: false)
+
+      link = link_for
+      expect(link).not_to include('/public/inventory/')
+      expect(link).to include('/f/')
+    end
+
+    it 'falls back when the company has no inventory token' do
+      company.update!(public_inventory_token: nil)
+
+      expect(link_for).not_to include('/public/inventory/')
+    end
+  end
+
+  # custom_label_3 read location_city, which is populated on almost no home, so
+  # the label was empty and a per-location product set had nothing to filter on.
+  describe 'the location label' do
+    it 'carries the rooftop name so a product set can filter by it' do
+      location = company.locations.create!(name: 'Aurora Sales Center',
+                                           code: "AUR-#{SecureRandom.hex(2)}", active: true)
+      home.update!(location_id: location.id)
+
+      feed_get
+
+      row = CSV.parse(response.body, headers: true).find { |r| r['id'] == "unit-#{home.id}" }
+      expect(row['custom_label_3']).to eq('aurora_sales_center')
+    end
+
+    it 'is left empty for a home with no rooftop' do
+      home.update!(location_id: nil)
+
+      feed_get
+
+      row = CSV.parse(response.body, headers: true).find { |r| r['id'] == "unit-#{home.id}" }
+      expect(row['custom_label_3'].to_s).to eq('')
+    end
+  end
 end
