@@ -214,6 +214,9 @@ class Company < ApplicationRecord
   # industries are skipped. Each sub-seed is individually rescued so one failure never
   # blocks company creation.
   after_create :seed_mh_finance_defaults
+  # Without a form there is no destination for an inventory ad to land on, so
+  # the Meta feed carries no link and Meta rejects every home.
+  after_create :seed_default_intake_form
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
   # The accounting subsystem is a web of cross-referencing FKs (and a circular
@@ -853,6 +856,16 @@ class Company < ApplicationRecord
   #
   # This seeds ONLY per-company data. The global RBAC catalog (Resource/Action/Role
   # seed_defaults) is seeded once per environment, not here.
+  def seed_default_intake_form
+    # Websites::DefaultLeadForm owns the shape of a basic contact form, and its
+    # leadField mappings are the ones every other form uses, so a submission
+    # lands on a Lead the same way. ensure_for is idempotent and returns an
+    # existing general-purpose form rather than making a second one.
+    Websites::DefaultLeadForm.ensure_for(self)
+  rescue StandardError => e
+    Rails.logger.error "[Company#seed_default_intake_form] company=#{id} failed: #{e.message}"
+  end
+
   def seed_mh_finance_defaults
     return unless industry == 'manufactured_housing'
 
