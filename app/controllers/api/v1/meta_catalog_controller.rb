@@ -97,7 +97,13 @@ class Api::V1::MetaCatalogController < ApplicationController
         public_inventory_enabled: @company.public_inventory_enabled,
         last_sync_at:  nil,
         statuses:      statuses,
-        allowed_statuses: ALLOWED_STATUSES
+        allowed_statuses: ALLOWED_STATUSES,
+        lead_form_id:  form&.id,
+        # Whether the dealer picked it or the resolver did, so the card can say
+        # which and offer to change it.
+        lead_form_is_automatic: configured_lead_form(@company).nil?,
+        lead_forms: @company.intake_forms.where(is_active: true).order(:name)
+                            .map { |f| { id: f.id, name: f.name } }
       }
     }
   end
@@ -111,13 +117,22 @@ class Api::V1::MetaCatalogController < ApplicationController
 
     settings = load_settings
     settings['statuses'] = requested
-    Setting.set('Company', @company.id, SETTING_KEY, settings)
+
+    if params.key?(:lead_form_id)
+      chosen = params[:lead_form_id].presence
+      # Blank clears the pick and hands the choice back to the resolver.
+      settings['lead_form_id'] =
+        chosen && @company.intake_forms.where(is_active: true).exists?(id: chosen) ? chosen.to_s : nil
+    end
+
+    Setting.set('Company', @company.id, SETTING_KEY, settings.compact)
 
     vehicle_count = @company.vehicles.where(is_deleted: false, status: requested).count
 
     render json: {
       catalog: {
         statuses:     requested,
+        lead_form_id: settings['lead_form_id'],
         active_count: vehicle_count
       }
     }
@@ -191,7 +206,11 @@ class Api::V1::MetaCatalogController < ApplicationController
   end
 
   def load_settings
-    raw = Setting.get('Company', @company.id, SETTING_KEY)
+    settings_for(@company)
+  end
+
+  def settings_for(company)
+    raw = Setting.get('Company', company.id, SETTING_KEY)
     case raw
     when Hash   then raw.deep_stringify_keys
     when String then (JSON.parse(raw).deep_stringify_keys rescue {})
@@ -321,14 +340,29 @@ class Api::V1::MetaCatalogController < ApplicationController
     ENV['APP_URL'].presence || ENV['FRONTEND_URL'].presence
   end
 
-  # The same resolver a generated site uses for its contact block, which
-  # prefers a general "get in touch" form over a campaign-specific one. A form
-  # named "Facebook Lead Intake — Spring Promo" is a real form and the wrong
-  # one to put under a home someone just clicked.
+  # The form shown under a home on the landing page.
+  #
+  # A dealer's pick wins. Choosing automatically is a reasonable default and a
+  # poor decision to be stuck with: the resolver only reads a form's name, so a
+  # form called "Contact Us" that asks for nothing but a first name beats a
+  # well-built one named for a campaign, and the dealer gets leads they cannot
+  # reply to.
   def default_intake_form(company)
+    configured = configured_lead_form(company)
+    return configured if configured
+
     Websites::DefaultLeadForm.for(company)
   rescue StandardError
     nil
+  end
+
+  # Falls through to the automatic choice if the chosen form has since been
+  # deleted or deactivated, rather than leaving items with no link at all.
+  def configured_lead_form(company)
+    id = settings_for(company)['lead_form_id']
+    return nil if id.blank?
+
+    company.intake_forms.where(is_active: true).find_by(id: id)
   end
 
   def tagged_link(base_url, v, extra = {})

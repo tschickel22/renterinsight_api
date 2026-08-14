@@ -226,6 +226,79 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
       sample = JSON.parse(response.body)['catalog']['sample_listing']
       expect(sample['link']).not_to include("/public/inventory/#{no_price.id}")
     end
+
+    # Choosing automatically is a fair default and a poor thing to be stuck
+    # with: the resolver only reads a form's name, so a form called "Contact Us"
+    # that asks for nothing but a first name wins over a well-built one, and the
+    # dealer collects leads they cannot reply to.
+    describe 'choosing the form' do
+      let!(:better_form) do
+        company.intake_forms.create!(name: 'Home Inquiry', is_active: true, schema: [])
+      end
+
+      it 'lists the active forms to choose from' do
+        get '/api/v1/meta/catalog/info', headers: auth
+
+        names = JSON.parse(response.body)['catalog']['lead_forms'].map { |f| f['name'] }
+        expect(names).to include('Home Inquiry')
+      end
+
+      it 'says when nobody has chosen and the resolver picked' do
+        get '/api/v1/meta/catalog/info', headers: auth
+
+        expect(JSON.parse(response.body)['catalog']['lead_form_is_automatic']).to be true
+      end
+
+      it 'uses the dealer pick over the resolver' do
+        patch '/api/v1/meta/catalog/settings', headers: auth,
+              params: { statuses: ['available'], lead_form_id: better_form.id }.to_json
+
+        get '/api/v1/meta/catalog/info', headers: auth
+        catalog = JSON.parse(response.body)['catalog']
+        expect(catalog['lead_form_id']).to eq(better_form.id)
+        expect(catalog['lead_form_is_automatic']).to be false
+      end
+
+      it 'puts the chosen form on every link in the feed' do
+        patch '/api/v1/meta/catalog/settings', headers: auth,
+              params: { statuses: ['available'], lead_form_id: better_form.id }.to_json
+
+        feed_get
+        link = CSV.parse(response.body, headers: true).first['link']
+        expect(link).to include("lead_form_id=#{better_form.id}")
+      end
+
+      it 'clears the pick when sent a blank, handing the choice back' do
+        patch '/api/v1/meta/catalog/settings', headers: auth,
+              params: { statuses: ['available'], lead_form_id: better_form.id }.to_json
+        patch '/api/v1/meta/catalog/settings', headers: auth,
+              params: { statuses: ['available'], lead_form_id: '' }.to_json
+
+        get '/api/v1/meta/catalog/info', headers: auth
+        expect(JSON.parse(response.body)['catalog']['lead_form_is_automatic']).to be true
+      end
+
+      it 'ignores a form belonging to another company' do
+        other = Company.create!(name: "Other-#{SecureRandom.hex(3)}")
+        theirs = other.intake_forms.create!(name: 'Theirs', is_active: true, schema: [])
+
+        patch '/api/v1/meta/catalog/settings', headers: auth,
+              params: { statuses: ['available'], lead_form_id: theirs.id }.to_json
+
+        get '/api/v1/meta/catalog/info', headers: auth
+        expect(JSON.parse(response.body)['catalog']['lead_form_id']).not_to eq(theirs.id)
+      end
+
+      # A deleted or deactivated pick must not leave every item without a link.
+      it 'falls back when the chosen form is deactivated' do
+        patch '/api/v1/meta/catalog/settings', headers: auth,
+              params: { statuses: ['available'], lead_form_id: better_form.id }.to_json
+        better_form.update!(is_active: false)
+
+        feed_get
+        expect(CSV.parse(response.body, headers: true).first['link']).to match(/lead_form_id=\d+/)
+      end
+    end
   end
 
   # Every home used to point at the same bare enquiry form, so a shopper who
