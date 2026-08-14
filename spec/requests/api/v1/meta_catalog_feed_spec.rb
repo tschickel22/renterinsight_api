@@ -198,6 +198,34 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
 
       expect(JSON.parse(response.body)['catalog']['public_inventory_enabled']).to be false
     end
+
+    # Preview Feed shows the data Meta reads, which answers nothing about what
+    # a shopper lands on. Hand back the real link off a home Meta will accept,
+    # rather than letting the frontend rebuild the URL and preview a guess.
+    it 'offers a real listing link to preview' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      sample = JSON.parse(response.body)['catalog']['sample_listing']
+      expect(sample['link']).to include("/public/inventory/#{home.id}")
+      expect(sample['title']).to be_present
+    end
+
+    it 'offers nothing to preview when no home would be sent' do
+      home.update!(sale_price: nil)
+
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      expect(JSON.parse(response.body)['catalog']['sample_listing']).to be_nil
+    end
+
+    # A home in a status the dealer has not selected is not in the feed, so
+    # previewing it would show something no ad will ever link to.
+    it 'never samples a home from an unselected status' do
+      get '/api/v1/meta/catalog/info', headers: auth
+
+      sample = JSON.parse(response.body)['catalog']['sample_listing']
+      expect(sample['link']).not_to include("/public/inventory/#{no_price.id}")
+    end
   end
 
   # Every home used to point at the same bare enquiry form, so a shopper who

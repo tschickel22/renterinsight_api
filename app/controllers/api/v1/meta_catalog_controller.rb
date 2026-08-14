@@ -49,6 +49,10 @@ class Api::V1::MetaCatalogController < ApplicationController
     excluded          = []
     excluded_by_status = Hash.new(0)
     eligible_by_status = Hash.new(0)
+    # The real link off the first home Meta will accept, so previewing it shows
+    # exactly what a shopper lands on. Rebuilding the URL in the frontend would
+    # preview a guess, and a guess cannot catch a broken link.
+    sample = nil
 
     # Same serialization the feed runs, so these counts are what Meta will
     # accept rather than how many rows we would send.
@@ -59,6 +63,7 @@ class Api::V1::MetaCatalogController < ApplicationController
 
       if missing.empty?
         eligible_by_status[status] += 1
+        sample ||= { title: item[:title], link: item[:link] } if statuses.include?(status)
         next
       end
 
@@ -84,6 +89,7 @@ class Api::V1::MetaCatalogController < ApplicationController
         excluded:      excluded.first(25),
         excluded_by_status: excluded_by_status,
         eligible_by_status: eligible_by_status,
+        sample_listing: sample,
         feed_url:      token.present? ? catalog_feed_url : nil,
         # A home in the feed is only viewable publicly while this is on. With it
         # off there is no home-specific page for an ad click to land on, and the
