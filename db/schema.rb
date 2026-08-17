@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_12_204918) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_17_172903) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6587,11 +6587,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_12_204918) do
     t.bigint "company_id", null: false
     t.string "category", default: "general"
     t.string "source", default: "manual"
+    t.string "usage", default: "standalone", null: false
     t.index ["category"], name: "index_templates_on_category"
     t.index ["company_id", "category"], name: "index_templates_on_company_id_and_category"
+    t.index ["company_id", "usage"], name: "index_templates_on_company_id_and_usage"
     t.index ["company_id"], name: "index_templates_on_company_id"
     t.index ["source"], name: "index_templates_on_source"
     t.index ["template_type", "name"], name: "index_templates_on_template_type_and_name"
+    t.index ["usage"], name: "index_templates_on_usage"
   end
 
   create_table "tenant_module_overrides", force: :cascade do |t|

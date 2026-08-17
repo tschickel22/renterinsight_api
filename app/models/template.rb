@@ -13,6 +13,11 @@ class Template < ApplicationRecord
 
   SOURCES = %w[manual ai_generated].freeze
 
+  # How the template is sent, as opposed to what it is about (see CATEGORIES).
+  # 'nurture'    — runs as a step inside a nurture sequence
+  # 'standalone' — picked by hand when emailing or texting one person
+  USAGES = %w[nurture standalone].freeze
+
   # Attachments for email templates (PDFs, documents, images, etc.)
   has_many_attached :attachments
 
@@ -20,8 +25,12 @@ class Template < ApplicationRecord
   validates :template_type, presence: true
   validates :category, inclusion: { in: CATEGORIES }, allow_nil: true
   validates :source, inclusion: { in: SOURCES }, allow_nil: true
+  validates :usage, inclusion: { in: USAGES }
 
   scope :for_category, ->(cat) { where(category: cat) }
+  scope :for_usage, ->(usage) { where(usage: usage) }
+  scope :nurture_templates, -> { where(usage: 'nurture') }
+  scope :standalone, -> { where(usage: 'standalone') }
   scope :ai_generated, -> { where(source: 'ai_generated') }
   scope :manual, -> { where(source: 'manual') }
   
