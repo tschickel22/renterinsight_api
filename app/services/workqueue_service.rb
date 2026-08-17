@@ -243,6 +243,23 @@ class WorkqueueService
 
   private
 
+  # Status keys that take a lead out of the work queues.
+  #
+  # These were hardcoded as converted/lost/unqualified(/dead) in five places, which
+  # meant a tenant could flag their own dead-end status — "Cold Storage", say — via
+  # the Lead Statuses tab, watch the leads list honour it (see
+  # Api::Crm::LeadsController#excluded_status_keys), and still find those leads
+  # sitting in the queue. Reading the same per-tenant list here makes the two agree.
+  #
+  # The hardcoded keys stay as a floor: a company that has flagged nothing should not
+  # suddenly see converted and lost leads appear in the queue.
+  BASELINE_EXCLUDED_STATUSES = %w[converted lost unqualified dead].freeze
+
+  def excluded_lead_status_keys
+    @excluded_lead_status_keys ||=
+      (BASELINE_EXCLUDED_STATUSES + @company.lead_statuses.excluded.pluck(:key)).compact.uniq
+  end
+
   def hash_queue?(queue_id)
     HASH_QUEUES.include?(queue_id.to_s)
   end
@@ -591,7 +608,7 @@ class WorkqueueService
           SELECT 1 FROM leads
           WHERE leads.id = workqueue_activities.parent_id
             AND (leads.is_converted IS NULL OR leads.is_converted = false)
-            AND leads.status NOT IN ('converted', 'lost', 'unqualified', 'dead')
+            AND leads.status NOT IN (#{excluded_lead_status_keys.map { |k| ActiveRecord::Base.connection.quote(k) }.join(', ')})
         ))
       )
     SQL
@@ -601,7 +618,7 @@ class WorkqueueService
 
   def leads_mine
     @company.leads.where(owner_id: @user.id)
-                  .where.not(status: %w[converted lost unqualified])
+                  .where.not(status: excluded_lead_status_keys)
   end
 
   def leads_new_24h
@@ -613,7 +630,7 @@ class WorkqueueService
   def leads_stale_48h
     cutoff = prefs[:stale_leads_days].to_i.days.ago
     @company.leads.where(owner_id: @user.id)
-                  .where.not(status: %w[converted lost unqualified])
+                  .where.not(status: excluded_lead_status_keys)
                   .where('(leads.last_activity_at IS NULL AND leads.created_at < :t) OR leads.last_activity_at < :t',
                          t: cutoff)
   end
@@ -626,7 +643,7 @@ class WorkqueueService
     cutoff = prefs[:replied_window_days].to_i.days.ago
     @company.leads
             .where(owner_id: @user.id)
-            .where.not(status: %w[converted lost unqualified])
+            .where.not(status: excluded_lead_status_keys)
             .where(<<~SQL.squish, cutoff: cutoff)
               EXISTS (
                 SELECT 1 FROM communications c_in
@@ -992,7 +1009,7 @@ class WorkqueueService
     ids_csv = ordered_ids.join(',')
 
     @company.leads.where(owner_id: @user.id, id: ordered_ids)
-                  .where.not(status: %w[converted lost unqualified])
+                  .where.not(status: excluded_lead_status_keys)
                   .order(Arel.sql("array_position(ARRAY[#{ids_csv}]::bigint[], leads.id)"))
   end
 
