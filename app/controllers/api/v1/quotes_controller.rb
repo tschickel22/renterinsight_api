@@ -252,7 +252,11 @@ module Api
           if result[:sent].any?
             # Update quote status
             @quote.send! if @quote.may_send?
-            
+
+            # Mirror the send into the customer's portal app, if they have it.
+            PortalPushService.new_quote(quote: @quote, buyer: @quote.contact)
+
+
             # Build per-channel status for frontend
             channel_results = result[:sent].map { |r| { channel: r[:channel], to: r[:to], status: 'success' } }
             channel_results += result[:failed].map { |r| { channel: r[:channel], to: r[:to], status: 'failed', reason: r[:reason] } }

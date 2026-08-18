@@ -86,6 +86,14 @@ module Api
       # Never ship the stored credentials to a client, encrypted or otherwise.
       settings_hash[:communications] = mask_sensitive_fields(settings_hash[:communications])
 
+      # OneSignal REST keys are write-only. This loop returns every Platform
+      # setting row verbatim, so a `push` row would otherwise hand its API keys
+      # to any admin client in plaintext. There is no push settings form yet, and
+      # masking without the restore_masked_secrets half of the contract would let
+      # a save write bullets over the real key, so redact rather than mask: these
+      # are configured through ENV (ONESIGNAL_*_API_KEY).
+      settings_hash[:push] = redact_push_credentials(settings_hash[:push]) if settings_hash.key?(:push)
+
       render json: settings_hash
     rescue => e
       Rails.logger.error "Platform settings error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
@@ -481,10 +489,30 @@ module Api
 
     private
 
+    # Strip OneSignal REST keys out of a `push` settings hash before it leaves
+    # the server, keeping the app ids (which are public and useful to see) and
+    # a flag saying whether a key is on file at all.
+    def redact_push_credentials(push_settings)
+      return push_settings unless push_settings.is_a?(Hash)
+
+      redacted = push_settings.deep_dup
+
+      %w[staff portal].each do |app|
+        section = redacted[app] || redacted[app.to_sym]
+        next unless section.is_a?(Hash)
+
+        key = section.key?('apiKey') ? 'apiKey' : :apiKey
+        section['apiKeyConfigured'] = section[key].present?
+        section.delete(key)
+      end
+
+      redacted
+    end
+
     # ============================================
     # RBAC Authorization Methods
     # ============================================
-    
+
     # `communications` is the one generic setting that carries credentials, so it
     # can't be written through here verbatim. Two things have to happen that the
     # raw Setting.set path skipped entirely: the mask the client was shown has to

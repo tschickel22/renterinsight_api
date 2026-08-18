@@ -19,7 +19,10 @@ class Api::V1::NotificationPreferencesController < ApplicationController
       preferences: preferences.as_json,
       grouped: grouped.transform_values { |prefs| prefs.as_json },
       available_types: Notification::TYPES.keys.map(&:to_s),
-      categories: Notification::TYPES.values.map { |t| t[:category] }.uniq
+      categories: Notification::TYPES.values.map { |t| t[:category] }.uniq,
+      # Only these offer a push toggle. Everything else is notification-center
+      # only, by design.
+      push_eligible_types: Notification::PUSH_ELIGIBLE_TYPES
     }
   end
   
@@ -62,7 +65,7 @@ class Api::V1::NotificationPreferencesController < ApplicationController
         if pref_data[:id]
           # Update existing
           pref = current_user.notification_preferences.find(pref_data[:id])
-          if pref.update(pref_data.permit(:in_app_enabled, :email_enabled, :sms_enabled, :frequency))
+          if pref.update(pref_data.permit(:in_app_enabled, :email_enabled, :sms_enabled, :push_enabled, :frequency))
             updated += 1
           else
             errors << { id: pref.id, errors: pref.errors }
@@ -70,7 +73,7 @@ class Api::V1::NotificationPreferencesController < ApplicationController
         elsif pref_data[:notification_type]
           # Create or update by notification_type
           pref = NotificationPreference.get_or_create_for(current_user, pref_data[:notification_type])
-          if pref.update(pref_data.permit(:in_app_enabled, :email_enabled, :sms_enabled, :frequency))
+          if pref.update(pref_data.permit(:in_app_enabled, :email_enabled, :sms_enabled, :push_enabled, :frequency))
             updated += 1
           else
             errors << { notification_type: pref_data[:notification_type], errors: pref.errors }
@@ -106,7 +109,7 @@ class Api::V1::NotificationPreferencesController < ApplicationController
     # Update all preferences in category
     updated = 0
     preferences.each do |pref|
-      if pref.update(update_params.permit(:in_app_enabled, :email_enabled, :sms_enabled, :frequency))
+      if pref.update(update_params.permit(:in_app_enabled, :email_enabled, :sms_enabled, :push_enabled, :frequency))
         updated += 1
       end
     end
@@ -145,6 +148,7 @@ class Api::V1::NotificationPreferencesController < ApplicationController
       :in_app_enabled,
       :email_enabled,
       :sms_enabled,
+      :push_enabled,
       :frequency,
       :respect_quiet_hours,
       :quiet_hours_start,

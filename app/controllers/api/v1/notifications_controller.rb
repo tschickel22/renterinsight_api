@@ -175,10 +175,11 @@ class Api::V1::NotificationsController < ApplicationController
     roles = params[:roles]
     send_email = ActiveModel::Type::Boolean.new.cast(params[:send_email])
     send_sms = ActiveModel::Type::Boolean.new.cast(params[:send_sms])
+    send_push = ActiveModel::Type::Boolean.new.cast(params[:send_push])
     attachments = params[:attachments] || []  # NEW: Accept file uploads
-    
+
     # Log what we received
-    Rails.logger.info "[Broadcast] Delivery options: send_email=#{send_email.inspect}, send_sms=#{send_sms.inspect}"
+    Rails.logger.info "[Broadcast] Delivery options: send_email=#{send_email.inspect}, send_sms=#{send_sms.inspect}, send_push=#{send_push.inspect}"
     Rails.logger.info "[Broadcast] Raw params: send_email='#{params[:send_email]}', send_sms='#{params[:send_sms]}'"
     
     if message.blank?
@@ -207,15 +208,18 @@ class Api::V1::NotificationsController < ApplicationController
           deliver_now: false,
           company_id: @company.id,
           actor: current_user,
-          attachments: attachments  # Pass attachments
+          attachments: attachments,  # Pass attachments
+          # Broadcast push is the admin's explicit choice below, not the
+          # per-user preference default.
+          push: false
         )
-        
+
         if notification
           # Override preference for broadcast delivery channels
-          if send_email || send_sms
-            NotificationService.deliver_broadcast(notification, send_email: send_email, send_sms: send_sms)
+          if send_email || send_sms || send_push
+            NotificationService.deliver_broadcast(notification, send_email: send_email, send_sms: send_sms, send_push: send_push)
           end
-          
+
           sent_count += 1
         end
       end
@@ -233,6 +237,7 @@ class Api::V1::NotificationsController < ApplicationController
         roles: roles,
         send_email: send_email,
         send_sms: send_sms,
+        send_push: send_push,
         deliver_now: true,
         actor: current_user,
         attachments: attachments  # Pass attachments

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_17_172903) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_17_190200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1188,6 +1188,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_17_172903) do
     t.datetime "invitation_accepted_at"
     t.boolean "mfa_enabled", default: false
     t.string "mfa_method"
+    t.boolean "push_opt_in", default: true
     t.index ["buyer_type", "buyer_id", "company_id"], name: "index_buyer_portal_on_buyer_and_company"
     t.index ["buyer_type", "buyer_id"], name: "index_buyer_portal_accesses_on_buyer"
     t.index ["company_id"], name: "index_buyer_portal_accesses_on_company_id"
@@ -4420,6 +4421,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_17_172903) do
     t.time "quiet_hours_end"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "push_enabled", default: false, null: false
     t.index ["category"], name: "index_notification_preferences_on_category"
     t.index ["user_id", "notification_type"], name: "index_notification_prefs_on_user_and_type", unique: true
   end
@@ -4450,6 +4452,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_17_172903) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "push_sent", default: false
+    t.datetime "push_sent_at"
     t.index ["category"], name: "index_notifications_on_category"
     t.index ["company_id", "created_at"], name: "index_notifications_on_company_id_and_created_at"
     t.index ["company_id", "notification_type"], name: "index_notifications_on_company_id_and_notification_type"
@@ -5381,6 +5385,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_17_172903) do
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
     t.index ["vendor_id"], name: "index_purchase_orders_on_vendor_id"
+  end
+
+  create_table "push_subscriptions", force: :cascade do |t|
+    t.string "owner_type", null: false
+    t.bigint "owner_id", null: false
+    t.bigint "company_id"
+    t.string "app", default: "staff", null: false
+    t.string "player_id", null: false
+    t.string "external_id"
+    t.string "platform"
+    t.string "device_model"
+    t.string "app_version"
+    t.string "natively_version"
+    t.boolean "permission_granted", default: true, null: false
+    t.datetime "last_seen_at"
+    t.datetime "last_success_at"
+    t.datetime "revoked_at"
+    t.integer "failure_count", default: 0, null: false
+    t.string "last_error"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["app", "external_id"], name: "index_push_subscriptions_on_app_and_external_id"
+    t.index ["company_id"], name: "index_push_subscriptions_on_company_id"
+    t.index ["owner_type", "owner_id"], name: "index_push_subscriptions_on_owner_type_and_owner_id"
+    t.index ["player_id"], name: "index_push_subscriptions_on_player_id", unique: true
+    t.index ["revoked_at"], name: "index_push_subscriptions_on_revoked_at"
   end
 
   create_table "quickbooks_connections", force: :cascade do |t|

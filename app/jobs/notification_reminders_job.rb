@@ -69,6 +69,31 @@ class NotificationRemindersJob < ApplicationJob
     end
   end
 
+  # Push an overdue invoice to the customer's portal app and leave a
+  # Notification row behind so the caller's 7-day guard sees it. Returns
+  # quietly when the customer has no portal login.
+  def notify_overdue_invoice_buyer(invoice)
+    contact = invoice.contact
+    access = BuyerPortalAccess.find_by(buyer_type: contact.class.name, buyer_id: contact.id)
+    return if access.blank?
+
+    days_overdue = (Date.today - invoice.due_date).to_i
+
+    NotificationService.create(
+      recipient: access,
+      notification_type: :invoice_overdue,
+      notifiable: invoice,
+      message: "Invoice #{invoice.invoice_number} is #{days_overdue} #{'day'.pluralize(days_overdue)} past due",
+      deliver_now: false,
+      company_id: invoice.company_id,
+      location_id: invoice.location_id
+    )
+
+    PortalPushService.invoice_overdue(invoice: invoice, buyer: contact)
+  rescue => e
+    Rails.logger.error("[NotificationRemindersJob] Portal overdue push failed for invoice #{invoice.id}: #{e.message}")
+  end
+
   def notify_overdue_invoices
     overdue_invoices = Invoice.where('due_date < ?', Date.today)
                               .where(status: ['sent', 'pending'])
@@ -82,6 +107,15 @@ class NotificationRemindersJob < ApplicationJob
       ).where('created_at > ?', 7.days.ago).exists?
 
       next if existing_notification
+
+      # The customer hears about it too, in their portal app.
+      #
+      # This runs before the staff notifications below and outside their
+      # finance_role branch, because a company without a finance_manager role
+      # creates no Notification row at all, which would leave the 7-day guard
+      # above permanently false and push the customer every single night.
+      # Marking it here is what makes the guard cover this send.
+      notify_overdue_invoice_buyer(invoice)
 
       company = Company.find(invoice.company_id)
       finance_role = Role.find_by(name: 'finance_manager', company: company)

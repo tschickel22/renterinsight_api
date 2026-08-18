@@ -454,6 +454,16 @@ Rails.application.routes.draw do
       
       # Notification Settings (Unified Reminder System)
       resource :notification_settings, only: [:show, :update], path: 'notification_settings'
+
+      # Mobile push device registration (OneSignal via the Natively shell).
+      # :id is the OneSignal player id, not a database id, so the constraint
+      # keeps the UUID's dashes from being read as a format segment.
+      resources :push_subscriptions, path: 'push-subscriptions', only: [:index, :create, :destroy],
+                                     constraints: { id: /[^\/]+/ } do
+        collection do
+          post :test
+        end
+      end
       
       # ==================== TASKS ====================
       resources :tasks do
@@ -3003,6 +3013,15 @@ Rails.application.routes.draw do
       resources :documents, only: [:index, :show, :create, :destroy] do
         member do
           get :download
+        end
+      end
+
+      # Mobile push device registration for the portal app
+      resources :push_subscriptions, path: 'push-subscriptions', only: [:index, :create, :destroy],
+                                     constraints: { id: /[^\/]+/ } do
+        collection do
+          post :test
+          patch :opt_in, path: 'opt-in'
         end
       end
 

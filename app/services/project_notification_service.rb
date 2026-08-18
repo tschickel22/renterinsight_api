@@ -610,6 +610,15 @@ class ProjectNotificationService
       category: 'project_notification',
       communicable: project
     )
+
+    # And on their phone, if they have the portal app. Work sits blocked until
+    # the customer looks at it, so this is worth an interruption.
+    PortalPushService.approval_requested(
+      project: project,
+      assignment: assignment,
+      client_email: client_email
+    )
+
     Rails.logger.info("[ProjectNotificationService] client review request email sent to #{client_email} for assignment #{assignment.id}")
   rescue => e
     Rails.logger.error("[ProjectNotificationService] Error notifying client review requested: #{e.message}")

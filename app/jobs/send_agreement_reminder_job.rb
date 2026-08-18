@@ -28,6 +28,11 @@ class SendAgreementReminderJob < ApplicationJob
         results << send_reminder_sms(agreement, signer, signing_link, branding)
       end
 
+      # Push rides alongside rather than counting as a delivery channel: the
+      # reminder record tracks email/SMS, and a signer with no portal app must
+      # not make an email-only reminder look like it failed.
+      PortalPushService.document_signature_reminder(agreement: agreement, signer: signer)
+
       any_success = results.any? { |success, _| success }
       last_error = results.select { |success, _| !success }.map { |_, err| err }.last
 

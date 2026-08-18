@@ -24,6 +24,11 @@ class SendAgreementJob < ApplicationJob
         if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
           send_signing_sms(agreement, signer, signing_link, branding)
         end
+
+        # Push to the portal app, in addition to whatever channel above. A
+        # signing request is what the portal app exists for, and it only lands
+        # if the signer has actually installed it.
+        PortalPushService.document_to_sign(agreement: agreement, signer: signer)
       rescue => e
         Rails.logger.error("[SendAgreementJob] Failed to send to #{signer.email}: #{e.message}\n#{e.backtrace.first(3).join("\n")}")
       end

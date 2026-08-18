@@ -87,7 +87,57 @@ class Notification < ApplicationRecord
     project_phase_completed: { category: 'service', priority: 'normal', title: 'Project Phase Completed' },
     contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' }
   }.freeze
-  
+
+  # Types that are allowed to reach a phone at all.
+  #
+  # The notification center carries everything in TYPES; a push interrupts
+  # someone, so the list is deliberately short and covers only the things a rep
+  # would want to be pulled out of what they are doing for. Anything not named
+  # here is in-app only and never offers a push toggle in preferences. Being
+  # listed here is permission, not consent: NotificationPreference decides which
+  # of these default to on.
+  PUSH_ELIGIBLE_TYPES = %w[
+    lead_assigned
+    task_assigned
+    task_due_soon
+    task_overdue
+    activity_reminder
+    deal_assigned
+    quote_accepted
+    deal_won
+    home_sold_choose_new_home
+    service_ticket_assigned
+    warranty_claim_assigned
+    payment_failed
+    invoice_overdue
+    mention_received
+    approval_required
+    sms_reply_received
+    email_reply_received
+    email_connection_broken
+    system_alert
+    broadcast_message
+    contractor_task_assigned
+    contractor_review_submitted
+    contractor_review_revision
+  ].freeze
+
+  def self.push_eligible?(notification_type)
+    PUSH_ELIGIBLE_TYPES.include?(notification_type.to_s)
+  end
+
+  def push_eligible?
+    self.class.push_eligible?(notification_type)
+  end
+
+  # Groups repeat notifications about the same record into one tray entry, so
+  # three updates on one deal replace each other instead of stacking.
+  def push_collapse_id
+    return "#{notification_type}:#{id}" if notifiable_type.blank?
+
+    "#{notification_type}:#{notifiable_type}:#{notifiable_id}"
+  end
+
   # Mark notification as read
   def mark_as_read!
     update!(read: true, read_at: Time.current)

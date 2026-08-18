@@ -39,6 +39,24 @@ class PlatformSetting
       Setting.set('Platform', PLATFORM_SCOPE_ID, 'branding', value)
     end
 
+    # Mobile push (OneSignal, delivered through the Natively native shell).
+    # Two OneSignal apps because Natively ships two separate builds: the staff
+    # DMS app and the customer portal app. Deep-merged so setting one app's
+    # credentials in Platform Admin does not blank the other's ENV defaults.
+    def push
+      persisted = Setting.get('Platform', PLATFORM_SCOPE_ID, 'push')
+      return default_push if persisted.blank?
+
+      persisted = persisted.deep_symbolize_keys
+      default_push.merge(persisted) do |_key, default_value, persisted_value|
+        default_value.is_a?(Hash) && persisted_value.is_a?(Hash) ? default_value.merge(persisted_value.compact) : persisted_value
+      end
+    end
+
+    def push=(value)
+      Setting.set('Platform', PLATFORM_SCOPE_ID, 'push', value)
+    end
+
     # Global master switch for guided tours. When true, no tours are served to
     # end users (regardless of each tour's individual is_active flag) and the
     # admin Tours tab is hidden. Individual tour states are left untouched so
@@ -117,6 +135,21 @@ class PlatformSetting
         email: { isEnabled: true, sendReminders: true },
         sms: { isEnabled: false, sendReminders: true },
         popup: { isEnabled: true, autoClose: true, autoCloseDelay: 5000 }
+      }
+    end
+
+    def default_push
+      {
+        provider: 'onesignal',
+        isEnabled: ENV['PUSH_ENABLED'] != 'false',
+        staff: {
+          appId: ENV['ONESIGNAL_STAFF_APP_ID'],
+          apiKey: ENV['ONESIGNAL_STAFF_API_KEY']
+        },
+        portal: {
+          appId: ENV['ONESIGNAL_PORTAL_APP_ID'],
+          apiKey: ENV['ONESIGNAL_PORTAL_API_KEY']
+        }
       }
     end
 

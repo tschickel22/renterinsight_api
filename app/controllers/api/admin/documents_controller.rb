@@ -78,6 +78,10 @@ module Api
         @document.file.attach(params[:file]) if params[:file].present?
         
         if @document.save
+          # Tell the customer it is there. A document sitting unseen in the
+          # portal is the same as no document.
+          PortalPushService.new_document(document: @document, buyer: contact)
+
           render json: { document: document_json(@document) }, status: :created
         else
           render json: { errors: @document.errors.full_messages }, status: :unprocessable_entity

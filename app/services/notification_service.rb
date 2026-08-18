@@ -13,7 +13,11 @@ class NotificationService
     
     # Extract attachments from options
     attachments = options.delete(:attachments) || []
-    
+
+    # Callers can suppress mobile push for a specific create (bulk backfills,
+    # notifications the user is already looking at).
+    push_allowed = options.delete(:push) != false
+
     # Build notification
     notification = Notification.new(
       recipient: recipient,
@@ -42,7 +46,13 @@ class NotificationService
       
       # Deliver via email/SMS if requested
       deliver(notification) if deliver_now
-      
+
+      # Push is not gated on deliver_now. That flag has always meant "also send
+      # email/SMS", and half the call sites pass false while still creating
+      # notifications a phone should hear about. Notification::PUSH_ELIGIBLE_TYPES
+      # and the user's preference decide instead.
+      PushNotificationService.deliver(notification) if push_allowed
+
       notification
     else
       Rails.logger.error("Failed to create notification: #{notification.errors.full_messages.join(', ')}")
@@ -51,7 +61,7 @@ class NotificationService
   end
   
   # Broadcast a message to multiple recipients
-  def self.broadcast(message:, location_ids: nil, roles: nil, send_email: false, send_sms: false, deliver_now: true, **options)
+  def self.broadcast(message:, location_ids: nil, roles: nil, send_email: false, send_sms: false, send_push: false, deliver_now: true, **options)
     # Get company_id from Current context
     company_id = Current.company_id
     unless company_id
@@ -126,15 +136,18 @@ class NotificationService
         deliver_now: false,
         company_id: company_id,  # Explicit company_id for cross-company admins
         attachments: attachments,  # Pass attachments to each notification
+        # Broadcast push is an explicit admin choice below, never the per-user
+        # preference default, so the normal create-time path stays out of it.
+        push: false,
         **options
       )
-      
+
       if notification
         # Override preference for broadcast delivery channels
-        if send_email || send_sms
-          deliver_broadcast(notification, send_email: send_email, send_sms: send_sms)
+        if send_email || send_sms || send_push
+          deliver_broadcast(notification, send_email: send_email, send_sms: send_sms, send_push: send_push)
         end
-        
+
         sent_count += 1
       end
     end
@@ -169,12 +182,16 @@ class NotificationService
   end
   
   # Deliver broadcast with explicit channel control (overrides user preferences)
-  def self.deliver_broadcast(notification, send_email: false, send_sms: false)
+  def self.deliver_broadcast(notification, send_email: false, send_sms: false, send_push: false)
     return unless notification.recipient.is_a?(User)
-    
+
     user = notification.recipient
-    
-    Rails.logger.info "[NotificationService] Delivering broadcast to #{user.email}: send_email=#{send_email}, send_sms=#{send_sms}"
+
+    Rails.logger.info "[NotificationService] Delivering broadcast to #{user.email}: send_email=#{send_email}, send_sms=#{send_sms}, send_push=#{send_push}"
+
+    # Push straight to the device: the admin asked for this one explicitly, so
+    # it skips the per-type preference the way email and SMS already do.
+    SendPushNotificationJob.perform_later(notification.id) if send_push
     
     # For broadcasts, OVERRIDE user preferences - admin chose explicit channels
     # Send email if admin selected it AND user has email

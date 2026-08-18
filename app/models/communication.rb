@@ -160,6 +160,12 @@ class Communication < ApplicationRecord
   # Thread management
   before_create :assign_to_thread
   after_create :update_thread_timestamp
+
+  # Push a dealer's portal message to the customer's phone. Hung off the model
+  # rather than a controller because portal-visible messages are created from
+  # several places, and a reply the customer never sees is the whole reason the
+  # portal app exists.
+  after_commit :push_portal_message_to_buyer, on: :create
   
   # Ensure metadata is stored as JSON-compatible hash (string keys, not symbols)
   before_save :normalize_metadata
@@ -396,4 +402,16 @@ class Communication < ApplicationRecord
     Rails.logger.error "[Communication#notify_workflow_of_inbound] failed: #{e.message}"
   end
 
+  def push_portal_message_to_buyer
+    # Outbound only: an inbound message is the customer's own reply.
+    # portal_visible is the flag that decides a message appears in the portal at
+    # all, so it is also the right gate for pushing about it. Marketing email
+    # and campaign sends are not portal_visible and stay out of this.
+    return unless direction == 'outbound' && portal_visible?
+    return if communicable.blank?
+
+    PortalPushService.new_message(communication: self, buyer: communicable)
+  rescue => e
+    Rails.logger.error "[Communication#push_portal_message_to_buyer] failed: #{e.message}"
+  end
 end
