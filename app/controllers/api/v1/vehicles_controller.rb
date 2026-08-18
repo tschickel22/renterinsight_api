@@ -442,8 +442,19 @@ module Api
         # Let the model generate a fresh inventory ID (clear the dup'd one)
         new_vehicle.inventory_id = nil
         
-        # Clear public_id so a new unique one is generated (unique constraint)
-        new_vehicle.public_id = nil
+        # Clear public_id if this database has the column.
+        #
+        # It is guarded rather than assumed because vehicles.public_id exists in
+        # schema.rb but NO migration creates it -- public_id is the Brochure pattern
+        # (see create_brochures.rb), and this line was copied from there. So a database
+        # built by running migrations has no such column and the bare assignment raised
+        # `undefined method 'public_id=' for #<Vehicle id: nil>`, turning every clone
+        # into a 500. A database built with db:schema:load does have it, which is why
+        # this never showed up in development.
+        #
+        # Guarded both ways on purpose: where the column exists it still has to be
+        # cleared, since dup would copy it into a row protected by a unique index.
+        new_vehicle.public_id = nil if new_vehicle.respond_to?(:public_id=)
         
         # Clear QuickBooks sync so clone gets its own QB record
         new_vehicle.quickbooks_id = nil
