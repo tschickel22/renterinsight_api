@@ -138,17 +138,29 @@ class PlatformSetting
       }
     end
 
+    # One Natively build serves everyone: the login decides whether you land in
+    # the DMS or the customer portal, so in practice there is ONE OneSignal app
+    # and both audiences resolve to the same credentials via ONESIGNAL_APP_ID /
+    # ONESIGNAL_API_KEY.
+    #
+    # The staff and portal keys stay separate here anyway, because the two
+    # audiences are targeted by different external-id namespaces (staff:<id> vs
+    # portal:<id>) and because shipping a second build later must not require a
+    # code change. The per-audience vars simply win when they are set.
     def default_push
+      shared_app_id  = ENV['ONESIGNAL_APP_ID'].presence
+      shared_api_key = ENV['ONESIGNAL_API_KEY'].presence
+
       {
         provider: 'onesignal',
         isEnabled: ENV['PUSH_ENABLED'] != 'false',
         staff: {
-          appId: ENV['ONESIGNAL_STAFF_APP_ID'],
-          apiKey: ENV['ONESIGNAL_STAFF_API_KEY']
+          appId: ENV['ONESIGNAL_STAFF_APP_ID'].presence || shared_app_id,
+          apiKey: ENV['ONESIGNAL_STAFF_API_KEY'].presence || shared_api_key
         },
         portal: {
-          appId: ENV['ONESIGNAL_PORTAL_APP_ID'],
-          apiKey: ENV['ONESIGNAL_PORTAL_API_KEY']
+          appId: ENV['ONESIGNAL_PORTAL_APP_ID'].presence || shared_app_id,
+          apiKey: ENV['ONESIGNAL_PORTAL_API_KEY'].presence || shared_api_key
         }
       }
     end
