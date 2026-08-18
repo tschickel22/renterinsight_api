@@ -298,16 +298,24 @@ class ApplicationController < ActionController::API
           @current_location_id = nil
         end
       else
-        # Location-tier users can only access their assigned locations
-        user_location = UserLocation.find_by(
-          user_id: current_user&.id,
-          location_id: header_location_id,
-          active: true
-        )
-        
-        if user_location
+        # Defer to User#accessible_locations rather than reading user_locations here.
+        #
+        # That method is the single source of truth for this question and already
+        # says a company-tier role reaches every location in the company. The
+        # UserLocation.find_by this replaces only knew about explicit per-location
+        # rows, so a company-tier user -- Finance Staff, tier: company -- was told on
+        # every single request that they had no access to a location their own user
+        # settings grant them. Two authorities, disagreeing, and the wrong one wired
+        # to the request.
+        #
+        # Note the consequence was not a lockout but the opposite: the branch below
+        # sets @current_location_id to nil, which removes the location filter and
+        # widens the response to the whole company. Meanwhile per-record lookups like
+        # VehiclesController#set_vehicle scope by accessible_location_ids and kept
+        # returning 404, which is how a home could be listed but not opened.
+        if current_user && current_user.accessible_locations.exists?(id: header_location_id)
           @current_location_id = header_location_id
-          Rails.logger.info "[Location] User #{current_user.email} filtering by assigned location: #{header_location_id}"
+          Rails.logger.info "[Location] User #{current_user.email} filtering by accessible location: #{header_location_id}"
         else
           Rails.logger.warn "[Location] User #{current_user&.email} does not have access to location #{header_location_id}"
           @current_location_id = nil
