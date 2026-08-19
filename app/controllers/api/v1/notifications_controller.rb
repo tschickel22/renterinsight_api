@@ -75,7 +75,8 @@ class Api::V1::NotificationsController < ApplicationController
     # return unless authorize_action!('notifications', 'update')
     
     @notification.mark_as_read!
-    
+    sync_push_badge
+
     render json: @notification.as_json_with_details
   end
   
@@ -84,7 +85,8 @@ class Api::V1::NotificationsController < ApplicationController
     # return unless authorize_action!('notifications', 'update')
     
     @notification.mark_as_unread!
-    
+    sync_push_badge
+
     render json: @notification.as_json_with_details
   end
   
@@ -105,6 +107,8 @@ class Api::V1::NotificationsController < ApplicationController
       )
     end
     
+    sync_push_badge
+
     render json: { success: true, message: 'All notifications marked as read' }
   end
   
@@ -113,6 +117,7 @@ class Api::V1::NotificationsController < ApplicationController
     # return unless authorize_action!('notifications', 'delete')
 
     @notification.destroy
+    sync_push_badge
 
     render json: { success: true, message: 'Notification deleted' }
   end
@@ -137,6 +142,8 @@ class Api::V1::NotificationsController < ApplicationController
       return render(json: { error: 'No ids' }, status: :bad_request) if ids.empty?
       deleted = scope.where(id: ids).delete_all
     end
+    sync_push_badge
+
     render json: { deleted: deleted, message: "Deleted #{deleted} notifications" }
   end
 
@@ -157,6 +164,8 @@ class Api::V1::NotificationsController < ApplicationController
       return render(json: { error: 'No ids' }, status: :bad_request) if ids.empty?
       marked = scope.where(id: ids).update_all(read: true, read_at: Time.current)
     end
+    sync_push_badge
+
     render json: { marked: marked, message: "Marked #{marked} as read" }
   end
 
@@ -430,6 +439,15 @@ class Api::V1::NotificationsController < ApplicationController
   end
   
   private
+
+  # The badge on the phone is only correct while the unread count it was sent
+  # with is. Every action here changes that count, so each one corrects it.
+  # Queued, never inline: a read receipt must not wait on OneSignal.
+  def sync_push_badge
+    PushNotificationService.sync_badge_later(current_user)
+  rescue StandardError => e
+    Rails.logger.error("[Push] Badge sync skipped: #{e.message}")
+  end
   
   def set_notification
     # Platform admins can access ALL their notifications

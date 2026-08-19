@@ -37,7 +37,8 @@ module Providers
       end
 
       # Returns { success:, external_id:, recipients:, invalid_external_ids:, invalid_subscription_ids: }
-      def send_message(title:, body:, external_ids: [], subscription_ids: [], url: nil, data: {}, priority: 'normal', collapse_id: nil)
+      def send_message(title:, body:, external_ids: [], subscription_ids: [], url: nil, data: {},
+                       priority: 'normal', collapse_id: nil, badge_count: nil, silent: false)
         validate_config!
 
         external_ids = Array(external_ids).compact.uniq
@@ -55,7 +56,9 @@ module Providers
           url: url,
           data: data,
           priority: priority,
-          collapse_id: collapse_id
+          collapse_id: collapse_id,
+          badge_count: badge_count,
+          silent: silent
         )
 
         response = post(payload)
@@ -70,13 +73,30 @@ module Providers
 
       private
 
-      def build_payload(title:, body:, external_ids:, subscription_ids:, url:, data:, priority:, collapse_id:)
+      def build_payload(title:, body:, external_ids:, subscription_ids:, url:, data:, priority:, collapse_id:,
+                        badge_count: nil, silent: false)
         payload = {
           app_id: config[:app_id],
-          headings: { en: title.to_s.truncate(64) },
-          contents: { en: body.to_s.truncate(180) },
           data: data.presence || {}
         }
+
+        if silent
+          # A badge-only update. OneSignal allows omitting the visible copy when
+          # content_available is set, which is what keeps this from lighting up
+          # the phone for something the user has already read.
+          payload[:content_available] = true
+        else
+          payload[:headings] = { en: title.to_s.truncate(64) }
+          payload[:contents] = { en: body.to_s.truncate(180) }
+        end
+
+        # SetTo rather than Increase: every push carries the true unread count,
+        # so the badge is self-correcting. Increase drifts the moment one push
+        # fails to arrive, and a stuck badge is worse than none.
+        if badge_count
+          payload[:ios_badgeType] = 'SetTo'
+          payload[:ios_badgeCount] = badge_count.to_i
+        end
 
         if external_ids.any?
           payload[:include_aliases] = { external_id: external_ids }
@@ -89,7 +109,9 @@ module Providers
         payload[:url] = url if url.present?
 
         # Urgent notifications are allowed to break through a dozing device.
-        if %w[urgent high].include?(priority.to_s)
+        if silent
+          payload[:priority] = 5
+        elsif %w[urgent high].include?(priority.to_s)
           payload[:priority] = 10
           payload[:ios_interruption_level] = priority.to_s == 'urgent' ? 'time-sensitive' : 'active'
         else

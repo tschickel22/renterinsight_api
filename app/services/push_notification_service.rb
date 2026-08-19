@@ -55,6 +55,7 @@ class PushNotificationService
         url: staff_url(notification.computed_action_url),
         priority: notification.priority,
         collapse_id: notification.push_collapse_id,
+        badge_count: unread_badge_count(user),
         data: {
           notification_id: notification.id,
           notification_type: notification.notification_type,
@@ -127,7 +128,8 @@ class PushNotificationService
 
     # Low-level send. Targets the owner's alias so every signed-in device gets
     # it in one call, then prunes anything OneSignal reports as dead.
-    def push!(owner:, title:, body:, url: nil, data: {}, priority: 'normal', collapse_id: nil)
+    def push!(owner:, title:, body:, url: nil, data: {}, priority: 'normal', collapse_id: nil,
+              badge_count: nil, silent: false)
       app = PushSubscription.app_for(owner)
       external_id = PushSubscription.external_id_for(owner)
 
@@ -138,7 +140,9 @@ class PushNotificationService
         url: url,
         data: data,
         priority: priority,
-        collapse_id: collapse_id
+        collapse_id: collapse_id,
+        badge_count: badge_count,
+        silent: silent
       )
 
       record_outcome(owner: owner, app: app, external_id: external_id, result: result)
@@ -154,6 +158,43 @@ class PushNotificationService
       { success: false, error: e.message }
     end
 
+    # Push the user's unread count to their devices without showing anything.
+    #
+    # iOS clears a badge only when told to, and the Natively bridge exposes no
+    # badge API, so the count has to be corrected from here: when someone reads
+    # their notifications on a laptop, this is what takes the number off their
+    # phone. Silent, so it never announces something already read.
+    def sync_badge(user)
+      return false unless user.is_a?(User)
+      return false unless devices?(user)
+
+      result = push!(
+        owner: user,
+        title: nil,
+        body: nil,
+        silent: true,
+        badge_count: unread_badge_count(user),
+        data: { event: 'badge_sync' }
+      )
+
+      result[:success] == true
+    rescue StandardError => e
+      Rails.logger.error("[Push] Badge sync failed for user #{user&.id}: #{e.message}")
+      false
+    end
+
+    # Out of band: a read receipt should never wait on OneSignal.
+    def sync_badge_later(user)
+      return false unless user.is_a?(User)
+      return false unless devices?(user)
+
+      SyncPushBadgeJob.perform_later(user.id)
+      true
+    rescue StandardError => e
+      Rails.logger.error("[Push] Could not queue badge sync for user #{user&.id}: #{e.message}")
+      false
+    end
+
     def configured?(app = 'staff')
       provider(app).enabled?
     end
@@ -162,6 +203,16 @@ class PushNotificationService
 
     def provider(app)
       Providers::Push::OneSignalProvider.new(app: app)
+    end
+
+    # Counted across companies rather than through the current company scope:
+    # a badge is a property of the phone, and there is no "currently viewing"
+    # company in a background job. For everyone but a platform admin the two
+    # are the same number anyway.
+    def unread_badge_count(user)
+      user.notifications.unread.count
+    rescue StandardError
+      nil
     end
 
     def devices?(owner)

@@ -220,6 +220,49 @@ RSpec.describe PushNotificationService do
     end
   end
 
+  describe 'app icon badge' do
+    let(:provider) { instance_double(Providers::Push::OneSignalProvider) }
+
+    before do
+      allow(Providers::Push::OneSignalProvider).to receive(:new).and_return(provider)
+      register_device
+    end
+
+    it 'sends the true unread count with a notification' do
+      3.times { notification }
+
+      expect(provider).to receive(:send_message).with(
+        hash_including(badge_count: 4)
+      ).and_return({ success: true, recipients: 1, invalid_external_ids: [], invalid_subscription_ids: [] })
+
+      described_class.deliver_now(notification)
+    end
+
+    it 'clears the badge silently once everything is read' do
+      note = notification
+      note.update!(read: true, read_at: Time.current)
+
+      expect(provider).to receive(:send_message).with(
+        hash_including(silent: true, badge_count: 0)
+      ).and_return({ success: true, recipients: 1, invalid_external_ids: [], invalid_subscription_ids: [] })
+
+      expect(described_class.sync_badge(user)).to be true
+    end
+
+    it 'does not queue a badge sync for someone with no phone' do
+      other = User.create!(email: "n-#{SecureRandom.hex(3)}@example.com", first_name: 'N', last_name: 'P',
+                           password: 'Pass1234!', company_id: company.id)
+
+      expect(SyncPushBadgeJob).not_to receive(:perform_later)
+      expect(described_class.sync_badge_later(other)).to be false
+    end
+
+    it 'queues a badge sync for someone with a registered phone' do
+      expect(SyncPushBadgeJob).to receive(:perform_later).with(user.id)
+      expect(described_class.sync_badge_later(user)).to be true
+    end
+  end
+
   describe 'PushSubscription.register!' do
     it 'is idempotent across relaunches' do
       id = SecureRandom.uuid
