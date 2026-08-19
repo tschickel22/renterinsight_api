@@ -9,9 +9,12 @@ RSpec.describe PushNotificationService do
                  password: 'Pass1234!', company_id: company.id)
   end
 
+  # skip_push so the model's after_commit hook does not fire here: these
+  # examples call PushNotificationService directly and would otherwise count
+  # the hook's send as well. The hook itself is covered further down.
   def notification(type: 'lead_assigned', **attrs)
     config = Notification::TYPES[type.to_sym]
-    Notification.create!(
+    record = Notification.new(
       {
         recipient: user,
         company_id: company.id,
@@ -22,6 +25,9 @@ RSpec.describe PushNotificationService do
         message: 'Something happened'
       }.merge(attrs)
     )
+    record.skip_push = true
+    record.save!
+    record
   end
 
   def register_device(owner: user, player_id: SecureRandom.uuid)
@@ -165,6 +171,52 @@ RSpec.describe PushNotificationService do
       expect(
         described_class.notify_portal(buyer_access: access, event: 'invoice_created', title: 'T', body: 'B')
       ).to be false
+    end
+  end
+
+  # The reason push moved onto the model: three call sites build Notification
+  # records directly, and an inbound email reply is one of them.
+  describe 'creation paths that bypass NotificationService' do
+    it 'pushes for a Notification built directly through the model' do
+      register_device
+      NotificationPreference.get_or_create_for(user, 'email_reply_received').update!(push_enabled: true)
+
+      expect(SendPushNotificationJob).to receive(:perform_later)
+
+      Notification.create!(
+        recipient: user, company_id: company.id,
+        notification_type: 'email_reply_received',
+        category: 'communications', priority: 'high',
+        title: 'Reply from a customer', message: 'They replied'
+      )
+    end
+
+    it 'stays silent when the caller sets skip_push' do
+      register_device
+      NotificationPreference.get_or_create_for(user, 'email_reply_received').update!(push_enabled: true)
+
+      expect(SendPushNotificationJob).not_to receive(:perform_later)
+
+      note = Notification.new(
+        recipient: user, company_id: company.id,
+        notification_type: 'email_reply_received',
+        category: 'communications', priority: 'high',
+        title: 'Reply from a customer', message: 'They replied'
+      )
+      note.skip_push = true
+      note.save!
+    end
+
+    it 'pushes once, not twice, when created through NotificationService' do
+      register_device
+      NotificationPreference.get_or_create_for(user, 'lead_assigned').update!(push_enabled: true)
+
+      expect(SendPushNotificationJob).to receive(:perform_later).once
+
+      NotificationService.create(
+        recipient: user, notification_type: :lead_assigned,
+        message: 'A lead was assigned', deliver_now: false
+      )
     end
   end
 

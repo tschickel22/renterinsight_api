@@ -35,7 +35,15 @@ class NotificationService
       action_data: options[:action_data] || {},
       metadata: metadata
     )
-    
+
+    # Push fires from Notification's after_commit hook, so suppression has to be
+    # set before the save rather than skipped afterwards. Push is deliberately
+    # not gated on deliver_now: that flag has always meant "also send
+    # email/SMS", and half the call sites pass false while still creating
+    # notifications a phone should hear about. PUSH_ELIGIBLE_TYPES and the
+    # user's own preference decide instead.
+    notification.skip_push = true unless push_allowed
+
     if notification.save
       # Attach files if provided
       if attachments.present?
@@ -46,12 +54,6 @@ class NotificationService
       
       # Deliver via email/SMS if requested
       deliver(notification) if deliver_now
-
-      # Push is not gated on deliver_now. That flag has always meant "also send
-      # email/SMS", and half the call sites pass false while still creating
-      # notifications a phone should hear about. Notification::PUSH_ELIGIBLE_TYPES
-      # and the user's preference decide instead.
-      PushNotificationService.deliver(notification) if push_allowed
 
       notification
     else

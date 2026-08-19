@@ -11,6 +11,19 @@ class Notification < ApplicationRecord
   # Tenant scoping
   belongs_to :company
   belongs_to :location, optional: true
+
+  # Mobile push hangs off the model, not off NotificationService.
+  #
+  # Three call sites build notifications directly (the inbound email reply
+  # notifier, the AI digest, the social comment sync), and a customer reply
+  # that reaches the bell but never the phone is exactly the case push was
+  # built for. Hooking the model means a new call site cannot forget.
+  #
+  # Callers that deliver push themselves, or deliberately suppress it, set
+  # skip_push before save. NotificationService#broadcast does both.
+  attr_accessor :skip_push
+
+  after_commit :deliver_push_notification, on: :create
   
   # Scopes
   scope :unread, -> { where(read: false) }
@@ -302,5 +315,16 @@ class Notification < ApplicationRecord
     end
     
     json
+  end
+
+  private
+
+  def deliver_push_notification
+    return if skip_push
+
+    PushNotificationService.deliver(self)
+  rescue StandardError => e
+    # Never let push take down the notification that was just written.
+    Rails.logger.error("[Push] deliver hook failed for notification #{id}: #{e.message}")
   end
 end
