@@ -18,27 +18,40 @@ class DeviceSession < ApplicationRecord
   # A token unused for this long is a phone someone stopped carrying.
   IDLE_LIMIT = 30.days
 
-  belongs_to :user
+  # Staff, customers and contractors all sign in on the same app and all forget
+  # passwords, so the owner is polymorphic exactly as PushSubscription's is.
+  belongs_to :owner, polymorphic: true
+
+  # Rails records a polymorphic type as the BASE class, so a contractor is
+  # stored as 'Vendor': Contractor is a subclass of Vendor with a default scope,
+  # not a table of its own. Listing 'Contractor' here would reject every
+  # contractor enrolment, which is exactly what it did first time round.
+  OWNER_TYPES = %w[User BuyerPortalAccess Vendor].freeze
+
+  validates :owner_type, inclusion: { in: OWNER_TYPES }
 
   scope :active, -> { where(revoked_at: nil).where('expires_at > ?', Time.current) }
   scope :for_device, ->(player_id) { where(player_id: player_id) if player_id.present? }
+  scope :for_owner, lambda { |owner|
+    where(owner_type: owner.class.base_class.name, owner_id: owner.id)
+  }
 
   # Returns [record, raw_token]. The raw token is shown exactly once, here, and
   # is not recoverable afterwards.
-  def self.issue!(user:, device_label: nil, platform: nil, app_version: nil, player_id: nil)
+  def self.issue!(owner:, device_label: nil, platform: nil, app_version: nil, player_id: nil)
     raw = SecureRandom.urlsafe_base64(32)
 
     # One biometric session per device, so re-enabling replaces rather than
     # accumulating rows that would each stay valid for 90 days.
     if player_id.present?
-      where(user_id: user.id, player_id: player_id).active.find_each do |existing|
+      for_owner(owner).where(player_id: player_id).active.to_a.each do |existing|
         existing.revoke!('replaced')
       end
     end
 
     record = create!(
-      user: user,
-      company_id: user.try(:company_id),
+      owner: owner,
+      company_id: owner.try(:company_id),
       token_digest: digest(raw),
       device_label: device_label.presence&.truncate(80),
       platform: platform,
@@ -66,11 +79,38 @@ class DeviceSession < ApplicationRecord
     Digest::SHA256.hexdigest(raw_token.to_s)
   end
 
-  # Revokes every biometric session a user has. Called when the password
-  # changes: whoever no longer knows the password should not keep a phone that
-  # bypasses it.
-  def self.revoke_all_for(user, reason = 'password_changed')
-    active.where(user_id: user.id).to_a.each { |session| session.revoke!(reason) }
+  # Revokes every biometric session an owner has. Called when a password
+  # changes, and when a contractor is deactivated: whoever no longer knows the
+  # password, or no longer works here, should not keep a phone that bypasses it.
+  def self.revoke_all_for(owner, reason = 'password_changed')
+    return 0 if owner.blank?
+
+    for_owner(owner).active.to_a.each { |session| session.revoke!(reason) }.size
+  end
+
+  # Which app this session unlocks. Derived rather than stored: owner_type
+  # already says it, and 'Vendor' means nothing to a phone.
+  def audience
+    case owner_type
+    when 'User'              then 'staff'
+    when 'BuyerPortalAccess' then 'portal'
+    when 'Vendor'            then 'contractor'
+    end
+  end
+
+  # What the exchange endpoint checks before minting a session. Each owner type
+  # can be switched off in its own way, and none of them should keep working.
+  def owner_usable?
+    return false if owner.blank?
+
+    case owner
+    when ::User               then !(owner.inactive? || owner.suspended?)
+    when ::BuyerPortalAccess  then owner.portal_enabled != false
+    when ::Vendor             then contractor_usable?(owner)
+    else false
+    end
+  rescue StandardError
+    false
   end
 
   def idle_too_long?
@@ -97,6 +137,12 @@ class DeviceSession < ApplicationRecord
     return true if revoked_at.present?
 
     update_columns(revoked_at: Time.current, revoked_reason: reason, updated_at: Time.current)
+  end
+
+  # Only contractors sign into a portal; a supplier row shares the table but has
+  # no login, so it must never be able to unlock anything.
+  def contractor_usable?(vendor)
+    vendor.vendor_type == 'contractor' && vendor.status == 'active' && !vendor.is_deleted
   end
 
   def as_json_for_client(options = {})

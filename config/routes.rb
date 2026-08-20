@@ -3038,6 +3038,16 @@ Rails.application.routes.draw do
         end
       end
 
+      # Biometric unlock (Face ID / fingerprint). Enrolment only: the token
+      # exchange is shared with staff and contractors at
+      # /api/v1/device-sessions/exchange, because a token identifies its own
+      # owner and three copies would only add three ways to disagree.
+      resources :device_sessions, path: 'device-sessions', only: [:index, :create, :destroy] do
+        collection do
+          delete :destroy_all, path: ''
+        end
+      end
+
       # Phase 4D - Communication Preferences
       get 'preferences', to: 'preferences#show'
       patch 'preferences', to: 'preferences#update'
@@ -3122,6 +3132,16 @@ Rails.application.routes.draw do
       post 'sessions/magic_link', to: 'sessions#magic_link'
       post 'sessions/verify', to: 'sessions#verify'
       post 'sessions/login', to: 'sessions#login'
+
+      # Biometric unlock (Face ID / fingerprint). Enrolment only: the token
+      # exchange is shared with staff and contractors at
+      # /api/v1/device-sessions/exchange, because a token identifies its own
+      # owner and three copies would only add three ways to disagree.
+      resources :device_sessions, path: 'device-sessions', only: [:index, :create, :destroy] do
+        collection do
+          delete :destroy_all, path: ''
+        end
+      end
 
       # Dashboard
       get 'dashboard', to: 'dashboard#index'

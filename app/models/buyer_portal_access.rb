@@ -26,6 +26,16 @@ class BuyerPortalAccess < ApplicationRecord
   validates :sms_opt_in, inclusion: { in: [true, false] }
   validates :marketing_opt_in, inclusion: { in: [true, false] }
   validates :portal_enabled, inclusion: { in: [true, false] }
+
+  # Phones allowed to unlock this portal login with Face ID or a fingerprint.
+  has_many :device_sessions, as: :owner, dependent: :destroy
+
+  # A password change, or a dealer switching portal access off, has to reach the
+  # phones. Biometric unlock bypasses the password by design, so leaving those
+  # sessions alive would mean a customer who was cut off still had a device that
+  # never needed the credential they lost.
+  after_update_commit :revoke_device_sessions_after_credential_change,
+                      if: -> { saved_change_to_password_digest? || turned_portal_access_off? }
   
   before_save :downcase_email
   after_initialize :set_defaults
@@ -164,5 +174,17 @@ class BuyerPortalAccess < ApplicationRecord
 
     # Append new change
     self.preference_history = preference_history + [change_entry]
+  end
+
+  private
+
+  def turned_portal_access_off?
+    saved_change_to_portal_enabled? && portal_enabled == false
+  end
+
+  def revoke_device_sessions_after_credential_change
+    DeviceSession.revoke_all_for(self, 'credentials_changed')
+  rescue StandardError => e
+    Rails.logger.error("[DeviceSession] Could not revoke for portal access #{id}: #{e.message}")
   end
 end

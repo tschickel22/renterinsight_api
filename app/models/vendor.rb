@@ -17,6 +17,14 @@ class Vendor < ApplicationRecord
 
   # Contractor surface
   has_many :contractor_assignments, dependent: :destroy
+  # Phones allowed to unlock the contractor portal with a fingerprint or Face ID.
+  has_many :device_sessions, as: :owner, dependent: :destroy
+
+  # Losing access has to reach the phones. Biometric unlock bypasses the
+  # credential by design, so a contractor who is deactivated or removed would
+  # otherwise keep a device that still opens the portal.
+  after_update_commit :revoke_device_sessions_after_access_change,
+                      if: -> { saved_change_to_password_digest? || lost_portal_access? }
 
   # Supplier surface — supplier_parts.supplier_id holds vendor IDs after migration
   has_many :supplier_parts, foreign_key: :supplier_id, dependent: :destroy
@@ -193,5 +201,18 @@ class Vendor < ApplicationRecord
     self.state = state&.strip&.upcase if state.present?
     self.zip_code = zip_code&.strip if zip_code.present?
     self.country = country&.strip&.upcase if country.present?
+  end
+
+  private
+
+  def lost_portal_access?
+    (saved_change_to_status? && status != 'active') ||
+      (saved_change_to_is_deleted? && is_deleted == true)
+  end
+
+  def revoke_device_sessions_after_access_change
+    DeviceSession.revoke_all_for(self, 'access_changed')
+  rescue StandardError => e
+    Rails.logger.error("[DeviceSession] Could not revoke for vendor #{id}: #{e.message}")
   end
 end

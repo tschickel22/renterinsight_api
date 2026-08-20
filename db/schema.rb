@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_20_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_20_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2818,7 +2818,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_20_120000) do
   end
 
   create_table "device_sessions", force: :cascade do |t|
-    t.bigint "user_id", null: false
     t.bigint "company_id"
     t.string "token_digest", null: false
     t.string "device_label"
@@ -2832,10 +2831,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_20_120000) do
     t.integer "use_count", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "owner_type", null: false
+    t.bigint "owner_id", null: false
     t.index ["expires_at"], name: "index_device_sessions_on_expires_at"
+    t.index ["owner_type", "owner_id", "revoked_at"], name: "index_device_sessions_on_owner_and_revoked"
     t.index ["token_digest"], name: "index_device_sessions_on_token_digest", unique: true
-    t.index ["user_id", "revoked_at"], name: "index_device_sessions_on_user_id_and_revoked_at"
-    t.index ["user_id"], name: "index_device_sessions_on_user_id"
   end
 
   create_table "draw_schedule_templates", force: :cascade do |t|
@@ -8004,7 +8004,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_20_120000) do
   add_foreign_key "deals", "users", column: "primary_salesperson_id"
   add_foreign_key "deals", "users", column: "sales_manager_id"
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
-  add_foreign_key "device_sessions", "users"
   add_foreign_key "entity_buyers", "companies"
   add_foreign_key "entity_buyers", "contacts"
   add_foreign_key "export_jobs", "companies"

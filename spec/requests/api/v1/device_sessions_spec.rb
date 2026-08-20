@@ -42,7 +42,7 @@ RSpec.describe 'Api::V1::DeviceSessions', type: :request do
         post '/api/v1/device-sessions', params: { platform: 'ios', player_id: player }, headers: headers
       end
 
-      expect(DeviceSession.active.where(user_id: user.id, player_id: player).count).to eq(1)
+      expect(DeviceSession.for_owner(user).active.where(player_id: player).count).to eq(1)
     end
   end
 
@@ -131,7 +131,7 @@ RSpec.describe 'Api::V1::DeviceSessions', type: :request do
     it 'will not let one user revoke another user\'s phone' do
       other = User.create!(email: "o-#{SecureRandom.hex(4)}@example.com", first_name: 'O', last_name: 'U',
                            password: 'Pass1234!', company_id: company.id, role: 'user')
-      session, = DeviceSession.issue!(user: other)
+      session, = DeviceSession.issue!(owner: other)
 
       delete "/api/v1/device-sessions/#{session.id}", headers: headers
 

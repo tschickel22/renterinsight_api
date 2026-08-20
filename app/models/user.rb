@@ -12,7 +12,7 @@ class User < ApplicationRecord
   has_many :locations, through: :user_locations
   has_many :login_activities, dependent: :destroy
   # Phones allowed to unlock with Face ID instead of a password.
-  has_many :device_sessions, dependent: :destroy
+  has_many :device_sessions, as: :owner, dependent: :destroy
   has_many :assigned_tasks, class_name: 'Task', foreign_key: 'assigned_to_id', dependent: :nullify
 
   # Commission Payment Associations
