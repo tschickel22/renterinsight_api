@@ -36,6 +36,11 @@ Rails.application.routes.draw do
   post 'client_errors',  to: 'public/client_errors#create'
   match 'client_errors', to: 'public/client_errors#options', via: :options
 
+  # Where a page reports that something ran off the right edge. Same shape as
+  # the crash reporter above: a log line and nothing else.
+  post 'ui_overflow',  to: 'public/ui_overflow#create'
+  match 'ui_overflow', to: 'public/ui_overflow#options', via: :options
+
   # The website concierge. Public, token-scoped, same shape as the beacons.
   post 'concierge/:token', to: 'public/concierge#create'
   # Taking someone's details is a separate act from answering their question.
