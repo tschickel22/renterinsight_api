@@ -90,6 +90,16 @@ class PlatformSetting
         privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.dealertide.com/privacy-policy/',
         termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.dealertide.com/terms-of-use/',
         subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'dealertide.com',
+        # Whether each mobile app has a public store listing yet.
+        #
+        # "Get the app" links point at listings that do not exist until the day
+        # each store approves, and a dead link in front of a dealer is worse
+        # than no link. These decide whether the offer is shown at all, so
+        # launch is a switch somebody flips rather than a deploy that has to be
+        # timed against a review queue. Apple and Google approve on different
+        # days, hence one each.
+        iosAppLive: ENV['IOS_APP_LIVE'] == 'true',
+        androidAppLive: ENV['ANDROID_APP_LIVE'] == 'true',
         # Where TENANT SITES are served, which is deliberately not the platform's
         # own domain.
         #
