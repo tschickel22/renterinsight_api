@@ -8,8 +8,9 @@ class BuyerPortalMailer < ApplicationMailer
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
     @company_name = dealership_name(buyer_access)
-    @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
-    
+    @portal_url = portal_login_url
+    @preferences_url = portal_app_url('settings')
+
     message = mail(
       to: buyer_access.email,
       subject: "Welcome to #{@company_name} Buyer Portal"
@@ -49,8 +50,8 @@ class BuyerPortalMailer < ApplicationMailer
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
     @company_name = dealership_name(buyer_access)
-    @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
-    @reset_link = "#{@portal_url}/auth/reset-password?token=#{buyer_access.reset_token}"
+    @portal_url = portal_login_url
+    @reset_link = portal_auth_url("client/reset-password/new?token=#{buyer_access.reset_token}")
     @expires_in = '1 hour'
     
     mail(
@@ -65,8 +66,10 @@ class BuyerPortalMailer < ApplicationMailer
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
     @company_name = dealership_name(buyer_access)
-    @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
-    @quote_url = "#{@portal_url}/quotes/#{quote.id}"
+    @portal_url = portal_login_url
+    @preferences_url = portal_app_url('settings')
+    # The portal lists quotes; there is no per-quote route to deep link to.
+    @quote_url = portal_app_url('quotes')
     
     mail(
       to: buyer_access.email,
@@ -95,8 +98,8 @@ class BuyerPortalMailer < ApplicationMailer
     @payment = payment
     @buyer = loan.borrower
     @company_name = dealership_name(loan)
-    @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
-    @loan_url = "#{@portal_url}/loans/#{loan.id}"
+    @portal_url = portal_login_url
+    @loan_url = portal_app_url('loans')
     
     buyer_email = @buyer.respond_to?(:email) ? @buyer.email : nil
     return unless buyer_email.present?
@@ -228,5 +231,38 @@ class BuyerPortalMailer < ApplicationMailer
   rescue StandardError => e
     Rails.logger.error("Failed to decrypt setting: #{e.message}")
     nil
+  end
+
+  private
+
+  # The buyer portal is served inside the main SPA, not on a host of its own.
+  #
+  # Its auth pages sit at the root (/client/login, /client/reset-password/new)
+  # while everything behind the login lives under /portalclient. PORTAL_URL
+  # predates that split: it used to name a bare portal host, so paths were
+  # simply concatenated onto it. Now that it points at the SPA root, the same
+  # concatenation produces 404s for anything past the login.
+  #
+  # Same resolution order as PushNotificationService, so a link in an email and
+  # a link in a push notification land in the same place.
+  def portal_root_url
+    (ENV['PORTAL_URL'].presence || Brand.app_url.to_s).chomp('/')
+  end
+
+  # Pages that live at the SPA root, outside the portal shell.
+  def portal_auth_url(path)
+    "#{portal_root_url}/#{path.to_s.delete_prefix('/')}"
+  end
+
+  def portal_login_url
+    portal_auth_url('client/login')
+  end
+
+  # Pages behind the portal login.
+  def portal_app_url(path = nil)
+    base = ENV['PORTAL_APP_URL'].presence&.chomp('/') || "#{portal_root_url}/portalclient"
+    return base if path.blank?
+
+    "#{base}/#{path.to_s.delete_prefix('/')}"
   end
 end
