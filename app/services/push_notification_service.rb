@@ -52,7 +52,7 @@ class PushNotificationService
         owner: user,
         title: notification.title,
         body: notification.message,
-        url: staff_url(notification.computed_action_url),
+        url: notification_target_url(notification),
         priority: notification.priority,
         collapse_id: notification.push_collapse_id,
         badge_count: unread_badge_count(user),
@@ -241,6 +241,17 @@ class PushNotificationService
       else
         Rails.logger.info("[Push] No recipients for #{external_id} (#{app})")
       end
+    end
+
+    # A push tap opens the resolver, never the entity path directly.
+    #
+    # The raw path assumes the app is already signed in, already looking at the
+    # right location, and that the route still exists. /n/:id makes none of
+    # those assumptions: it signs the user in if needed, switches location to
+    # match the notification, marks it read, and only then navigates. A stale
+    # target lands on the notification center instead of a 404.
+    def notification_target_url(notification)
+      staff_url("/n/#{notification.id}")
     end
 
     def staff_url(path)

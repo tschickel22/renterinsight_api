@@ -1,7 +1,7 @@
 # app/controllers/api/v1/notifications_controller.rb
 class Api::V1::NotificationsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_notification, only: [:show, :mark_as_read, :mark_as_unread, :destroy, :download_attachment]
+  before_action :set_notification, only: [:show, :mark_as_read, :mark_as_unread, :destroy, :download_attachment, :target]
   
   def index
     # Skip RBAC for now - all authenticated users can see their own notifications
@@ -70,6 +70,36 @@ class Api::V1::NotificationsController < ApplicationController
     render json: { unread_count: count }
   end
   
+  # Resolves where a notification should take someone. This is what a push tap
+  # hits, via the /n/:id route in the app.
+  #
+  # It exists so the awkward parts of a deep link live in one place instead of
+  # at every call site: the client needs to know which location to switch to
+  # before it navigates, or a rep whose selector is on one lot taps a lead from
+  # another and lands on an empty page.
+  #
+  # Opening a notification is reading it, so this marks it read and corrects the
+  # badge in the same breath.
+  def target
+    path = @notification.computed_action_url
+
+    @notification.mark_as_read! unless @notification.read?
+    sync_push_badge
+
+    render json: {
+      ok: path.present?,
+      path: path,
+      # Falls back to the notification center when a notification has no
+      # resolvable target, which beats sending the app to a 404.
+      fallback_path: '/notifications',
+      notification_id: @notification.id,
+      notification_type: @notification.notification_type,
+      title: @notification.title,
+      company_id: @notification.company_id,
+      location_id: resolved_location_id(@notification)
+    }
+  end
+
   def mark_as_read
     # Skip RBAC for now
     # return unless authorize_action!('notifications', 'update')
@@ -443,6 +473,21 @@ class Api::V1::NotificationsController < ApplicationController
   # The badge on the phone is only correct while the unread count it was sent
   # with is. Every action here changes that count, so each one corrects it.
   # Queued, never inline: a read receipt must not wait on OneSignal.
+  # Most notifications were written without a location, so derive it from the
+  # record they point at rather than backfilling a column that would go stale
+  # again. Nil is a valid answer: it means "leave the selector alone".
+  def resolved_location_id(notification)
+    return notification.location_id if notification.location_id.present?
+
+    record = notification.notifiable
+    return nil if record.blank?
+    return nil unless record.respond_to?(:location_id)
+
+    record.location_id
+  rescue StandardError
+    nil
+  end
+
   def sync_push_badge
     PushNotificationService.sync_badge_later(current_user)
   rescue StandardError => e

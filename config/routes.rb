@@ -440,6 +440,9 @@ Rails.application.routes.draw do
         member do
           patch :mark_as_read
           patch :mark_as_unread
+          # Where a push tap lands: resolves the notification to a route, a
+          # company and a location the client can switch to before navigating.
+          get :target
           get 'attachments/:attachment_id', action: :download_attachment, as: :download_attachment
         end
       end

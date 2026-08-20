@@ -188,7 +188,15 @@ class Notification < ApplicationRecord
     when 'Task'
       "/tasks/#{notifiable_id}"
     when 'Communication'
-      "/portal/messages"
+      # A staff notification about a message belongs on the record it was sent
+      # against, not on the customer portal's message list, which a rep cannot
+      # reach. Falls through to nil when the parent is something without a page.
+      case notifiable.try(:communicable_type)
+      when 'Lead'    then "/crm/leads/#{notifiable.communicable_id}?tab=communications"
+      when 'Contact' then "/contacts/#{notifiable.communicable_id}?tab=communications"
+      when 'Account' then "/accounts/#{notifiable.communicable_id}?tab=communications"
+      when 'Deal'    then "/deals/#{notifiable.communicable_id}"
+      end
     when 'ContractorAssignment'
       "/projects/reviews"
     when 'Note'
