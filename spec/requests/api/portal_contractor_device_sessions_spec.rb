@@ -90,23 +90,30 @@ RSpec.describe 'Biometric unlock for customers and contractors', type: :request 
       Contractor.create!(company_id: company.id, name: "Trade-#{SecureRandom.hex(3)}",
                          email: "c-#{SecureRandom.hex(3)}@example.com", status: 'active')
     end
-    let(:headers) { { 'Authorization' => 'Bearer stubbed' } }
-
-    # Contractor tokens are signed with Rails.application.credentials
-    # .secret_key_base, which is nil under test, so a real token cannot be
-    # verified here. Their auth layer is stubbed rather than reimplemented: what
-    # these examples cover is the device-session controller behind it.
-    def sign_in_contractor
-      allow_any_instance_of(Api::Contractor::BaseController)
-        .to receive(:authenticate_contractor!) do |ctrl|
-          ctrl.instance_variable_set(:@current_contractor, contractor)
-        end
+    # A real contractor token, verified by the real auth layer. This only became
+    # possible once BaseController.jwt_secret gained a fallback: the credential
+    # it used is nil outside production, so every contractor endpoint used to
+    # answer 401 under test regardless of what it was sent.
+    let(:headers) do
+      { 'Authorization' => "Bearer #{Api::Contractor::BaseController.generate_contractor_token(contractor)}" }
     end
 
     def enrol
-      sign_in_contractor
       post '/api/contractor/device-sessions', params: { platform: 'android' }, headers: headers
       JSON.parse(response.body)['device_token']
+    end
+
+    it 'accepts a genuine contractor token' do
+      get '/api/contractor/device-sessions', headers: headers
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'rejects a token signed with the wrong key' do
+      forged = JWT.encode({ contractor_ids: [contractor.id], primary_contractor_id: contractor.id,
+                            exp: 1.day.from_now.to_i }, 'not-the-real-secret', 'HS256')
+
+      get '/api/contractor/device-sessions', headers: { 'Authorization' => "Bearer #{forged}" }
+      expect(response).to have_http_status(:unauthorized)
     end
 
     it 'refuses to enrol without a contractor session' do

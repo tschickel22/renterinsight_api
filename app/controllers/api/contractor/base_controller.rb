@@ -18,7 +18,7 @@ module Api
         begin
           decoded_token = JWT.decode(
             token,
-            Rails.application.credentials.secret_key_base,
+            self.class.jwt_secret,
             true,
             { algorithm: 'HS256' }
           )
@@ -107,7 +107,24 @@ module Api
           exp: 7.days.from_now.to_i
         }
 
-        JWT.encode(payload, Rails.application.credentials.secret_key_base, 'HS256')
+        JWT.encode(payload, jwt_secret, 'HS256')
+      end
+
+      # The key contractor tokens are signed and verified with.
+      #
+      # credentials.secret_key_base stays authoritative, so production is
+      # untouched: whatever signs a token today still signs it and still
+      # verifies it. The fallback only engages where that credential does not
+      # exist, which is every environment except production.
+      #
+      # That gap was not cosmetic. Under test the key resolved to nil, JWT
+      # refuses to verify against nil ("No verification key available"), and so
+      # every contractor endpoint answered 401 no matter what it was given.
+      # The whole contractor portal was untestable, and a spec written for it
+      # would have passed by asserting the failure.
+      def self.jwt_secret
+        Rails.application.credentials.secret_key_base.presence ||
+          Rails.application.secret_key_base
       end
     end
   end
