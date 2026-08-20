@@ -11,6 +11,8 @@ class User < ApplicationRecord
   has_many :user_tour_completions, dependent: :destroy
   has_many :locations, through: :user_locations
   has_many :login_activities, dependent: :destroy
+  # Phones allowed to unlock with Face ID instead of a password.
+  has_many :device_sessions, dependent: :destroy
   has_many :assigned_tasks, class_name: 'Task', foreign_key: 'assigned_to_id', dependent: :nullify
 
   # Commission Payment Associations
@@ -18,6 +20,14 @@ class User < ApplicationRecord
   has_many :approved_payments, class_name: 'CommissionPayment', foreign_key: 'approved_by_user_id', dependent: :nullify
   has_many :paid_payments, class_name: 'CommissionPayment', foreign_key: 'paid_by_user_id', dependent: :nullify
   has_many :reversed_payments, class_name: 'CommissionPayment', foreign_key: 'reversed_by_user_id', dependent: :nullify
+
+  # A password change has to reach the phones too. Biometric unlock bypasses
+  # the password by design, so leaving those sessions alive would mean someone
+  # who changed their password because they feared it was known still had a
+  # device in the wild that never needs it. Hung off the model rather than the
+  # reset service because passwords change from several places.
+  after_update_commit :revoke_device_sessions_after_password_change,
+                      if: :saved_change_to_password_digest?
 
   # RBAC System Associations
   has_many :user_role_assignments, dependent: :destroy
@@ -405,6 +415,12 @@ class User < ApplicationRecord
   end
 
   private
+
+  def revoke_device_sessions_after_password_change
+    DeviceSession.revoke_all_for(self, 'password_changed')
+  rescue StandardError => e
+    Rails.logger.error("[DeviceSession] Could not revoke after password change for user #{id}: #{e.message}")
+  end
 
   # Find a role by various identifiers
   def find_role_by_identifier(identifier)

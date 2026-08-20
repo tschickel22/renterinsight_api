@@ -461,6 +461,16 @@ Rails.application.routes.draw do
       # Mobile push device registration (OneSignal via the Natively shell).
       # :id is the OneSignal player id, not a database id, so the constraint
       # keeps the UUID's dashes from being read as a format segment.
+      # Biometric unlock (Face ID / fingerprint). #exchange is the only
+      # unauthenticated one: the stored token is itself the credential, and the
+      # phone only releases it after a successful biometric check.
+      resources :device_sessions, path: 'device-sessions', only: [:index, :create, :destroy] do
+        collection do
+          post :exchange
+          delete :destroy_all, path: ''
+        end
+      end
+
       resources :push_subscriptions, path: 'push-subscriptions', only: [:index, :create, :destroy],
                                      constraints: { id: /[^\/]+/ } do
         collection do
