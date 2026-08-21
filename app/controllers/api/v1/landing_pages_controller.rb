@@ -114,6 +114,57 @@ class Api::V1::LandingPagesController < ApplicationController
     render json: { error: e.message }, status: :bad_gateway
   end
 
+  # POST /api/v1/landing_pages/import_html
+  #
+  # A page designed elsewhere, kept as itself. The block importer reproduces
+  # content in our design system, which is the right trade for a page a dealer
+  # will maintain and the wrong one for a page whose design is the pitch. This
+  # rehosts the assets, drops anything executable, and stores the result as a
+  # single customHtml block.
+  def import_html
+    return unless authorize_action!('websites', 'create')
+
+    site = Marketing::MarketingSiteProvisioner.call(company: @company, location: target_location)
+    result = LandingPages::HtmlImporter.new(company: @company, website: site).call(params[:file])
+
+    page = site.website_pages.new(
+      title: params[:title].presence || File.basename(params[:file].original_filename.to_s, '.*'),
+      page_kind: 'landing',
+      blocks: [{ 'id' => "block_#{SecureRandom.hex(6)}", 'type' => 'customHtml', 'order' => 0,
+                 'content' => { 'html' => result.html,
+                                # Every video in the design, as an empty slot the
+                                # editor can point at an MP4 in the media library.
+                                'videoSlots' => result.video_slots,
+                                'videos' => {} } }]
+    )
+
+    # Same reason as create: a landing page with no form silently drops every
+    # lead. The design's own form markup is inert once scripts are gone, so a
+    # real one is appended rather than left to look like it works.
+    page.intake_form = build_intake_form(page.title)
+    if page.intake_form_id.present? || page.intake_form.present?
+      page.blocks += [{
+        'id' => "block_#{SecureRandom.hex(6)}", 'type' => 'contact', 'order' => 1,
+        'content' => { 'title' => 'Request details', 'displayMode' => 'inline' }
+      }]
+    end
+
+    if page.save
+      bind_form_to_contact_blocks(page)
+      page.save
+      render json: detail(page).merge(
+        import: { imported: result.imported, skipped: result.skipped,
+                  warnings: result.warnings, video_slots: result.video_slots }
+      ), status: :created
+    else
+      render json: { error: page.errors.full_messages.to_sentence }, status: :unprocessable_entity
+    end
+  rescue LandingPages::HtmlImporter::ImportError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue Marketing::MarketingSiteProvisioner::ProvisioningError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def update
     return unless authorize_action!('websites', 'update')
 
@@ -303,6 +354,38 @@ class Api::V1::LandingPagesController < ApplicationController
     end
   end
 
+  # The colours a landing page should actually render in.
+  #
+  # MarketingSiteProvisioner creates the container with an empty theme, and
+  # nothing has ever filled it in, so every landing page fell through to
+  # SiteRenderer's hardcoded #3b82f6 and came out the same default blue no
+  # matter whose dealership it belonged to. The company's own branding is
+  # already resolved for embedded inventory; the same answer is the right one
+  # here.
+  #
+  # Resolved at read time rather than written at provision time so containers
+  # that already exist are corrected too, and so a dealer who later changes
+  # their brand colour does not have to rebuild their landing pages.
+  def preview_theme(page)
+    theme = (page.website&.theme || {}).dup
+    return theme if theme['primary_color'].present?
+
+    branding = @company.resolve_branding_for_inventory(
+      website: page.website,
+      location: page.website&.location
+    )
+    primary = branding[:primary_color] || branding['primary_color']
+    secondary = branding[:secondary_color] || branding['secondary_color']
+
+    theme['primary_color'] = primary if primary.present?
+    theme['secondary_color'] = secondary if secondary.present?
+    theme
+  rescue StandardError => e
+    # A colour is not worth failing a page load over.
+    Rails.logger.warn("[LandingPages] theme resolve failed: #{e.message}")
+    page.website&.theme || {}
+  end
+
   # Point contact blocks at the page's current form.
   #
   # Only blocks that were following the page are moved: one deliberately bound
@@ -373,7 +456,14 @@ class Api::V1::LandingPagesController < ApplicationController
       # "Contact form not available" no matter which form was bound; without the
       # theme the preview drew in default blue while the published page used the
       # site's colours, which is the one thing a preview must not do.
-      theme: page.website&.theme,
+      theme: preview_theme(page),
+      # The container's header/footer switches, which for a landing page are
+      # deliberately off. Sent because SiteRenderer treats a missing site_header
+      # as "never configured" and falls back to a generated nav bar carrying the
+      # site name, so a preview that was not given them grew a header the
+      # published page does not have, captioned with the page's internal title.
+      site_header: page.website&.site_header,
+      site_footer: page.website&.site_footer,
       inventory_embed_config: {
         token: @company.public_inventory_token,
         company_id: @company.id,

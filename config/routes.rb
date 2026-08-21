@@ -794,6 +794,7 @@ Rails.application.routes.draw do
         end
         collection do
           post :ai_generate
+          post :import_html
         end
       end
 
