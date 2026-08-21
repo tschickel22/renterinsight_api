@@ -54,7 +54,8 @@ module LandingPages
     # Anything that executes. Removed wholesale.
     SCRIPTABLE = %w[script noscript object embed applet].freeze
 
-    Result = Struct.new(:html, :imported, :skipped, :warnings, :video_slots, keyword_init: true)
+    Result = Struct.new(:html, :imported, :skipped, :warnings, :video_slots, :forms_wired,
+                        keyword_init: true)
 
     # A Struct rather than an uploaded file, so S3UploadService treats a decoded
     # asset exactly like a browser upload.
@@ -73,6 +74,7 @@ module LandingPages
       @warnings = []
       @skipped = 0
       @video_slots = []
+      @forms_wired = 0
     end
 
     # @param upload [ActionDispatch::Http::UploadedFile] an .html or .zip
@@ -88,6 +90,7 @@ module LandingPages
       # Before scripts are stripped, because a YouTube or Vimeo embed is an
       # iframe and strip_executable is what decides which iframes survive.
       claim_video_slots(doc)
+      wire_forms(doc)
       strip_executable(doc)
       rewrite_assets(doc, entries)
       rewrite_style_urls(doc, entries)
@@ -100,10 +103,63 @@ module LandingPages
       end
 
       Result.new(html: html, imported: @map.values.compact.uniq.size,
-                 skipped: @skipped, warnings: @warnings.uniq, video_slots: @video_slots)
+                 skipped: @skipped, warnings: @warnings.uniq, video_slots: @video_slots,
+                 forms_wired: @forms_wired)
     end
 
     private
+
+    # Make the design's own form collect a real lead.
+    #
+    # A design's form is decoration: it posts to "#", and once scripts are gone
+    # it does nothing at all. Left that way the page shows a dealer a form that
+    # looks like it works and silently collects nothing, which is the single
+    # most expensive way for a landing page to be wrong.
+    #
+    # The markup is kept exactly as designed and only marked, so the renderer
+    # can attach a real submission to it without touching how it looks.
+    #
+    # The submit control needs finding rather than assuming: a design tool draws
+    # the primary action as a styled link, so these forms arrive with three
+    # inputs and no button at all. The first direct-child anchor becomes the
+    # submit, which leaves a "pick a time yourself" link further down the form
+    # alone because that one is nested inside a paragraph.
+    #
+    # Where that anchor pointed is kept, not discarded. It is nearly always a
+    # booking page, and capturing the lead and then sending them on to book is
+    # both of the things the author wanted rather than a choice between them.
+    def wire_forms(doc)
+      doc.css('form').each do |form|
+        form['data-dt-form'] = '1'
+        form.remove_attribute('action')
+        form.remove_attribute('method')
+
+        next if form.at_css('button[type="submit"], input[type="submit"], button:not([type])')
+
+        anchor = form.element_children.find { |child| child.name == 'a' }
+        next if anchor.nil?
+
+        button = Nokogiri::XML::Node.new('button', doc)
+        button['type'] = 'submit'
+        button['class'] = anchor['class'] if anchor['class'].present?
+        button['data-dt-submit'] = '1'
+        button.inner_html = anchor.inner_html
+
+        href = anchor['href'].to_s
+        form['data-dt-redirect'] = href if href.match?(%r{\Ahttps?://})
+
+        anchor.replace(button)
+        @forms_wired += 1
+      end
+
+      return if @forms_wired.zero?
+
+      @warnings << if @forms_wired == 1
+                     'The page\'s own form now submits to your lead intake.'
+                   else
+                     "#{@forms_wired} forms now submit to your lead intake."
+                   end
+    end
 
     # Turn every video in the design into a slot we can fill later.
     #
@@ -428,11 +484,48 @@ module LandingPages
 
     def extract_body(doc)
       fonts = doc.css('head link[rel="stylesheet"]').select { |l| l['href'].to_s.match?(FONT_HOSTS) }
-      styles = doc.css('head style').map(&:to_html)
+      styles = doc.css('style').map { |node| scoped_style(node) }
       body = doc.at_css('body')
       markup = body ? body.inner_html : doc.to_html
 
       (fonts.map(&:to_html) + styles + [markup]).reject(&:blank?).join("\n")
+    end
+
+    def scoped_style(node)
+      "<style>#{scope_document_selectors(node.content)}</style>"
+    end
+
+    # Point a design's document-level rules at the element it is rendered into.
+    #
+    # The body element does not survive , what gets stored is a fragment , so a
+    # rule like `body { background: var(--surface-app); color: var(--text-strong) }`
+    # would target nothing and the page would lose its base background, colour
+    # and font in one go. On a design whose hero is white text on a dark ground
+    # that reads as a blank page with a missing headline, which is exactly how it
+    # presents rather than as a stylesheet that did not apply.
+    #
+    # :host is the shadow root's own element, so those rules land where the body
+    # rules meant to. Only whole selectors are rewritten: .body-copy and
+    # #bodyText are ordinary names that happen to contain the word.
+    # :root belongs here as much as html and body do, and matters more. It is
+    # where a modern design keeps its custom properties, and inside a shadow root
+    # it matches nothing at all, so every var() referring to them resolves to
+    # invalid and the declaration is thrown away. A hero whose background is
+    # radial-gradient(... var(--navy-800) ...) simply loses its background and
+    # renders white text on white.
+    DOCUMENT_SELECTOR = /\A(?::root|html\s+body|html|body)(?=\z|[\s.,:\[>+~])/i
+
+    def scope_document_selectors(css)
+      css.to_s.gsub(/(\A|[{};])([^{}@]+?)\s*\{/m) do
+        prefix = Regexp.last_match(1)
+        selectors = Regexp.last_match(2)
+
+        rewritten = selectors.split(',').map do |selector|
+          selector.strip.sub(DOCUMENT_SELECTOR, ':host')
+        end.join(', ')
+
+        "#{prefix}#{rewritten} {"
+      end
     end
   end
 end

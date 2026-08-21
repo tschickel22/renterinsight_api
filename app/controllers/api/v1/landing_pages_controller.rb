@@ -142,7 +142,11 @@ class Api::V1::LandingPagesController < ApplicationController
     # lead. The design's own form markup is inert once scripts are gone, so a
     # real one is appended rather than left to look like it works.
     page.intake_form = build_intake_form(page.title)
-    if page.intake_form_id.present? || page.intake_form.present?
+
+    # Only when the design has no form of its own. It usually does, and the
+    # importer has just wired it, so appending ours as well would put two forms
+    # on one page asking for the same three things.
+    if page.intake_form.present? && result.forms_wired.zero?
       page.blocks += [{
         'id' => "block_#{SecureRandom.hex(6)}", 'type' => 'contact', 'order' => 1,
         'content' => { 'title' => 'Request details', 'displayMode' => 'inline' }
@@ -151,10 +155,23 @@ class Api::V1::LandingPagesController < ApplicationController
 
     if page.save
       bind_form_to_contact_blocks(page)
+      # The design's own forms were wired at import; they address the public
+      # intake endpoint by public id, which only exists once the form is saved.
+      if result.forms_wired.positive? && page.intake_form.present?
+        page.blocks = Array(page.blocks).map do |block|
+          next block unless block['type'].to_s == 'customHtml'
+
+          content = block['content'].is_a?(Hash) ? block['content'] : {}
+          block.merge('content' => content.merge(
+            'intakeFormPublicId' => page.intake_form.public_id
+          ))
+        end
+      end
       page.save
       render json: detail(page).merge(
         import: { imported: result.imported, skipped: result.skipped,
-                  warnings: result.warnings, video_slots: result.video_slots }
+                  warnings: result.warnings, video_slots: result.video_slots,
+                  forms_wired: result.forms_wired }
       ), status: :created
     else
       render json: { error: page.errors.full_messages.to_sentence }, status: :unprocessable_entity

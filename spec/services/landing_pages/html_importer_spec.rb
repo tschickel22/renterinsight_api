@@ -56,7 +56,7 @@ RSpec.describe LandingPages::HtmlImporter do
       result = importer.call(upload_of(html, 'page.html'))
 
       expect(result.imported).to eq(1)
-      expect(result.html).to include('.hero{background:url(')
+      expect(result.html).to match(/\.hero\s*\{background:url\(/)
       expect(result.html).not_to include('data:image/png')
     end
 
@@ -119,6 +119,66 @@ RSpec.describe LandingPages::HtmlImporter do
 
       expect { importer.call(upload_of(bytes, 'design.zip')) }
         .to raise_error(described_class::ImportError, /no HTML/i)
+    end
+  end
+
+  describe 'the design\'s own form' do
+    # A design's form posts to "#" and does nothing once scripts are gone, so
+    # the page shows a dealer a form that looks like it works and collects
+    # nothing.
+    let(:designed_form) do
+      %(<body><form class="form-body" action="#" method="post">) +
+        %(<label><input type="text" name="name"></label>) +
+        %(<label><input type="email" name="email"></label>) +
+        %(<a class="btn btn-teal" href="https://bookings.example.com/abc">Request my demo</a>) +
+        %(<p class="fineprint">Or <a href="https://bookings.example.com/abc">pick a time</a></p>) +
+        %(</form></body>)
+    end
+
+    it 'marks the form and drops its dead action' do
+      result = importer.call(upload_of(designed_form, 'page.html'))
+
+      expect(result.html).to include('data-dt-form="1"')
+      expect(result.html).not_to include('action="#"')
+      expect(result.forms_wired).to eq(1)
+    end
+
+    # A design tool draws the primary action as a styled link, so these forms
+    # arrive with inputs and no button at all.
+    it 'promotes the styled link into a real submit, keeping how it looks' do
+      result = importer.call(upload_of(designed_form, 'page.html'))
+
+      expect(result.html).to include('<button type="submit"')
+      expect(result.html).to include('class="btn btn-teal"')
+      expect(result.html).to include('Request my demo')
+    end
+
+    it 'leaves a link nested further down the form alone' do
+      result = importer.call(upload_of(designed_form, 'page.html'))
+
+      expect(result.html).to include('pick a time')
+      expect(result.html).to match(/<a[^>]*>pick a time<\/a>/)
+    end
+
+    # Capturing the lead and then sending them on to book is both of the things
+    # the author wanted, rather than a choice between them.
+    it 'keeps where the button pointed so the lead can still be sent on' do
+      result = importer.call(upload_of(designed_form, 'page.html'))
+
+      expect(result.html).to include('data-dt-redirect="https://bookings.example.com/abc"')
+    end
+
+    it 'leaves a form that already has a submit control alone' do
+      html = %(<body><form><input name="email"><button type="submit">Go</button></form></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to include('<button type="submit">Go</button>')
+      expect(result.html).not_to include('data-dt-submit')
+    end
+
+    it 'says how many forms it wired' do
+      result = importer.call(upload_of(designed_form, 'page.html'))
+      expect(result.warnings.join).to match(/own form now submits to your lead intake/i)
     end
   end
 
@@ -231,11 +291,50 @@ RSpec.describe LandingPages::HtmlImporter do
       expect(result.html).not_to include('evil.test')
     end
 
+    # The body element does not survive, so a rule that targets it would apply
+    # to nothing and the design would lose its base background, colour and font
+    # in one go , which presents as a blank page with a missing headline.
+    it 'points document-level rules at the element it renders into' do
+      html = %(<html><head><style>html{font-size:16px}body{background:#0F2A52;color:#fff}</style></head><body><h1>Hi</h1></body></html>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to match(/:host\s*\{font-size:16px\}/)
+      expect(result.html).to match(/:host\s*\{background:#0F2A52;color:#fff\}/)
+    end
+
+    # Where a modern design keeps its tokens. Inside a shadow root :root matches
+    # nothing, so every var() referring to them resolves invalid and the whole
+    # declaration is discarded.
+    it 'points :root custom properties at the element too' do
+      html = %(<head><style>:root{--navy-900:#0F2A52}.hero{background:radial-gradient(120% 120% at 15% 0%, var(--navy-900) 0%)}</style></head><body><div class="hero"></div></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to match(/:host\s*\{--navy-900:#0F2A52\}/)
+      expect(result.html).to include('var(--navy-900)')
+    end
+
+    it 'leaves names that merely contain the word alone' do
+      html = %(<head><style>.body-copy{margin:0}#bodyText{padding:0}</style></head><body><p>x</p></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to include('.body-copy')
+      expect(result.html).to include('#bodyText')
+      expect(result.html).not_to include(':host-copy')
+    end
+
+    it 'rewrites a descendant selector rooted at the document' do
+      html = %(<head><style>html body .hero{padding:0}body > main{margin:0}</style></head><body><p>x</p></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to match(/:host\s+\.hero/)
+      expect(result.html).to match(/:host\s*>\s*main/)
+    end
+
     it 'returns head styles followed by the body, not a whole document' do
       html = %(<html><head><title>Ignore me</title><style>.a{color:red}</style></head><body><p>Copy</p></body></html>)
       result = importer.call(upload_of(html, 'page.html'))
 
-      expect(result.html).to include('.a{color:red}')
+      expect(result.html).to match(/\.a\s*\{color:red\}/)
       expect(result.html).to include('<p>Copy</p>')
       expect(result.html).not_to include('Ignore me')
       expect(result.html).not_to include('<body')
