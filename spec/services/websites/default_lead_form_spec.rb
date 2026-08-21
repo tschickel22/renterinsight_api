@@ -3,7 +3,13 @@
 require 'rails_helper'
 
 RSpec.describe Websites::DefaultLeadForm do
-  let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
+  # Company seeds a general-purpose "Contact Us" form on create, so the resolver
+  # would find that one rather than whatever an example set up, and every
+  # expectation of nil below would be testing the callback instead of the
+  # resolver. Cleared so each example starts from the state it describes.
+  let(:company) do
+    Company.create!(name: "Co-#{SecureRandom.hex(3)}").tap { |c| c.intake_forms.destroy_all }
+  end
 
   # A form with no fields renders as an empty box, so schema presence matters.
   SCHEMA = [{ 'id' => 'f1', 'label' => 'Email', 'type' => 'text', 'leadField' => 'email' }].freeze
@@ -69,6 +75,7 @@ RSpec.describe Websites::DefaultLeadForm do
 
   it 'does not reach across companies' do
     other = Company.create!(name: "Other-#{SecureRandom.hex(3)}")
+    other.intake_forms.destroy_all
     other.intake_forms.create!(name: 'Contact Us', is_active: true, schema: SCHEMA)
 
     expect(described_class.for(company)).to be_nil
