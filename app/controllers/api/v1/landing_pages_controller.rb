@@ -117,7 +117,17 @@ class Api::V1::LandingPagesController < ApplicationController
   def update
     return unless authorize_action!('websites', 'update')
 
-    if @page.update(page_params)
+    previous_form_id = @page.intake_form_id
+    @page.assign_attributes(page_params)
+
+    # SiteRenderer reads the form off the contact block before it falls back to
+    # the page. Left alone, changing the editor's form picker moved the page's
+    # own intake_form_id and left every contact block still naming the previous
+    # form, so the picker looked like it had worked while the leads kept going
+    # to the form the author had just switched away from.
+    rebind_contact_blocks(@page, previous_form_id) if @page.intake_form_id != previous_form_id
+
+    if @page.save
       render json: detail(@page)
     else
       render json: { error: @page.errors.full_messages.to_sentence }, status: :unprocessable_entity
@@ -293,6 +303,24 @@ class Api::V1::LandingPagesController < ApplicationController
     end
   end
 
+  # Point contact blocks at the page's current form.
+  #
+  # Only blocks that were following the page are moved: one deliberately bound
+  # to some other form is somebody's decision, and changing the page-level
+  # default must not overrule it.
+  def rebind_contact_blocks(page, previous_form_id)
+    page.blocks = Array(page.blocks).map do |block|
+      next block unless block['type'].to_s == 'contact'
+
+      content = block['content'].is_a?(Hash) ? block['content'] : {}
+      bound = content['intakeFormId']
+      following = bound.blank? || bound.to_s == previous_form_id.to_s
+      next block unless following
+
+      block.merge('content' => content.merge('intakeFormId' => page.intake_form_id))
+    end
+  end
+
   def page_params
     params.permit(
       :title, :path, :is_visible, :seo_title, :seo_description, :og_image_url,
@@ -338,7 +366,19 @@ class Api::V1::LandingPagesController < ApplicationController
       seo_title: page.seo_title,
       seo_description: page.seo_description,
       og_image_url: page.og_image_url,
-      canonical_path: page.canonical_path
+      canonical_path: page.canonical_path,
+      # What the editor and the detail preview need to render the page the way
+      # a visitor sees it. Without the embed config SiteRenderer has no token to
+      # give the intake form, so every contact block in the builder said
+      # "Contact form not available" no matter which form was bound; without the
+      # theme the preview drew in default blue while the published page used the
+      # site's colours, which is the one thing a preview must not do.
+      theme: page.website&.theme,
+      inventory_embed_config: {
+        token: @company.public_inventory_token,
+        company_id: @company.id,
+        enabled: @company.public_inventory_enabled || false
+      }
     )
   end
 

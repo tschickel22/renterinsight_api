@@ -261,6 +261,77 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
     end
   end
 
+  describe 'PUT /:id' do
+    # SiteRenderer reads the form off the contact block before it falls back to
+    # the page, so a page-level change that leaves the blocks alone looks like
+    # it worked while the leads keep going to the previous form.
+    it 'moves contact blocks that were following the page onto the new form' do
+      old_form = IntakeForm.create!(company: company, name: 'Old', fields: [], is_active: true)
+      new_form = IntakeForm.create!(company: company, name: 'New', fields: [], is_active: true)
+      page.update!(
+        intake_form_id: old_form.id,
+        blocks: [
+          { 'id' => 'b1', 'type' => 'contact', 'order' => 0,
+            'content' => { 'intakeFormId' => old_form.id } },
+          { 'id' => 'b2', 'type' => 'contact', 'order' => 1, 'content' => {} }
+        ]
+      )
+
+      put "/api/v1/landing_pages/#{page.id}",
+          params: { intake_form_id: new_form.id }.to_json, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(json['blocks'].map { |b| b['content']['intakeFormId'] }).to all(eq(new_form.id))
+    end
+
+    it 'leaves a contact block deliberately bound to some other form alone' do
+      other = IntakeForm.create!(company: company, name: 'Other', fields: [], is_active: true)
+      new_form = IntakeForm.create!(company: company, name: 'New', fields: [], is_active: true)
+      page.update!(
+        intake_form_id: nil,
+        blocks: [{ 'id' => 'b1', 'type' => 'contact', 'order' => 0,
+                   'content' => { 'intakeFormId' => other.id } }]
+      )
+
+      put "/api/v1/landing_pages/#{page.id}",
+          params: { intake_form_id: new_form.id }.to_json, headers: headers
+
+      expect(json['blocks'].first['content']['intakeFormId']).to eq(other.id)
+    end
+
+    it 'keeps the blocks it was sent' do
+      put "/api/v1/landing_pages/#{page.id}",
+          params: {
+            blocks: [
+              { id: 'b1', type: 'hero', order: 0,
+                content: { title: 'Rewritten', ctaText: 'Get Details', ctaLink: '/inventory' } },
+              { id: 'b2', type: 'features', order: 1,
+                content: { features: [{ icon: 'x', title: 'F', description: 'd' }] } }
+            ]
+          }.to_json,
+          headers: headers
+
+      expect(json['blocks'].length).to eq(2)
+      expect(json['blocks'].first['content']['ctaLink']).to eq('/inventory')
+      expect(json['blocks'].last['content']['features'].first['title']).to eq('F')
+    end
+  end
+
+  describe 'what a preview needs to render' do
+    # Without these the builder drew every landing page in default blue with
+    # "Contact form not available" where the bound form belongs, which is the
+    # one thing an author opens the preview to check.
+    it 'returns the embed config and the container theme' do
+      get "/api/v1/landing_pages/#{page.id}", headers: headers
+
+      expect(json['inventory_embed_config']).to include(
+        'token' => company.reload.public_inventory_token,
+        'company_id' => company.id
+      )
+      expect(json).to have_key('theme')
+    end
+  end
+
   describe 'GET /:id/analytics' do
     it 'returns the funnel, engagement, video, sources and timeseries' do
       PageVisit.create!(company_id: company.id, website_page_id: page.id,
