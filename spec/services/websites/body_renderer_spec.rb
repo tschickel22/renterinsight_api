@@ -79,6 +79,44 @@ RSpec.describe Websites::BodyRenderer do
     end
   end
 
+  describe 'an imported design' do
+    # A customHtml block stores its stylesheet under the same "html" key its
+    # copy lives under. Rails' sanitize drops a disallowed TAG and keeps what
+    # was inside it, so the CSS reached the crawlable body as prose and a
+    # visitor watched a page of it render before React replaced it.
+    let(:design) do
+      [{ 'type' => 'customHtml', 'order' => 1, 'content' => {
+        'html' => '<style>:host{--navy-950:#071528}.hero{background:red}</style>' \
+                  '<h1>Your buyers are calling</h1>' \
+                  '<p>One connected system, first click to final warranty.</p>' \
+                  '<script>steal()</script>'
+      } }]
+    end
+
+    let(:page) do
+      website.website_pages.create!(title: 'DT V4', path: '/dt-v4', blocks: design)
+    end
+
+    subject(:html) do
+      described_class.new(website: website, page: page, canonical_host: 'x.test').call
+    end
+
+    it 'keeps the words a visitor reads' do
+      expect(html).to include('Your buyers are calling')
+      expect(html).to include('One connected system')
+    end
+
+    it 'does not put the stylesheet in front of a crawler as prose' do
+      expect(html).not_to include('--navy-950')
+      expect(html).not_to include(':host')
+      expect(html).not_to include('background:red')
+    end
+
+    it 'drops script text as well' do
+      expect(html).not_to include('steal()')
+    end
+  end
+
   describe 'a page with nothing renderable' do
     # Otherwise the site we just built would be flagged by our own audit for
     # having no H1.

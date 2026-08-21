@@ -480,8 +480,22 @@ module Websites
     # Keeps the headings and lists a dealer wrote, drops everything else. An h1
     # inside authored copy is demoted rather than removed, because two h1 tags on
     # a page is exactly what our own audit fails a site for.
+    # Elements whose text is not prose. Removed whole, children included.
+    #
+    # Rails' sanitize drops a disallowed TAG and keeps what was inside it, which
+    # is right for a <div> and badly wrong for a <style>: an imported design
+    # stores its stylesheet under the same "html" key its copy lives under, so
+    # the crawlable body filled with ":host { --navy-950:#071528; ... }" and a
+    # visitor watched a page of CSS render before React replaced it. That is a
+    # flash of the wrong thing on every load, and it puts a stylesheet in front
+    # of a crawler as though it were the page's words.
+    NON_PROSE_ELEMENTS = %w[style script noscript template svg].freeze
+
     def sanitize_rich_text(html)
-      demoted = html.gsub(%r{<(/?)h1(\s|>)}i, '<\1h2\2')
+      doc = Nokogiri::HTML::DocumentFragment.parse(html)
+      doc.css(NON_PROSE_ELEMENTS.join(',')).each(&:remove)
+
+      demoted = doc.to_html.gsub(%r{<(/?)h1(\s|>)}i, '<\1h2\2')
 
       ActionController::Base.helpers.sanitize(
         demoted, tags: ALLOWED_TAGS, attributes: ALLOWED_ATTRS
