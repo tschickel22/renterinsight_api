@@ -65,6 +65,18 @@ class Api::V1::WebsiteMediaController < ApplicationController
 
     file = params[:file]
 
+    # Refused before a byte goes to S3. Without this the request buffered the
+    # whole file, uploaded it, and only then hit whatever failed next , which on
+    # a large video is a long wait for an error that says nothing useful.
+    limit = WebsiteMedia.max_upload_bytes(file.try(:content_type))
+    if file.respond_to?(:size) && file.size.to_i > limit
+      return render json: {
+        error: "That file is #{ActiveSupport::NumberHelper.number_to_human_size(file.size)}. " \
+               "The limit for #{WebsiteMedia.kind_for(file.try(:content_type))} files is " \
+               "#{ActiveSupport::NumberHelper.number_to_human_size(limit)}."
+      }, status: :payload_too_large
+    end
+
     # Upload to S3
     begin
       s3_service = S3UploadService.new

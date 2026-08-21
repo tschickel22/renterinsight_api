@@ -49,18 +49,38 @@ class S3UploadService
     
     # Upload to S3
     begin
-      s3_client.put_object(
-        bucket: bucket_name,
-        key: key,
-        body: file.respond_to?(:read) ? file.read : File.read(file.path),
-        content_type: content_type,
-        # No ACL needed - bucket policy makes all objects public
-        metadata: {
-          'original_filename' => file.original_filename || File.basename(file.path),
-          'uploaded_at' => Time.now.iso8601
-        }
-      )
-      
+      metadata = {
+        'original_filename' => file.original_filename || File.basename(file.path),
+        'uploaded_at' => Time.now.iso8601
+      }
+
+      # Streamed from disk rather than read into a String first.
+      #
+      # `file.read` pulled the whole upload into memory before sending it, so a
+      # 200MB video cost 200MB of resident heap on a box that is serving every
+      # other request at the same time, and two at once could take the instance
+      # out. upload_file also switches to a multipart upload on its own once the
+      # object is large, which is what lets a video survive a slow connection
+      # instead of restarting from zero.
+      source_path = file.try(:tempfile).try(:path) || (file.respond_to?(:path) ? file.path : nil)
+
+      if source_path && File.exist?(source_path)
+        Aws::S3::Resource.new(client: s3_client)
+                         .bucket(bucket_name)
+                         .object(key)
+                         .upload_file(source_path, content_type: content_type, metadata: metadata)
+      else
+        # StringIO and friends, used by the importers. Small by construction.
+        s3_client.put_object(
+          bucket: bucket_name,
+          key: key,
+          body: file.respond_to?(:read) ? file.read : File.read(file.path),
+          content_type: content_type,
+          # No ACL needed - bucket policy makes all objects public
+          metadata: metadata
+        )
+      end
+
       # Get file size
       file_size = file.respond_to?(:size) ? file.size : File.size(file.path)
       
