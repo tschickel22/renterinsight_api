@@ -29,6 +29,31 @@ RSpec.describe 'Api::V1::Campaigns Phase B endpoints', type: :request do
       expect(body['channel']).to eq('email')
       expect(body['subject']).to eq('Hi Sample')
       expect(body['html_body']).to include('Hi Sample')
+      expect(body['step_position']).to eq(1)
+    end
+
+    it 'previews the step named by step_id, not always the first one' do
+      second = campaign.campaign_steps.create!(position: 1, channel: 'email', subject: 'Second step',
+                                               body_blocks: [{ 'type' => 'text', 'html' => 'Body two' }])
+
+      get "/api/v1/campaigns/#{campaign.id}/preview", params: { step_id: second.id }, headers: headers
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body['step_id']).to eq(second.id)
+      expect(body['step_position']).to eq(2)
+      expect(body['subject']).to eq('Second step')
+      expect(body['html_body']).to include('Body two')
+    end
+
+    it 'returns 422 when step_id belongs to another campaign' do
+      other = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'Other',
+                               campaign_type: 'blast', from_identity_type: 'User', from_identity_id: user.id,
+                               throttle_per_day: 100)
+      foreign_step = other.campaign_steps.create!(position: 0, channel: 'email', subject: 'Nope',
+                                                  body_blocks: [])
+
+      get "/api/v1/campaigns/#{campaign.id}/preview", params: { step_id: foreign_step.id }, headers: headers
+      expect(response).to have_http_status(:unprocessable_entity)
     end
   end
 

@@ -167,5 +167,41 @@ RSpec.describe Campaigns::AiBuilder do
       expect(child.parent_generation_id).to eq(parent.id)
       expect(child.status).to eq('refined')
     end
+
+    it 'asks for enough output tokens to return a whole multi-step plan' do
+      requests = []
+      stub_claude_response(plan, captured_requests: requests)
+      parent = CampaignAiGeneration.create!(company: company, user: user, prompt: 'p',
+                                             generated_plan: { 'channel' => 'email' }, status: 'generated')
+      described_class.new(company: company, user: user).refine(generation: parent, feedback: 'shorter')
+
+      expect(JSON.parse(requests.first.body)['max_tokens']).to be >= 16_384
+    end
+
+    it 'reports a truncated response as truncation, not as a JSON syntax error' do
+      # Claude hit max_tokens: the body is real JSON, the PLAN inside it is
+      # half-written. Users saw "unexpected end of input" and had no idea the
+      # plan had simply been cut off.
+      body = {
+        'content' => [{ 'type' => 'text', 'text' => '{"name":"V2","steps":[{"subject":"Hi' }],
+        'stop_reason' => 'max_tokens',
+        'usage' => { 'input_tokens' => 10, 'output_tokens' => 20 }
+      }.to_json
+      response = instance_double(Net::HTTPResponse, code: '200', body: body)
+      http = instance_double(Net::HTTP)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:request).and_return(response)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(ENV).to receive(:[]).with('ANTHROPIC_API_KEY').and_return('test-key')
+
+      parent = CampaignAiGeneration.create!(company: company, user: user, prompt: 'p',
+                                             generated_plan: { 'channel' => 'email' }, status: 'generated')
+
+      expect {
+        described_class.new(company: company, user: user).refine(generation: parent, feedback: 'shorter')
+      }.to raise_error(Campaigns::AiBuilder::GenerationError, /cut off/i)
+    end
   end
 end

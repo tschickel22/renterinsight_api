@@ -6,8 +6,13 @@ module Campaigns
     CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages'
     GENERATE_MODEL = AiModel.for(:generation)
     REFINE_MODEL = AiModel.for(:refine)
-    GENERATE_MAX_TOKENS = 4096
-    REFINE_MAX_TOKENS = 2048
+    # A full campaign plan is the ENTIRE JSON document: every step, every
+    # body_block of HTML. Refine returns the COMPLETE plan, not a diff, so it
+    # needs at least as much room as generate. The old 2048 ceiling silently
+    # truncated any plan past ~3 steps, and the half-written JSON surfaced to
+    # the user as "AI returned invalid JSON: unexpected end of input".
+    GENERATE_MAX_TOKENS = 16_384
+    REFINE_MAX_TOKENS = 16_384
 
     DEFAULT_MONTHLY_CREDIT = 50
 
@@ -591,7 +596,10 @@ module Campaigns
       uri = URI(CLAUDE_API_URL)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
-      http.read_timeout = 120
+      # Non-streaming request, so this has to cover the model writing the WHOLE
+      # plan. A full 6-step campaign at the raised token ceiling can take a
+      # couple of minutes; 120s cut those off mid-generation.
+      http.read_timeout = 300
       http.open_timeout = 30
 
       request = Net::HTTP::Post.new(uri)
@@ -618,6 +626,14 @@ module Campaigns
       result = JSON.parse(response.body)
       text = result['content']&.find { |c| c['type'] == 'text' }&.fetch('text', '')
       usage = result['usage'] || {}
+
+      # Truncated output is never parseable JSON. Say so plainly instead of
+      # letting parse_plan report a mystery syntax error at line 136.
+      if result['stop_reason'].to_s == 'max_tokens'
+        raise GenerationError,
+              'The campaign plan came back longer than the model was allowed to write, so it was cut off. ' \
+              'Try refining fewer steps at a time, or ask for shorter email bodies.'
+      end
 
       {
         text: text,

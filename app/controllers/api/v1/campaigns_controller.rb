@@ -382,8 +382,18 @@ class Api::V1::CampaignsController < ApplicationController
 
   def preview
     return unless authorize_action!('campaigns', 'read')
-    step = @campaign.campaign_steps.active.ordered.first
-    return render(json: { error: 'Campaign has no active steps' }, status: :unprocessable_entity) unless step
+
+    # Preview a specific step (defaults to the first active step), the same
+    # way test_send does. A drip's later steps are the ones most likely to be
+    # wrong, so previewing only step 1 hides exactly what needs checking.
+    step = if params[:step_id].present?
+             @campaign.campaign_steps.active.find_by(id: params[:step_id])
+           else
+             @campaign.campaign_steps.active.ordered.first
+           end
+    return render(json: { error: 'Step not found or campaign has no active steps' }, status: :unprocessable_entity) unless step
+
+    step_position = (@campaign.campaign_steps.active.ordered.pluck(:id).index(step.id) || 0) + 1
 
     recipient_type = params[:recipient_type] || 'Lead'
     recipient_id = params[:recipient_id]
@@ -410,13 +420,15 @@ class Api::V1::CampaignsController < ApplicationController
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: fake_send, company: @company, base_url: base_url
       ).render
-      render json: { channel: 'email', subject: rendered[:subject], html_body: rendered[:html_body], error: rendered[:error] }
+      render json: { channel: 'email', step_id: step.id, step_position: step_position,
+                     subject: rendered[:subject], html_body: rendered[:html_body], error: rendered[:error] }
     else
       rendered = Messaging::SmsRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: fake_send, company: @company, base_url: base_url
       ).render
-      render json: { channel: 'sms', body: rendered[:body], media_url: rendered[:media_url] }
+      render json: { channel: 'sms', step_id: step.id, step_position: step_position,
+                     body: rendered[:body], media_url: rendered[:media_url] }
     end
   rescue => e
     Rails.logger.error "[CampaignsController#preview] #{e.class}: #{e.message}"
