@@ -174,12 +174,14 @@ module LandingPages
     # an aspect-ratio box, and the sizing belongs to the design. The element's
     # own class, style and dimensions are carried across for the same reason.
     def claim_video_slots(doc)
-      nodes = doc.css('iframe').select { |n| video_host(n['src']) } + doc.css('video')
+      nodes = doc.css('iframe').select { |n| video_host(n['src']) } +
+              doc.css('video') +
+              video_links(doc)
 
       nodes.each_with_index do |node, index|
         slot = "v#{index + 1}"
-        source = node.name == 'iframe' ? video_host(node['src']) : 'file'
-        original = node.name == 'iframe' ? node['src'].to_s : node['src'].to_s
+        original = (node.name == 'a' ? node['href'] : node['src']).to_s
+        source = video_host(original) || (node.name == 'video' ? 'file' : 'link')
 
         replacement = Nokogiri::XML::Node.new('video', doc)
         replacement['data-dt-slot'] = slot
@@ -201,14 +203,34 @@ module LandingPages
 
       return if @video_slots.empty?
 
-      @warnings << "#{@video_slots.size} video#{'s' if @video_slots.size != 1} became empty " \
-                   'slots. Point each one at an MP4 in your media library.'
+      @warnings << if @video_slots.size == 1
+                     'The video became an empty slot. Point it at an MP4 in your media library.'
+                   else
+                     "#{@video_slots.size} videos became empty slots. " \
+                       'Point each one at an MP4 in your media library.'
+                   end
     end
 
     def video_host(src)
       case src.to_s
       when %r{\Ahttps?://(www\.)?(youtube(-nocookie)?\.com|youtu\.be)/}i then 'youtube'
       when %r{\Ahttps?://(player\.)?vimeo\.com/}i then 'vimeo'
+      when %r{\Ahttps?://[^/]+/:v:/}i then 'sharepoint'
+      when %r{\Ahttps?://(www\.)?loom\.com/}i then 'loom'
+      when %r{\Ahttps?://[^\s]+\.(mp4|webm|mov)(\?|\z)}i then 'file'
+      end
+    end
+
+    # A design tool cannot embed a player it has no credentials for, so it draws
+    # the video as a link wearing a poster: an anchor to the file, wrapping a
+    # play button and a caption. Yours pointed at SharePoint.
+    #
+    # Only anchors that wrap something are taken. A plain text link saying "watch
+    # it on YouTube" in the middle of a paragraph is a sentence, not a player,
+    # and turning it into one would be a worse mistake than missing it.
+    def video_links(doc)
+      doc.css('a[href]').select do |anchor|
+        video_host(anchor['href']) && anchor.element_children.any?
       end
     end
 

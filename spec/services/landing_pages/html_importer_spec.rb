@@ -260,7 +260,42 @@ RSpec.describe LandingPages::HtmlImporter do
       result = importer.call(
         upload_of(%(<body><iframe src="https://player.vimeo.com/video/1"></iframe></body>), 'page.html')
       )
-      expect(result.warnings.join).to match(/1 video became an empty slot|became empty slots/i)
+      expect(result.warnings.join).to match(/the video became an empty slot/i)
+    end
+
+    # A design tool cannot embed a player it has no credentials for, so it draws
+    # the video as a link wearing a poster.
+    it 'takes a poster-style link as a slot' do
+      html = %(<body><a class="video" href="https://x.sharepoint.com/:v:/g/personal/a/IQC9">) +
+             %(<span class="play"></span><b>Watch the product tour</b></a></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.video_slots.first).to include('source' => 'sharepoint')
+      expect(result.html).to include('data-dt-slot="v1"')
+      expect(result.html).not_to include('sharepoint.com')
+    end
+
+    it 'keeps the class so the design still sizes it' do
+      html = %(<body><a class="video" href="https://x.sharepoint.com/:v:/g/a"><span></span></a></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to include('class="video"')
+    end
+
+    it 'recognises a direct mp4 link' do
+      html = %(<body><a href="https://cdn.example.com/tour.mp4"><span></span></a></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.video_slots.size).to eq(1)
+    end
+
+    # A sentence, not a player. Turning it into one is worse than missing it.
+    it 'leaves a plain text link in a paragraph alone' do
+      html = %(<body><p>You can also <a href="https://youtu.be/abc">watch it on YouTube</a>.</p></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.video_slots).to be_empty
+      expect(result.html).to include('watch it on YouTube')
     end
 
     it 'reports no slots for a page with no video' do
