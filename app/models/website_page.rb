@@ -40,6 +40,24 @@ class WebsitePage < ApplicationRecord
   scope :top_level, -> { where(parent_page_id: nil) }
   scope :ordinary, -> { where(page_kind: 'page') }
   scope :landing_pages, -> { where(page_kind: 'landing') }
+
+  # What the public site may serve.
+  #
+  # An ordinary page has no publish state of its own. The SITE is published or
+  # it is not, and HostResolver already refuses an unpublished one, so filtering
+  # those here would only take a live dealer's pages away.
+  #
+  # A landing page does have one: publish! and unpublish!, published_at,
+  # is_visible, and a `published` scope. The public side read none of it. A
+  # campaign page was reachable at its path from the moment it was created, so
+  # an unfinished draft sat on a guessable URL and the publish toggle governed
+  # nothing but a badge. That is not what a dealer means by "not published yet",
+  # and it matters most for exactly the pages this is used for: the ones an ad
+  # is about to point at.
+  scope :publicly_servable, lambda {
+    where(is_deleted: [false, nil])
+      .where("page_kind <> 'landing' OR (published_at IS NOT NULL AND is_visible = TRUE)")
+  }
   scope :published, -> { where.not(published_at: nil).where(is_visible: true) }
 
   # Returns the page path (used by as_json methods: [:full_path])

@@ -21,7 +21,20 @@ Rails.application.routes.draw do
   get 'up', to: 'rails/health#show', as: :rails_health_check
 
   # Root
-  root to: proc { [200, {}, ['Renter Insight API']] }
+  #
+  # A tenant hostname only reaches this line when it resolved to nothing: no
+  # linked website, or a site still in draft. It used to answer such a visitor
+  # with the API's own status string, which is both an internal detail and the
+  # platform's old name, sitting on the dealer's domain. A plain 404 is the
+  # honest answer, and it says nothing about who runs the host.
+  root to: proc { |env|
+    request = ActionDispatch::Request.new(env)
+    if Constraints::TenantWebsiteHost.platform_request?(request)
+      [200, { 'Content-Type' => 'text/plain' }, ['Renter Insight API']]
+    else
+      [404, { 'Content-Type' => 'text/plain' }, ['Not found']]
+    end
+  }
   
   # Serve uploaded files (logos, images, etc.) - Legacy URLs without /api prefix
   get 'uploads/*path', to: 'api/uploads#show', format: false

@@ -31,6 +31,12 @@ module Websites
         methods: [:full_theme]
       )
 
+      # The association above serves every page the site has, deleted and
+      # unpublished included, so an unpublished landing page's blocks reached the
+      # browser even once the server stopped routing to it. Gating the route and
+      # not the payload hides the URL and ships the content anyway.
+      payload['website_pages'] = servable_pages
+
       payload['blog_posts'] = blog_posts
       payload['blog_categories'] = blog_categories
       payload['inventory_embed_config'] = inventory_embed_config
@@ -52,6 +58,16 @@ module Websites
     end
 
     private
+
+    def servable_pages
+      @website.website_pages
+              .publicly_servable
+              .order(:order)
+              .as_json(
+                only: %i[id title slug path is_visible order blocks show_in_nav show_in_footer page_order],
+                methods: [:full_path]
+              )
+    end
 
     def blog_posts
       @website.blog_posts

@@ -17,6 +17,22 @@ module Constraints
       new.matches?(request)
     end
 
+    # Whether this request arrived on one of our own hostnames rather than a
+    # tenant's. Exposed because the root route has to tell the two apart: a
+    # custom hostname that reaches us and resolves to nothing used to fall
+    # through to the API root and answer a dealer's visitor with the platform's
+    # name and an internal detail.
+    def self.platform_request?(request)
+      host = Websites::RequestHost.for(request)
+      return true if host.blank?
+
+      new.send(:platform_host?, host)
+    rescue StandardError
+      # Same reasoning as matches?: a lookup failure must not turn into a 500.
+      # Treating it as ours keeps the previous behaviour.
+      true
+    end
+
     # Paths that must always reach the application, even when the request arrives on a
     # dealer hostname. These routes are matched before the tenant catch-all, so without
     # this a dealer domain would swallow API and webhook traffic.

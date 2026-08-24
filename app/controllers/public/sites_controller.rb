@@ -220,6 +220,12 @@ module Public
       @website = @resolution.website
       @canonical_host = @resolution.canonical_host
       @page = find_page
+      # A nil page normally means "let the client route it": blog posts and home
+      # detail pages are SPA routes with no website_pages row, so the shell is
+      # the right answer. A path that names a real but unpublished landing page
+      # is not that. Falling through would answer a draft's URL with the site,
+      # which is the same as serving it as far as anyone linking it is concerned.
+      return render_not_found if unpublished_landing_page?
       @vehicle = find_home
       # A /homes/ path whose id resolves to nothing is a dead listing, not a
       # dealer page. Saying so beats rendering the site shell under a URL that
@@ -276,11 +282,24 @@ module Public
 
     def find_page
       path = normalized_path
-      pages = @website.website_pages.where(is_deleted: [false, nil])
+      # publicly_servable, not just undeleted: an unpublished landing page must
+      # 404 rather than serve, which is what its publish toggle has always said.
+      pages = @website.website_pages.publicly_servable
 
       pages.find_by(path: path) ||
         pages.find_by(path: path.delete_prefix('/')) ||
         (path == '/' ? pages.order(:order).first : nil)
+    end
+
+    # A landing page exists at this path and publicly_servable refused it.
+    def unpublished_landing_page?
+      return false if @page
+
+      path = normalized_path
+      @website.website_pages
+              .landing_pages
+              .where(is_deleted: [false, nil])
+              .exists?(path: [path, path.delete_prefix('/')])
     end
 
     def normalized_path
@@ -300,7 +319,7 @@ module Public
     # out of search is a per-page robots concern, which is a separate thing this never was.
     def visible_pages
       @website.website_pages
-              .where(is_deleted: [false, nil])
+              .publicly_servable
               .order(:order)
     end
 

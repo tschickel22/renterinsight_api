@@ -246,10 +246,18 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.body).not_to include('Sunshine RV')
     end
 
-    it 'leaves the API root untouched for an unknown host' do
-      # An unmatched host falls through to whatever the platform would have served, rather
-      # than being claimed by the site controller.
+    it 'answers a host that is not ours with 404, not the API root' do
+      # It still falls through rather than being claimed by the site controller.
+      # What it falls through TO changed: naming the platform on a hostname we do
+      # not own tells a dealer's visitor something that is neither true nor theirs.
       get_site('/', host: 'nobody.test')
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).not_to include('Renter Insight')
+    end
+
+    it 'leaves the API root untouched on our own hostname' do
+      get 'http://localhost/'
 
       expect(response.body).to eq('Renter Insight API')
     end
@@ -547,6 +555,58 @@ RSpec.describe 'Public::Sites', type: :request do
       get '/', headers: { 'HTTP_HOST' => 'renterinsight-api-prod.onrender.com' }
 
       expect(response.body).to eq('Renter Insight API')
+    end
+  end
+
+  # A landing page carries its own publish state, and the public side read none
+  # of it: a campaign page was reachable at its path from the moment it existed.
+  describe 'an unpublished landing page' do
+    let!(:draft) do
+      website.website_pages.create!(title: 'Facebook Offer', path: '/fb', order: 5,
+                                    page_kind: 'landing', blocks: [])
+    end
+
+    it 'is not served' do
+      get 'http://sunshine-rv.test/fb'
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'is served once published' do
+      draft.publish!
+
+      get 'http://sunshine-rv.test/fb'
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'keeps its blocks out of the payload a browser receives' do
+      get 'http://sunshine-rv.test/about'
+      expect(response.body).not_to include('Facebook Offer')
+    end
+
+    it 'stays out of the sitemap' do
+      get 'http://sunshine-rv.test/sitemap.xml'
+      expect(response.body).not_to include('/fb')
+    end
+
+    # An ordinary page has no publish state of its own. Applying the same gate to
+    # it would take a live dealer's site away.
+    it 'does not gate an ordinary page the same way' do
+      get 'http://sunshine-rv.test/about'
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
+  # A hostname that reaches us and resolves to nothing used to fall through to
+  # the API root and answer a dealer's visitor with the platform's own name.
+  describe 'a hostname linked to no website' do
+    let!(:unlinked) do
+      company.company_domains.create!(hostname: 'unassigned.test', verification_status: 'active')
+    end
+
+    it 'answers 404 rather than naming the platform' do
+      get 'http://unassigned.test/'
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).not_to include('Renter Insight')
     end
   end
 end
