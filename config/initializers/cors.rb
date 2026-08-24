@@ -107,6 +107,26 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              methods: %i[post options],
              credentials: false
 
+    # The lead form on a landing page.
+    #
+    # An imported design keeps its own form markup and posts it to the absolute
+    # API host, so from the dealer's own hostname this is cross-origin like the
+    # tracking beacon above. Rack::Cors answers the preflight before the
+    # controller is reached, and with no rule here it answered 200 carrying no
+    # Access-Control-Allow-Origin at all. The browser then refused the POST,
+    # fetch threw, and the visitor was told "that did not send" while the
+    # endpoint itself was working perfectly: submitting the same body by hand
+    # created the lead. A form on an ad landing page failing this way loses the
+    # click and the spend behind it.
+    #
+    # GET is the form's own definition, fetched to render a hosted form.
+    %w[/api/f/* /f/*].each do |path|
+      resource path,
+               headers: :any,
+               methods: %i[get post options head],
+               credentials: false
+    end
+
     # Blog posts and categories rendered into a site's pages.
     resource '/api/public/*',
              headers: :any,

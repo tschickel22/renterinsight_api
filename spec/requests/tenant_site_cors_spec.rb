@@ -64,4 +64,23 @@ RSpec.describe 'Tenant site CORS', type: :request do
     expect(response.headers['Access-Control-Allow-Origin']).to eq(allowlisted)
     expect(response.headers['Access-Control-Allow-Credentials']).to eq('true')
   end
+
+  # The lead form on an imported landing page posts to the absolute API host,
+  # so from the dealer's own hostname it is cross-origin like the beacon. With
+  # no rule, Rack::Cors answered the preflight 200 carrying no allow-origin at
+  # all, the browser refused the POST, and the visitor was told "that did not
+  # send" while the endpoint was working: the same body submitted by hand
+  # created the lead. On an ad landing page that loses the click and the spend.
+  it 'allows a landing page form to submit from a dealer domain' do
+    expect(allow_origin_for('/api/f/abc123/submit', dealer_domain, method: 'POST')).to be_present
+    expect(allow_origin_for('/api/f/abc123/submit', tenant_origin, method: 'POST')).to be_present
+  end
+
+  it 'allows the short form path too' do
+    expect(allow_origin_for('/f/abc123/submit', dealer_domain, method: 'POST')).to be_present
+  end
+
+  it 'allows a hosted form to be fetched for rendering' do
+    expect(allow_origin_for('/api/f/abc123', dealer_domain)).to be_present
+  end
 end
