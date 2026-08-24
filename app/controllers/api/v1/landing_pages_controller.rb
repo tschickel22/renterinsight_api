@@ -453,6 +453,13 @@ class Api::V1::LandingPagesController < ApplicationController
       :title, :path, :is_visible, :seo_title, :seo_description, :og_image_url,
       :robots, :canonical_path, :intake_form_id, :layout_id,
       style: {},
+      # Named rather than a bare hash: the custom head/body fields are injected
+      # into the document as written, so what may be set here is worth being
+      # explicit about.
+      tracking_config: [
+        :google_analytics_id, :google_tag_manager_id, :facebook_pixel_id, :hotjar_id,
+        { custom_scripts: %i[head body] }
+      ],
       blocks: [:id, :type, :order, { content: {}, settings: {} }]
     )
   end
@@ -494,6 +501,10 @@ class Api::V1::LandingPagesController < ApplicationController
       seo_description: page.seo_description,
       og_image_url: page.og_image_url,
       canonical_path: page.canonical_path,
+      tracking_config: page.tracking_config,
+      # What the page inherits from its container, so the editor can say which
+      # tags already fire here rather than inviting a duplicate pixel.
+      inherited_tracking_config: page.website&.tracking_config || {},
       # What the editor and the detail preview need to render the page the way
       # a visitor sees it. Without the embed config SiteRenderer has no token to
       # give the intake form, so every contact block in the builder said

@@ -609,4 +609,67 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.body).not_to include('Renter Insight')
     end
   end
+
+  # A pixel that only fires once React has mounted misses whoever leaves before
+  # that, which on an ad landing page is the population being measured. Meta's
+  # own install check reads the delivered HTML too, so a client-injected pixel
+  # reports itself as not installed.
+  describe 'analytics and pixels in the delivered HTML' do
+    it 'writes the site\'s configured tags into the shell' do
+      website.update!(tracking_config: { 'google_analytics_id' => 'G-SITE1234' })
+
+      get_site('/about')
+
+      expect(response.body).to include('gtag/js?id=G-SITE1234')
+    end
+
+    it "lets a landing page carry its own pixel over the site's" do
+      website.update!(tracking_config: { 'facebook_pixel_id' => '1111111111' })
+      website.website_pages.create!(title: 'Offer', path: '/fb', page_kind: 'landing',
+                                    blocks: [], published_at: Time.current, is_visible: true,
+                                    tracking_config: { 'facebook_pixel_id' => '2222222222' })
+
+      get_site('/fb')
+
+      # The site's id still appears in the JSON payload the app boots from; what
+      # matters is which one the pixel actually initialises with.
+      expect(response.body).to include("fbq('init', '2222222222')")
+      expect(response.body).not_to include("fbq('init', '1111111111')")
+    end
+
+    it 'puts the GTM noscript half after the opening body tag' do
+      website.update!(tracking_config: { 'google_tag_manager_id' => 'GTM-ABC123' })
+
+      get_site('/about')
+
+      expect(response.body).to match(%r{<body[^>]*>\s*<noscript><iframe src="https://www\.googletagmanager\.com/ns\.html})
+    end
+
+    # Measurement is worth losing. The dealer's site is not.
+    it 'still serves the page when the config is unusable' do
+      website.update!(tracking_config: { 'custom_scripts' => 'not a hash' })
+
+      get_site('/about')
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('Sunshine RV')
+    end
+
+    # SiteRenderer injects the custom head/body fields client side, which is
+    # right for the builder preview and a shared demo. On a live site both would
+    # run and every snippet would fire twice.
+    it 'tells the client that these tags are already in the document' do
+      website.update!(tracking_config: { 'google_analytics_id' => 'G-SITE1234' })
+
+      get_site('/about')
+
+      expect(response.body).to include('<meta name="dt-tracking" content="server">')
+    end
+
+    it 'leaves no marker when there is nothing to track' do
+      get_site('/about')
+
+      expect(response.body).not_to include('name="dt-tracking"')
+    end
+  end
 end

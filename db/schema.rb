@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_20_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_24_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7491,6 +7491,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_20_160000) do
     t.bigint "intake_form_id"
     t.string "layout_id"
     t.datetime "deleted_at"
+    t.jsonb "tracking_config", default: {}, null: false
     t.index ["campaign_id"], name: "index_website_pages_on_campaign_id"
     t.index ["intake_form_id"], name: "index_website_pages_on_intake_form_id"
     t.index ["order"], name: "index_website_pages_on_order"

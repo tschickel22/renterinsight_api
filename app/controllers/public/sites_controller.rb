@@ -365,7 +365,31 @@ module Public
       # never has to render an empty frame first.
       doc = doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
 
+      doc = inject_tracking(doc)
+
       inject_prerendered_body(doc)
+    end
+
+    # Analytics and pixels, from the site's tracking_config merged with the
+    # page's.
+    #
+    # Server side rather than in SiteRenderer, which is where the custom
+    # head/body fields have been injected until now. A pixel that only fires
+    # once React has mounted misses whoever leaves before that, and on an ad
+    # landing page those are precisely the visitors being measured. Meta's own
+    # install check also reads the delivered HTML, so a client-injected pixel
+    # reports itself as not installed.
+    #
+    # Failure here costs measurement, not the page: a dealer's site must not go
+    # dark because a snippet field holds something unexpected.
+    def inject_tracking(doc)
+      tags = Websites::TrackingTags.new(website: @website, page: @page).call
+      doc = doc.sub(%r{</head>}i) { "#{tags.head}\n</head>" } if tags.head.present?
+      doc = doc.sub(%r{<body([^>]*)>}i) { "<body#{Regexp.last_match(1)}>\n#{tags.body}" } if tags.body.present?
+      doc
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Sites] tracking injection failed for #{@website&.id}: #{e.message}")
+      doc
     end
 
     # The crawlable copy of the page, in its own container BEFORE #root.
