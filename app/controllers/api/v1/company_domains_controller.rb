@@ -1,5 +1,9 @@
 # API controller for managing custom domains via Cloudflare for SaaS
 class Api::V1::CompanyDomainsController < ApplicationController
+  # What the picker sends for "Landing Pages" when the container does not exist
+  # yet. Resolved to a real id on save, never stored.
+  LANDING_PAGES_ID = 'landing_pages'
+
   SENDING_DOMAIN_MODULE = 'marketing.sending_domain'
 
   before_action :set_company_scope
@@ -68,11 +72,8 @@ class Api::V1::CompanyDomainsController < ApplicationController
 
     # Scoped lookup, so a website id from the request can only ever resolve to this
     # company's own site.
-    website_id = params[:website_id].presence
-    if website_id.present? && !@company.websites.exists?(id: website_id)
-      return render json: { error: 'That website does not belong to this company' },
-                    status: :unprocessable_entity
-    end
+    website_id, website_error = resolve_website_id(params[:website_id])
+    return render json: { error: website_error }, status: :unprocessable_entity if website_error
 
     # Create domain record
     domain = @company.company_domains.build(
@@ -156,13 +157,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
     # Never take a website id on trust. Scoping the lookup to the company is what stops a
     # domain being pointed at another tenant's site by guessing an id.
     if update_params.key?(:website_id)
-      website_id = update_params[:website_id].presence
-      if website_id.present? && !@company.websites.exists?(id: website_id)
-        return render json: { error: 'That website does not belong to this company' },
-                      status: :unprocessable_entity
-      end
+      resolved, error = resolve_website_id(update_params[:website_id])
+      return render json: { error: error }, status: :unprocessable_entity if error
 
-      update_params[:website_id] = website_id
+      update_params[:website_id] = resolved
     end
 
     if @domain.update(update_params)
@@ -544,25 +542,73 @@ class Api::V1::CompanyDomainsController < ApplicationController
     #
     # It is offered now and marked, so the picker can say which is which rather
     # than relying on the container's name to carry the distinction.
-    websites = @company.websites
-                       .where(is_deleted: [false, nil])
-                       .for_current_location
-                       .order(:name)
+    scope = @company.websites.where(is_deleted: [false, nil])
 
-    websites.map do |w|
-      {
-        id: w.id, name: w.name, slug: w.slug, status: w.status,
-        published: w.status == 'published',
-        kind: w.kind,
-        # A container is always 'published' (HostResolver only answers for
-        # published sites and nobody would think to publish an invisible
-        # record), so its readiness is a per-page question instead.
-        landing_container: w.marketing_container?
-      }
-    end
+    # The location selector filters a dealer's SITES, which belong to a location
+    # the way a showroom does. The landing page container does not: there is one
+    # per company, and MarketingSiteProvisioner picks a location for it only
+    # because the column demands one. Filtering it the same way meant the picker
+    # went empty whenever the selector sat on any location but that arbitrary
+    # one, which is what a tenant with a Corporate location and a working one
+    # sees most of the time.
+    sites = scope.sites.for_current_location.order(:name)
+    container = scope.marketing_containers.order(:name).first
+
+    offered = sites.map { |w| website_option(w) }
+    offered << website_option(container) if container
+    offered << provisional_landing_option if container.nil?
+    offered
   rescue StandardError => e
     Rails.logger.error "[CompanyDomains] Could not list websites: #{e.message}"
     []
+  end
+
+  def website_option(website)
+    {
+      id: website.id, name: website.name, slug: website.slug, status: website.status,
+      published: website.status == 'published',
+      kind: website.kind,
+      # A container is always 'published' (HostResolver only answers for
+      # published sites and nobody would think to publish an invisible
+      # record), so its readiness is a per-page question instead.
+      landing_container: website.marketing_container?
+    }
+  end
+
+  # Offered before any landing page exists, so the order of operations stops
+  # mattering.
+  #
+  # The container is created by the first landing page, so a tenant setting up an
+  # ad domain had to add the domain, leave, build a page, publish it, and come
+  # back to link what they had come to link in the first place. Nothing about
+  # pointing a hostname at landing pages requires a page to exist yet.
+  # LANDING_PAGES_ID is resolved to a real container on save.
+  def provisional_landing_option
+    {
+      id: LANDING_PAGES_ID, name: 'Landing Pages', slug: nil, status: 'published',
+      published: true, kind: 'marketing', landing_container: true
+    }
+  end
+
+  # Resolves what the picker sent into a website id this company owns, creating
+  # the landing page container if that is what was chosen and none exists.
+  #
+  # @return [Array(Object, String)] the id to store, and an error to render instead
+  def resolve_website_id(raw)
+    value = raw.presence
+    return [nil, nil] if value.nil?
+
+    if value.to_s == LANDING_PAGES_ID
+      container = Marketing::MarketingSiteProvisioner.call(company: @company)
+      return [container.id, nil]
+    end
+
+    return [nil, 'That website does not belong to this company'] unless @company.websites.exists?(id: value)
+
+    [value, nil]
+  rescue Marketing::MarketingSiteProvisioner::ProvisioningError => e
+    Rails.logger.error "[CompanyDomains] container provisioning failed: #{e.message}"
+    [nil, e.message]
   end
 
   def domain_needs_dns_help?(domain)
