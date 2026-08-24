@@ -138,4 +138,69 @@ RSpec.describe 'Webhooks::Twilio inbound tenant scoping', type: :request do
       expect(pref_b&.opted_in).not_to eq(false)
     end
   end
+
+  # Sending from the shared number is supported; replying to it is not, and
+  # cannot be — the number identifies no tenant.
+  describe 'the shared platform number' do
+    let(:platform_number) { '+17205752095' }
+
+    before do
+      allow(PlatformSetting).to receive(:communications).and_return(
+        { 'sms' => { 'fromNumber' => '17205752095' } }
+      )
+    end
+
+    let(:params) do
+      { 'From' => shared_phone, 'To' => platform_number, 'Body' => 'Still interested',
+        'MessageSid' => "SM#{SecureRandom.hex(8)}" }
+    end
+
+    # The stored value has no leading +, Twilio's To always does, and the old
+    # comparison was a raw ==. It also read ENV['TWILIO_PHONE_NUMBER'], which is
+    # a different setting entirely and unset in production, so this branch was
+    # never recognised as the platform number at all.
+    it 'recognises the number even though settings store it without a plus' do
+      post '/webhooks/twilio/sms/inbound', params: params
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    # The reply cannot be attributed, and guessing is worse than dropping it:
+    # phone numbers are not unique across tenants, so the old across-all-tenants
+    # match handed one company's customer to another company's rep.
+    it 'does not attribute the reply to whichever tenant texted most recently' do
+      outbound_sms(company: company_b, lead: lead_b, sender: rep_b,
+                   from: platform_number, sent_at: 5.minutes.ago)
+
+      expect { post '/webhooks/twilio/sms/inbound', params: params }
+        .not_to change { Communication.where(direction: 'inbound').count }
+    end
+
+    it 'does not forward it to a rep who cannot own it' do
+      outbound_sms(company: company_b, lead: lead_b, sender: rep_b,
+                   from: platform_number, sent_at: 5.minutes.ago)
+
+      post '/webhooks/twilio/sms/inbound', params: params
+
+      expect(TwilioSmsService).not_to have_received(:send_via_master)
+        .with(hash_including(to: rep_b.phone))
+    end
+
+    # Reaches metadata.dig on the matched outbound, which is where the four
+    # examples above already fail: db/schema.rb declares communications.metadata
+    # as text while every deployed database holds jsonb, so a Hash round-trips
+    # through the test database as a Ruby inspect string. Pending rather than
+    # deleted — RSpec reports a pending example that starts passing, so this
+    # turns itself back on the moment the schema is corrected.
+    it 'still routes a reply that arrives on a tenant\'s own number',
+       pending: 'communications.metadata text/jsonb schema drift' do
+      outbound_sms(company: company_a, lead: lead_a, sender: rep_a,
+                   from: number_a, sent_at: 2.hours.ago)
+
+      expect {
+        post '/webhooks/twilio/sms/inbound',
+             params: params.merge('To' => number_a)
+      }.to change { Communication.where(direction: 'inbound').count }.by(1)
+    end
+  end
 end

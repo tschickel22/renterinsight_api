@@ -187,14 +187,35 @@ module Webhooks
       end
 
       # twilio_account / company were resolved from the receiving number at the top.
+      #
+      # A number we do not own the tenant for cannot deliver a reply to anyone.
+      # Two separate reasons this branch was reached far more often than it
+      # looked: the platform number is configured in Platform Settings, not in
+      # ENV['TWILIO_PHONE_NUMBER'], which is unset in production; and the
+      # comparison was a raw string against a value Twilio sends as E.164, so
+      # "+17205752095" never equalled the stored "17205752095" even when the
+      # variable was populated. Every inbound text to the platform number was
+      # discarded here, which is exactly what a tenant reported as "replies
+      # don't come back".
       unless company
-        platform_number = ENV['TWILIO_PHONE_NUMBER']
-        if to_number == platform_number
-          Rails.logger.info "[TwilioWebhook] Inbound to platform number #{to_number}"
+        if platform_sms_number.present? &&
+           Campaigns::SmsInboundHandler.normalize_phone(to_number) == platform_sms_number
+          # Sending from the shared number is supported; replying to it is not,
+          # and cannot be. The number identifies no tenant, so the only way to
+          # attribute this message would be to search every company's outbound
+          # for the sender's digits and take the most recent — which is what
+          # used to happen here. Phone numbers are not unique across tenants, so
+          # that hands one company's customer reply to another company's rep.
+          # A tenant who wants two-way SMS provisions their own number.
+          Rails.logger.info(
+            "[TwilioWebhook] Inbound to the shared platform number #{to_number} from " \
+            "#{from_number}: no owning tenant, so it is not routed. Two-way SMS needs a " \
+            'dedicated number.'
+          )
         else
-          Rails.logger.warn "[TwilioWebhook] No TwilioAccount or platform match for number #{to_number}"
-          head :ok and return
+          Rails.logger.warn "[TwilioWebhook] No TwilioAccount for number #{to_number}"
         end
+        head :ok and return
       end
 
       # Find most recent outbound SMS to this contact to link the reply to the correct
@@ -206,15 +227,11 @@ module Webhooks
       # are not unique across tenants, so an unscoped match can select another
       # company's outbound and forward this customer's message to that company's rep.
       from_digits = from_number.to_s.gsub(/\D/, '').last(10)
+      # Always company-scoped now: the branch above returns before this point
+      # when there is no owning tenant, so there is no longer a path that
+      # searches every company's outbound for a matching phone number.
       outbound_scope = Communication.where(channel: 'sms', direction: 'outbound')
-
-      if company
-        outbound_scope = outbound_scope.where(company_id: company.id)
-      else
-        # Shared platform number — no owning company to scope to.
-        Rails.logger.warn "[TwilioWebhook] Matching reply from #{from_number} across all tenants " \
-                          "(platform number #{to_number} has no owning company)"
-      end
+                                    .where(company_id: company.id)
 
       original_communication = outbound_scope.where(
         "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(to_address, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?",
@@ -388,6 +405,27 @@ module Webhooks
     
     # Forward an inbound contact reply to the CRM user who originally sent the SMS
     # Appends a tokenized reply link so the user can respond without logging in
+    # The shared sending number, in the shape Twilio reports a recipient.
+    #
+    # Configured in Platform Settings, which is where an admin sets it. ENV is
+    # still consulted because several other call sites read it and an
+    # installation may have set it there; whichever answers first is normalised,
+    # since the stored value has no leading + and Twilio's To always does.
+    def platform_sms_number
+      raw = PlatformSetting.communications.dig(:sms, :fromNumber).presence ||
+            PlatformSetting.communications.dig('sms', 'fromNumber').presence ||
+            ENV['TWILIO_PHONE_NUMBER'].presence ||
+            ENV['SMS_FROM_NUMBER'].presence
+      return nil if raw.blank?
+
+      Campaigns::SmsInboundHandler.normalize_phone(raw)
+    rescue StandardError => e
+      # A settings read must never turn an inbound webhook into a 500: Twilio
+      # retries on one, and a retry storm on a misconfiguration helps nobody.
+      Rails.logger.warn "[TwilioWebhook] could not read the platform number: #{e.message}"
+      nil
+    end
+
     def forward_sms_to_sender(to_cell:, from_number:, body:, communicable:, reply_token: nil)
       entity_label = communicable ? "#{communicable.class.name} ##{communicable.id}" : 'Unknown contact'
       base_body    = "DMS Reply from #{from_number} (#{entity_label}): #{body}"
