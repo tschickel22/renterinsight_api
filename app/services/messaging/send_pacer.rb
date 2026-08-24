@@ -17,6 +17,10 @@ module Messaging
   # Stateful on purpose: callers allocate many slots in a loop, so the cursor
   # advances in memory instead of re-querying per recipient.
   class SendPacer
+    # How far ahead a committed send still counts against the mailbox's near-term
+    # capacity. A send scheduled next week does not make a send today unsafe.
+    PACING_HORIZON = 24.hours
+
     def initialize(connection_key:, earliest: nil, now: Time.current, limits: nil)
       @connection_key = connection_key.presence
       @now = now
@@ -39,21 +43,37 @@ module Messaging
 
     private
 
-    # Start after whatever this mailbox already has queued, so a second campaign
-    # enrolling into the same mailbox lines up behind the first instead of
-    # scheduling on top of it. Never earlier than the caller's `earliest`
-    # (which carries the step's configured wait) or than now.
+    # Start far enough out that this batch does not exceed the mailbox rate when
+    # added to what is already committed. Never earlier than the caller's
+    # `earliest` (which carries the step's configured wait) or than now.
+    #
+    # This used to chase the MAXIMUM next_send_at on the mailbox and start one
+    # interval past it. That conflates two different things a next_send_at can
+    # mean. For a batch being paced it is a slot claim, and lining up behind the
+    # last one is right. For an enrollment sitting mid-drip it is a configured
+    # WAIT, and a five-day step-4 wait is not five days of queue depth: it is one
+    # message, five days out. Campaign 31 launched behind campaign 26's drip tail
+    # and had its zero-wait first step scheduled four days late, with the delay
+    # ratcheting further out for each campaign launched after it.
+    #
+    # Counting committed sends instead prices each one at what it actually costs
+    # the mailbox, one interval, wherever it happens to sit. A drip step days out
+    # contributes its interval and nothing more.
     def first_slot
+      committed = committed_ahead
       candidates = [@earliest, @now]
-      tail = latest_scheduled
-      candidates << (tail + interval) if tail
+      candidates << (@now + (committed * interval).seconds) if committed.positive?
       candidates.max
     end
 
-    def latest_scheduled
+    # Sends already committed on this mailbox inside the pacing horizon. Anything
+    # beyond it is not competing for near-term capacity and is deliberately not
+    # counted — that is the whole point of the change above.
+    def committed_ahead
       CampaignEnrollment
         .where(sending_connection_key: @connection_key, status: %w[pending active])
-        .maximum(:next_send_at)
+        .where(next_send_at: @now..(@now + PACING_HORIZON))
+        .count
     end
   end
 end

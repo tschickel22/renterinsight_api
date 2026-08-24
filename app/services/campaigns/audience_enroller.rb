@@ -1,5 +1,8 @@
 module Campaigns
   class AudienceEnroller
+    # See #dispatch_if_imminent.
+    IMMINENT_WINDOW = 5.minutes
+
     def initialize(campaign:)
       @campaign = campaign
       @audience = @campaign.campaign_audience
@@ -68,6 +71,7 @@ module Campaigns
           next unless enrollment.persisted?
 
           enrolled += 1
+          dispatch_if_imminent(enrollment)
           CampaignEvent.create!(
             company_id: @campaign.company_id, campaign_id: @campaign.id,
             campaign_enrollment_id: enrollment.id,
@@ -122,6 +126,31 @@ module Campaigns
     end
 
     private
+
+    # Launching a campaign used to enqueue nothing but this enroller, which only
+    # writes next_send_at. The single thing that dispatches a send is
+    # CampaignSchedulerJob#dispatch_due_enrollments, and that ticks every five
+    # minutes. So a first step configured to wait zero days and zero hours still
+    # sat for up to five minutes, while the builder promised the launch would
+    # "immediately begin sending" and the Recipients tab (which counts sends, not
+    # enrollments) showed nothing at all. A dealer watching that screen concludes
+    # the campaign is broken, which is exactly what happened.
+    #
+    # Handing the job its own slot as wait_until keeps pacing intact: the send
+    # fires at the instant the pacer allocated, not the instant we enqueued.
+    # Only near-term slots go out this way; everything past the scheduler's own
+    # tick is left to the scheduler, so the two paths do not both claim the same
+    # enrollment. CampaignSender re-checks for an existing send anyway.
+    def dispatch_if_imminent(enrollment)
+      slot = enrollment.next_send_at
+      return if slot.nil? || slot > Time.current + IMMINENT_WINDOW
+
+      if slot <= Time.current
+        ProcessCampaignSendJob.perform_later(enrollment.id)
+      else
+        ProcessCampaignSendJob.set(wait_until: slot).perform_later(enrollment.id)
+      end
+    end
 
     # Which mailbox this recipient's sends will go through, used to pick the
     # right pacer. Memoized hard: for every identity type except Owner the

@@ -145,4 +145,34 @@ RSpec.describe Campaigns::AudienceEnroller do
       expect(keys).to eq(["UserEmailConnection:#{connection.id}"])
     end
   end
+
+  # Launch used to enqueue only this enroller, and nothing dispatched a send:
+  # CampaignSchedulerJob's five-minute sweep was the sole path, so a first step
+  # configured to wait zero days sat for up to five minutes while the builder
+  # promised sending would begin immediately.
+  describe 'dispatching an imminent first step' do
+    it 'enqueues a send job for a zero-wait first step instead of waiting for the sweep' do
+      expect { described_class.new(campaign: campaign).enroll_all }
+        .to have_enqueued_job(ProcessCampaignSendJob).twice
+    end
+
+    # Dispatching early must not undo pacing. A paced slot is handed to the job
+    # as wait_until, so the send still leaves at the instant it was allocated.
+    it 'schedules a paced slot for its own time rather than firing the batch at once' do
+      UserEmailConnection.create!(user_id: user.id, company_id: company.id, provider: 'oauth_outlook',
+                                  email_address: "s-#{SecureRandom.hex(3)}@example.com", is_active: true)
+
+      freeze_time do
+        expect { described_class.new(campaign: campaign).enroll_all }
+          .to have_enqueued_job(ProcessCampaignSendJob).at(18.seconds.from_now)
+      end
+    end
+
+    it 'leaves a step whose wait puts it past the sweep to the scheduler' do
+      campaign.campaign_steps.first.update!(wait_days: 3)
+
+      expect { described_class.new(campaign: campaign).enroll_all }
+        .not_to have_enqueued_job(ProcessCampaignSendJob)
+    end
+  end
 end

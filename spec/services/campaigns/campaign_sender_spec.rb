@@ -180,4 +180,59 @@ RSpec.describe Campaigns::CampaignSender do
       expect(CampaignSuppression.where(company_id: company.id, reason: 'sms_stop').exists?).to be true
     end
   end
+
+  # Two paths dispatch a send now: AudienceEnroller hands imminent slots straight
+  # to ProcessCampaignSendJob, and CampaignSchedulerJob sweeps every five minutes.
+  # They can overlap. Before this guard the second one delivered a duplicate,
+  # because a CampaignSend was created fresh on every call.
+  describe 'duplicate dispatch' do
+    let!(:user_email_conn) do
+      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_gmail', is_active: true,
+                                  email_address: user.email, display_name: 'Test User')
+    end
+
+    before do
+      allow(CommunicationService).to receive(:send_email).and_return(
+        { success: true, communication: instance_double(Communication, id: 999, body: '<p>x</p>',
+                                                        update_column: true) }
+      )
+    end
+
+    it 'does not send a step twice for the same enrollment' do
+      enrollment = make_email_enrollment(email_campaign)
+      described_class.new(enrollment: enrollment).deliver_current_step
+
+      step = email_campaign.campaign_steps.first
+      # Pin the enrollment back to the step it just delivered, which is the state
+      # a crash between send and advance leaves behind.
+      enrollment.update!(current_step_index: 0, status: 'pending')
+
+      expect { described_class.new(enrollment: enrollment.reload).deliver_current_step }
+        .not_to change { enrollment.campaign_sends.where(campaign_step_id: step.id).where.not(sent_at: nil).count }
+    end
+
+    it 'advances past an already-delivered step instead of re-dispatching it forever' do
+      enrollment = make_email_enrollment(email_campaign)
+      email_campaign.campaign_steps.create!(position: 1, channel: 'email', subject: 'Two',
+                                           body_blocks: [{ 'type' => 'text', 'html' => 'two' }],
+                                           wait_days: 1)
+      described_class.new(enrollment: enrollment).deliver_current_step
+      enrollment.update!(current_step_index: 0, status: 'pending')
+
+      sender = described_class.new(enrollment: enrollment.reload)
+      expect(sender.deliver_current_step).to be false
+      expect(sender.last_skip_reason).to eq('already_sent_for_step')
+      expect(enrollment.reload.current_step_index).to eq(1)
+    end
+
+    it 'still retries a step whose only attempt failed before it left' do
+      enrollment = make_email_enrollment(email_campaign)
+      step = email_campaign.campaign_steps.first
+      CampaignSend.create!(company_id: company.id, campaign_id: email_campaign.id,
+                           campaign_step_id: step.id, campaign_enrollment_id: enrollment.id)
+
+      expect { described_class.new(enrollment: enrollment).deliver_current_step }
+        .to change { enrollment.campaign_sends.where.not(sent_at: nil).count }.by(1)
+    end
+  end
 end

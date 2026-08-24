@@ -37,6 +37,17 @@ module Campaigns
       step = current_step
       return mark_completed unless step
 
+      # Two paths now dispatch a send: AudienceEnroller hands imminent slots
+      # straight to ProcessCampaignSendJob so a zero-wait first step goes out in
+      # seconds, and CampaignSchedulerJob sweeps everything due every five
+      # minutes. They can overlap at the boundary, and the scheduler could
+      # already double-dispatch on its own if a job outlived a tick. Nothing
+      # stopped the second one delivering a duplicate, because a CampaignSend is
+      # created fresh on every call.
+      #
+      # A test send is excluded: an admin pressing Send Test twice means it.
+      return mark_skipped('already_sent_for_step') if !test_send? && already_sent?(step)
+
       return mark_failed('contact_value_missing') if contact_value.blank?
       return mark_unsubscribed if suppressed?
 
@@ -121,6 +132,30 @@ module Campaigns
 
     def test_send?
       @enrollment.metadata.is_a?(Hash) && @enrollment.metadata['test_send'].to_s == 'true'
+    end
+
+    # This step already went out for this enrollment. Only a send that actually
+    # left counts: a CampaignSend with no sent_at is a row from an attempt that
+    # failed, and that must stay retryable.
+    def already_sent?(step)
+      @enrollment.campaign_sends
+                 .where(campaign_step_id: step.id)
+                 .where.not(sent_at: nil)
+                 .exists?
+    end
+
+    # Duplicate dispatch is not a failure of the enrollment, so it must not mark
+    # one. Advance instead: reaching here means the send landed but the advance
+    # that follows it did not, which would otherwise leave the enrollment pinned
+    # to a step it has already delivered and re-dispatched on every tick forever.
+    def mark_skipped(reason)
+      @last_skip_reason = reason
+      Rails.logger.info(
+        "[CampaignSender] enrollment #{@enrollment.id} skipping step " \
+        "#{@enrollment.current_step_index} — #{reason}"
+      )
+      advance_unless_test
+      false
     end
 
     # True when the controller flagged this enrollment as an Owner-mode
