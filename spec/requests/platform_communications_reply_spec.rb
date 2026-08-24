@@ -117,5 +117,56 @@ RSpec.describe 'Api::Platform::Communications replying', type: :request do
       outbound = Communication.where(company_id: company.id).where(direction: 'outbound').order(:created_at).last
       expect(outbound.metadata['in_reply_to_id']).to be_nil
     end
+
+    # A reply arrived carrying only the new sentence, so the customer had to
+    # remember what they had asked and their own mail client had nothing to
+    # thread it against.
+    describe 'what the customer receives' do
+      it 'quotes the message being answered' do
+        reply_with(inbound.id)
+
+        outbound = Communication.where(company_id: company.id).where(direction: 'outbound').order(:created_at).last
+        expect(outbound.body).to include('Here is what happens next.')
+        expect(outbound.body).to include('Still interested, what are the next steps?')
+        expect(outbound.body).to include('dana.work@example.com wrote:')
+      end
+
+      it 'quotes nothing on an ordinary send' do
+        post '/api/platform/communications/email',
+             params: { entity_type: 'Lead', entity_id: lead.id, to: 'dana@example.com',
+                       subject: 'Checking in', body: 'Just following up.' },
+             headers: headers
+
+        outbound = Communication.where(company_id: company.id).where(direction: 'outbound').order(:created_at).last
+        expect(outbound.body).not_to include('wrote:')
+      end
+
+      # Quoting a previous outbound verbatim would carry its tracking pixel into
+      # every later message in the thread, so opening today's reply would
+      # register an open against a mail sent last week and the counts on old
+      # messages would climb on their own.
+      it 'strips the tracking pixel out of what it quotes' do
+        sent = Communication.create!(
+          company_id: company.id, communicable: lead, channel: 'email', direction: 'outbound',
+          subject: 'Your quote', status: 'sent', from_address: 'sales@dealer.com',
+          to_address: 'dana@example.com',
+          body: '<p>Here is your quote.</p><img src="https://x.test/webhooks/email/4242/pixel.gif" width="1" />'
+        )
+
+        reply_with(sent.id)
+
+        outbound = Communication.where(company_id: company.id).where(direction: 'outbound').order(:created_at).last
+        expect(outbound.body).to include('Here is your quote.')
+        expect(outbound.body).not_to include('/webhooks/email/4242/pixel.gif')
+      end
+
+      # Its own pixel still has to be there, and outside the quoted block.
+      it 'keeps a pixel for the message being sent' do
+        reply_with(inbound.id)
+
+        outbound = Communication.where(company_id: company.id).where(direction: 'outbound').order(:created_at).last
+        expect(outbound.body).to include("/webhooks/email/#{outbound.id}/pixel.gif")
+      end
+    end
   end
 end

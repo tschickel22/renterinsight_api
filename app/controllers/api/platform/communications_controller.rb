@@ -212,8 +212,18 @@ module Api
           communication.update_column(:reply_to, generated_reply_to)
           Rails.logger.info "[Platform::CommunicationsController] Auto-generated reply_to: #{generated_reply_to} for communication #{communication.id}"
           
-          # Add tracking pixel to email body
-          enhanced_body = add_tracking_pixel(email_params[:content], communication.id)
+          # The conversation so far, below the reply.
+          #
+          # A reply arrived carrying only the new sentence, so the customer had
+          # to remember what they had asked and nothing in their own mail client
+          # threaded it. Quoting the parent is also what makes the chain
+          # accumulate: the parent's body already holds its own quote, so each
+          # reply carries everything before it, the way any mail client does.
+          replied_body = with_quoted_reply(email_params[:content], communication)
+
+          # Pixel last, so it belongs to THIS message and lands outside the
+          # quoted block.
+          enhanced_body = add_tracking_pixel(replied_body, communication.id)
           # Update the communication record with the HTML version
           communication.update!(body: enhanced_body)
         else
@@ -1364,6 +1374,55 @@ module Api
       end
 
       
+      # Appends the message being answered, quoted, the way a mail client does.
+      #
+      # Nothing is appended for an ordinary send, or when the parent could not
+      # be resolved: an unexplained empty quote block is worse than none.
+      def with_quoted_reply(body, communication)
+        parent_id = communication.metadata.is_a?(Hash) ? communication.metadata['in_reply_to_id'] : nil
+        return body if parent_id.blank?
+
+        parent = Communication.find_by(id: parent_id, company_id: communication.company_id)
+        return body if parent.nil? || parent.body.blank?
+
+        <<~HTML
+          #{body}
+          <br><br>
+          <div style="border-left:2px solid #d1d5db;padding-left:12px;color:#4b5563;font-size:13px">
+            <p style="margin:0 0 8px">#{ERB::Util.html_escape(quote_attribution(parent))}</p>
+            #{quotable_body(parent)}
+          </div>
+        HTML
+      end
+
+      def quote_attribution(parent)
+        on = (parent.sent_at || parent.created_at)&.strftime('%-d %b %Y at %H:%M')
+        who = parent.from_address.presence || 'them'
+
+        on.present? ? "On #{on}, #{who} wrote:" : "#{who} wrote:"
+      end
+
+      # The parent's body, minus anything that must not run again.
+      #
+      # A previous outbound carries its own tracking pixel, and quoting it
+      # verbatim would embed that pixel in every later message in the thread —
+      # so opening today's reply would register an open against a mail sent last
+      # week, and the open counts on old messages would climb on their own.
+      # Scripts go for the ordinary reason.
+      def quotable_body(parent)
+        doc = Nokogiri::HTML::DocumentFragment.parse(parent.body.to_s)
+        doc.css('script, style').each(&:remove)
+        doc.css('img').each do |img|
+          img.remove if img['src'].to_s.match?(%r{/webhooks/email/\d+/pixel\.gif})
+        end
+        doc.to_html
+      rescue StandardError => e
+        # A quote is a courtesy. Losing the reply over it is not a trade worth
+        # making, so fall back to the text.
+        Rails.logger.warn("[Platform::CommunicationsController] could not quote #{parent.id}: #{e.message}")
+        ERB::Util.html_escape(strip_html_tags(parent.body.to_s))
+      end
+
       # Add tracking pixel to email HTML
       def add_tracking_pixel(html_body, communication_id)
         return html_body unless html_body.present? && communication_id.present?
