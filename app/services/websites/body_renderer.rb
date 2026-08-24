@@ -75,6 +75,23 @@ module Websites
       @vehicle = vehicle
     end
 
+    # Takes the crawlable copy out of the visual flow without taking it out of
+    # the document.
+    #
+    # TenantSiteApp removes #dt-prerender when it mounts, so this markup was only
+    # ever meant to be on screen for the moment before hydration. On a plain
+    # dealer page that moment passed unnoticed. On an imported landing page it
+    # does not: the design's styling lives in the block's own stylesheet, which
+    # the crawlable copy deliberately strips, so what paints first is several
+    # kilobytes of unstyled prose that a visitor reads as the page having broken.
+    # Hiding it earns nothing back for the case it exists to serve, because the
+    # consumers this feature was built for (assistants, link previews, crawlers
+    # that do not execute JavaScript) do not apply CSS at all. Google renders,
+    # sees it hidden, and still has the React page, which is the same content in
+    # the same words.
+    PRERENDER_STYLE = '#dt-prerender{position:absolute;width:1px;height:1px;margin:-1px;' \
+                      'padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}'
+
     # @return [String, nil] HTML for the crawlable container, or nil when there
     #   is nothing to say
     def call
@@ -82,6 +99,7 @@ module Websites
       return nil if sections.blank?
 
       <<~HTML
+        <style>#{PRERENDER_STYLE}</style>
         <div id="dt-prerender">
         #{sections}
         #{dealership_footer}

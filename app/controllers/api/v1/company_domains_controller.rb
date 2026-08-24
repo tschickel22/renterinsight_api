@@ -533,17 +533,33 @@ class Api::V1::CompanyDomainsController < ApplicationController
   # Drafts are offered too: dealers routinely wire up the address before publishing, and
   # HostResolver refuses to serve an unpublished site anyway.
   def assignable_websites
-    # .sites: the marketing container is not offered here. Pointing a dealer's
-    # domain at their landing page container instead of their actual site is a
-    # mistake with no obvious symptom, and the name in this dropdown would not
-    # make the difference clear. Serving landing pages from a custom domain is a
-    # separate, deliberate action.
-    @company.websites
-            .sites
-            .where(is_deleted: [false, nil])
-            .for_current_location
-            .order(:name)
-            .map { |w| { id: w.id, name: w.name, slug: w.slug, status: w.status, published: w.status == 'published' } }
+    # The marketing container used to be excluded here, on the reasoning that
+    # pointing a dealer's domain at their landing pages instead of their site is
+    # a mistake with no obvious symptom. The exclusion cost more than it saved:
+    # serving landing pages from a custom domain was supposed to be a separate
+    # deliberate action and no such action was ever built, so a tenant who added
+    # a domain for exactly that purpose had nothing to select, the domain stayed
+    # unlinked, and every request to it 404'd with the UI reporting only
+    # "Nothing to show".
+    #
+    # It is offered now and marked, so the picker can say which is which rather
+    # than relying on the container's name to carry the distinction.
+    websites = @company.websites
+                       .where(is_deleted: [false, nil])
+                       .for_current_location
+                       .order(:name)
+
+    websites.map do |w|
+      {
+        id: w.id, name: w.name, slug: w.slug, status: w.status,
+        published: w.status == 'published',
+        kind: w.kind,
+        # A container is always 'published' (HostResolver only answers for
+        # published sites and nobody would think to publish an invisible
+        # record), so its readiness is a per-page question instead.
+        landing_container: w.marketing_container?
+      }
+    end
   rescue StandardError => e
     Rails.logger.error "[CompanyDomains] Could not list websites: #{e.message}"
     []

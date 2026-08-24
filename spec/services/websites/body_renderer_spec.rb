@@ -335,4 +335,33 @@ RSpec.describe Websites::BodyRenderer do
       expect(html).to include('&lt;script&gt;')
     end
   end
+
+  # TenantSiteApp removes #dt-prerender on mount, so this markup is on screen
+  # only until React runs. On an imported landing page whose styling lives in the
+  # block's own stylesheet (which the crawlable copy strips), that moment is
+  # several kilobytes of unstyled prose painting and vanishing on every load.
+  describe 'the pre-hydration flash' do
+    let(:page) do
+      website.website_pages.create!(
+        title: 'Offer', path: '/fb',
+        blocks: [{ 'type' => 'customHtml', 'order' => 1, 'content' => {
+          'html' => '<style>.hero{color:red}</style><h1>Book a demo</h1><p>Thirty minutes.</p>'
+        } }]
+      )
+    end
+
+    let(:html) do
+      described_class.new(website: website, page: page, canonical_host: 'x.example.com').call
+    end
+
+    it 'ships the container out of the visual flow' do
+      expect(html).to include('id="dt-prerender"')
+      expect(html).to include('clip:rect(0 0 0 0)')
+    end
+
+    it 'still carries the words, since hiding is for the eye and not the crawler' do
+      expect(html).to include('Book a demo')
+      expect(html).to include('Thirty minutes.')
+    end
+  end
 end
