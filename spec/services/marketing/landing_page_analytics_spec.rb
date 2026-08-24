@@ -115,6 +115,48 @@ RSpec.describe Marketing::LandingPageAnalytics do
       visit
       expect(report[:video]).to eq(plays: 0)
     end
+
+    # A play count means different things depending on how the video is set up,
+    # and one number for both invites a wrong reading: on an autoplaying clip it
+    # equals visits, so a completion rate measured against it is really how far
+    # the average visitor stayed rather than how many chose to watch.
+    describe 'an autoplaying video' do
+      def autoplay_visit(events)
+        v = visit
+        events.each { |type| v.record_event!(type, { 'autoplay' => true }, at: 1.hour.ago) }
+        v
+      end
+
+      it 'says the plays were automatic' do
+        autoplay_visit(%w[video_play video_25])
+
+        expect(report[:video][:auto_started]).to be true
+      end
+
+      it 'does not claim automatic when the visitor pressed play' do
+        visit(events: %w[video_play])
+
+        expect(report[:video][:auto_started]).to be false
+      end
+
+      # Reaching for the speaker on a muted clip is a visitor asking to hear it,
+      # which on a video with no narration answers whether recording some is
+      # worth the effort.
+      it 'counts unmutes and rates them against plays' do
+        autoplay_visit(%w[video_play video_unmute])
+        autoplay_visit(%w[video_play])
+
+        expect(report[:video][:unmuted]).to eq(1)
+        expect(report[:video][:unmute_rate]).to eq(50.0)
+      end
+
+      it 'reports no unmutes rather than nothing when nobody reached for it' do
+        autoplay_visit(%w[video_play video_50])
+
+        expect(report[:video][:unmuted]).to eq(0)
+        expect(report[:video][:unmute_rate]).to eq(0.0)
+      end
+    end
   end
 
   describe 'sources' do

@@ -83,18 +83,44 @@ module Marketing
 
     # Quartiles are what make a video block justifiable: a page where most
     # visitors reach 75% is working even before anyone submits.
+    # Video engagement.
+    #
+    # `plays` means two different things depending on how the video is set up,
+    # and reporting one number for both invites a wrong reading. A click-to-play
+    # video counts people who chose to watch. An autoplaying one counts everyone
+    # the page loaded for, so plays equals visits and a completion rate measured
+    # against it is really "how far into the clip the average visitor stayed".
+    # auto_started says which it is, taken from the events themselves rather
+    # than from the block's current setting, so a page whose author changed the
+    # setting last week does not have its old numbers relabelled.
     def video
       plays = events.of_type('video_play').distinct.count(:page_visit_id)
       return { plays: 0 } if plays.zero?
 
+      completed = events.of_type('video_complete').distinct.count(:page_visit_id)
+
       {
         plays: plays,
+        auto_started: auto_started_plays.positive?,
         quartile_25: events.of_type('video_25').distinct.count(:page_visit_id),
         quartile_50: events.of_type('video_50').distinct.count(:page_visit_id),
         quartile_75: events.of_type('video_75').distinct.count(:page_visit_id),
-        completed: events.of_type('video_complete').distinct.count(:page_visit_id),
-        completion_rate: percentage(events.of_type('video_complete').distinct.count(:page_visit_id), plays)
+        completed: completed,
+        completion_rate: percentage(completed, plays),
+        # Someone reaching for the speaker on a muted autoplaying clip is asking
+        # to hear it. On a video with no narration that is the answer to whether
+        # recording some is worth it.
+        unmuted: events.of_type('video_unmute').distinct.count(:page_visit_id),
+        unmute_rate: percentage(events.of_type('video_unmute').distinct.count(:page_visit_id), plays)
       }
+    end
+
+    def auto_started_plays
+      events.of_type('video_play').where("payload ->> 'autoplay' = 'true'").count
+    rescue StandardError
+      # payload shape is the client's, and a reporting nicety must not take the
+      # whole analytics response down with it.
+      0
     end
 
     def sources
