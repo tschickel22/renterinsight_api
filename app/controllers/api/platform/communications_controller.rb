@@ -1269,6 +1269,12 @@ module Api
           content: clean_body,
           body: clean_body,
           status: comm.status,
+          # Who it was between. Needed to reply to an inbound message at all:
+          # the address to answer is the one it came FROM, which is not
+          # necessarily the address currently on the lead record.
+          fromAddress: comm.from_address,
+          toAddress: comm.to_address,
+          threadId: comm.communication_thread_id,
           sentAt: comm.sent_at&.iso8601,
           deliveredAt: comm.delivered_at&.iso8601,
           readAt: comm.read_at&.iso8601,
@@ -1307,6 +1313,8 @@ module Api
         entity = entity_type.constantize.find_by(id: entity_id)
         return nil unless entity
         
+        parent = replied_to_communication(entity)
+
         Communication.create!(
           communicable: entity,
           company_id: current_company_id,
@@ -1319,13 +1327,42 @@ module Api
           from_address: config['fromEmail'] || config[:fromEmail],
           cc_addresses: email_params[:cc],
           bcc_addresses: email_params[:bcc],
+          # communication_thread_id is deliberately not set here. Communication
+          # has before_create :assign_to_thread, which finds or creates one
+          # CommunicationThread per entity and channel, so grouping already
+          # works and setting it from here would overwrite a thread id with a
+          # message id.
           metadata: {
             template_id: email_params[:template_id],
             sender_user_id: current_user&.id,
-            assigned_user_id: entity.try(:assigned_user_id)
+            assigned_user_id: entity.try(:assigned_user_id),
+            in_reply_to_id: parent&.id
           }.compact
         )
       end
+
+      # The message this one answers, if the client named one.
+      #
+      # Recorded rather than used for grouping: assign_to_thread already puts
+      # every message for an entity and channel in one thread. What that cannot
+      # say is WHICH message a reply answers, and a conversation with several
+      # open questions needs that.
+      #
+      # Scoped to the same entity as well as the company. An id from a request
+      # is not evidence of anything, and pointing a reply at another customer's
+      # message would file the wrong reference against this one.
+      def replied_to_communication(entity)
+        id = params[:in_reply_to_id].presence
+        return nil if id.blank?
+
+        Communication.find_by(
+          id: id,
+          company_id: current_company_id,
+          communicable_type: entity.class.name,
+          communicable_id: entity.id
+        )
+      end
+
       
       # Add tracking pixel to email HTML
       def add_tracking_pixel(html_body, communication_id)
