@@ -431,4 +431,53 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
       expect(response).to have_http_status(:not_found)
     end
   end
+
+  # An imported design is one customHtml block that names its form by PUBLIC id,
+  # because the design's own markup is posted straight to the public endpoint.
+  # Only 'contact' blocks were rebound, so on the one kind of page where this
+  # picker is the only way to choose a form, choosing did nothing.
+  describe 'rebinding an imported design to the chosen form' do
+    let(:old_form) do
+      company.intake_forms.create!(name: 'Auto-generated', is_active: true, schema: [])
+    end
+    let(:new_form) do
+      company.intake_forms.create!(name: 'Facebook Contact', is_active: true, schema: [])
+    end
+    let(:imported) do
+      site.website_pages.create!(
+        title: 'FB', path: '/fb', page_kind: 'landing', intake_form_id: old_form.id,
+        blocks: [{ 'id' => 'b1', 'type' => 'customHtml', 'order' => 0,
+                   'content' => { 'html' => '<form data-dt-form></form>',
+                                  'intakeFormPublicId' => old_form.public_id } }]
+      )
+    end
+
+    it 'repoints the design at the newly chosen form' do
+      patch "/api/v1/landing_pages/#{imported.id}",
+            params: { intake_form_id: new_form.id }.to_json, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(imported.reload.blocks.first['content']['intakeFormPublicId'])
+        .to eq(new_form.public_id)
+    end
+
+    it 'leaves the design alone when the page has no form' do
+      patch "/api/v1/landing_pages/#{imported.id}",
+            params: { intake_form_id: nil }.to_json, headers: headers
+
+      expect(imported.reload.blocks.first['content']['intakeFormPublicId'])
+        .to eq(old_form.public_id)
+    end
+
+    it 'cannot bind a design to another company\'s form' do
+      other = Company.create!(name: "Other-#{SecureRandom.hex(3)}")
+      theirs = other.intake_forms.create!(name: 'Theirs', is_active: true, schema: [])
+
+      patch "/api/v1/landing_pages/#{imported.id}",
+            params: { intake_form_id: theirs.id }.to_json, headers: headers
+
+      expect(imported.reload.blocks.first['content']['intakeFormPublicId'])
+        .not_to eq(theirs.public_id)
+    end
+  end
 end

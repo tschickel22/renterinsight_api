@@ -409,16 +409,43 @@ class Api::V1::LandingPagesController < ApplicationController
   # to some other form is somebody's decision, and changing the page-level
   # default must not overrule it.
   def rebind_contact_blocks(page, previous_form_id)
+    public_id = page.intake_form_id.present? ? public_form_id_for(page.intake_form_id) : nil
+
     page.blocks = Array(page.blocks).map do |block|
+      content = block['content'].is_a?(Hash) ? block['content'] : {}
+
+      # An imported design is a single customHtml block that names its form by
+      # PUBLIC id, because the design's own markup is posted straight to the
+      # public endpoint. Only 'contact' was rebound, so on the one kind of page
+      # where this picker is the sole way to choose a form, choosing did
+      # nothing: the page's intake_form_id moved and the design kept posting to
+      # whichever form the importer stamped at import time. Leads from a paid ad
+      # landed under an auto-generated form with no source, and were attributed
+      # to "Web Form" rather than to the campaign that paid for them.
+      #
+      # Rebound unconditionally, unlike a contact block: there is no per-block
+      # form picker on an imported design, so a value that differs from the page
+      # is stale rather than deliberate.
+      if block['type'].to_s == 'customHtml'
+        next block if public_id.nil?
+
+        next block.merge('content' => content.merge('intakeFormPublicId' => public_id))
+      end
+
       next block unless block['type'].to_s == 'contact'
 
-      content = block['content'].is_a?(Hash) ? block['content'] : {}
       bound = content['intakeFormId']
       following = bound.blank? || bound.to_s == previous_form_id.to_s
       next block unless following
 
       block.merge('content' => content.merge('intakeFormId' => page.intake_form_id))
     end
+  end
+
+  # Scoped to the company, so a form id that somehow reached here can never
+  # bind a page to another tenant's form.
+  def public_form_id_for(form_id)
+    @company.intake_forms.where(id: form_id).pick(:public_id)
   end
 
   def page_params
