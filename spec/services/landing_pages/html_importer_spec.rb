@@ -298,6 +298,43 @@ RSpec.describe LandingPages::HtmlImporter do
       expect(result.html).to include('watch it on YouTube')
     end
 
+    # An import that turns a silent looping background clip into a click-to-play
+    # player with a control bar across it has changed the design, which is the
+    # one thing this importer is supposed not to do.
+    it 'keeps the autoplay and loop a design asked for' do
+      html = %(<body><video autoplay loop muted src="hero.mp4"></video></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to include('autoplay')
+      expect(result.html).to include('loop')
+      # Autoplay is granted only to a muted video, so the design's intent is
+      # unreachable without this.
+      expect(result.html).to include('muted')
+    end
+
+    it 'drops the control bar from a background loop the design drew without one' do
+      html = %(<body><video autoplay loop muted src="hero.mp4"></video></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).not_to include('controls')
+    end
+
+    it 'keeps controls on a video the design gave them to' do
+      html = %(<body><video autoplay loop muted controls src="hero.mp4"></video></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).to include('controls')
+    end
+
+    # An embed or a link carries no playback intent, so it must not acquire one.
+    it 'does not invent autoplay for an embed' do
+      html = %(<body><iframe src="https://player.vimeo.com/video/1"></iframe></body>)
+      result = importer.call(upload_of(html, 'page.html'))
+
+      expect(result.html).not_to include('autoplay')
+      expect(result.html).to include('controls')
+    end
+
     it 'reports no slots for a page with no video' do
       result = importer.call(upload_of(%(<body><p>Copy</p></body>), 'page.html'))
       expect(result.video_slots).to be_empty

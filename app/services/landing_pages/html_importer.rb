@@ -183,11 +183,29 @@ module LandingPages
         original = (node.name == 'a' ? node['href'] : node['src']).to_s
         source = video_host(original) || (node.name == 'video' ? 'file' : 'link')
 
+        # A design that asked for a silent looping background clip meant it, and
+        # an import that quietly turned it into a click-to-play player with a
+        # control bar across it has changed the design, which is the one thing
+        # this importer is supposed not to do. Only a real <video> can have said
+        # so; an iframe embed or a link carries no such intent.
+        autoplay = node.name == 'video' && node['autoplay']
+
         replacement = Nokogiri::XML::Node.new('video', doc)
         replacement['data-dt-slot'] = slot
-        replacement['controls'] = 'controls'
+        # Autoplay is granted only to a muted video. Chrome does not raise, it
+        # just declines to start, which reaches the dealer as a video that will
+        # not play.
+        if autoplay
+          replacement['autoplay'] = 'autoplay'
+          replacement['muted'] = 'muted'
+        end
+        replacement['loop'] = 'loop' if node.name == 'video' && node['loop']
+        # A background loop has no use for a control bar and the design did not
+        # draw one. Everything else keeps controls, since a slot the author has
+        # not filled yet is otherwise indistinguishable from a broken player.
+        replacement['controls'] = 'controls' if !autoplay || node['controls']
         replacement['playsinline'] = 'playsinline'
-        replacement['preload'] = 'metadata'
+        replacement['preload'] = autoplay ? 'auto' : 'metadata'
         # A slot with nothing in it yet must not be a black rectangle in the
         # middle of the page, so it says what it is until it is filled.
         replacement['style'] = [node['style'], 'width:100%;height:100%;background:#111;display:block']
