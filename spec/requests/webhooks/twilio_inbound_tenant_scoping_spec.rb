@@ -186,14 +186,7 @@ RSpec.describe 'Webhooks::Twilio inbound tenant scoping', type: :request do
         .with(hash_including(to: rep_b.phone))
     end
 
-    # Reaches metadata.dig on the matched outbound, which is where the four
-    # examples above already fail: db/schema.rb declares communications.metadata
-    # as text while every deployed database holds jsonb, so a Hash round-trips
-    # through the test database as a Ruby inspect string. Pending rather than
-    # deleted — RSpec reports a pending example that starts passing, so this
-    # turns itself back on the moment the schema is corrected.
-    it 'still routes a reply that arrives on a tenant\'s own number',
-       pending: 'communications.metadata text/jsonb schema drift' do
+    it 'still routes a reply that arrives on a tenant\'s own number' do
       outbound_sms(company: company_a, lead: lead_a, sender: rep_a,
                    from: number_a, sent_at: 2.hours.ago)
 

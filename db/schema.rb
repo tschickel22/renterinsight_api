@@ -1873,7 +1873,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_20_160000) do
     t.datetime "delivered_at"
     t.datetime "failed_at"
     t.text "error_message"
-    t.text "metadata"
+    t.jsonb "metadata"
     t.string "external_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
