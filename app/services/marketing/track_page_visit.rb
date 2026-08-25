@@ -68,6 +68,7 @@ module Marketing
         utm_term: @params[:utm_term].to_s.presence&.first(120),
         device_type: device_type,
         country: country,
+        region: region,
         ip_hash: ip_hash,
         is_bot: bot?,
         first_seen_at: now,
@@ -175,6 +176,24 @@ module Marketing
       return nil if %w[XX T1].include?(code)
 
       code.to_s.upcase.first(2)
+    end
+
+    # The visitor's state, forwarded by the tenant host Worker.
+    #
+    # Cloudflare exposes this on request.cf, which is a Worker-runtime object
+    # and never a header, so unlike CF-IPCountry it does not arrive on its own —
+    # the Worker has to put it on the request. Free on every plan; the paid
+    # alternative is a managed transform this zone does not have.
+    #
+    # Only meaningful for the country it belongs to: several countries use the
+    # same two-letter subdivision codes, so a bare "CO" is Colorado or Cordoba
+    # depending. Recorded anyway rather than composed, because every reader here
+    # groups by country first.
+    def region
+      code = @request&.headers&.[]('X-DT-Region').presence
+      return nil if code.blank?
+
+      code.to_s.upcase.first(8)
     end
 
     def bot?

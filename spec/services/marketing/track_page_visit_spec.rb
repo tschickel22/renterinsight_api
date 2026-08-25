@@ -230,4 +230,21 @@ RSpec.describe Marketing::TrackPageVisit do
       expect(track(base).country).to be_nil
     end
   end
+
+  # Cloudflare exposes the region on request.cf, which is a Worker-runtime
+  # object and never a header, so unlike the country it does not arrive on its
+  # own — the tenant host Worker has to put it on the request.
+  describe 'region' do
+    context 'when the Worker forwarded it' do
+      let(:headers) { { 'CF-IPCountry' => 'US', 'X-DT-Region' => 'co' } }
+
+      it 'records it, normalised' do
+        expect(track(base).region).to eq('CO')
+      end
+    end
+
+    it 'records nothing when the Worker did not send it' do
+      expect(track(base).region).to be_nil
+    end
+  end
 end

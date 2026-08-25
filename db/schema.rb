@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_24_220000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_25_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4651,6 +4651,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_24_220000) do
     t.boolean "is_bot", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "region", limit: 8
     t.index ["campaign_enrollment_id"], name: "index_page_visits_on_campaign_enrollment_id"
     t.index ["campaign_id"], name: "index_page_visits_on_campaign_id"
     t.index ["company_id", "visitor_token"], name: "index_page_visits_on_company_id_and_visitor_token"

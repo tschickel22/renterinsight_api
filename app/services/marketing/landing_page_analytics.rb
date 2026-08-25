@@ -143,7 +143,11 @@ module Marketing
         # Populated from Cloudflare's header on visits recorded since the beacon
         # started going through the proxy. Older rows have none, so an empty map
         # here means "not measured yet" rather than "nobody".
-        by_country: visits.where.not(country: nil).group(:country).count
+        by_country: visits.where.not(country: nil).group(:country).count,
+        # The grain an ad decision is made at: whether the spend is reaching the
+        # states you sell in. Empty until the Worker forwarding it is deployed,
+        # so an empty map means not measured rather than nowhere.
+        by_region: visits.where.not(region: nil).group(:region).count
       }
     end
 

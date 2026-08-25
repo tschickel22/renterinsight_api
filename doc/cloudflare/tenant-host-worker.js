@@ -197,6 +197,24 @@ export default {
     // visitor actually used or every generated URL comes back as http.
     headers.set('X-Forwarded-Proto', 'https');
 
+    // The visitor's state, for landing page analytics.
+    //
+    // CF-IPCountry rides along on its own: Cloudflare attaches it before this Worker runs
+    // and the Headers copy above preserves it. Region does not — it exists only on
+    // request.cf, which is a Worker-runtime object and never a header, so without this the
+    // origin cannot see it at all. Free on every plan; the paid alternative is a managed
+    // transform this zone does not have.
+    //
+    // regionCode, not region: two letters that mean one place, against a display name that
+    // arrives spelled differently often enough to split one state into several rows.
+    //
+    // City is deliberately not forwarded. Most of this traffic is mobile, where the IP
+    // resolves to the carrier's regional hub rather than the visitor, so a city column
+    // would be confidently wrong. State is the grain an ad decision is actually made at,
+    // and far less identifying for a visit that later becomes a named lead.
+    const geo = request.cf || {};
+    if (geo.regionCode) headers.set('X-DT-Region', String(geo.regionCode).slice(0, 8));
+
     let response;
     try {
       response = await fetch(new URL(url).toString(), {

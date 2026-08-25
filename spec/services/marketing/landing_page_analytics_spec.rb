@@ -159,6 +159,25 @@ RSpec.describe Marketing::LandingPageAnalytics do
     end
   end
 
+  describe 'where they are' do
+    # Country alone cannot answer an ad question when essentially all the
+    # traffic is one country. The state is the grain a decision is made at.
+    it 'groups by region, ignoring visits recorded before the Worker sent one' do
+      visit.update!(country: 'US', region: 'CO')
+      visit.update!(country: 'US', region: 'CO')
+      visit.update!(country: 'US', region: 'TX')
+      visit # no region at all
+
+      expect(report[:sources][:by_region]).to eq('CO' => 2, 'TX' => 1)
+    end
+
+    it 'reports an empty map rather than nothing when none was measured' do
+      visit
+
+      expect(report[:sources][:by_region]).to eq({})
+    end
+  end
+
   describe 'sources' do
     it 'groups by tag, treating an untagged visit with no referrer as direct' do
       visit(utm: 'email')
