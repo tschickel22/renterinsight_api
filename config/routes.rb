@@ -808,6 +808,10 @@ Rails.application.routes.draw do
         collection do
           post :ai_generate
           post :import_html
+          # Every page's headline numbers in one table. Declared on the
+          # collection, so it does not collide with the member :analytics that
+          # reports on one.
+          get :comparison
         end
       end
 

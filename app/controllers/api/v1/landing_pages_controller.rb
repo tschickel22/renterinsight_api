@@ -294,6 +294,21 @@ class Api::V1::LandingPagesController < ApplicationController
     ).call
   end
 
+  # GET /api/v1/landing_pages/comparison
+  #
+  # The question the per-page report cannot answer: which of these is doing
+  # better. Answering it meant opening each page in turn and holding the numbers
+  # in your head.
+  def comparison
+    return unless authorize_action!('websites', 'read')
+
+    render json: Marketing::LandingPageComparison.new(
+      company_landing_pages.order(:title),
+      from: params[:from].presence && Time.zone.parse(params[:from]),
+      to: params[:to].presence && Time.zone.parse(params[:to])
+    ).call
+  end
+
   # GET /api/v1/landing_pages/:id/visitors
   #
   # Identified visitors only. An anonymous row has nothing a salesperson can

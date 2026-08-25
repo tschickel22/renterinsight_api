@@ -498,4 +498,81 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
         .not_to eq(theirs.public_id)
     end
   end
+
+  # The per-page report answers "how is this page doing" and cannot answer
+  # "which of these is doing better", which is the question someone running two
+  # ads against two pages actually has.
+  describe 'GET /api/v1/landing_pages/comparison' do
+    let!(:winner) do
+      site.website_pages.create!(title: 'A Winner', path: '/a', page_kind: 'landing', blocks: [])
+    end
+    let!(:loser) do
+      site.website_pages.create!(title: 'B Loser', path: '/b', page_kind: 'landing', blocks: [])
+    end
+
+    def visit_page(page, converted: false, bot: false, at: 1.hour.ago, visitor: SecureRandom.hex(4))
+      PageVisit.create!(company_id: company.id, website_page_id: page.id,
+                        visitor_token: visitor, session_token: SecureRandom.hex(6),
+                        converted: converted, is_bot: bot, max_scroll_depth: 0,
+                        first_seen_at: at, last_seen_at: at)
+    end
+
+    it 'returns a row per page with matching totals' do
+      visit_page(winner, converted: true)
+      visit_page(winner)
+      visit_page(loser)
+
+      get '/api/v1/landing_pages/comparison', headers: headers
+      expect(response).to have_http_status(:ok)
+
+      rows = json['items'].index_by { |r| r['id'] }
+      expect(rows[winner.id]['visits']).to eq(2)
+      expect(rows[winner.id]['conversions']).to eq(1)
+      expect(rows[winner.id]['conversion_rate']).to eq(50.0)
+      expect(rows[loser.id]['conversions']).to eq(0)
+    end
+
+    # One person returning three times is one person deciding, and the per-page
+    # report counts it that way.
+    it 'counts a returning visitor once' do
+      visit_page(winner, visitor: 'same')
+      visit_page(winner, visitor: 'same')
+
+      get '/api/v1/landing_pages/comparison', headers: headers
+
+      row = json['items'].find { |r| r['id'] == winner.id }
+      expect(row['visits']).to eq(2)
+      expect(row['unique_visitors']).to eq(1)
+    end
+
+    # A crawler that runs JavaScript inflates every number, and this is the view
+    # most likely to be skimmed rather than read.
+    it 'excludes bots, as the per-page report does' do
+      visit_page(winner, bot: true)
+
+      get '/api/v1/landing_pages/comparison', headers: headers
+
+      expect(json['items'].find { |r| r['id'] == winner.id }['visits']).to eq(0)
+    end
+
+    it 'honours the window so two campaigns on one page can be told apart' do
+      visit_page(winner, at: 60.days.ago)
+      visit_page(winner, at: 1.hour.ago)
+
+      get "/api/v1/landing_pages/comparison?from=#{7.days.ago.to_date}", headers: headers
+
+      expect(json['items'].find { |r| r['id'] == winner.id }['visits']).to eq(1)
+    end
+
+    it 'refuses another company\'s pages' do
+      other = Company.create!(name: "Other-#{SecureRandom.hex(3)}")
+      other_site = Marketing::MarketingSiteProvisioner.call(company: other)
+      theirs = other_site.website_pages.create!(title: 'Theirs', path: '/t',
+                                                page_kind: 'landing', blocks: [])
+
+      get '/api/v1/landing_pages/comparison', headers: headers
+
+      expect(json['items'].map { |r| r['id'] }).not_to include(theirs.id)
+    end
+  end
 end
