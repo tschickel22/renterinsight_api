@@ -123,12 +123,71 @@ module Marketing
       0
     end
 
+    # Where the traffic came from, from the referrer when nothing tagged it.
+    #
+    # This grouped on utm_source alone and called everything else "direct". On
+    # the two pages running Meta ads that was wrong for half the traffic: 24 of
+    # 47 visits arrived with a facebook.com referrer and 3 carried a utm_source,
+    # so the report said "direct" about paid clicks and there was no way to tell
+    # an ad click from someone typing the URL.
+    #
+    # A tag still wins where there is one, because a tag says which ad and a
+    # referrer only says which site.
     def sources
       {
-        by_utm_source: visits.group(:utm_source).count.transform_keys { |k| k.presence || 'direct' },
+        by_source: visits.pluck(:utm_source, :referrer)
+                         .map { |utm, referrer| source_label(utm, referrer) }
+                         .tally,
         by_campaign: visits.where.not(campaign_id: nil).group(:campaign_id).count,
         by_device: visits.group(:device_type).count.transform_keys { |k| k.presence || 'unknown' }
       }
+    end
+
+    # Referrer hosts worth naming. Anything else is reported by its host, which
+    # is more use than lumping it under "other".
+    REFERRER_SOURCES = {
+      /(^|\.)facebook\.com$/i => 'facebook',
+      /(^|\.)instagram\.com$/i => 'instagram',
+      /(^|\.)google\./i => 'google',
+      /(^|\.)bing\.com$/i => 'bing',
+      /(^|\.)linkedin\.com$/i => 'linkedin',
+      /(^|\.)t\.co$/i => 'twitter',
+      /(^|\.)youtube\.com$/i => 'youtube'
+    }.freeze
+
+    def source_label(utm_source, referrer)
+      return utm_source if utm_source.present?
+
+      host = referrer_host(referrer)
+      return 'direct' if host.blank?
+      # A referrer pointing at the page's own site is a reload or an in-page
+      # link, not a source. Calling it one would credit the page for its own
+      # traffic, and on these two pages that is a third of the referrers.
+      return 'direct' if own_hosts.include?(host)
+
+      REFERRER_SOURCES.each { |pattern, name| return name if host.match?(pattern) }
+      host
+    end
+
+    # Every hostname this page can be reached on, so a self-referral is
+    # recognised whichever of them the visitor was using.
+    def own_hosts
+      @own_hosts ||= begin
+        site = @page.website
+        hosts = site ? site.company_domains.pluck(:hostname) : []
+        hosts.compact.map { |h| h.to_s.downcase.delete_prefix('www.') }.to_set
+      rescue StandardError => e
+        Rails.logger.warn("[LandingPageAnalytics] could not read own hosts: #{e.message}")
+        Set.new
+      end
+    end
+
+    def referrer_host(referrer)
+      return nil if referrer.blank?
+
+      URI.parse(referrer).host&.downcase&.delete_prefix('www.')
+    rescue URI::InvalidURIError
+      nil
     end
 
     def timeseries

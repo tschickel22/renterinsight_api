@@ -160,12 +160,55 @@ RSpec.describe Marketing::LandingPageAnalytics do
   end
 
   describe 'sources' do
-    it 'groups by utm source, treating missing as direct' do
+    it 'groups by tag, treating an untagged visit with no referrer as direct' do
       visit(utm: 'email')
       visit(utm: 'email')
       visit(utm: nil)
 
-      expect(report[:sources][:by_utm_source]).to eq('email' => 2, 'direct' => 1)
+      expect(report[:sources][:by_source]).to eq('email' => 2, 'direct' => 1)
+    end
+
+    # This grouped on utm_source alone and called everything else "direct". On
+    # the two pages running Meta ads that was wrong for half the traffic: 24 of
+    # 47 visits arrived with a facebook.com referrer and 3 carried a tag, so the
+    # report said "direct" about paid clicks.
+    describe 'a visit nobody tagged' do
+      def referred(from)
+        v = visit
+        v.update!(referrer: from)
+        v
+      end
+
+      it 'names the site it came from' do
+        referred('https://m.facebook.com/')
+        referred('https://www.facebook.com/some/path')
+
+        expect(report[:sources][:by_source]['facebook']).to eq(2)
+      end
+
+      it 'reports an unrecognised referrer by its host rather than as other' do
+        referred('https://news.example.com/article')
+
+        expect(report[:sources][:by_source]['news.example.com']).to eq(1)
+      end
+
+      # Crediting the page for its own reloads would inflate whatever source
+      # happened to be named alongside them.
+      it 'treats a referrer from the page\'s own site as direct' do
+        company.company_domains.create!(hostname: 'go.example.com', website_id: site.id,
+                                        verification_status: 'active')
+        referred('https://go.example.com/fb')
+
+        expect(report[:sources][:by_source]['direct']).to eq(1)
+      end
+
+      # A tag says which ad; a referrer only says which site.
+      it 'prefers the tag when there is one' do
+        v = visit(utm: 'fb-lookalike-may')
+        v.update!(referrer: 'https://m.facebook.com/')
+
+        expect(report[:sources][:by_source]['fb-lookalike-may']).to eq(1)
+      end
     end
 
     it 'groups by device' do
