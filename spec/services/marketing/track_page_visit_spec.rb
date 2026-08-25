@@ -7,8 +7,13 @@ RSpec.describe Marketing::TrackPageVisit do
   let(:site) { Marketing::MarketingSiteProvisioner.call(company: company) }
   let(:page) { site.website_pages.create!(title: 'Spring Sale', path: '/spring-sale', page_kind: 'landing') }
 
+  # Cloudflare proxies every tenant hostname and attaches the visitor's country.
+  # Defaults to absent so the existing examples describe a request that did not
+  # come through the proxy.
+  let(:headers) { {} }
   let(:request) do
-    instance_double(ActionDispatch::Request, user_agent: 'Mozilla/5.0 (Macintosh)', remote_ip: '203.0.113.9')
+    instance_double(ActionDispatch::Request, user_agent: 'Mozilla/5.0 (Macintosh)',
+                                             remote_ip: '203.0.113.9', headers: headers)
   end
 
   def track(params)
@@ -68,7 +73,8 @@ RSpec.describe Marketing::TrackPageVisit do
 
     it 'hashes the same IP consistently and different IPs differently' do
       a = track(base)
-      other = instance_double(ActionDispatch::Request, user_agent: 'Mozilla/5.0', remote_ip: '198.51.100.4')
+      other = instance_double(ActionDispatch::Request, user_agent: 'Mozilla/5.0',
+                                                       remote_ip: '198.51.100.4', headers: {})
       b = described_class.new(page: page, params: base.merge(session_token: 's-2').with_indifferent_access,
                               request: other).call
 
@@ -78,7 +84,8 @@ RSpec.describe Marketing::TrackPageVisit do
 
   describe 'bot filtering' do
     it 'flags obvious crawlers rather than dropping them' do
-      bot = instance_double(ActionDispatch::Request, user_agent: 'Googlebot/2.1', remote_ip: '203.0.113.9')
+      bot = instance_double(ActionDispatch::Request, user_agent: 'Googlebot/2.1',
+                                                     remote_ip: '203.0.113.9', headers: {})
       visit = described_class.new(page: page, params: base.with_indifferent_access, request: bot).call
 
       expect(visit.is_bot).to be(true)
@@ -192,6 +199,35 @@ RSpec.describe Marketing::TrackPageVisit do
 
     it 'leaves an ordinary visitor anonymous' do
       expect(track(base).identified_entity).to be_nil
+    end
+  end
+
+  # page_visits.country has existed since the table was created and nothing ever
+  # wrote it: the beacon posted straight to the API host, skipping the proxy
+  # that knows the answer.
+  describe 'country' do
+    context 'when the request came through Cloudflare' do
+      let(:headers) { { 'CF-IPCountry' => 'us' } }
+
+      it 'records it, normalised' do
+        expect(track(base).country).to eq('US')
+      end
+    end
+
+    # XX means Cloudflare could not tell and T1 means Tor. Neither is a place,
+    # and storing them would put two invented countries in every report.
+    %w[XX T1].each do |placeholder|
+      context "when Cloudflare sends #{placeholder}" do
+        let(:headers) { { 'CF-IPCountry' => placeholder } }
+
+        it 'records nothing' do
+          expect(track(base).country).to be_nil
+        end
+      end
+    end
+
+    it 'records nothing when the request did not come through the proxy' do
+      expect(track(base).country).to be_nil
     end
   end
 end

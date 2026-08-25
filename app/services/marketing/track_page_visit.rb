@@ -67,6 +67,7 @@ module Marketing
         utm_content: @params[:utm_content].to_s.presence&.first(120),
         utm_term: @params[:utm_term].to_s.presence&.first(120),
         device_type: device_type,
+        country: country,
         ip_hash: ip_hash,
         is_bot: bot?,
         first_seen_at: now,
@@ -154,6 +155,26 @@ module Marketing
 
     def user_agent
       @user_agent ||= @request&.user_agent.to_s
+    end
+
+    # Where the visitor is, without keeping anything that locates them.
+    #
+    # Cloudflare proxies every tenant hostname and attaches this to the request,
+    # free, on any plan. The column has existed since page_visits was created
+    # and nothing has ever written it, because the beacon posted straight to the
+    # API host and skipped the proxy entirely.
+    #
+    # Country only, deliberately. It answers "is this audience in the right
+    # state" without retaining anything that identifies a person, which is the
+    # same trade ip_hash already makes.
+    def country
+      code = @request&.headers&.[]('CF-IPCountry').presence
+      return nil if code.blank?
+      # Cloudflare sends XX when it cannot tell and T1 for Tor. Neither is a
+      # place, and storing them would put two fake countries in every report.
+      return nil if %w[XX T1].include?(code)
+
+      code.to_s.upcase.first(2)
     end
 
     def bot?

@@ -139,7 +139,11 @@ module Marketing
                          .map { |utm, referrer| source_label(utm, referrer) }
                          .tally,
         by_campaign: visits.where.not(campaign_id: nil).group(:campaign_id).count,
-        by_device: visits.group(:device_type).count.transform_keys { |k| k.presence || 'unknown' }
+        by_device: visits.group(:device_type).count.transform_keys { |k| k.presence || 'unknown' },
+        # Populated from Cloudflare's header on visits recorded since the beacon
+        # started going through the proxy. Older rows have none, so an empty map
+        # here means "not measured yet" rather than "nobody".
+        by_country: visits.where.not(country: nil).group(:country).count
       }
     end
 
