@@ -461,6 +461,24 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
         .to eq(new_form.public_id)
     end
 
+    # Gating the rebind on a change meant a page bound before the rebinding
+    # existed could never heal: its form does not change on a later save. Page
+    # 29 in production sat that way, page-level form set and the design still
+    # posting to its auto-generated one with no source, so every lead recorded
+    # as "Web Form".
+    it 'corrects a stale design even when the form did not change' do
+      imported.update!(intake_form_id: new_form.id)
+      expect(imported.reload.blocks.first['content']['intakeFormPublicId'])
+        .to eq(old_form.public_id)
+
+      patch "/api/v1/landing_pages/#{imported.id}",
+            params: { title: 'FB' }.to_json, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(imported.reload.blocks.first['content']['intakeFormPublicId'])
+        .to eq(new_form.public_id)
+    end
+
     it 'leaves the design alone when the page has no form' do
       patch "/api/v1/landing_pages/#{imported.id}",
             params: { intake_form_id: nil }.to_json, headers: headers

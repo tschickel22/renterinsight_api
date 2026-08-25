@@ -193,7 +193,19 @@ class Api::V1::LandingPagesController < ApplicationController
     # own intake_form_id and left every contact block still naming the previous
     # form, so the picker looked like it had worked while the leads kept going
     # to the form the author had just switched away from.
-    rebind_contact_blocks(@page, previous_form_id) if @page.intake_form_id != previous_form_id
+    # Unconditionally, not only when the picker moved.
+    #
+    # Gating on a change meant a page bound before this rebinding existed could
+    # never heal: its form does not change on a later save, so the rebind never
+    # ran and the design kept posting to whichever form the importer stamped.
+    # Page 29 in production sat that way — page-level form set to Facebook
+    # Contact, design still posting to its auto-generated one with no source, so
+    # every lead recorded as "Web Form".
+    #
+    # Safe for contact blocks, which keep their own rule: with the form
+    # unchanged, one following the page is rewritten to the value it already
+    # holds, and one deliberately bound elsewhere is still left alone.
+    rebind_form_blocks(@page, previous_form_id)
 
     if @page.save
       render json: detail(@page)
@@ -408,7 +420,7 @@ class Api::V1::LandingPagesController < ApplicationController
   # Only blocks that were following the page are moved: one deliberately bound
   # to some other form is somebody's decision, and changing the page-level
   # default must not overrule it.
-  def rebind_contact_blocks(page, previous_form_id)
+  def rebind_form_blocks(page, previous_form_id)
     public_id = page.intake_form_id.present? ? public_form_id_for(page.intake_form_id) : nil
 
     page.blocks = Array(page.blocks).map do |block|
@@ -428,6 +440,10 @@ class Api::V1::LandingPagesController < ApplicationController
       # is stale rather than deliberate.
       if block['type'].to_s == 'customHtml'
         next block if public_id.nil?
+        # Corrected whenever it disagrees, not only when the picker moved.
+        # There is no per-block form picker on an imported design, so a value
+        # that differs from the page is stale rather than deliberate.
+        next block if content['intakeFormPublicId'].to_s == public_id.to_s
 
         next block.merge('content' => content.merge('intakeFormPublicId' => public_id))
       end
