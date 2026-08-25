@@ -31,6 +31,16 @@ class SyncAllUsersSentEmailsJob < ApplicationJob
     # 2. OAuth connections (UserEmailConnection with oauth_gmail or oauth_outlook)
     all_oauth = UserEmailConnection.where(provider: %w[oauth_gmail oauth_outlook], is_active: true)
 
+    # A connection whose grant the provider has permanently rejected cannot be
+    # repaired by polling it again: only the user re-running OAuth fixes it, and
+    # they were notified when it was flagged. Retrying regardless is what turned
+    # one stale Gmail mailbox into hundreds of rejected token requests a day
+    # against our OAuth client, every day, forever.
+    all_oauth, awaiting_reconnect = all_oauth.to_a.partition { |c| !c.needs_reauth? }
+    if awaiting_reconnect.any?
+      Rails.logger.info "[EmailSync] Skipping #{awaiting_reconnect.count} connection(s) awaiting reconnect: #{awaiting_reconnect.map(&:email_address).join(', ')}"
+    end
+
     # A send-only grant (Gmail's gmail.send) can post a message but cannot list
     # one. Attempting anyway fails on auth, and EmailConnectionHealth would read
     # that as a dead token and tell the user to reconnect a mailbox that is

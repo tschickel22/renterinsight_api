@@ -13,6 +13,13 @@ class HarvestCampaignBouncesJob < ApplicationJob
   def perform
     all_connections = UserEmailConnection.where(provider: %w[oauth_gmail oauth_outlook smtp], is_active: true)
 
+    # Same rule as SyncAllUsersSentEmailsJob: a dead grant stays dead until the
+    # user reconnects, so polling it only burns rejected token requests.
+    all_connections, awaiting_reconnect = all_connections.to_a.partition { |c| !c.needs_reauth? }
+    if awaiting_reconnect.any?
+      Rails.logger.info "[BounceHarvest] Skipping #{awaiting_reconnect.count} connection(s) awaiting reconnect: #{awaiting_reconnect.map(&:email_address).join(', ')}"
+    end
+
     # Reading the INBOX needs a read grant. A send-only connection cannot do it,
     # and trying would look like a dead token to EmailConnectionHealth.
     connections, send_only = all_connections.partition(&:can_read_mailbox?)

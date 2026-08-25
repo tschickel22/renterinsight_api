@@ -453,7 +453,7 @@ class UserEmailConnection < ApplicationRecord
 
   # Refresh OAuth token and persist
   # scope: optional override scope string (e.g. for Graph API tokens)
-  def refresh_oauth_token!(scope: nil)
+  def refresh_oauth_token!(scope: nil, flag_dead_grant: true)
     oauth_type = provider == 'oauth_gmail' ? :google : :microsoft
 
     token_url = case oauth_type
@@ -482,7 +482,15 @@ class UserEmailConnection < ApplicationRecord
     tokens = JSON.parse(res.body)
 
     if tokens['error'].present?
-      Rails.logger.error "[UserEmailConnection#refresh_oauth_token!] Error: #{tokens['error']} - #{tokens['error_description']}"
+      @last_refresh_error = [tokens['error'], tokens['error_description']].compact_blank.join(' - ')
+      Rails.logger.error "[UserEmailConnection#refresh_oauth_token!] Error: #{@last_refresh_error}"
+      # A grant the provider has permanently rejected (invalid_grant, revoked
+      # consent, a testing-mode token past its 7 day life) never recovers by
+      # being asked again. Flag it once, notify the owner, and let the pollers
+      # skip it. Without this the scheduled syncs re-posted the same doomed
+      # refresh every 10 minutes forever: one stale Gmail mailbox on staging
+      # produced ~400 rejected token requests a day against our OAuth client.
+      EmailConnectionHealth.flag!(self, @last_refresh_error) if flag_dead_grant
       return nil
     end
 
@@ -504,12 +512,17 @@ class UserEmailConnection < ApplicationRecord
   GRAPH_SEND_SCOPE = 'https://graph.microsoft.com/Mail.Send offline_access'.freeze
   GRAPH_FULL_SCOPE = 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read offline_access'.freeze
 
+  # The scoped variants do not flag on failure: ensure_graph_token! asks for the
+  # wider Send+Read grant first and falls back to Send-only, and Microsoft answers
+  # a scope it never consented to with invalid_grant too. Flagging there would
+  # tell a mailbox that sends perfectly well to reconnect. Only the caller that
+  # has run out of fallbacks knows the grant is actually dead.
   def refresh_oauth_token_for_graph!
-    refresh_oauth_token!(scope: GRAPH_SEND_SCOPE)
+    refresh_oauth_token!(scope: GRAPH_SEND_SCOPE, flag_dead_grant: false)
   end
 
   def refresh_oauth_token_for_graph_read!
-    refresh_oauth_token!(scope: GRAPH_FULL_SCOPE)
+    refresh_oauth_token!(scope: GRAPH_FULL_SCOPE, flag_dead_grant: false)
   end
 
   # Get a valid Graph API access token, refreshing if expired
@@ -518,7 +531,12 @@ class UserEmailConnection < ApplicationRecord
     token = oauth_token_encrypted
     if oauth_token_expired? && oauth_refresh_token_encrypted.present?
       refreshed = refresh_oauth_token_for_graph_read! || refresh_oauth_token_for_graph!
-      token = refreshed if refreshed
+      if refreshed
+        token = refreshed
+      else
+        # Both scopes rejected, so this is the grant and not the scope.
+        EmailConnectionHealth.flag!(self, @last_refresh_error)
+      end
     end
     token
   end

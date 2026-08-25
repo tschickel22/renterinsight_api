@@ -351,7 +351,12 @@ class Api::V1::OauthEmailController < ApplicationController
       verified_at:                Time.current,
       oauth_token_encrypted:      access_token,
       oauth_refresh_token_encrypted: refresh_token,
-      oauth_expires_at:           expires_at
+      oauth_expires_at:           expires_at,
+      # Reconnecting is exactly what clears a dead grant. Leaving the old
+      # "Reauth required" error in place would keep the pollers skipping a
+      # mailbox that works again.
+      last_error_at:              nil,
+      last_error_message:         nil
     }
     # Only overwrite on a grant that actually reported scopes. A provider that
     # omits the field must not wipe what we already knew about the connection.

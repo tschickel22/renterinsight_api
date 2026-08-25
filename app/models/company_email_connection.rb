@@ -218,7 +218,7 @@ class CompanyEmailConnection < ApplicationRecord
     imap.authenticate('XOAUTH2', email, token)
   end
 
-  def refresh_oauth_token!(scope: nil)
+  def refresh_oauth_token!(scope: nil, flag_dead_grant: true)
     oauth_type = provider == 'oauth_gmail' ? :google : :microsoft
     token_url = case oauth_type
                 when :microsoft then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
@@ -245,7 +245,12 @@ class CompanyEmailConnection < ApplicationRecord
     res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
     tokens = JSON.parse(res.body)
 
-    return nil if tokens['error'].present?
+    if tokens['error'].present?
+      @last_refresh_error = [tokens['error'], tokens['error_description']].compact_blank.join(' - ')
+      Rails.logger.error "[CompanyEmailConnection#refresh_oauth_token!] Error: #{@last_refresh_error}"
+      note_dead_grant!(@last_refresh_error) if flag_dead_grant
+      return nil
+    end
 
     attrs = {
       oauth_token_encrypted: tokens['access_token'],
@@ -263,20 +268,40 @@ class CompanyEmailConnection < ApplicationRecord
   GRAPH_SEND_SCOPE = 'https://graph.microsoft.com/Mail.Send offline_access'.freeze
   GRAPH_FULL_SCOPE = 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read offline_access'.freeze
 
+  # Not flagged on failure: ensure_graph_token! tries Send+Read first and falls
+  # back to Send-only, and Microsoft rejects an unconsented scope with
+  # invalid_grant as well. Only the caller out of fallbacks knows the grant died.
   def refresh_oauth_token_for_graph!
-    refresh_oauth_token!(scope: GRAPH_SEND_SCOPE)
+    refresh_oauth_token!(scope: GRAPH_SEND_SCOPE, flag_dead_grant: false)
   end
 
   def refresh_oauth_token_for_graph_read!
-    refresh_oauth_token!(scope: GRAPH_FULL_SCOPE)
+    refresh_oauth_token!(scope: GRAPH_FULL_SCOPE, flag_dead_grant: false)
   end
 
   def ensure_graph_token!
     token = oauth_token_encrypted
     if oauth_token_expired? && oauth_refresh_token_encrypted.present?
       refreshed = refresh_oauth_token_for_graph_read! || refresh_oauth_token_for_graph!
-      token = refreshed if refreshed
+      if refreshed
+        token = refreshed
+      else
+        note_dead_grant!(@last_refresh_error)
+      end
     end
     token
+  end
+
+  # A grant the provider has permanently rejected never recovers by being asked
+  # again, so record it rather than re-posting the same doomed refresh on every
+  # send. Nothing polls these connections on a schedule the way the per-user
+  # ones are polled, but the recorded error is what tells the settings screen
+  # the mailbox has to be reconnected.
+  def note_dead_grant!(message)
+    return if message.blank?
+    return unless EmailConnectionHealth.reauth_error?(message)
+    return if last_error_message.to_s.start_with?('Reauth required:')
+
+    record_error!("Reauth required: #{message}")
   end
 end
