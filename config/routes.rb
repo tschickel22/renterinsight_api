@@ -2867,6 +2867,14 @@ Rails.application.routes.draw do
 
     # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
     namespace :admin do
+      # Who is on a tenant site right now, and who has just left. Cross-tenant
+      # on purpose: this is the platform operator's view.
+      resources :live_visitors, only: [:index] do
+        collection do
+          get :history
+        end
+      end
+
       # Admin Buyers (Portal Users for Admin View)
       resources :buyers, only: [:index]
       

@@ -151,30 +151,8 @@ module Marketing
       }
     end
 
-    # Referrer hosts worth naming. Anything else is reported by its host, which
-    # is more use than lumping it under "other".
-    REFERRER_SOURCES = {
-      /(^|\.)facebook\.com$/i => 'facebook',
-      /(^|\.)instagram\.com$/i => 'instagram',
-      /(^|\.)google\./i => 'google',
-      /(^|\.)bing\.com$/i => 'bing',
-      /(^|\.)linkedin\.com$/i => 'linkedin',
-      /(^|\.)t\.co$/i => 'twitter',
-      /(^|\.)youtube\.com$/i => 'youtube'
-    }.freeze
-
     def source_label(utm_source, referrer)
-      return utm_source if utm_source.present?
-
-      host = referrer_host(referrer)
-      return 'direct' if host.blank?
-      # A referrer pointing at the page's own site is a reload or an in-page
-      # link, not a source. Calling it one would credit the page for its own
-      # traffic, and on these two pages that is a third of the referrers.
-      return 'direct' if own_hosts.include?(host)
-
-      REFERRER_SOURCES.each { |pattern, name| return name if host.match?(pattern) }
-      host
+      Marketing::VisitSource.label(utm_source: utm_source, referrer: referrer, own_hosts: own_hosts)
     end
 
     # Every hostname this page can be reached on, so a self-referral is
