@@ -166,6 +166,7 @@ class SocialPostGeneratorService
         voice:           post_type == 'rep_personal' ? 'first_person' : 'company_plural',
         length_hint:     platform.to_s == 'instagram' ? 'short (80-120 words)' : 'up to 250 words',
         hashtag_hint:    platform.to_s == 'instagram' ? '8-15 hashtags' : '3-6 hashtags',
+        recent_posts:    recent_posts(company: company),
         past_examples:   past_examples(company: company, intent_category: intent_category, platform: platform)
       }
     end
@@ -178,6 +179,42 @@ class SocialPostGeneratorService
     # platform), then any recent published post from the company. Engagement
     # score weights link_clicks and engagement_count more heavily than raw
     # impressions since they signal audience response, not just reach.
+    # How many recent posts to show the model as already covered.
+    #
+    # The schedule rotates through a fixed set of intents, so the same one comes
+    # round every cycle — six here, which is roughly weekly. Eight covers more
+    # than one full turn, so the model sees its own last attempt at this intent
+    # rather than rediscovering the same angle.
+    RECENT_POST_MEMORY = 8
+
+    # What this business has already said, so the next post does not say it again.
+    #
+    # Nothing fed this back before, and the result was a near-twin every cycle:
+    # "🚀 Just shipped: Work Queue is now live in DealerTide" went out on the 16th
+    # and again, barely reworded, on the 24th. The model had no way to know,
+    # because the only thing it was shown from this company was a style example
+    # for the very same intent — which is to say, the post it was about to
+    # duplicate.
+    #
+    # Drafts count. A queued draft publishes later, so treating only published
+    # posts as "said" would let a run duplicate one that has not gone out yet.
+    def recent_posts(company:, limit: RECENT_POST_MEMORY)
+      return [] unless company&.id
+
+      SocialPost
+        .where(company_id: company.id)
+        .where(is_deleted: [false, nil])
+        .where.not(caption: [nil, ''])
+        .where(status: %w[published scheduled draft])
+        .order(Arel.sql('COALESCE(published_at, scheduled_at, created_at) DESC'))
+        .limit(limit)
+        .to_a
+    rescue StandardError => e
+      # Losing this costs variety, not the post.
+      Rails.logger.warn("[SocialPostGeneratorService] recent posts lookup failed: #{e.message}")
+      []
+    end
+
     def past_examples(company:, intent_category:, platform:, limit: MAX_PAST_EXAMPLES)
       return [] unless company&.id
 
@@ -349,12 +386,36 @@ class SocialPostGeneratorService
       sections << "Additional context from the user:\n#{ctx[:topic_details]}" if ctx[:topic_details].present?
       draft = format_current_draft(ctx[:current_draft])
       sections << "Current draft (already written by the user — keep these consistent and complement them; do not rewrite them):\n#{draft}" if draft.present?
-      examples = format_past_examples(ctx[:past_examples])
+      recent = format_recent_posts(ctx[:recent_posts])
+      if recent.present?
+        sections << "ALREADY POSTED — do not repeat these. Pick a different angle, a different " \
+                    "opening line, and a different example. Saying the same thing again in new " \
+                    "words is the failure this list exists to prevent:\n#{recent}"
+      end
+
+      # Style examples exclude anything in the list above. The whole trouble was
+      # that the best-performing post for an intent was also the most recent one,
+      # so "match the voice" was handed the exact post to avoid duplicating.
+      recent_ids = Array(ctx[:recent_posts]).map(&:id)
+      examples = format_past_examples(Array(ctx[:past_examples]).reject { |e| recent_ids.include?(e.id) })
       sections << "Past posts from this business (style reference only — match the voice, not the content):\n#{examples}" if examples.present?
       sections << "The attached image(s) belong to this post — describe and reference what they show." if ctx[:image_urls].present?
       sections << "Include this lead capture link in the caption (with UTM tracking already applied): #{ctx[:intake_form_url]}" if ctx[:intake_form_url].present?
       sections << "Return JSON only."
       sections.join("\n\n")
+    end
+
+    # Deliberately shows the opening line rather than the whole caption. The
+    # opening is what repeats most visibly, and a prompt carrying eight full
+    # captions crowds out the instructions.
+    def format_recent_posts(posts)
+      return '' if posts.blank?
+
+      posts.each_with_index.map do |post, i|
+        when_posted = (post.published_at || post.scheduled_at || post.created_at)&.to_date
+        opening = post.caption.to_s.squish.first(140)
+        "#{i + 1}. [#{post.intent_category}#{when_posted ? ", #{when_posted}" : ''}] #{opening}"
+      end.join("\n")
     end
 
     def format_past_examples(examples)
