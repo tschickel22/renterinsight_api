@@ -138,4 +138,64 @@ RSpec.describe 'Api::Admin::LiveVisitors', type: :request do
       expect(response).to have_http_status(:forbidden).or have_http_status(:unauthorized)
     end
   end
+
+  # Two halves of the same question. Reading them on separate screens means
+  # missing the moment a dealer's own staff are in the product while their
+  # customer is on their site.
+  describe 'app users alongside website visitors' do
+    it 'tags each row with which kind it is' do
+      visit_for(company_a, page_for(company_a), last_seen: 5.seconds.ago)
+      tenant_user.update_columns(last_active_at: 30.seconds.ago, last_active_path: '/crm/leads')
+
+      get '/api/admin/live_visitors', headers: headers_for(admin)
+
+      kinds = json['items'].map { |r| r['kind'] }
+      expect(kinds).to include('website_visitor', 'app_user')
+    end
+
+    it 'names the user and where they were' do
+      tenant_user.update_columns(last_active_at: 30.seconds.ago, last_active_path: '/crm/leads/42')
+
+      get '/api/admin/live_visitors', headers: headers_for(admin)
+
+      row = json['items'].find { |r| r['kind'] == 'app_user' }
+      expect(row['identity']['email']).to eq(tenant_user.email)
+      expect(row['page_path']).to eq('/crm/leads/42')
+      expect(row['company']).to eq(company_a.name)
+    end
+
+    # A user reading a deal for four minutes makes no requests at all, so the
+    # ninety seconds that suits a beacon would show them leaving and returning.
+    it 'keeps a user present for longer than a visitor' do
+      tenant_user.update_columns(last_active_at: 3.minutes.ago)
+
+      get '/api/admin/live_visitors', headers: headers_for(admin)
+
+      expect(json['items'].map { |r| r['kind'] }).to include('app_user')
+    end
+
+    it 'drops a user who has been idle past the window' do
+      tenant_user.update_columns(last_active_at: 30.minutes.ago)
+
+      get '/api/admin/live_visitors', headers: headers_for(admin)
+
+      expect(json['items'].map { |r| r['kind'] }).not_to include('app_user')
+    end
+
+    it 'never shows a user who has done nothing since this shipped' do
+      tenant_user.update_columns(last_active_at: nil)
+
+      get '/api/admin/live_visitors', headers: headers_for(admin)
+
+      expect(json['items'].map { |r| r['kind'] }).not_to include('app_user')
+    end
+
+    it 'lists idle users under history when asked for that kind' do
+      tenant_user.update_columns(last_active_at: 2.hours.ago)
+
+      get '/api/admin/live_visitors/history?kind=user', headers: headers_for(admin)
+
+      expect(json['items'].map { |r| r['identity']['email'] }).to eq([tenant_user.email])
+    end
+  end
 end

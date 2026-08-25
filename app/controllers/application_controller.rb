@@ -8,9 +8,43 @@ class ApplicationController < ActionController::API
   
   before_action :authenticate
   before_action :set_current_attributes
+  after_action :record_user_activity
 
   private
-  
+
+  # How long a user stays "active" between writes.
+  #
+  # One update per user per minute, not one per request. The guard reads an
+  # attribute already loaded on current_user, so a request that does not need to
+  # write costs nothing at all.
+  ACTIVITY_THROTTLE = 60.seconds
+
+  # When someone was last doing something in the app.
+  #
+  # The visitor live view answers who is on a dealer's website. This answers who
+  # is working in the product, which is the half support actually needs: a user
+  # stuck on one screen for ten minutes is about to raise a ticket.
+  #
+  # original_user, not current_user: during impersonation the tenant user is not
+  # here, the platform admin is. Recording the impersonated user would show a
+  # customer as online because someone was looking at their account, which is the
+  # same reason impersonation deliberately writes no login record.
+  #
+  # after_action, so a request that failed authentication records nothing. Never
+  # allowed to fail a request: this is telemetry, and losing it costs a row.
+  def record_user_activity
+    user = original_user
+    return if user.nil?
+    return if user.last_active_at.present? && user.last_active_at > ACTIVITY_THROTTLE.ago
+
+    user.update_columns(
+      last_active_at: Time.current,
+      last_active_path: request.path.to_s.first(255)
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[Activity] could not record activity for user #{original_user&.id}: #{e.message}")
+  end
+
   # Set Current attributes for use throughout the request
   # This allows models to access current context without explicit passing
   def set_current_attributes

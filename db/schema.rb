@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_25_140000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_25_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6982,6 +6982,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_25_140000) do
     t.integer "daily_digest_hour", default: 7
     t.datetime "daily_digest_last_sent_at"
     t.jsonb "calendar_preferences", default: {}, null: false
+    t.datetime "last_active_at"
+    t.string "last_active_path", limit: 255
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
@@ -6989,6 +6991,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_25_140000) do
     t.index ["email_username"], name: "index_users_on_email_username"
     t.index ["invitation_id"], name: "index_users_on_invitation_id"
     t.index ["invitation_token"], name: "index_users_on_invitation_token", unique: true
+    t.index ["last_active_at"], name: "index_users_on_last_active_at"
     t.index ["magic_link_token"], name: "index_users_on_magic_link_token", unique: true
     t.index ["mfa_enabled"], name: "index_users_on_mfa_enabled"
     t.index ["mfa_method"], name: "index_users_on_mfa_method"

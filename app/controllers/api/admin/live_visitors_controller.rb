@@ -22,13 +22,34 @@ class Api::Admin::LiveVisitorsController < ApplicationController
   # who closed the tab a minute ago, which is worse than showing nobody.
   PRESENT_WITHIN = 90.seconds
 
+  # An app user is present for longer than a website visitor.
+  #
+  # A visitor's browser reports every twenty seconds whether or not they do
+  # anything. A user reading a deal for four minutes makes no requests at all,
+  # so the same ninety seconds would show them leaving and coming back.
+  USER_PRESENT_WITHIN = 5.minutes
+
   # GET /api/admin/live_visitors
+  #
+  # Both kinds in one feed, each tagged. They answer different halves of the
+  # same question and reading them on two screens means missing the moment a
+  # dealer's own staff are in the product while their customer is on their site.
   def index
     visits = base_scope.where(last_seen_at: PRESENT_WITHIN.ago..)
                        .order(last_seen_at: :desc)
                        .limit(200)
 
-    render json: { items: visits.map { |v| row(v) }, present_within_seconds: PRESENT_WITHIN.to_i }
+    users = active_users.where(last_active_at: USER_PRESENT_WITHIN.ago..)
+                        .order(last_active_at: :desc)
+                        .limit(200)
+
+    items = visits.map { |v| row(v) } + users.map { |u| user_row(u) }
+
+    render json: {
+      items: items.sort_by { |i| i[:last_seen_at] || Time.at(0) }.reverse,
+      present_within_seconds: PRESENT_WITHIN.to_i,
+      user_present_within_seconds: USER_PRESENT_WITHIN.to_i
+    }
   end
 
   # GET /api/admin/live_visitors/history
@@ -37,6 +58,14 @@ class Api::Admin::LiveVisitorsController < ApplicationController
   # usually the interesting one: a live view alone means noticing a visitor only
   # if you happen to be looking at the moment they are there.
   def history
+    kind = params[:kind].presence
+
+    if kind == 'user'
+      users = active_users.where(last_active_at: ...USER_PRESENT_WITHIN.ago)
+                          .order(last_active_at: :desc)
+      return render json: paginated(users) { |u| user_row(u) }
+    end
+
     visits = base_scope.where(last_seen_at: ...PRESENT_WITHIN.ago)
                        .order(last_seen_at: :desc)
 
@@ -44,18 +73,61 @@ class Api::Admin::LiveVisitorsController < ApplicationController
     visits = visits.where(converted: true) if truthy?(params[:converted])
     visits = visits.identified if truthy?(params[:identified])
 
+    render json: paginated(visits) { |v| row(v) }
+  end
+
+  private
+
+  def paginated(scope)
     page = [params[:page].to_i, 1].max
     per_page = [[params[:per_page].to_i, 1].max, 200].min
-    total = visits.count
+    total = scope.count
 
-    render json: {
-      items: visits.offset((page - 1) * per_page).limit(per_page).map { |v| row(v) },
+    {
+      items: scope.offset((page - 1) * per_page).limit(per_page).map { |r| yield(r) },
       meta: { total: total, page: page, per_page: per_page,
               total_pages: (total.to_f / per_page).ceil }
     }
   end
 
-  private
+  # Staff working in the product, as opposed to visitors on a dealer's website.
+  #
+  # Never recorded activity before now, so a user who has not signed in since
+  # this shipped simply has none rather than appearing to have been idle since
+  # the beginning of time.
+  def active_users
+    User.where.not(last_active_at: nil).includes(:company)
+  end
+
+  def user_row(user)
+    {
+      kind: 'app_user',
+      id: "user-#{user.id}",
+      company: user.company&.name,
+      company_id: user.company_id,
+      # Reusing the visitor's key so one sorted feed needs no special casing.
+      last_seen_at: user.last_active_at,
+      first_seen_at: user.last_sign_in_at,
+      page_path: user.last_active_path,
+      page_title: nil,
+      is_landing_page: false,
+      visitor: nil,
+      source: 'app',
+      device: nil,
+      country: nil,
+      region: nil,
+      duration_ms: nil,
+      max_scroll_depth: nil,
+      converted: false,
+      identity: {
+        type: 'User',
+        id: user.id,
+        name: [user.first_name, user.last_name].compact.join(' ').presence || user.email,
+        email: user.email,
+        role: user.role
+      }
+    }
+  end
 
   # Bots excluded, as everywhere else. A crawler that runs JavaScript would
   # otherwise sit in the live view looking like a person.
@@ -69,6 +141,7 @@ class Api::Admin::LiveVisitorsController < ApplicationController
     page = visit.website_page
 
     {
+      kind: 'website_visitor',
       id: visit.id,
       company: visit.company&.name,
       company_id: visit.company_id,
