@@ -135,6 +135,9 @@ class SocialPostGeneratorService
     # ------------------------------------------------------------------
     def build_context(company:, vehicle:, user:, intent_category:, post_type:, platform:, tone:, topic_details: nil, intake_form_url: nil, image_urls: [], current_draft: nil, profile: nil)
       profile ||= SocialPostIntentCatalog.for_company(company)
+      # Resolved once: the style examples must exclude anything already in the
+      # "do not repeat" list, and past_examples needs their ids to do that in SQL.
+      recents = recent_posts(company: company)
       {
         image_urls:    sanitize_image_urls(image_urls),
         current_draft: sanitize_current_draft(current_draft),
@@ -166,8 +169,9 @@ class SocialPostGeneratorService
         voice:           post_type == 'rep_personal' ? 'first_person' : 'company_plural',
         length_hint:     platform.to_s == 'instagram' ? 'short (80-120 words)' : 'up to 250 words',
         hashtag_hint:    platform.to_s == 'instagram' ? '8-15 hashtags' : '3-6 hashtags',
-        recent_posts:    recent_posts(company: company),
-        past_examples:   past_examples(company: company, intent_category: intent_category, platform: platform)
+        recent_posts:    recents,
+        past_examples:   past_examples(company: company, intent_category: intent_category,
+                                       platform: platform, exclude_ids: recents.map(&:id))
       }
     end
 
@@ -215,13 +219,18 @@ class SocialPostGeneratorService
       []
     end
 
-    def past_examples(company:, intent_category:, platform:, limit: MAX_PAST_EXAMPLES)
+    # exclude_ids: posts already shown to the model as "do not repeat". Excluded here
+    # rather than filtered out of the result, so the ranking backfills to `limit`
+    # instead of silently returning fewer examples (often none, since the best
+    # performing post for an intent is usually also the most recent one).
+    def past_examples(company:, intent_category:, platform:, limit: MAX_PAST_EXAMPLES, exclude_ids: [])
       return [] unless company&.id
 
       base = SocialPost
         .where(company_id: company.id, status: 'published')
         .where(is_deleted: [false, nil])
         .where.not(caption: [nil, ''])
+      base = base.where.not(id: exclude_ids) if exclude_ids.present?
 
       primary = ranked_examples(base.where(intent_category: intent_category, platform: platform), limit)
       collected_ids = primary.map(&:id)
@@ -393,11 +402,10 @@ class SocialPostGeneratorService
                     "words is the failure this list exists to prevent:\n#{recent}"
       end
 
-      # Style examples exclude anything in the list above. The whole trouble was
-      # that the best-performing post for an intent was also the most recent one,
-      # so "match the voice" was handed the exact post to avoid duplicating.
-      recent_ids = Array(ctx[:recent_posts]).map(&:id)
-      examples = format_past_examples(Array(ctx[:past_examples]).reject { |e| recent_ids.include?(e.id) })
+      # Style examples already exclude everything in the list above: build_context
+      # hands the recent ids to past_examples, which drops them in the query. Do not
+      # re-filter here. These are example_payload hashes, not SocialPost records.
+      examples = format_past_examples(Array(ctx[:past_examples]))
       sections << "Past posts from this business (style reference only — match the voice, not the content):\n#{examples}" if examples.present?
       sections << "The attached image(s) belong to this post — describe and reference what they show." if ctx[:image_urls].present?
       sections << "Include this lead capture link in the caption (with UTM tracking already applied): #{ctx[:intake_form_url]}" if ctx[:intake_form_url].present?
