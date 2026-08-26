@@ -11,12 +11,20 @@ class Api::Platform::TwilioProvisioningController < ApplicationController
     result = TwilioProvisioningService.provision_client(@company, area_code: area_code, country: country)
 
     if result[:success]
+      # A number can provision cleanly and still be missing from the A2P sender pool,
+      # in which case it will not deliver to US carriers. Say so rather than reporting
+      # a flat success the operator has no reason to double check.
       render json: {
-        message: 'SMS provisioning successful',
+        message: result[:a2p_enrolled] ? 'SMS provisioning successful' :
+                                         'Number provisioned, but NOT enrolled in the A2P sender pool',
         phone_number: result[:phone_number],
         sub_account_sid: result[:sub_account_sid],
+        a2p_enrolled: result[:a2p_enrolled],
+        messaging_service_sid: result[:messaging_service_sid],
+        webhook_url: result[:webhook_url],
+        warning: result[:warning],
         status: 'active'
-      }, status: :created
+      }.compact, status: :created
     else
       render json: {
         error: result[:error],

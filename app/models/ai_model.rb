@@ -6,18 +6,23 @@
 #
 # Per-environment override via ENV, no deploy needed beyond the Render restart
 # an ENV change already triggers: AI_MODEL_GENERATION=claude-sonnet-5, etc.
+#
+# Model ids are complete as written. Do NOT append a date suffix: the dated
+# form is a stale convention that resolves today and stops resolving without
+# warning. The spec enforces this, and the same rule applies to any AI_MODEL_*
+# override set in Render.
 module AiModel
   DEFAULTS = {
     classification: 'claude-sonnet-4-6',
     generation:     'claude-sonnet-4-6',
-    refine:         'claude-haiku-4-5-20251001',
+    refine:         'claude-haiku-4-5',
     vision:         'claude-sonnet-4-6',
     analysis:       'claude-sonnet-4-6',
     # The website concierge. Haiku by default and deliberately: it answers
     # short questions from facts it is handed, which is the cheapest class of
     # work we do and the highest volume, since it sits on every dealer page.
     # AI_MODEL_CONCIERGE moves it without a deploy if the answers need more.
-    concierge:      'claude-haiku-4-5-20251001'
+    concierge:      'claude-haiku-4-5'
   }.freeze
 
   def self.for(role)

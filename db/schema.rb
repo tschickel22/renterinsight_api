@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_26_163000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_26_191714) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6233,7 +6233,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_26_163000) do
     t.datetime "approved_at"
     t.bigint "approved_by_id"
     t.string "video_url"
+    t.boolean "imported_from_page", default: false, null: false
     t.index ["approved_by_id"], name: "index_social_posts_on_approved_by_id"
+    t.index ["company_id", "imported_from_page"], name: "index_social_posts_on_company_id_and_imported"
     t.index ["company_id", "intent_category"], name: "index_social_posts_on_company_id_and_intent_category"
     t.index ["company_id", "status"], name: "index_social_posts_on_company_id_and_status"
     t.index ["created_by_user_id"], name: "index_social_posts_on_created_by_user_id"

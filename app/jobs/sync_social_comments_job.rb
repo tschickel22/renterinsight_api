@@ -13,6 +13,9 @@ class SyncSocialCommentsJob < ApplicationJob
   # How many posts an on-demand sync will look at, newest first.
   ON_DEMAND_POST_LIMIT = 15
 
+  # How far down the Page's own feed to look for posts we hold no row for.
+  PAGE_POST_LIMIT = 25
+
   def perform
     company_ids = FacebookIntegration.active.distinct.pluck(:company_id)
 
@@ -69,8 +72,14 @@ class SyncSocialCommentsJob < ApplicationJob
     posts = if limit
               posts_scope.order(published_at: :desc).limit(limit).to_a
             else
-              posts_scope
+              posts_scope.to_a
             end
+
+    # A post published straight to the Page has no row here, so walking our own
+    # table alone never asked Facebook for its comments. A dealer who posts from
+    # their phone got an inbox that was permanently empty with nothing on screen
+    # to say why.
+    posts += adopt_page_posts(company, integration)
 
     posts.each do |post|
       begin
@@ -104,6 +113,60 @@ class SyncSocialCommentsJob < ApplicationJob
     end
 
     [synced, new_count]
+  end
+
+  # Give the Page's own recent posts a row, so their comments have somewhere to
+  # hang: social_comments.social_post_id is NOT NULL and a comment cannot exist
+  # without one.
+  #
+  # Adopted rows are flagged imported_from_page so the Posts tab, which counts
+  # what was created in DealerTide, goes on meaning that. They are still real
+  # posts everywhere else: the Page strip can now offer to open their comments
+  # here instead of sending the dealer to Facebook to moderate.
+  #
+  # Fails soft. A Page we cannot read posts from should still sync comments for
+  # the posts we do hold.
+  def adopt_page_posts(company, integration)
+    return [] if integration.page_id.blank?
+
+    response = MetaGraphApi.get_page_posts(integration.page_id,
+                                           integration.page_access_token,
+                                           limit: PAGE_POST_LIMIT)
+    raw_posts = Array(response['data'])
+    return [] if raw_posts.empty?
+
+    ids = raw_posts.filter_map { |p| p['id'].presence }
+    known = company.social_posts.where(external_post_id: ids).pluck(:external_post_id).to_set
+    cutoff = LOOKBACK_DAYS.days.ago
+
+    raw_posts.filter_map do |raw|
+      external_id = raw['id'].presence
+      next if external_id.blank? || known.include?(external_id)
+
+      published_at = parse_time(raw['created_time'])
+      next if published_at.nil? || published_at < cutoff
+
+      adopt_one(company, integration, raw, external_id, published_at)
+    end
+  rescue MetaGraphApi::Error => e
+    Rails.logger.warn "[SyncSocialCommentsJob] company=#{company.id} page posts skipped: #{e.message}"
+    []
+  end
+
+  def adopt_one(company, integration, raw, external_id, published_at)
+    company.social_posts.create!(
+      platform:           'facebook',
+      status:             'published',
+      external_post_id:   external_id,
+      caption:            raw['message'],
+      published_at:       published_at,
+      location_id:        integration.location_id,
+      imported_from_page: true
+    )
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+    # Two syncs racing for the same post. Whichever lost still wants the row.
+    Rails.logger.info "[SyncSocialCommentsJob] adopt #{external_id}: #{e.class}"
+    company.social_posts.find_by(external_post_id: external_id)
   end
 
   # Upsert by external_comment_id. Returns [was_newly_created?, record].

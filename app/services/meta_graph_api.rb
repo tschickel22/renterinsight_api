@@ -198,6 +198,15 @@ class MetaGraphApi
       post("/#{post_id}", access_token, message: message)
     end
 
+    # The Page's own recent posts, including ones published on Facebook rather
+    # than through us. BrandHealthService asks for the same edge to draw the
+    # Page strip; the comment sync uses it to find posts it holds no row for.
+    def get_page_posts(page_id, access_token, limit: 25)
+      get("/#{page_id}/posts", access_token,
+          fields: 'id,message,created_time,permalink_url,full_picture',
+          limit:  limit)
+    end
+
     def get_post_insights(post_id, access_token)
       get("/#{post_id}/insights", access_token,
           metric: 'post_impressions,post_reach,post_clicks,post_engaged_users')
