@@ -11,7 +11,10 @@ class Api::V1::SocialPostsController < ApplicationController
   def index
     return unless authorize_action!('social_posts', 'read')
 
-    scope = @company.social_posts.active
+    # Posts adopted from the Page so their comments could be stored are not
+    # posts this dealer made here. The tab says "Posts created in DealerTide"
+    # and the tile below it should keep counting exactly that.
+    scope = @company.social_posts.active.where(imported_from_page: false)
 
     scope = scope.where(status: params[:status])                     if params[:status].present?
     scope = scope.where(platform: params[:platform])                 if params[:platform].present?
@@ -39,7 +42,7 @@ class Api::V1::SocialPostsController < ApplicationController
         page:        page,
         per_page:    per_page,
         total_pages: (filtered_count.to_f / per_page).ceil,
-        stats:       stats_payload(@company.social_posts.active)
+        stats:       stats_payload(@company.social_posts.active.where(imported_from_page: false))
       }
     }
   end
