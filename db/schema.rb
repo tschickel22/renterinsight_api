@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_26_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_26_163000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6838,6 +6838,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_26_150000) do
     t.index ["status"], name: "index_twilio_accounts_on_status"
   end
 
+  create_table "user_activity_watches", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "created_by_user_id", null: false
+    t.text "reason", null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "started_at", null: false
+    t.datetime "ended_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_user_activity_watches_on_company_id"
+    t.index ["user_id", "active"], name: "index_user_activity_watches_on_user_id_and_active"
+  end
+
   create_table "user_email_connections", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.bigint "company_id", null: false
@@ -7419,6 +7433,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_26_150000) do
     t.index ["service_ticket_id"], name: "index_warranty_claims_on_service_ticket_id"
     t.index ["status"], name: "index_warranty_claims_on_status"
     t.index ["submitted_at"], name: "index_warranty_claims_on_submitted_at"
+  end
+
+  create_table "watched_requests", force: :cascade do |t|
+    t.bigint "user_activity_watch_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "http_method", null: false
+    t.string "path", limit: 2048, null: false
+    t.string "controller_action"
+    t.integer "status"
+    t.integer "duration_ms"
+    t.string "ip_address"
+    t.string "user_agent", limit: 512
+    t.boolean "is_poll", default: false, null: false
+    t.datetime "occurred_at", null: false
+    t.index ["user_activity_watch_id", "occurred_at"], name: "index_watched_requests_on_watch_and_time"
+    t.index ["user_id", "occurred_at"], name: "index_watched_requests_on_user_id_and_occurred_at"
   end
 
   create_table "webhook_deliveries", force: :cascade do |t|

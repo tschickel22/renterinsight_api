@@ -9,6 +9,7 @@ class ApplicationController < ActionController::API
   before_action :authenticate
   before_action :set_current_attributes
   after_action :record_user_activity
+  after_action :record_watched_request
 
   private
 
@@ -45,9 +46,60 @@ class ApplicationController < ActionController::API
     Rails.logger.warn("[Activity] could not record activity for user #{original_user&.id}: #{e.message}")
   end
 
+  # Captures the request trail of a user under a platform-side watch.
+  #
+  # Render retains request logs about 7 days, which turned "what has this user
+  # been doing" into a race against retention. A watch writes the trail to the
+  # database instead. Costs one INSERT per request for the handful of users
+  # actually flagged, and a set lookup for everyone else.
+  #
+  # original_user for the same reason record_user_activity uses it: during
+  # impersonation the platform admin is here, not the tenant user, and
+  # attributing a platform admin's clicks to a watched user would poison the
+  # evidence this exists to produce.
+  #
+  # Never allowed to fail a request.
+  def record_watched_request
+    user = original_user
+    return if user.nil?
+    return unless UserActivityWatch.watching?(user.id)
+
+    watch = UserActivityWatch.active_for(user.id)
+    return if watch.nil?
+
+    path = request.fullpath.to_s
+
+    WatchedRequest.create!(
+      user_activity_watch_id: watch.id,
+      user_id: user.id,
+      company_id: watch.company_id,
+      http_method: request.request_method.to_s,
+      path: path.first(2048),
+      controller_action: "#{params[:controller]}##{params[:action]}",
+      status: response&.status,
+      duration_ms: watch_request_duration_ms,
+      ip_address: request.remote_ip,
+      user_agent: request.user_agent.to_s.first(512).presence,
+      is_poll: UserActivityWatch.poll_path?(request.path),
+      occurred_at: Time.current
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[UserActivityWatch] could not record request for user #{original_user&.id}: #{e.message}")
+  end
+
+  def watch_request_duration_ms
+    return nil if @_request_started_at.nil?
+
+    ((Time.current - @_request_started_at) * 1000).round
+  end
+
   # Set Current attributes for use throughout the request
   # This allows models to access current context without explicit passing
   def set_current_attributes
+    # Feeds watch_request_duration_ms. One assignment on a filter that already
+    # runs for every request, so unwatched users pay nothing measurable.
+    @_request_started_at = Time.current
+
     Current.user = current_user
     Current.original_user = original_user
     Current.company_id = current_company_id

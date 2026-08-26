@@ -2988,6 +2988,14 @@ Rails.application.routes.draw do
       get   'email_usage/:company_id',           to: 'email_usage#show'
       patch 'email_usage/:company_id/set_limit', to: 'email_usage#set_limit'
 
+      # Platform-side user monitoring. No tenant-facing equivalent, by design.
+      resources :user_watches, only: %i[index show create destroy] do
+        member do
+          get :report
+          get :timeline
+        end
+      end
+
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection
         post :test_sms, on: :collection
