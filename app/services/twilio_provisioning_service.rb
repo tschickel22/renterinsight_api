@@ -47,9 +47,35 @@ class TwilioProvisioningService
 
   def self.messaging_service_sid
     sms_settings = Setting.get('Platform', 0, 'communications')&.dig('sms') || {}
-    ENV['TWILIO_MESSAGING_SERVICE_SID'] ||
+    # .presence matters: an env var set to an empty string is truthy in Ruby, so a blank
+    # TWILIO_MESSAGING_SERVICE_SID used to win over the settings fallback and skip
+    # enrollment entirely while provisioning still reported success.
+    ENV['TWILIO_MESSAGING_SERVICE_SID'].presence ||
       sms_settings['twilioMessagingServiceSid'].presence ||
       sms_settings[:twilioMessagingServiceSid].presence
+  end
+
+  # Where Twilio should POST inbound SMS for the numbers we provision.
+  #
+  # RAILS_API_URL is this API's own origin and is what the other server-to-server
+  # callbacks already use. Deliberately not DMS_API_URL: that is the customer-facing
+  # host (api.dealertide.com) fronted by Cloudflare, where a bot rule would silently
+  # drop Twilio's POSTs. Same reasoning as Ses::EventPipeline.webhook_url.
+  #
+  # There is deliberately no default. This used to fall back to a hardcoded staging
+  # host, which meant a production provision quietly pointed a real customer number
+  # at the staging backend and still reported success.
+  def self.api_base_url
+    base = ENV['API_BASE_URL'].presence || ENV['RAILS_API_URL'].presence
+    if base.blank?
+      raise ProvisioningError,
+            'Set API_BASE_URL or RAILS_API_URL so Twilio knows where to deliver inbound SMS for provisioned numbers.'
+    end
+    base.chomp('/')
+  end
+
+  def self.inbound_webhook_url
+    "#{api_base_url}/webhooks/twilio/sms/inbound"
   end
 
   # ─── Public API ─────────────────────────────────────────────────────────────
@@ -79,6 +105,10 @@ class TwilioProvisioningService
     )
 
     begin
+      # Resolve the inbound webhook target BEFORE buying anything. A number purchased
+      # with nowhere to deliver inbound SMS has to be released by hand.
+      webhook_url = inbound_webhook_url
+
       phone = purchase_phone_number(area_code: area_code, country: country)
       Rails.logger.info "[TwilioProvisioning] Phone number purchased on master: #{phone.phone_number} (#{phone.sid})"
 
@@ -86,10 +116,10 @@ class TwilioProvisioningService
       twilio_account.phone_number_sid = phone.sid
       twilio_account.save!
 
-      configure_webhook_on_master(phone.sid)
-      Rails.logger.info "[TwilioProvisioning] Webhook configured for #{phone.phone_number}"
+      configure_webhook_on_master(phone.sid, webhook_url)
+      Rails.logger.info "[TwilioProvisioning] Webhook configured for #{phone.phone_number} -> #{webhook_url}"
 
-      enroll_in_messaging_service(phone.sid, phone.phone_number)
+      enrollment = enroll_in_messaging_service(phone.sid, phone.phone_number)
 
       twilio_account.mark_active!
       company.update!(sms_provisioning_mode: 'dedicated')
@@ -98,10 +128,14 @@ class TwilioProvisioningService
       Rails.logger.info "[TwilioProvisioning] ✅ Provisioning complete for Company #{company.id} — #{phone.phone_number}"
 
       {
-        success:       true,
+        success:        true,
         twilio_account: twilio_account,
-        phone_number:  phone.phone_number
-      }
+        phone_number:   phone.phone_number,
+        webhook_url:    webhook_url,
+        a2p_enrolled:   enrollment[:enrolled],
+        messaging_service_sid: enrollment[:messaging_service_sid],
+        warning:        enrollment[:warning]
+      }.compact
 
     rescue AreaCodeUnavailableError => e
       # Release any number if somehow purchased before error
@@ -175,27 +209,34 @@ class TwilioProvisioningService
     master_client.api.incoming_phone_numbers.create(phone_number: available.first.phone_number)
   end
 
-  def self.configure_webhook_on_master(phone_number_sid)
-    api_base_url = ENV['API_BASE_URL'] || 'https://renterinsight-api-staging.onrender.com'
-
+  def self.configure_webhook_on_master(phone_number_sid, webhook_url = nil)
     master_client.api.incoming_phone_numbers(phone_number_sid).update(
-      sms_url:    "#{api_base_url}/webhooks/twilio/sms/inbound",
+      sms_url:    webhook_url || inbound_webhook_url,
       sms_method: 'POST'
     )
   end
 
+  # Non-fatal by design: a number that is bought and webhooked is worth keeping even if
+  # enrollment fails, and an operator can add it to the pool by hand. But the caller has
+  # to be told, otherwise a "provisioning successful" response hides a number that will
+  # not deliver to US carriers.
   def self.enroll_in_messaging_service(phone_number_sid, phone_number)
     sid = messaging_service_sid
-    unless sid.present?
-      Rails.logger.warn "[TwilioProvisioning] No MessagingServiceSid configured — #{phone_number} NOT enrolled in A2P sender pool"
-      return
+    if sid.blank?
+      warning = "No Messaging Service SID configured (set TWILIO_MESSAGING_SERVICE_SID). " \
+                "#{phone_number} was NOT enrolled in the A2P sender pool and will not deliver to US carriers."
+      Rails.logger.warn "[TwilioProvisioning] #{warning}"
+      return { enrolled: false, warning: warning }
     end
 
     master_client.messaging.v1.services(sid).phone_numbers.create(phone_number_sid: phone_number_sid)
     Rails.logger.info "[TwilioProvisioning] ✅ Enrolled #{phone_number} in Messaging Service #{sid}"
+    { enrolled: true, messaging_service_sid: sid }
   rescue => e
-    # Non-fatal — provisioning still succeeds; operator can enroll manually
-    Rails.logger.warn "[TwilioProvisioning] ⚠️ Could not enroll #{phone_number} in Messaging Service: #{e.message}"
+    warning = "Could not enroll #{phone_number} in Messaging Service #{sid}: #{e.message}. " \
+              "The number is provisioned but NOT in the A2P sender pool."
+    Rails.logger.warn "[TwilioProvisioning] ⚠️ #{warning}"
+    { enrolled: false, warning: warning, messaging_service_sid: sid }
   end
 
   def self.release_phone_number_from_master(phone_number_sid)
