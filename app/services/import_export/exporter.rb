@@ -7,6 +7,15 @@ module ImportExport
   # Generates CSV/XLSX/JSON files from a company-scoped query.
   # The S3 upload step is wired in Chunk C; for now files land in tmp/exports.
   class Exporter
+    # Raised when an export would exceed the tenant's row cap. Refusing beats
+    # truncating: a silently short file reads as a complete one.
+    class RowCapExceeded < StandardError; end
+
+    # Column appended to every exported row. Per-row rather than a header or
+    # footer so the mark survives someone lifting a subset of rows into
+    # another system, which is the case that matters.
+    WATERMARK_LABEL = 'export_ref'
+
     def initialize(export_job)
       @job     = export_job
       @company = export_job.company
@@ -18,8 +27,9 @@ module ImportExport
       cfg = ModuleRegistry.config_for(@job.module_type)
       raise "Unknown module: #{@job.module_type}" unless cfg
 
-      fields  = ModuleRegistry.fields_for(@job.module_type, company_id: @company.id)
+      fields  = ModuleRegistry.fields_for(@job.module_type, company_id: @company.id, for_export: true)
       keys    = (@job.selected_fields.presence || fields.map { |f| f[:key] }).map(&:to_s)
+      keys    = ExportPolicy.filter_keys(keys)
       scope   = apply_filters(@company.public_send(cfg[:scope]), @job.filters)
 
       # Eager-load associations that will be resolved to display names
@@ -38,7 +48,7 @@ module ImportExport
 
       Rails.logger.info "[ImportExport::Exporter] module=#{@job.module_type} keys=#{keys.inspect} includes=#{includes_list.inspect}"
 
-      records = scope
+      records = enforce_row_cap!(scope)
 
       path = case @job.format
              when 'csv'  then write_csv(records, fields, keys)
@@ -53,9 +63,16 @@ module ImportExport
         row_count: records.size,
         file_url: path
       )
+
+      alert_platform_if_large!(records.size)
+    rescue RowCapExceeded => e
+      # Not an error in the system, a refusal. Surfaced to the user verbatim so
+      # they know to add a filter rather than retrying the same request.
+      Rails.logger.warn "[ImportExport::Exporter] #{e.message}"
+      @job.update!(status: 'failed', completed_at: Time.current, error_message: e.message)
     rescue StandardError => e
       Rails.logger.error "[ImportExport::Exporter] #{e.class}: #{e.message}"
-      @job.update!(status: 'failed', completed_at: Time.current)
+      @job.update!(status: 'failed', completed_at: Time.current, error_message: e.message)
       raise
     end
 
@@ -135,6 +152,36 @@ module ImportExport
       end
     end
 
+    # Refuses rather than truncates. 0 means unlimited.
+    def enforce_row_cap!(scope)
+      cap = ExportPolicy.row_cap(@company)
+      return scope if cap <= 0
+
+      total = scope.count
+      if total > cap
+        raise RowCapExceeded,
+              "This export would contain #{total} rows, above the #{cap} row limit " \
+              'for your account. Add a filter to narrow it, or contact support.'
+      end
+
+      scope
+    end
+
+    def watermark
+      @job.watermark_token.presence
+    end
+
+    # Tells the platform when a tenant pulls a large slice of their data out.
+    # Best-effort: an alert that fails must never fail the export itself.
+    def alert_platform_if_large!(row_count)
+      threshold = ExportPolicy.alert_threshold(@company)
+      return if threshold <= 0 || row_count < threshold
+
+      ExportAlertMailer.large_export(@job.id).deliver_later
+    rescue StandardError => e
+      Rails.logger.warn "[ImportExport::Exporter] Failed to send large-export alert for job ##{@job.id}: #{e.message}"
+    end
+
     def output_path(ext)
       dir = Rails.root.join('tmp', 'exports')
       FileUtils.mkdir_p(dir)
@@ -145,9 +192,9 @@ module ImportExport
       selected = fields.select { |f| keys.include?(f[:key]) }
       path = output_path('csv')
       CSV.open(path, 'w') do |csv|
-        csv << selected.map { |f| f[:label] || f[:key] }
+        csv << selected.map { |f| f[:label] || f[:key] } + [WATERMARK_LABEL]
         records.find_each do |r|
-          csv << selected.map { |f| value_for(r, f) }
+          csv << selected.map { |f| value_for(r, f) } + [watermark]
         end
       end
       path
@@ -158,9 +205,9 @@ module ImportExport
       path = output_path('xlsx')
       package = Axlsx::Package.new
       package.workbook.add_worksheet(name: @job.module_type[0, 31]) do |sheet|
-        sheet.add_row(selected.map { |f| f[:label] || f[:key] })
+        sheet.add_row(selected.map { |f| f[:label] || f[:key] } + [WATERMARK_LABEL])
         records.find_each do |r|
-          sheet.add_row(selected.map { |f| value_for(r, f) })
+          sheet.add_row(selected.map { |f| value_for(r, f) } + [watermark])
         end
       end
       package.serialize(path)
@@ -170,7 +217,11 @@ module ImportExport
     def write_json(records, fields, keys)
       selected = fields.select { |f| keys.include?(f[:key]) }
       path = output_path('json')
-      data = records.map { |r| selected.each_with_object({}) { |f, h| h[f[:key]] = value_for(r, f) } }
+      data = records.map do |r|
+        row = selected.each_with_object({}) { |f, h| h[f[:key]] = value_for(r, f) }
+        row[WATERMARK_LABEL] = watermark
+        row
+      end
       File.write(path, data.to_json)
       path
     end

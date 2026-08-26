@@ -1,0 +1,25 @@
+<h2>Large data export</h2>
+
+<p>
+  A tenant just completed an export above the alert threshold for their account.
+  This is informational. No action is required unless the pattern looks wrong.
+</p>
+
+<table cellpadding="6" cellspacing="0" border="0">
+  <tr><td><strong>Tenant</strong></td><td><%= @company&.name %> (ID <%= @job.company_id %>)</td></tr>
+  <tr><td><strong>User</strong></td><td><%= @user&.email %> (ID <%= @job.user_id %>)</td></tr>
+  <tr><td><strong>Module</strong></td><td><%= @job.module_type %></td></tr>
+  <tr><td><strong>Format</strong></td><td><%= @job.format.upcase %></td></tr>
+  <tr><td><strong>Rows</strong></td><td><%= @job.row_count %></td></tr>
+  <tr><td><strong>Fields</strong></td><td><%= @job.selected_fields.size %></td></tr>
+  <tr><td><strong>Filters</strong></td><td><%= @job.filters.presence || 'none (full table)' %></td></tr>
+  <tr><td><strong>Requested from</strong></td><td><%= @job.requested_ip %></td></tr>
+  <tr><td><strong>Acknowledged at</strong></td><td><%= @job.acknowledged_at %></td></tr>
+  <tr><td><strong>Watermark</strong></td><td><code><%= @job.watermark_token %></code></td></tr>
+  <tr><td><strong>Export job</strong></td><td>#<%= @job.id %></td></tr>
+</table>
+
+<p>
+  Every row in the delivered file carries the watermark above in an
+  <code>export_ref</code> column, so this file stays attributable to this job.
+</p>

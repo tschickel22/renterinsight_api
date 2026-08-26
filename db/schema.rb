@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_25_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_26_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2886,10 +2886,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_25_170000) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "acknowledged_at"
+    t.text "acknowledgement_text"
+    t.string "watermark_token"
+    t.string "requested_ip"
+    t.datetime "downloaded_at"
+    t.integer "download_count", default: 0, null: false
+    t.text "error_message"
+    t.index ["company_id", "user_id", "created_at"], name: "index_export_jobs_on_company_user_created"
     t.index ["company_id"], name: "index_export_jobs_on_company_id"
     t.index ["module_type"], name: "index_export_jobs_on_module_type"
     t.index ["status"], name: "index_export_jobs_on_status"
     t.index ["user_id"], name: "index_export_jobs_on_user_id"
+    t.index ["watermark_token"], name: "index_export_jobs_on_watermark_token"
   end
 
   create_table "facebook_integrations", force: :cascade do |t|

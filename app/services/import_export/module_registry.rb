@@ -184,14 +184,19 @@ module ImportExport
         cfg[:model].safe_constantize
       end
 
-      # Dynamic field discovery — standard columns + custom fields + lookup fields.
+      # Dynamic field discovery: standard columns + custom fields + lookup fields.
       # Pass for_import: true to exclude foreign key _id columns and add lookup fields.
-      def fields_for(module_type, company_id: nil, for_import: false)
+      # Pass for_export: true to strip platform-internal columns (scoring,
+      # syndication keys) that describe how the product works rather than what
+      # the tenant collected. See ImportExport::ExportPolicy.
+      def fields_for(module_type, company_id: nil, for_import: false, for_export: false)
         # Modules that don't follow the standard column-introspection pattern
         # supply their own field list (e.g. budget_lines has a fixed monthly
         # column layout that doesn't match the CSV format dealers upload).
         custom_override = custom_fields_override(module_type)
-        return custom_override if custom_override
+        if custom_override
+          return for_export ? ExportPolicy.filter_fields(custom_override) : custom_override
+        end
 
         klass = model_class(module_type)
         return [] unless klass
@@ -216,7 +221,8 @@ module ImportExport
         # Add virtual 'tags' field for taggable modules on import.
         tag_field = (for_import && taggable?(module_type)) ? [tag_field_definition] : []
 
-        standard + custom + lookups + tag_field
+        all_fields = standard + custom + lookups + tag_field
+        for_export ? ExportPolicy.filter_fields(all_fields) : all_fields
       end
 
       # Hardcoded fields for modules that don't follow the standard

@@ -28,7 +28,15 @@ module Api
         return render json: { error: 'Unknown module' }, status: :not_found unless cfg
 
         for_import = params[:context].to_s == 'import'
-        fields = ImportExport::ModuleRegistry.fields_for(params[:module_type], company_id: @company.id, for_import: for_import)
+        # Anything not explicitly an import is treated as an export view, so the
+        # builder never offers a platform-internal column as a checkbox.
+        for_export = !for_import
+        fields = ImportExport::ModuleRegistry.fields_for(
+          params[:module_type],
+          company_id: @company.id,
+          for_import: for_import,
+          for_export: for_export
+        )
         render json: {
           module_type: params[:module_type],
           label: cfg[:label],

@@ -1,0 +1,19 @@
+Large data export
+
+A tenant just completed an export above the alert threshold for their account.
+This is informational. No action is required unless the pattern looks wrong.
+
+Tenant:          <%= @company&.name %> (ID <%= @job.company_id %>)
+User:            <%= @user&.email %> (ID <%= @job.user_id %>)
+Module:          <%= @job.module_type %>
+Format:          <%= @job.format.upcase %>
+Rows:            <%= @job.row_count %>
+Fields:          <%= @job.selected_fields.size %>
+Filters:         <%= @job.filters.presence || 'none (full table)' %>
+Requested from:  <%= @job.requested_ip %>
+Acknowledged at: <%= @job.acknowledged_at %>
+Watermark:       <%= @job.watermark_token %>
+Export job:      #<%= @job.id %>
+
+Every row in the delivered file carries the watermark above in an export_ref
+column, so this file stays attributable to this job.

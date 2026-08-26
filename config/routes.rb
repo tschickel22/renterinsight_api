@@ -268,6 +268,7 @@ Rails.application.routes.draw do
       resources :import_templates, only: %i[index show create update destroy]
       resources :export_jobs, only: %i[index show create] do
         member { get :download }
+        collection { get :policy }
       end
       scope path: 'import_export', controller: 'import_export_metadata' do
         get 'modules',                       action: :modules
@@ -2955,7 +2956,11 @@ Rails.application.routes.draw do
         delete 'modules/override/:module_key', to: 'tenant_subscriptions#remove_override'
         post 'modules/bulk_override', to: 'tenant_subscriptions#bulk_override'
         patch 'modules/config', to: 'tenant_subscriptions#update_module_config'
-        
+
+        # Per-tenant export controls (JSON format gate, limits, alert threshold)
+        get   'export_settings', to: 'tenant_export_settings#show'
+        patch 'export_settings', to: 'tenant_export_settings#update'
+
         member do
           get :check_domain_dns
           post :verify_domain
