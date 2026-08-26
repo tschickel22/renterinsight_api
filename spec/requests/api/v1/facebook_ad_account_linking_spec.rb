@@ -40,6 +40,21 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(Api::V1::Integrations::FacebookController::SCOPES)
         .to include('pages_manage_ads', 'ads_management', 'ads_read', 'leads_retrieval')
     end
+
+    # Comment reading, comment moderation and insights all shipped against a
+    # token that was never granted them. BrandHealthService fails soft on a
+    # missing permission, so nothing raised and the features just returned less
+    # than they should have.
+    it 'requests the permissions the comment and insights features depend on' do
+      expect(Api::V1::Integrations::FacebookController::SCOPES)
+        .to include('pages_read_user_content', 'pages_manage_engagement', 'read_insights')
+    end
+
+    # Classic login is the only flow in use, so this array is the whole gate:
+    # a permission enabled on the Meta app but absent here is never requested.
+    it 'is what the authorize URL actually sends' do
+      expect(Api::V1::Integrations::FacebookController::SCOPES.size).to eq(12)
+    end
   end
 
   describe 'GET /api/v1/integrations/facebook/ad_accounts' do

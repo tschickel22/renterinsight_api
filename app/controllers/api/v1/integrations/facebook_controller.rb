@@ -4,6 +4,13 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   before_action :set_company_scope, except: [:callback]
   skip_before_action :authenticate, only: [:callback]
 
+  # The last three back features that already ship and have been calling Graph
+  # without the permission to do it: pages_read_user_content for reading
+  # comments on a post, pages_manage_engagement for replying to, hiding and
+  # deleting them, read_insights for post and campaign insights.
+  # BrandHealthService fails soft on a missing permission, so this degraded
+  # quietly rather than erroring.
+  #
   # pages_manage_ads is what lets the app act on ads attached to the Page —
   # without it Meta answers ad-creative and lead-form calls with
   # "(#200) Requires pages_manage_ads permission to manage the object".
@@ -19,6 +26,9 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     pages_manage_ads
     ads_management
     ads_read
+    pages_read_user_content
+    pages_manage_engagement
+    read_insights
   ].freeze
 
   # Facebook Login for Business configuration ID
