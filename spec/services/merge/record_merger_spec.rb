@@ -97,10 +97,14 @@ RSpec.describe Merge::RecordMerger do
 
       described_class.call(survivor: survivor, loser: loser)
 
-      expect(Contact.find_by(id: loser.id)).to be_present   # still there
+      # Retained, but only reachable when explicitly asked for. That is the
+      # whole contract: recoverable, and invisible to every ordinary query.
+      expect(Contact.with_merged.find_by(id: loser.id)).to be_present
+      expect(Contact.find_by(id: loser.id)).to be_nil
+      expect(Contact.merged_away).to include(loser)
+
       expect(loser.reload.merged_into_id).to eq(survivor.id)
       expect(loser.merged_at).to be_present
-      expect(Contact.not_merged).not_to include(loser)
       expect(loser.surviving_record).to eq(survivor)
     end
   end

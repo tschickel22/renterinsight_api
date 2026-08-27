@@ -42,8 +42,19 @@ class Account < ApplicationRecord
   belongs_to :merged_into, class_name: 'Account', optional: true
   belongs_to :merged_by,   class_name: 'User', optional: true
 
-  scope :not_merged, -> { where(merged_into_id: nil) }
-  scope :merged_away, -> { where.not(merged_into_id: nil) }
+  # A record that lost a merge must disappear from every list, count, export
+  # and report. There are ~200 query sites across leads, contacts and accounts,
+  # so filtering at each one guarantees a miss: the first cut of this shipped
+  # with the scope defined and never applied, and merged leads kept showing in
+  # the CRM list next to the record they had been folded into.
+  #
+  # default_scope fails closed instead. Everything that has to see a merged
+  # record asks for it explicitly through .with_merged.
+  default_scope { where(merged_into_id: nil) }
+
+  scope :with_merged, -> { unscope(where: :merged_into_id) }
+  scope :not_merged,  -> { where(merged_into_id: nil) }
+  scope :merged_away, -> { with_merged.where.not(merged_into_id: nil) }
 
   def merged? = merged_into_id.present?
 
@@ -51,7 +62,8 @@ class Account < ApplicationRecord
   def surviving_record(depth = 0)
     return self if merged_into_id.blank? || depth > 10
 
-    merged_into&.surviving_record(depth + 1) || self
+    nxt = self.class.with_merged.find_by(id: merged_into_id)
+    nxt ? nxt.surviving_record(depth + 1) : self
   end
   belongs_to :location, optional: true
   belongs_to :source, optional: true
