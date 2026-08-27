@@ -745,7 +745,13 @@ module Api
             opened_at: opened_event&.occurred_at,
             clicked_at: clicked_event&.occurred_at,
             contact_name: entity_name,  # Works for both Contact and Lead
-            contact_id: comm.communicable_id
+            contact_id: comm.communicable_id,
+            # The id alone is ambiguous: leads and contacts have separate id
+            # sequences, so a Lead id sent as contact_id sends the UI to
+            # /contacts/:lead_id. That 404s when no contact holds that number
+            # and, worse, opens an unrelated contact when one does. Ship the
+            # type so the caller can build the right link.
+            entity_type: comm.communicable_type
           }
         end
         
