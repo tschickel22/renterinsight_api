@@ -28,6 +28,25 @@ class Contact < ApplicationRecord
 
   # Associations
   belongs_to :account, optional: true
+
+  # ── Duplicate merge ───────────────────────────────────────────────────────
+  # merged_into_id is set when this record lost a merge. It keeps the row
+  # intact and pointing at its survivor, so the merge is auditable, reversible
+  # and old links can be redirected. Every list query must exclude these.
+  belongs_to :merged_into, class_name: 'Contact', optional: true
+  belongs_to :merged_by,   class_name: 'User', optional: true
+
+  scope :not_merged, -> { where(merged_into_id: nil) }
+  scope :merged_away, -> { where.not(merged_into_id: nil) }
+
+  def merged? = merged_into_id.present?
+
+  # Follows a chain of merges to the record that is actually live now.
+  def surviving_record(depth = 0)
+    return self if merged_into_id.blank? || depth > 10
+
+    merged_into&.surviving_record(depth + 1) || self
+  end
   belongs_to :company, optional: true
   belongs_to :location, optional: true
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true

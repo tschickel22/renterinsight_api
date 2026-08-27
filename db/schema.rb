@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_26_191714) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -187,12 +187,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_26_191714) do
     t.bigint "location_id"
     t.jsonb "custom_field_values", default: {}, null: false
     t.decimal "deposit_amount", precision: 15, scale: 2
+    t.bigint "merged_into_id"
+    t.datetime "merged_at"
+    t.bigint "merged_by_id"
     t.index ["account_number"], name: "index_accounts_on_account_number", unique: true
     t.index ["account_type"], name: "index_accounts_on_account_type"
     t.index ["company_id", "location_id"], name: "index_accounts_on_company_id_and_location_id"
+    t.index ["company_id", "merged_into_id"], name: "index_accounts_on_company_id_and_merged_into"
     t.index ["company_id"], name: "index_accounts_on_company_id"
     t.index ["is_deleted"], name: "index_accounts_on_is_deleted"
     t.index ["location_id"], name: "index_accounts_on_location_id"
+    t.index ["merged_into_id"], name: "index_accounts_on_merged_into_id"
     t.index ["name"], name: "index_accounts_on_name"
     t.index ["owner_id"], name: "index_accounts_on_owner_id"
     t.index ["parent_account_id"], name: "index_accounts_on_parent_account_id"
@@ -2258,11 +2263,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_26_191714) do
     t.decimal "deposit_amount", precision: 15, scale: 2
     t.boolean "tax_exempt", default: false, null: false
     t.string "tax_exempt_reason"
+    t.bigint "merged_into_id"
+    t.datetime "merged_at"
+    t.bigint "merged_by_id"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
+    t.index ["company_id", "merged_into_id"], name: "index_contacts_on_company_id_and_merged_into"
     t.index ["company_id"], name: "index_contacts_on_company_id"
     t.index ["is_deleted"], name: "index_contacts_on_is_deleted"
     t.index ["location_id"], name: "index_contacts_on_location_id"
+    t.index ["merged_into_id"], name: "index_contacts_on_merged_into_id"
     t.index ["opt_in_sms"], name: "index_contacts_on_opt_in_sms"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
@@ -3824,16 +3834,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_26_191714) do
     t.string "co_applicant_email"
     t.string "co_applicant_phone"
     t.decimal "deposit_amount", precision: 15, scale: 2
+    t.bigint "merged_into_id"
+    t.datetime "merged_at"
+    t.bigint "merged_by_id"
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
     t.index ["company_id", "champion_salesforce_id"], name: "idx_leads_company_champion_sf_id", unique: true
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
+    t.index ["company_id", "merged_into_id"], name: "index_leads_on_company_id_and_merged_into"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["company_name"], name: "index_leads_on_company_name"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["health_score"], name: "index_leads_on_health_score"
     t.index ["location_id"], name: "index_leads_on_location_id"
+    t.index ["merged_into_id"], name: "index_leads_on_merged_into_id"
     t.index ["opt_in_sms"], name: "index_leads_on_opt_in_sms"
     t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"

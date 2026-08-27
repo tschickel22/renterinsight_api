@@ -3,6 +3,9 @@
 module Api
   module V1
     class AccountsController < ApplicationController
+      # Find & merge duplicates. Endpoints and survivorship live in the
+      # concern so all three CRM entities behave identically.
+      include MergeableRecords
       before_action :set_company_scope
       before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals contacts insights score communications_rollup]
 
@@ -1112,6 +1115,11 @@ module Api
         
         recommendations
       end
+
+      private
+
+      def merge_resource_key = 'crm'
+      def merge_model_class  = Account
     end
   end
 end

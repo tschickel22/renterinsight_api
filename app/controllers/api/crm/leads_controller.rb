@@ -1,6 +1,9 @@
 module Api
   module Crm
     class LeadsController < ApplicationController
+      # Find & merge duplicates. Endpoints and survivorship live in the
+      # concern so all three CRM entities behave identically.
+      include MergeableRecords
       include PersonNameSearch
 
       before_action :set_company_scope
@@ -1426,6 +1429,11 @@ module Api
           lastActivityAt: l.last_activity_at,
         }
       end
+
+      private
+
+      def merge_resource_key = 'leads'
+      def merge_model_class  = Lead
     end
   end
 end
