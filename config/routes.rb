@@ -1524,6 +1524,12 @@ Rails.application.routes.draw do
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
+          # Find & merge duplicates. :id is always the SURVIVOR; the record being
+          # merged away is named as duplicate_id in the body, so a mis-sent
+          # request cannot retire the record the user is looking at.
+          get  :duplicates
+          post :merge_preview
+          post :merge
           get :tags, to: 'contacts#tags'  # Get tags for contact
           post :tags, to: 'contacts#add_tags'
           delete 'tags/:tag_name', to: 'contacts#remove_tag'
@@ -1594,6 +1600,12 @@ Rails.application.routes.draw do
       # ==================== ACCOUNTS ====================
       resources :accounts do
         member do
+          # Find & merge duplicates. :id is always the SURVIVOR; the record being
+          # merged away is named as duplicate_id in the body, so a mis-sent
+          # request cannot retire the record the user is looking at.
+          get  :duplicates
+          post :merge_preview
+          post :merge
           post :convert_to_customer
           get :tags, to: 'accounts#tags'  # Get tags for account
           post :tags, to: 'accounts#add_tags'
@@ -2528,6 +2540,15 @@ Rails.application.routes.draw do
 
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
+        member do
+          # Find & merge duplicates. :id is always the SURVIVOR; the record being
+          # merged away is named as duplicate_id in the body, so a mis-sent
+          # request cannot retire the record the user is looking at.
+          get  :duplicates
+          post :merge_preview
+          post :merge
+        end
+
         collection do
           # Soft duplicate lookup for the New Lead form (email/phone match).
           post :check_duplicates

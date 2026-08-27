@@ -1,6 +1,9 @@
 module Api
   module Crm
     class LeadsController < ApplicationController
+      # Find & merge duplicates. Endpoints and survivorship live in the
+      # concern so all three CRM entities behave identically.
+      include MergeableRecords
       include PersonNameSearch
 
       before_action :set_company_scope
@@ -1087,6 +1090,24 @@ module Api
           scope = scope.where(health_score: range)
         end
 
+        # Tag filter. Accepts repeated tag_ids[] or a comma separated list, and
+        # matches a lead carrying ANY of them, which is what a multi-select tag
+        # filter means everywhere else.
+        #
+        # EXISTS rather than joins(:tags): a join returns one row per matching
+        # tag, so a lead carrying two of the selected tags would appear twice.
+        # That inflates the filtered_count this method feeds, which is what
+        # drives both pagination and the "select all matching" bulk actions.
+        tag_ids = Array(filters[:tag_ids]).flat_map { |v| v.to_s.split(',') }
+                                          .map(&:strip).reject(&:blank?)
+        if tag_ids.any?
+          scope = scope.where(
+            'EXISTS (SELECT 1 FROM tag_assignments ta ' \
+            "WHERE ta.entity_type = 'Lead' AND ta.entity_id = leads.id AND ta.tag_id IN (?))",
+            tag_ids
+          )
+        end
+
         scope
       end
 
@@ -1426,6 +1447,11 @@ module Api
           lastActivityAt: l.last_activity_at,
         }
       end
+
+      private
+
+      def merge_resource_key = 'leads'
+      def merge_model_class  = Lead
     end
   end
 end

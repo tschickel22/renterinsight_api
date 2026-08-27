@@ -3,6 +3,9 @@
 module Api
   module V1
     class ContactsController < ApplicationController
+      # Find & merge duplicates. Endpoints and survivorship live in the
+      # concern so all three CRM entities behave identically.
+      include MergeableRecords
       include PersonNameSearch
 
       before_action :set_company_scope
@@ -1193,6 +1196,11 @@ module Api
           updatedAt: document.updated_at
         }
       end
+
+      private
+
+      def merge_resource_key = 'crm'
+      def merge_model_class  = Contact
     end
   end
 end
