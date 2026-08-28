@@ -397,54 +397,112 @@ class Api::V1::SocialPostsController < ApplicationController
 
   # GET /api/v1/social-posts/:id/skip?token=...
   # Token-signed link from approval email. No session auth required.
-  # GET /api/v1/social-posts/:id/skip  (token-based, no auth)
+  # GET  /api/v1/social-posts/:id/skip  -> confirmation page
+  # POST /api/v1/social-posts/:id/skip  -> actually skips
   def skip
-    payload = SocialPostMailer.decode_action_token(params[:token].to_s)
-    return render json: { error: 'Invalid or expired token' }, status: :unauthorized if payload.blank?
-    return render json: { error: 'Token does not match post' }, status: :unauthorized unless payload['post_id'].to_i == params[:id].to_i
-    return render json: { error: 'Token is not a skip token' }, status: :unauthorized unless payload['action'].to_s == 'skip'
-
-    post = SocialPost.active.find_by(id: params[:id])
-    return render json: { error: 'Post not found' }, status: :not_found unless post
-    return render json: { message: 'Post already actioned', status: post.status }, status: :ok if post.status != 'draft'
-
-    post.update!(status: 'failed', nurture_approved: false)
-    render json: { message: 'Post skipped', status: post.status }
+    handle_email_action('skip') do |post|
+      post.update!(status: 'failed', nurture_approved: false)
+      render_email_action_page('Post skipped.', declined: true)
+    end
   end
 
-  # GET /api/v1/social-posts/:id/email_approve  (token-based, no auth)
+  # GET  /api/v1/social-posts/:id/email_approve  -> confirmation page
+  # POST /api/v1/social-posts/:id/email_approve  -> actually approves
   def email_approve
-    payload = SocialPostMailer.decode_action_token(params[:token].to_s)
-    return render_email_action_page('Invalid or expired link.', error: true) if payload.blank?
-    return render_email_action_page('Token does not match this post.', error: true) unless payload['post_id'].to_i == params[:id].to_i
-    return render_email_action_page('Invalid action token.', error: true) unless payload['action'].to_s == 'approve'
-
-    post = SocialPost.active.find_by(id: params[:id])
-    return render_email_action_page('Post not found.', error: true) unless post
-    return render_email_action_page("This post has already been #{post.status}.", already: true) unless post.status == 'draft'
-
-    post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
-    PublishSocialPostJob.perform_later(post.id) if defined?(PublishSocialPostJob)
-    render_email_action_page(
-      'Post approved and publishing!',
-      success: true,
-      note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
-    )
+    handle_email_action('approve') do |post|
+      post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
+      PublishSocialPostJob.perform_later(post.id) if defined?(PublishSocialPostJob)
+      render_email_action_page(
+        'Post approved and publishing!',
+        success: true,
+        note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
+      )
+    end
   end
 
-  # GET /api/v1/social-posts/:id/email_decline  (token-based, no auth)
+  # GET  /api/v1/social-posts/:id/email_decline  -> confirmation page
+  # POST /api/v1/social-posts/:id/email_decline  -> actually declines
   def email_decline
+    handle_email_action('decline') do |post|
+      post.update!(status: 'failed', nurture_approved: false)
+      render_email_action_page('Post declined.', declined: true)
+    end
+  end
+
+  private
+
+  # Shared guard for the three token links in the approval email.
+  #
+  # A GET never changes anything. It renders a page with a button, and the
+  # button POSTs. This is not politeness about HTTP verbs, it is the whole
+  # point: email security scanners fetch every link in a message to check it.
+  # On 2026-08-28 a scanner hit skip, approve and decline for post 69 from three
+  # different IPs within one second of the approval email being sent. Skip won,
+  # so the post was dead thirty seconds after it was created, and the real
+  # approval hours later was told the post had "already been failed".
+  def handle_email_action(action)
     payload = SocialPostMailer.decode_action_token(params[:token].to_s)
     return render_email_action_page('Invalid or expired link.', error: true) if payload.blank?
     return render_email_action_page('Token does not match this post.', error: true) unless payload['post_id'].to_i == params[:id].to_i
-    return render_email_action_page('Invalid action token.', error: true) unless payload['action'].to_s == 'decline'
+    return render_email_action_page('Invalid action token.', error: true) unless payload['action'].to_s == action
 
     post = SocialPost.active.find_by(id: params[:id])
     return render_email_action_page('Post not found.', error: true) unless post
-    return render_email_action_page("This post has already been #{post.status}.", already: true) unless post.status == 'draft'
+    return render_email_action_page(already_actioned_message(post), already: true) unless post.status == 'draft'
 
-    post.update!(status: 'failed', nurture_approved: false)
-    render_email_action_page('Post declined.', declined: true)
+    return render_email_action_confirm(post, action) if request.get?
+
+    yield post
+  end
+
+  # "This post has already been failed" was the old wording, which is both
+  # ungrammatical and wrong: skip and decline share the failed status, so a
+  # skipped post reported itself as a publishing failure.
+  def already_actioned_message(post)
+    case post.status.to_s
+    when 'approved'  then 'This post has already been approved.'
+    when 'published' then 'This post has already been published.'
+    when 'failed'    then 'This post was already declined or skipped, so there is nothing to approve.'
+    else                  "This post is no longer waiting for approval. Its status is #{post.status}."
+    end
+  end
+
+  ACTION_LABELS = {
+    'approve' => { verb: 'Approve and publish', prompt: 'Publish this post?', icon: '📣' },
+    'decline' => { verb: 'Decline',             prompt: 'Decline this post?', icon: '🚫' },
+    'skip'    => { verb: 'Skip',                prompt: 'Skip this post?',    icon: '⏭️' }
+  }.freeze
+
+  def render_email_action_confirm(post, action)
+    cfg     = ACTION_LABELS.fetch(action)
+    caption = post.caption.to_s.strip
+    preview = caption.length > 240 ? "#{caption[0, 240]}…" : caption
+    path    = request.path
+
+    html = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Social Post Action</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body{font-family:-apple-system,Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#dbeafe;margin:0;padding:16px}
+        .card{background:white;border-radius:12px;padding:32px 24px;max-width:460px;width:100%;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.08);box-sizing:border-box}
+        .icon{font-size:44px;margin-bottom:12px}
+        .msg{font-size:18px;color:#111827;font-weight:600}
+        .preview{font-size:14px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin:16px 0;text-align:left;white-space:pre-wrap;word-break:break-word}
+        button{font-size:16px;padding:14px 20px;width:100%;border:0;border-radius:8px;background:#2563eb;color:white;font-weight:600;cursor:pointer}
+        .sub{font-size:13px;color:#6b7280;margin-top:12px}
+      </style></head>
+      <body><div class="card">
+        <div class="icon">#{cfg[:icon]}</div>
+        <div class="msg">#{ERB::Util.html_escape(cfg[:prompt])}</div>
+        #{preview.present? ? %(<div class="preview">#{ERB::Util.html_escape(preview)}</div>) : ''}
+        <form method="post" action="#{ERB::Util.html_escape(path)}">
+          <input type="hidden" name="token" value="#{ERB::Util.html_escape(params[:token].to_s)}">
+          <button type="submit">#{ERB::Util.html_escape(cfg[:verb])}</button>
+        </form>
+        <div class="sub">Nothing has changed yet. This only takes effect when you press the button.</div>
+      </div></body></html>
+    HTML
+    render html: html.html_safe, layout: false
   end
 
   private

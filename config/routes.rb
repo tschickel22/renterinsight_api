@@ -1750,9 +1750,16 @@ Rails.application.routes.draw do
           post :publish
           post :schedule
           post :duplicate
-          get  :skip
-          get  :email_approve
-          get  :email_decline
+          # Email approval links. GET renders a confirmation page and changes
+          # nothing; POST is what actually acts. Email security scanners fetch
+          # every link in a message, so a GET that mutates gets triggered by a
+          # robot before the recipient ever sees the mail.
+          get   :skip
+          post  :skip
+          get   :email_approve
+          post  :email_approve
+          get   :email_decline
+          post  :email_decline
         end
         collection do
           post :generate
