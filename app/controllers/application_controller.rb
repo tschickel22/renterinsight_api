@@ -7,6 +7,7 @@ class ApplicationController < ActionController::API
   include CustomAuthorization   # Add custom financial permissions
   
   before_action :authenticate
+  before_action :block_suspended_company
   before_action :set_current_attributes
   after_action :record_user_activity
   after_action :record_watched_request
@@ -115,6 +116,43 @@ class ApplicationController < ActionController::API
 
   # Standard tenant isolation - sets @company from current user
   # Use as: before_action :set_company_scope
+  # Shuts a suspended or cancelled company out of the whole API.
+  #
+  # This lives in the before_action chain rather than inside set_company_scope,
+  # which is where it started. 43 controllers define their OWN
+  # set_company_scope and override the base one, so a gate placed there covered
+  # exactly one of them: measured in production, a suspended company was still
+  # reading leads and tasks half an hour after being locked out of everything
+  # else. Anything added to that method inherits the same hole, so the check
+  # belongs somewhere no controller can quietly replace.
+  #
+  # Ordered after :authenticate so an unauthenticated request is still answered
+  # with 401 by the normal path rather than a confusing 403 about a company
+  # nobody has claimed yet.
+  def block_suspended_company
+    # Public and portal controllers skip :authenticate, so there is no user and
+    # nothing to scope. Their websites, embeds and intake forms are deliberately
+    # unaffected by a billing flag.
+    return if @current_user_id.blank? && @impersonated_user.blank?
+
+    company_id = current_company_id
+    return if company_id.blank?
+
+    company = ::Company.find_by(id: company_id)
+    return if company.nil? || !company.access_blocked?
+
+    # The people who reinstate an account keep their access to it. Read from
+    # original_user because under impersonation current_user IS the employee.
+    return if original_user&.platform_admin? || original_user&.super_admin?
+
+    Rails.logger.warn "🚫 [block_suspended_company] Company #{company.id} is #{company.status}, refusing #{current_user&.email}"
+    render json: {
+      error: 'This account is not active. Please contact support.',
+      code: 'company_suspended',
+      status: company.status
+    }, status: :forbidden
+  end
+
   def set_company_scope
     unless current_user
       Rails.logger.error "🚫 [set_company_scope] No authenticated user found"
