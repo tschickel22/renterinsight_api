@@ -39,6 +39,15 @@ module Api
             return
           end
 
+          if company_access_blocked?(user)
+            render json: {
+              success: false,
+              message: 'This account is not active. Please contact support.',
+              code: 'company_suspended'
+            }, status: :forbidden
+            return
+          end
+
           # Check if user has MFA enabled
           if user.mfa_enabled?
             # Generate temporary token for MFA verification
@@ -148,10 +157,11 @@ module Api
 
           user = User.find(decoded[:user_id])
 
-          if user.inactive? || user.suspended?
+          if user.inactive? || user.suspended? || company_access_blocked?(user)
             render json: {
               success: false,
-              message: 'Account is not active'
+              message: 'Account is not active',
+              code: 'company_suspended'
             }, status: :forbidden
             return
           end
@@ -194,6 +204,20 @@ module Api
       private
 
       attr_reader :current_user
+
+      # Whether this user's company still entitles them to sign in.
+      #
+      # Refused at the door as well as on every request, so a suspension takes
+      # effect immediately instead of whenever an already-issued token happens
+      # to expire.
+      #
+      # Platform and super admins are exempt: they are the people who reinstate
+      # an account, and locking them out of it makes that impossible.
+      def company_access_blocked?(user)
+        return false if user.platform_admin? || user.super_admin?
+
+        user.company&.access_blocked? || false
+      end
 
       def authenticate_user_from_token!
         header = request.headers['Authorization']

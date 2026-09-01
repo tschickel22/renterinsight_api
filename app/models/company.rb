@@ -469,6 +469,27 @@ class Company < ApplicationRecord
   def cancelled?
     status == 'cancelled'
   end
+
+  # Whether staff of this company may still use the DMS.
+  #
+  # Suspending or cancelling a company used to set this flag and nothing else:
+  # Company#suspended? was defined and never called anywhere, so every login
+  # check read User#suspended? instead. Measured in production , a company
+  # suspended at 16:42 had three of its people authenticating normally 90
+  # seconds later.
+  #
+  # Deliberately covers cancelled as well as suspended. Both mean the account is
+  # no longer entitled to the product, and leaving cancelled open would reopen
+  # the same hole under a different name.
+  #
+  # Staff access ONLY. Their public website, inventory embed and intake forms
+  # are served by controllers that never establish a company scope, and taking a
+  # live dealer's site down is a far larger and more customer-visible act than
+  # locking staff out of the back office. It should be a separate, deliberate
+  # decision, not a side effect of a billing flag.
+  def access_blocked?
+    suspended? || cancelled?
+  end
   
   # Settings helpers
   # The Company Settings UI (CompanySettingsController) persists operational settings under

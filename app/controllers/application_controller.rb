@@ -138,6 +138,28 @@ class ApplicationController < ActionController::API
       return false
     end
     
+    # A suspended or cancelled company loses the back office.
+    #
+    # Every authenticated request that touches company data comes through here,
+    # so this is the one place that catches a token issued before the
+    # suspension. Refusing only at login would leave anyone already signed in
+    # working until their JWT expired , which is exactly what happened in
+    # production, where three people kept working 90 seconds after their
+    # company was suspended.
+    #
+    # Checked against original_user, not current_user: under impersonation
+    # current_user IS the impersonated employee, so reading it would lock the
+    # platform admin out of the account they are trying to support or reinstate.
+    if @company.access_blocked? && !original_user&.platform_admin? && !original_user&.super_admin?
+      Rails.logger.warn "🚫 [set_company_scope] Company #{@company.id} is #{@company.status}, refusing #{current_user.email}"
+      render json: {
+        error: 'This account is not active. Please contact support.',
+        code: 'company_suspended',
+        status: @company.status
+      }, status: :forbidden
+      return false
+    end
+
     Rails.logger.info "✅ [set_company_scope] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
     true
   end

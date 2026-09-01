@@ -17,6 +17,12 @@ module SiteProfiles
     CACHE_KEY = 'site_profiles/demo_inventory_company'
     CACHE_TTL = 10.minutes
 
+    # Read from outside this class by SiteContentProfilesController#inventory_lots,
+    # so they have to be on the class and not on its singleton. See the notes
+    # further down for what each one is for.
+    ENABLED_VALUES = %w[true t 1].freeze
+    SELLABLE_STATUSES = %w[available available_to_order].freeze
+
     class << self
       # For a company that has an account: its own lot, or nothing.
       # @return [Hash, nil] { 'token', 'company_id', 'enabled' }
@@ -161,7 +167,14 @@ module SiteProfiles
       #
       # Compared as text because the JSONB value may have been written as a
       # boolean or as a string depending on which settings screen wrote it.
-      ENABLED_VALUES = %w[true t 1].freeze
+      #
+      # Lives on the class, NOT inside `class << self`. Defined in there it
+      # belongs to the singleton class, so the constant is reachable from these
+      # methods but NOT as DemoInventoryResolver::ENABLED_VALUES , which is how
+      # SiteContentProfilesController#inventory_lots reads it. That endpoint
+      # raised NameError and 500d on every call, so the "which lot should this
+      # demo show" picker returned nothing and no demo could be bound to a lot.
+      # Declared at the top of the class instead.
 
       # What counts as a lot worth showing.
       #
@@ -177,7 +190,7 @@ module SiteProfiles
       # whatever a company's public_statuses allows (both, everywhere measured),
       # and projectProfile widens a sample lot to both explicitly. This was the
       # last place still assuming a dealer-style lot.
-      SELLABLE_STATUSES = %w[available available_to_order].freeze
+      # Also declared at the top of the class, and for the same reason.
 
       def candidates(scope)
         scope
