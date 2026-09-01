@@ -42,6 +42,31 @@ module ApiKeyAuthentication
       end
     end
 
+    # A suspended or cancelled company's keys stop working, without touching the
+    # keys themselves.
+    #
+    # The partner API descends from ActionController::API, NOT from
+    # ApplicationController, so the before_action that locks staff out of a
+    # suspended tenant is not in this chain at all , it is not returning early
+    # here, it never runs. Measured on a live suspension: six keys carrying
+    # leads read+write stayed fully usable after every human had been locked
+    # out, and the partner controllers expose index and show, so that is a route
+    # out for the lead database and not merely a route in.
+    #
+    # Deliberately a status check rather than revoking the keys. Revoking is a
+    # second piece of state to remember to undo, and a customer who is
+    # reinstated would silently keep a dead Facebook and Google intake until
+    # someone noticed. This reverses itself the moment the company is active
+    # again, which is the property that matters for a billing hold.
+    if @current_company&.access_blocked?
+      Rails.logger.warn "🚫 [ApiKeyAuthentication] Company #{@current_company.id} is #{@current_company.status}, refusing key #{@current_api_key.id}"
+      render json: {
+        error: 'This account is not active. Please contact support.',
+        code: 'company_suspended'
+      }, status: :forbidden
+      return
+    end
+
     @current_api_key.touch_usage!
   end
 

@@ -37,6 +37,24 @@ class WebhookService
   def self.fire(company_id:, event:, payload:, location_id: nil)
     return unless EVENTS.include?(event.to_s)
 
+    # Nothing leaves a suspended or cancelled company.
+    #
+    # A webhook carries that company's records to a third-party URL, so leaving
+    # deliveries running would keep data flowing out of an account that has been
+    # shut off everywhere a person or an API key can reach it. Dropped rather
+    # than queued: a hold can last months, and replaying a backlog of stale
+    # events at whoever is on the other end when the account returns is worse
+    # than the gap.
+    #
+    # Checked here rather than by deactivating the endpoints, so reinstating the
+    # company resumes delivery on its own with no second piece of state to
+    # remember. Platform-level endpoints (company_id nil) are ours and are not
+    # affected on their own account, only by the subject company being blocked.
+    if company_id.present? && ::Company.find_by(id: company_id)&.access_blocked?
+      Rails.logger.info "[WebhookService] Company #{company_id} is not active, dropping #{event}"
+      return
+    end
+
     # Find matching endpoints:
     # 1. Platform-level endpoints (company_id IS NULL) — always receive all events
     # 2. Company-scoped endpoints matching this company
