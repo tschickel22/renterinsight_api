@@ -5,7 +5,7 @@
 # sources are platform-level config, so there is no set_company_scope and
 # company_id is never permitted in params.
 class Api::Admin::CatalogSourcesController < ApplicationController
-  # Staleness lives on ScrapeRun (ScrapeRun::STALE_AFTER) so the nightly sweep
+  # Staleness lives on ScrapeRun (ScrapeRun::PROGRESS_STALE_AFTER) so the nightly sweep
   # and the subscription path reap too, not only this controller.
 
   before_action :require_platform_admin
@@ -38,7 +38,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   def index
     # Un-stick sources whose run was killed by a deploy, so the list stops
     # reporting a crawl that no worker is running. Cheap: a no-op unless a row
-    # is genuinely past STALE_AFTER.
+    # has genuinely stopped progressing.
     ScrapeRun.reap_stale!
 
     sources = CatalogSource.active.order(:name)

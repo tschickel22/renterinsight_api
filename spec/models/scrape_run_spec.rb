@@ -15,8 +15,9 @@ RSpec.describe ScrapeRun do
   # live in the admin controller and fire ONLY on Run Now, so until somebody
   # pressed that button every other reader saw a phantom crawl in progress.
   describe '.reap_stale!' do
-    it 'fails a run abandoned past STALE_AFTER' do
-      run = running_run(started_at: (described_class::STALE_AFTER + 5.minutes).ago)
+    it 'fails a run that has stopped making progress' do
+      run = running_run(started_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
+      run.update_columns(updated_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
 
       expect(described_class.reap_stale!).to eq 1
       expect(run.reload.status).to eq 'failed'
@@ -25,7 +26,8 @@ RSpec.describe ScrapeRun do
     end
 
     it 'un-sticks the source, so the list stops reporting a crawl' do
-      running_run(started_at: (described_class::STALE_AFTER + 5.minutes).ago)
+      running_run(started_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
+        .update_columns(updated_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
 
       described_class.reap_stale!
 
@@ -57,6 +59,9 @@ RSpec.describe ScrapeRun do
       other = create(:catalog_source, last_run_status: 'running')
       mine  = running_run(started_at: 1.hour.ago)
       theirs = running_run(started_at: 1.hour.ago, src: other)
+      # Staleness is measured from the last sign of life, so these have to look
+      # abandoned rather than merely old.
+      [mine, theirs].each { |run| run.update_columns(updated_at: 1.hour.ago) }
 
       described_class.reap_stale!(source.scrape_runs)
 
@@ -81,7 +86,29 @@ RSpec.describe ScrapeRun do
 
     # The status column insists otherwise, which is exactly the trap.
     it 'is false for a row abandoned by a dead worker' do
-      expect(running_run(started_at: 2.hours.ago)).not_to be_actually_running
+      run = running_run(started_at: 2.hours.ago)
+      run.update_columns(updated_at: 2.hours.ago)
+
+      expect(run.reload).not_to be_actually_running
+    end
+
+    # The case that made this rule necessary: the worker runs inside Puma, so a
+    # deploy kills a crawl minutes after it started and the badge said "running"
+    # for the next half hour.
+    it 'is false minutes after a deploy kills it, not half an hour later' do
+      run = running_run(started_at: 12.minutes.ago)
+      run.update_columns(updated_at: 11.minutes.ago)
+
+      expect(run.reload).not_to be_actually_running
+    end
+
+    # And the inverse, which the old duration-based rule got wrong: a big
+    # catalog with image archiving legitimately runs past any fixed cap.
+    it 'is true for a long crawl that is still writing progress' do
+      run = running_run(started_at: 90.minutes.ago)
+      run.update_columns(updated_at: 30.seconds.ago)
+
+      expect(run.reload).to be_actually_running
     end
 
     it 'is false for a finished run' do

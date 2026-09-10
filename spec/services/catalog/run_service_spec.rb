@@ -41,8 +41,11 @@ RSpec.describe Catalog::RunService do
     # Otherwise a run killed by a deploy blocks the source forever.
     it 'reaps an abandoned run and proceeds' do
       dead = create(:scrape_run, catalog_source: source, status: 'running',
-                                 started_at: (ScrapeRun::STALE_AFTER + 5.minutes).ago,
+                                 started_at: (ScrapeRun::PROGRESS_STALE_AFTER + 5.minutes).ago,
                                  finished_at: nil)
+      # Abandoned means it stopped writing, not merely that it started a while
+      # back — a long crawl that is still heartbeating must never be reaped.
+      dead.update_columns(updated_at: (ScrapeRun::PROGRESS_STALE_AFTER + 5.minutes).ago)
 
       run = run_with([FakeCatalogAdapter.home('1')])
 
