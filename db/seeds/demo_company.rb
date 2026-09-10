@@ -37,6 +37,13 @@ if ENV['RESET'] == 'true'
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
 
+    # tracked_link_events has no company_id of its own, so the company-scoped sweep at
+    # the bottom of this block can't reach it — deleting the links would leave the
+    # events behind as orphans. Clear the children first, by parent.
+    if defined?(TrackedLinkEvent)
+      TrackedLinkEvent.where(tracked_link_id: TrackedLink.where(company_id: existing.id).select(:id)).delete_all
+    end
+
     # Campaign teardown is order-sensitive: Campaign declares `has_many :campaign_steps,
     # dependent: :destroy` (line 17) BEFORE `has_many :campaign_sends` (line 20), so
     # campaign.destroy tries to delete steps while campaign_sends still FK-reference them
@@ -1686,22 +1693,58 @@ if defined?(AgreementTemplate)
 end
 
 # ── 28. Brochures + Listings ──────────────────────────────
+# THREE collections, not one. The Workqueue's "Brochure Opened" queue names the
+# collection a prospect opened — with a single brochure seeded, every row in it
+# says the same thing and the queue can't show what it's for. Section 36 mints
+# the clicks against these.
 puts "\n28. Setting up brochures and listings..."
+brochures = {}
 if defined?(Brochure)
-  featured_vehicles = company.vehicles.where(status: "available").limit(3)
-  if featured_vehicles.any?
-    company.brochures.find_or_create_by!(title: "Spring 2026 Featured Homes") do |b|
-      b.description = "Hand-picked new homes available right now"
-      b.public_id = "#{DEMO_PREFIX}-spring-2026-#{SecureRandom.hex(4)}"
-      b.template_name = "mh_family_living"
-      b.template_data = { "theme" => "warm", "highlight_color" => "#3B82F6" }
-      b.vehicle_ids = featured_vehicles.pluck(:id)
-      b.is_public = true
-      b.status = "active"
-      b.location_id = locations["AUB"].id
+  brochure_specs = [
+    { title: "Spring 2026 Featured Homes",
+      desc:  "Hand-picked new homes available right now",
+      template: "mh_family_living",
+      theme: { "theme" => "warm", "highlight_color" => "#3B82F6" },
+      serials: %w[112-000-H-D-C412913A 112-000-H-A-C412925C RMN-2026-A-001234],
+      location: "AUB" },
+    { title: "Move-In Ready Under $75k",
+      desc:  "Single-section homes ready for delivery this month",
+      template: "mh_modern_minimalist",
+      theme: { "theme" => "cool", "highlight_color" => "#0EA5E9" },
+      serials: %w[RMN-2025-A-001100 DH-2026-S-005003 112-000-H-H-C412930E],
+      location: "FTW" },
+    { title: "Pre-Owned Value Homes",
+      desc:  "Inspected, reconditioned, and priced to move",
+      template: "classic_professional",
+      theme: { "theme" => "neutral", "highlight_color" => "#64748B" },
+      serials: %w[CLT-2019-T-889900 SKY-2021-A-776600 FLT-2017-B-554400],
+      # Deliberately company-wide (NULL location) — the workqueue reads a brochure
+      # row's location from the brochure, so one unscoped collection exercises that path.
+      location: nil },
+  ]
+
+  brochure_specs.each do |spec|
+    units = spec[:serials].filter_map { |s| vehicles[s] }
+    next if units.empty?
+
+    b = company.brochures.find_or_create_by!(title: spec[:title]) do |rec|
+      rec.public_id = "#{DEMO_PREFIX}-#{spec[:title].parameterize}-#{SecureRandom.hex(4)}"
+      rec.is_public = true
     end
+    # Refresh on every run so an existing demo company picks up new units/templates.
+    b.update!(
+      description:   spec[:desc],
+      template_name: spec[:template],
+      template_data: spec[:theme],
+      vehicle_ids:   units.map(&:id),
+      is_public:     true,
+      status:        "active",
+      is_deleted:    false,
+      location_id:   spec[:location] ? locations[spec[:location]].id : nil
+    )
+    brochures[spec[:title]] = b
   end
-  puts "  Brochures: #{company.brochures.count}"
+  puts "  Brochures: #{brochures.size} (#{brochures.values.sum { |b| b.vehicle_ids.size }} homes across them)"
 end
 
 if defined?(Listing)
@@ -2335,6 +2378,184 @@ ca_specs.each do |s|
 end
 puts "  Contact activities: #{ca_count} created"
 
+# ── 36. Brochure + inventory click signals (Hot Engagement) ─
+# The Workqueue's "Hot Engagement" group does NOT read tasks or activities — it
+# reads TrackedLink rows, which nothing else in this seed created, so the whole
+# group came up empty on a fresh demo company. WorkqueueService:
+#
+#   brochure_hot_interest  → source_type 'Brochure', click_count > 0, a non-null
+#                            entity_id, last_clicked_at within BROCHURE_CLICK_WINDOW
+#                            (48h). One row per person-and-brochure; a link with a
+#                            vehicle_id is "clicked a home INSIDE the collection",
+#                            one without is "opened the collection".
+#   inventory_hot_interest → any link with a vehicle_id, click_count >= 2, 48h.
+#
+# The two queues overlap on purpose, and that is the app's behavior, not a seeding
+# slip: inventory_hot_interest does not filter on source_type, so a home clicked
+# twice inside a brochure is both "opened your collection" and "shopping this home".
+# Don't "fix" it here by holding brochure home clicks under 2.
+#
+# Both call preload_owned_entities, so a signal is only visible to the user who
+# OWNS the lead/contact. Every lead in section 8 is owned by the manager, which
+# would have parked every signal in one inbox — so the recipients below are
+# pinned to specific demo users, at least one per login.
+#
+# Rebuilt from scratch each run: click_count / last_clicked_at are cumulative and
+# the 48h window is relative, so re-seeding on top of existing rows would inflate
+# the counts and leave stale timestamps.
+puts "\n36. Seeding brochure + inventory click signals..."
+
+if defined?(TrackedLink) && brochures.any?
+  existing_links = TrackedLink.where(company_id: company.id)
+  TrackedLinkEvent.where(tracked_link_id: existing_links.select(:id)).delete_all if defined?(TrackedLinkEvent)
+  wiped = existing_links.delete_all
+
+  brochure_base_url = ENV['PUBLIC_BASE_URL'].presence || 'https://dms.renterinsight.com'
+
+  # record_click! stamps Time.current, which would put every demo click "0h ago".
+  # Write the counters and the event rows directly so "3h ago" in the queue is real.
+  record_clicks = lambda do |link, clicks, last_at|
+    next link if clicks.to_i.zero?
+
+    times = Array.new(clicks) { |i| last_at - (clicks - 1 - i).hours }
+    if defined?(TrackedLinkEvent)
+      times.each_with_index do |t, i|
+        TrackedLinkEvent.create!(
+          tracked_link_id: link.id,
+          clicked_at:      t,
+          ip_address:      "73.14.22.#{100 + (link.id + i) % 120}",
+          user_agent:      i.even? ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15'
+                                   : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0'
+        )
+      end
+    end
+    link.update_columns(click_count: clicks, first_clicked_at: times.first, last_clicked_at: times.last)
+    link
+  end
+
+  # opens = the collection itself being opened; homes = serial → clicks on that home
+  # inside it. hours_ago is when the LAST click landed.
+  brochure_sends = [
+    { entity: leads["Steven Baker"],      owner: users[:sales1],  brochure: "Spring 2026 Featured Homes",
+      opens: 3, hours_ago: 2,  homes: { "112-000-H-D-C412913A" => 4, "RMN-2026-A-001234" => 1 } },
+    { entity: contacts["Tammy Fisher"],   owner: users[:sales1],  brochure: "Spring 2026 Featured Homes",
+      opens: 2, hours_ago: 4,  homes: { "112-000-H-D-C412913A" => 2 } },
+    { entity: leads["Dorothy Hughes"],    owner: users[:sales2],  brochure: "Move-In Ready Under $75k",
+      opens: 2, hours_ago: 6,  homes: { "DH-2026-S-005003" => 3 } },
+    { entity: leads["Kenneth Stewart"],   owner: users[:manager], brochure: "Spring 2026 Featured Homes",
+      opens: 1, hours_ago: 20, homes: { "112-000-H-A-C412925C" => 2 } },
+    { entity: contacts["Angela Brooks"],  owner: users[:manager], brochure: "Move-In Ready Under $75k",
+      opens: 1, hours_ago: 26, homes: { "112-000-H-H-C412930E" => 2 } },
+    { entity: leads["Ronald Morris"],     owner: users[:admin],   brochure: "Pre-Owned Value Homes",
+      opens: 4, hours_ago: 30, homes: { "SKY-2021-A-776600" => 3 } },
+    { entity: contacts["Raymond Price"],  owner: users[:admin],   brochure: "Pre-Owned Value Homes",
+      opens: 3, hours_ago: 12, homes: { "FLT-2017-B-554400" => 1 } },
+    # Opened, never clicked a home — the "📄 N opens" badge instead of "🏠 N home clicks".
+    { entity: leads["Sharon Bell"],       owner: users[:sales1],  brochure: "Move-In Ready Under $75k",
+      opens: 1, hours_ago: 44, homes: {} },
+    # The mirror case: clicked straight through to a home from the email without ever
+    # opening the collection page — exercises the "Clicked N homes in ..." subtitle.
+    { entity: leads["Michelle Rivera"],   owner: users[:sales2],  brochure: "Pre-Owned Value Homes",
+      opens: 0, hours_ago: 9,  homes: { "CLT-2019-T-889900" => 2 } },
+    # Outside the 48h window on purpose: proves the queue is a live signal, not a log.
+    # Shows on the lead's timeline and the brochure's own stats, not in the workqueue.
+    { entity: leads["Larry Coleman"],     owner: users[:sales2],  brochure: "Spring 2026 Featured Homes",
+      opens: 2, hours_ago: 120, homes: { "RMN-2026-A-001234" => 1 } },
+  ]
+
+  brochure_signal_count = 0
+  brochure_sends.each do |s|
+    entity   = s[:entity]
+    brochure = brochures[s[:brochure]]
+    next unless entity && brochure
+
+    # Ownership is what decides whose inbox this lands in — pin it.
+    entity.update_columns(owner_id: s[:owner].id) unless entity.owner_id == s[:owner].id
+
+    etype   = entity.class.name
+    last_at = s[:hours_ago].hours.ago
+
+    open_link = TrackedLink.create!(
+      company:     company,
+      url:         brochure.public_url(brochure_base_url),
+      link_type:   'brochure_view',
+      entity_type: etype,
+      entity_id:   entity.id,
+      source_type: 'Brochure',
+      source_id:   brochure.id
+    )
+    # Mirrors BrochureSendingService: the token is only known after create, and it
+    # rides on the URL so homes clicked on the public page stay attributable.
+    open_link.update_column(:url, "#{brochure.public_url(brochure_base_url)}?rt=#{open_link.token}")
+    # The collection is opened before the homes inside it are clicked.
+    record_clicks.call(open_link, s[:opens], last_at - 1.hour)
+
+    s[:homes].each do |serial, clicks|
+      unit = vehicles[serial]
+      next unless unit
+
+      listing_link = TrackedLink.create!(
+        company:     company,
+        vehicle_id:  unit.id,
+        url:         "#{brochure.public_url(brochure_base_url)}?listing=#{unit.id}&rt=#{open_link.token}",
+        link_type:   'brochure_listing',
+        entity_type: etype,
+        entity_id:   entity.id,
+        source_type: 'Brochure',
+        source_id:   brochure.id
+      )
+      record_clicks.call(listing_link, clicks, last_at)
+    end
+    brochure_signal_count += 1
+  end
+
+  # Brochure stat counters, derived from the links just minted rather than guessed,
+  # so the brochure list's Views/Shares columns agree with the workqueue.
+  brochures.each_value do |b|
+    opens = TrackedLink.where(company_id: company.id, source_type: 'Brochure', source_id: b.id, vehicle_id: nil)
+    b.update_columns(view_count: opens.sum(:click_count), share_count: opens.count)
+  end
+
+  # Hot inventory interest that did NOT come from a brochure — a home link in a
+  # one-to-one email. Needs click_count >= 2 to qualify (browsing noise filter).
+  inventory_signals = [
+    { entity: leads["Gregory Ward"],     owner: users[:sales2],  serial: "112-000-H-A-C412920B", clicks: 5, hours_ago: 3 },
+    { entity: contacts["Kevin O'Brien"], owner: users[:sales1],  serial: "RMN-2026-A-001235",    clicks: 3, hours_ago: 8 },
+    { entity: leads["Frank Wood"],       owner: users[:admin],   serial: "112-000-H-D-C412935F", clicks: 4, hours_ago: 11 },
+    { entity: leads["Betty Sanchez"],    owner: users[:manager], serial: "DH-2026-A-005002",     clicks: 2, hours_ago: 18 },
+  ]
+
+  inventory_signal_count = 0
+  inventory_signals.each do |s|
+    entity = s[:entity]
+    unit   = vehicles[s[:serial]]
+    next unless entity && unit
+
+    entity.update_columns(owner_id: s[:owner].id) unless entity.owner_id == s[:owner].id
+
+    link = TrackedLink.create_for_inventory!(
+      company:     company,
+      vehicle:     unit,
+      url:         "#{brochure_base_url}/inventory/#{unit.id}",
+      entity_type: entity.class.name,
+      entity_id:   entity.id
+    )
+    record_clicks.call(link, s[:clicks], s[:hours_ago].hours.ago)
+    inventory_signal_count += 1
+  end
+
+  in_window = TrackedLink.where(company_id: company.id).for_brochures.clicked
+                         .where('last_clicked_at >= ?', 48.hours.ago).where.not(entity_id: nil)
+  puts "  Cleared #{wiped} prior tracked links" if wiped > 0
+  puts "  Brochure signals:  #{brochure_signal_count} recipients across #{brochures.size} collections " \
+       "(#{in_window.where(vehicle_id: nil).sum(:click_count)} opens, " \
+       "#{in_window.where.not(vehicle_id: nil).sum(:click_count)} home clicks in the 48h window)"
+  puts "  Inventory signals: #{inventory_signal_count} (direct home links, click_count >= 2)"
+  puts "  Owners pinned:     admin/manager/sales1/sales2 each own at least one signal"
+else
+  puts "  Skipped (TrackedLink or brochures unavailable)"
+end
+
 # ── 41. Report demo data (Inventory Stock List + Salesperson GP Pipeline) ──
 # Idempotent: every record is guarded by find_or_create_by / update_columns, so
 # re-running without RESET re-applies links instead of duplicating. Builds a full
@@ -2497,6 +2718,209 @@ load Rails.root.join('db/seeds/deal_desk_seed.rb')
 seed_deal_desk_for(company)
 seed_deal_desk_rbac!
 
+# ── Deal Desk scenarios (the desks themselves) ─────────────
+# The block above seeds the REFERENCE data a desk draws from — lender programs and
+# their tier matrices, fee templates, F&I products. It creates no desks, so Deal Desk
+# opened on a fresh demo company was an empty tool with a full parts bin behind it.
+#
+# These are real DealDeskScenario rows: a deal can carry several (that's the compare
+# feature), and the derived columns are computed through DealDesk::Engine exactly as
+# the autosave path in DealDeskScenariosController#recompute! does — nothing here
+# hand-writes a payment or a gross, so the seeded numbers can't disagree with the app.
+#
+# Statuses cover the whole lifecycle: active (working), selected (the one that closed,
+# kept permanently), expired (past its window — read-only, history only).
+puts "\n   Seeding Deal Desk scenarios..."
+if defined?(DealDeskScenario)
+  DealDeskScenario.where(company_id: company.id).delete_all
+
+  dd_program = ->(lender, name) { company.lender_programs.find_by(lender_name: lender, program_name: name) }
+  dd_fni     = company.fni_products.index_by(&:name)
+  dd_fni_line = lambda do |name|
+    p = dd_fni[name]
+    p && { 'id' => p.id, 'name' => p.name, 'price' => p.default_price.to_f, 'cost' => p.default_cost.to_f }
+  end
+
+  # fees keys must be ones DealDeskScenario::FEE_LINE_NAMES knows (doc/delivery/setup/
+  # skirting/accessories) — an unknown key logs a warning and is dropped on write-back.
+  dd_specs = [
+    # Fisher is the live one: three structures on the same deal, which is what the
+    # compare view exists to show. Same unit, different money.
+    { deal: "Fisher - Dutch 1676S", serial: "DH-2026-S-005003", label: "Base — 20yr @ 21st",
+      status: "active", by: users[:sales1], program: ['21st Mortgage', 'MH Chattel'],
+      tier: 'Near-prime (660-719) · 11-30yr', term: 240, cash_down: 6_200, rebates: 0,
+      fees: { 'doc' => 599, 'delivery' => 2_800, 'setup' => 4_500, 'skirting' => 1_150 },
+      fni: ['Vehicle Service Contract', 'GAP Coverage'] },
+    { deal: "Fisher - Dutch 1676S", serial: "DH-2026-S-005003", label: "More down — 15yr",
+      status: "active", by: users[:sales1], program: ['21st Mortgage', 'MH Chattel'],
+      tier: 'Near-prime (660-719) · 0-10yr', term: 180, cash_down: 12_000, rebates: 1_000,
+      fees: { 'doc' => 599, 'delivery' => 2_800, 'setup' => 4_500 },
+      fni: ['GAP Coverage'] },
+    { deal: "Fisher - Dutch 1676S", serial: "DH-2026-S-005003", label: "Trade-in — Clayton",
+      status: "active", by: users[:manager], program: ['Aqua Finance', 'Recreational Standard'],
+      tier: 'Tier 2 (700-759) · 6-15yr', term: 180, cash_down: 3_500,
+      trade_allowance: 18_500, trade_payoff: 11_200, tax_mode: 'price_minus_trade',
+      fees: { 'doc' => 599, 'delivery' => 2_800, 'setup' => 4_500, 'accessories' => 1_400 },
+      fni: ['Vehicle Service Contract', 'Tire & Wheel Protection'] },
+
+    # Unit swap on a live deal — a second desk on a different (cross-location) home,
+    # which is what is_cross_location / unit_days_on_lot are there to surface.
+    { deal: "Fisher - Dutch 1676S", serial: "112-000-H-H-C412930E", label: "Swap to Heritage 1676H",
+      status: "active", by: users[:sales2], program: ['21st Mortgage', 'MH Chattel'],
+      tier: 'Near-prime (660-719) · 0-10yr', term: 180, cash_down: 5_000,
+      fees: { 'doc' => 599, 'delivery' => 2_800, 'setup' => 4_500 },
+      fni: ['GAP Coverage'] },
+
+    # Closed deals keep the structure that actually sold.
+    { deal: "Smuts - Champion Aspire", serial: "112-000-H-D-C412913A", label: "Signed structure",
+      status: "selected", by: users[:sales1], program: ['21st Mortgage', 'MH Chattel'],
+      tier: 'Prime (720+) · 11-30yr', term: 240, cash_down: 9_100,
+      fees: { 'doc' => 599, 'delivery' => 3_500, 'setup' => 4_500, 'skirting' => 950 },
+      fni: ['Vehicle Service Contract', 'GAP Coverage', 'Tire & Wheel Protection'] },
+    { deal: "Martin - Emerald Sky 4483", serial: "112-000-H-A-C412920B", label: "Signed structure",
+      status: "selected", by: users[:sales2], program: ['Aqua Finance', 'Recreational Standard'],
+      tier: 'Tier 1 (760+) · 6-15yr', term: 180, cash_down: 24_980, rebates: 2_500,
+      fees: { 'doc' => 599, 'delivery' => 4_200, 'setup' => 4_500 },
+      fni: ['Vehicle Service Contract', 'Paint & Fabric Protection'] },
+
+    # Cash: no program, no term. Payment is nil and OTD is the whole story.
+    { deal: "Gonzalez - Heritage 1676H", serial: "112-000-H-H-C412930E", label: "Cash — no financing",
+      status: "selected", by: users[:manager], program: nil, tier: nil, term: nil, cash_down: 62_900,
+      fees: { 'doc' => 599, 'delivery' => 2_800, 'setup' => 4_500 }, fni: [] },
+
+    # Manual APR override — rate_source lands on 'manual_override' rather than 'tier'.
+    { deal: "Hoosier Dev - Bulk Order", serial: "112-000-H-D-C412935F", label: "Bulk — negotiated rate",
+      status: "active", by: users[:admin], program: ['21st Mortgage', 'MH Chattel'],
+      tier: 'Prime (720+) · 0-10yr', term: 240, cash_down: 45_000, apr_override: 6.25,
+      fees: { 'doc' => 599, 'delivery' => 18_000, 'setup' => 8_000 },
+      fni: ['Vehicle Service Contract'] },
+
+    # Aged out of its validity window: read-only, hidden from the working desk,
+    # reachable from history. Expire, don't prune.
+    { deal: "Turner - Skyline Amber Cove", serial: "SKY-2021-A-776600", label: "Original pencil (expired)",
+      status: "expired", by: users[:sales2], program: ['Aqua Finance', 'Recreational Standard'],
+      tier: 'Tier 4 (620-659) · 6-15yr', term: 120, cash_down: 2_000,
+      valid_through: Date.current - 9, fees: { 'doc' => 599, 'delivery' => 2_000 },
+      fni: ['GAP Coverage'] },
+  ]
+
+  dd_created = 0
+  dd_specs.each_with_index do |sp, idx|
+    deal = deals[sp[:deal]]
+    unit = sp[:serial] ? vehicles[sp[:serial]] : nil
+    unit ||= company.vehicles.find_by(id: deal&.vehicle_id)
+    next unless deal && unit
+
+    program = sp[:program] && dd_program.call(*sp[:program])
+    tier    = program && sp[:tier] && program.tiers.find_by(tier_label: sp[:tier])
+    deal_loc_id = deal.location_id || locations["AUB"].id
+
+    sc = DealDeskScenario.new(
+      company:             company,
+      location_id:         deal_loc_id,
+      deal:                deal,
+      vehicle:             unit,
+      created_by:          sp[:by],
+      label:               sp[:label],
+      status:              sp[:status],
+      trade_allowance:     sp[:trade_allowance] || 0,
+      trade_payoff:        sp[:trade_payoff] || 0,
+      cash_down:           sp[:cash_down] || 0,
+      rebates:             sp[:rebates] || 0,
+      fees:                sp[:fees] || {},
+      fni_products:        Array(sp[:fni]).filter_map { |n| dd_fni_line.call(n) },
+      lender_program:      program,
+      lender_tier:         tier&.tier_label,
+      term_months:         sp[:term],
+      tax_mode:            sp[:tax_mode] || 'full_price',
+      # The engine takes the tax rate as a FRACTION (0.06 = 6%), not the whole-number
+      # percent that deals.state_tax_rate carries.
+      tax_rate:            0.06,
+      unit_price_snapshot: unit.sale_price,
+      unit_cost_snapshot:  unit.dealer_cost || unit.cost,
+      unit_location_id:    unit.location_id,
+      unit_days_on_lot:    (unit.date_in_stock ? (Date.current - unit.date_in_stock).to_i : nil),
+      is_cross_location:   unit.location_id.present? && unit.location_id != deal_loc_id,
+      apr_override:        sp[:apr_override]
+    )
+
+    # Same resolution + recompute the controller runs on autosave, so the seeded
+    # payment/gross are the engine's numbers rather than a second implementation.
+    resolved = DealDesk::RateResolver.resolve_with_source(
+      manual_override: sp[:apr_override],
+      tier_rate:       tier&.rate,
+      company_default: company.default_finance_rate
+    )
+    sc.apr         = resolved[:rate]
+    sc.rate_source = resolved[:source]&.to_s
+
+    result = sc.engine_result
+    sc.amount_financed = result.amount_financed
+    sc.monthly_payment = result.monthly_payment
+    sc.out_the_door    = result.out_the_door
+    if result.gross
+      sc.front_gross  = result.gross.front
+      sc.back_gross   = result.gross.back
+      sc.dealer_gross = result.gross.total
+    end
+    sc.save!
+
+    # Post-save fixups the create-time callbacks would otherwise overwrite:
+    # set_validity_window always stamps a forward-looking valid_through, and
+    # selected_at is set by mark_selected! (which also writes back to the deal —
+    # not something a seed should do to an already-closed deal).
+    fixups = { created_at: (3 + idx).days.ago, updated_at: (idx + 1).hours.ago }
+    fixups[:valid_through] = sp[:valid_through] if sp[:valid_through]
+    fixups[:selected_at]   = (5 + idx).days.ago if sp[:status] == 'selected'
+    sc.update_columns(fixups)
+    dd_created += 1
+  end
+
+  by_status = DealDeskScenario.where(company_id: company.id).group(:status).count
+  puts "   ✅ Scenarios: #{dd_created} " \
+       "(active #{by_status['active'].to_i}, selected #{by_status['selected'].to_i}, expired #{by_status['expired'].to_i}) " \
+       "across #{DealDeskScenario.where(company_id: company.id).distinct.count(:deal_id)} deals"
+
+  # One shared pencil, already viewed — the customer-facing half of the desk, and the
+  # only thing that fills the share's view counters. Snapshot is built server-side by
+  # the same builder the controller uses; vehicle_payload is nil because that payload
+  # needs `request` for absolute URLs and there is none in a seed.
+  if defined?(DealDeskShare)
+    begin
+      DealDeskShare.where(company_id: company.id).delete_all
+      shared_deal = deals["Fisher - Dutch 1676S"]
+      shared      = DealDeskScenario.where(company_id: company.id, deal_id: shared_deal&.id, status: 'active').order(:id).to_a
+      if shared_deal && shared.any?
+        snapshot = DealDesk::ShareSnapshotBuilder.new(
+          deal: shared_deal, scenarios: shared.first(3), vehicle_payload: nil
+        ).build
+        share = DealDeskShare.create!(
+          company:        company,
+          deal:           shared_deal,
+          shared_by:      users[:sales1],
+          scenario_ids:   shared.first(3).map(&:id),
+          snapshot:       snapshot,
+          channels:       ['email'],
+          to_email:       contacts["Tammy Fisher"]&.email,
+          custom_message: "Tammy — here are the three ways we can structure the Dutch 1676S. Call me with questions.",
+          expires_at:     11.days.from_now
+        )
+        share.update_columns(
+          sent_at:         2.days.ago,
+          first_viewed_at: 40.hours.ago,
+          last_viewed_at:  5.hours.ago,
+          view_count:      4
+        )
+        puts "   ✅ Shared pencil: #{share.scenario_ids.size} scenarios to #{share.to_email} (viewed #{share.view_count}x)"
+      end
+    rescue => e
+      puts "   ⚠ Deal Desk share skipped: #{e.class}: #{e.message}"
+    end
+  end
+else
+  puts "   ⚠ Skipped (DealDeskScenario not defined)"
+end
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -2546,6 +2970,10 @@ puts "-" * 55
   "Agreements"        => company.respond_to?(:agreements)        ? company.agreements.count : 0,
   "Brochures"         => company.respond_to?(:brochures)         ? company.brochures.count : 0,
   "Listings"          => company.respond_to?(:listings)          ? company.listings.count : 0,
+  "Tracked Links"     => defined?(TrackedLink)                    ? TrackedLink.where(company_id: company.id).count : 0,
+  "  \u2192 Brochure opens"   => defined?(TrackedLink)            ? TrackedLink.where(company_id: company.id).brochure_opens.sum(:click_count) : 0,
+  "  \u2192 Home clicks"      => defined?(TrackedLink)            ? TrackedLink.where(company_id: company.id).brochure_listings.sum(:click_count) : 0,
+  "  \u2192 Hot in 48h"       => defined?(TrackedLink)            ? TrackedLink.where(company_id: company.id).clicked.where.not(entity_id: nil).where("last_clicked_at >= ?", 48.hours.ago).count : 0,
   "Payment Methods"   => defined?(PaymentMethod)                  ? PaymentMethod.where(company_id: company.id).count : 0,
   "Payments"          => company.respond_to?(:payments)           ? company.payments.count : 0,
   "  → Revenue (completed)" => company.respond_to?(:payments)     ? company.payments.where(status: 'completed').sum(:amount).to_i : 0,
@@ -2564,6 +2992,9 @@ puts "-" * 55
   "Lender Programs"   => company.respond_to?(:lender_programs) ? company.lender_programs.count : 0,
   "Fee Templates"     => company.respond_to?(:fee_templates)   ? company.fee_templates.count : 0,
   "F&I Products"      => company.respond_to?(:fni_products)    ? company.fni_products.count : 0,
+  "Deal Desk Scenarios" => defined?(DealDeskScenario)          ? DealDeskScenario.where(company_id: company.id).count : 0,
+  "  \u2192 Desked deals"     => defined?(DealDeskScenario)      ? DealDeskScenario.where(company_id: company.id).distinct.count(:deal_id) : 0,
+  "  \u2192 Shared pencils"   => defined?(DealDeskShare)         ? DealDeskShare.where(company_id: company.id).count : 0,
   "Deals w/ Lender"   => company.deals.where.not(lender_id: nil).count,
   "Deals w/ Vehicle"  => company.deals.where.not(vehicle_id: nil).count,
   "Open (Pending)"    => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).count,
