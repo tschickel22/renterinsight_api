@@ -140,9 +140,22 @@ module SiteProfiles
     # in the wrong place. The renderer knows which one happened; say it.
     FALLBACK = 'Upload a brochure or build the demo by hand instead.'
 
+    # What to do next, which is not the same for every failure.
+    #
+    # A site that refuses this server is not a dead end: the same scan run from
+    # a laptop on an ordinary connection reads it in seconds, and that route
+    # exists. Telling someone to upload a brochure instead — or naming an
+    # environment variable at them — buries the one thing that works.
+    LOCAL_SCAN_ADVICE = <<~TEXT.squish
+      It will scan from a computer that can open the site: run
+      rake "site_scan:push[URL]" there. Otherwise upload a brochure or build the
+      demo by hand.
+    TEXT
+
     def unreadable_message(root)
       host = host_of(@record.source_url) || @record.source_url
-      "#{host} #{unreadable_reason(root)} #{FALLBACK}"
+      advice = render_verdict == :still_challenged ? LOCAL_SCAN_ADVICE : FALLBACK
+      "#{host} #{unreadable_reason(root)} #{advice}"
     end
 
     def unreadable_reason(root)
@@ -167,7 +180,8 @@ module SiteProfiles
           "start on this server#{render_detail}"
       when :still_challenged
         'is behind a bot check that will not clear for this server' \
-          "#{render_detail}#{hosted_renderer_hint}"
+          "#{render_detail}. It is refusing this machine rather than the browser" \
+          "#{hosted_renderer_hint}"
       when :error, :empty
         "could not be read: the browser did not return a page#{render_detail}"
       when :rendered
@@ -187,8 +201,7 @@ module SiteProfiles
     def hosted_renderer_hint
       return '' if Renderer.hosted_configured?
 
-      '. The check is refusing this machine rather than the browser, so only a ' \
-        'renderer with residential egress can read it (SITE_SCAN_RENDER_TOKEN)'
+      ', and no wait or browser setting changes that'
     end
 
     def archive_note(root)
