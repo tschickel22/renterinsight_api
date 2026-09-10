@@ -829,6 +829,7 @@ Rails.application.routes.draw do
         collection do
           get :inventory_lots
           get 'by_token/:token', action: :by_token  # PUBLIC - shareable preview
+          post :import  # A profile scanned on a machine that could reach the site
         end
       end
 

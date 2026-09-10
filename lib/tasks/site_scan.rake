@@ -47,4 +47,87 @@ namespace :site_scan do
 
     puts "\nverdict: #{html && !SiteProfiles::ArchiveFallback.challenged?(200, html) ? 'this server can read the site' : 'this server cannot read the site'}"
   end
+
+  # Scan here, share there.
+  #
+  # For a prospect whose site refuses the server. Measured on thehomeplus.com:
+  # a bot check that never clears in 120s from Render clears in 0.1s from a
+  # laptop on a home connection, with the same browser build — the address is
+  # what is being refused, so the only fixes are to pay for residential egress
+  # or to scan from somewhere that already has it. This is the second one.
+  #
+  # The whole scan runs locally, against this same code, and only the finished
+  # profile is sent up. Images were already rehosted onto S3 during the scan, so
+  # they load from anywhere.
+  #
+  #   TOKEN=... rake "site_scan:push[https://theirsite.com]"
+  #   TOKEN=... TARGET=https://renterinsight-api-prod.onrender.com \
+  #     rake "site_scan:push[https://theirsite.com,Their Label]"
+  #
+  # TOKEN is a platform-admin bearer token: open the app, and it is authToken in
+  # localStorage. COMPANY_ID sets which tenant owns the demo (defaults to the
+  # token's own company). LOT sets the inventory lot the demo borrows.
+  desc 'Scan a site locally and push the finished profile to staging or production'
+  task :push, %i[url label] => :environment do |_t, args|
+    url = args[:url].presence || abort('usage: rake "site_scan:push[https://example.com]"')
+    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    token = ENV['TOKEN'].presence || abort('TOKEN is required (authToken from localStorage)')
+
+    company = Company.find_by(id: ENV['LOCAL_COMPANY_ID']) || Company.first
+    abort('no company in the local database to scan under') if company.nil?
+
+    profile = SiteContentProfile.new(company: company, source_url: url, status: 'pending',
+                                     display_name: args[:label].presence)
+    profile.save!(validate: false)
+
+    puts "scanning #{url} locally (this takes a few minutes)"
+    started = Time.current
+    begin
+      SiteProfiles::Orchestrator.new(profile).call
+    rescue StandardError => e
+      profile.destroy
+      abort("scan failed: #{e.message}")
+    end
+    profile.reload
+    puts "  read #{profile.report['page_count']} pages in #{(Time.current - started).round}s"
+    puts "  brand: #{profile.profile.dig('brand', 'name').inspect}"
+    puts "  logo:  #{profile.profile.dig('brand', 'logo_url').present? ? 'found' : 'none'}"
+
+    body = {
+      source_url: profile.source_url,
+      display_name: profile.display_name,
+      profile: profile.profile,
+      report: profile.report,
+      seo_report: profile.seo_report,
+      schema_version: profile.schema_version,
+      suggested_subdomain: profile.suggested_subdomain,
+      robots_allowed: profile.robots_allowed,
+      preview_template_ids: (ENV['TEMPLATES'] || '').split(',').map(&:strip).reject(&:blank?),
+      inventory_company_id: ENV['LOT'].presence
+    }.compact
+
+    uri = URI.join("#{target}/", 'api/v1/site_content_profiles/import')
+    request = Net::HTTP::Post.new(uri)
+    request['Content-Type'] = 'application/json'
+    request['Authorization'] = "Bearer #{token}"
+    request['X-Company-ID'] = ENV['COMPANY_ID'] if ENV['COMPANY_ID'].present?
+    request.body = body.to_json
+
+    puts "pushing to #{target}"
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.read_timeout = 60
+    response = http.request(request)
+
+    unless response.is_a?(Net::HTTPSuccess)
+      abort("push failed: HTTP #{response.code} #{response.body.to_s[0, 300]}")
+    end
+
+    remote = JSON.parse(response.body)
+    # The local copy has done its job; the shareable one lives on the server.
+    profile.destroy
+
+    site = target.include?('staging') ? 'https://staging.dealertide.com' : 'https://app.dealertide.com'
+    puts "\ndone. #{site}/preview/templates/#{remote['preview_token']}"
+  end
 end

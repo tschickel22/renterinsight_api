@@ -39,6 +39,54 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     render json: detail(@profile)
   end
 
+  # POST /api/v1/site_content_profiles/import
+  #
+  # Takes a profile that was scanned somewhere else and makes it shareable here.
+  #
+  # For the sites this server cannot read. A bot check that refuses a datacenter
+  # address clears in a tenth of a second on a laptop with a normal home
+  # connection, and no amount of waiting or browser tuning changes that — the
+  # address is what is being refused. So the scan runs where it works, on the
+  # admin's own machine against this same codebase, and only the finished
+  # profile is sent up. See rake site_scan:push.
+  #
+  # No crawl, no browser and no model call happen here: everything expensive
+  # already happened on the machine that could reach the site.
+  def import
+    profile_json = params.require(:profile)
+    profile_json = profile_json.to_unsafe_h if profile_json.respond_to?(:to_unsafe_h)
+
+    profile = SiteContentProfile.new(
+      company_id: @company.id,
+      created_by: current_user,
+      source_url: params[:source_url].presence,
+      source_kind: 'url',
+      display_name: params[:display_name].presence,
+      preview_template_ids: Array(params[:preview_template_ids]).map(&:to_s),
+      inventory_company_id: params[:inventory_company_id].presence,
+      suggested_subdomain: params[:suggested_subdomain].presence,
+      profile: profile_json,
+      schema_version: params[:schema_version].presence || SiteProfiles::ProfileSchema::VERSION,
+      report: (params[:report] || {}).then { |r| r.respond_to?(:to_unsafe_h) ? r.to_unsafe_h : r },
+      seo_report: (params[:seo_report] || {}).then { |r| r.respond_to?(:to_unsafe_h) ? r.to_unsafe_h : r },
+      robots_allowed: params[:robots_allowed].nil? ? true : params[:robots_allowed],
+      status: 'ready'
+    )
+
+    # Says on the record that this one was read elsewhere, so a demo that looks
+    # stale later can be explained without guesswork.
+    profile.report = profile.report.to_h.merge('imported_at' => Time.current.iso8601)
+
+    profile.save!
+    # The lot the demo will borrow has to have a form on it, exactly as a local
+    # scan would arrange.
+    ensure_lead_form_for(profile)
+
+    render json: detail(profile), status: :created
+  rescue ActionController::ParameterMissing => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # POST /api/v1/site_content_profiles
   #   { source_url: }    -> scan an existing site (async)
   #   { manual: {...} }  -> build from a short form, ready immediately
@@ -423,6 +471,16 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       show_seo_report: profile.show_seo_report,
       show_seo_teaser: profile.show_seo_teaser
     }
+  end
+
+  def ensure_lead_form_for(profile)
+    config = SiteProfiles::DemoInventoryResolver.config_for_profile(profile)
+    return if config.blank?
+
+    company = Company.find_by(id: config['company_id'])
+    Websites::DefaultLeadForm.ensure_for(company) if company
+  rescue StandardError => e
+    Rails.logger.warn("[SiteContentProfiles#import] lead form setup failed: #{e.message}")
   end
 
   def detail(profile)
