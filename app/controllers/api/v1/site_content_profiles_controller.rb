@@ -452,6 +452,9 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # Why a scan failed. The list said only "Scan failed", so the one sentence
       # telling an admin what to do instead was written and never shown.
       error_message: profile.error_message,
+      # 'still_challenged' means the site refuses our servers but not an
+      # ordinary machine, which is the one failure the admin can route around.
+      failure_kind: profile.report.to_h['failure_kind'],
       source_kind: profile.source_kind,
       document_filename: profile.document_filename,
       # Zero means the document was read as text only — worth surfacing, since

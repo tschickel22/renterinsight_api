@@ -73,6 +73,20 @@ RSpec.describe SiteProfiles::Orchestrator do
     expect(e.message).to match(/brochure/i)
   end
 
+  # The admin screen offers a route around this particular failure, so it has to
+  # be able to recognise it without reading the sentence.
+  it 'records what kind of failure it was, not only the message' do
+    fetcher = instance_double(SiteProfiles::Fetcher,
+                              render_notes: { 'https://thehomeplus.com' => :still_challenged },
+                              render_details: {}, close: nil)
+    allow(fetcher).to receive(:get).and_return(nil)
+    allow(fetcher).to receive(:robots_allows?).and_return(true)
+
+    described_class.new(profile, fetcher: fetcher).call
+  rescue SiteProfiles::Fetcher::FetchError
+    expect(profile.reload.report['failure_kind']).to eq('still_challenged')
+  end
+
   it 'records the failure on the profile rather than leaving it mid-scan' do
     described_class.new(profile, fetcher: fetcher_returning(PARKED_STUB, from_archive: true)).call
   rescue SiteProfiles::Fetcher::FetchError

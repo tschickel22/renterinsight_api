@@ -85,7 +85,14 @@ module SiteProfiles
       run_seo_audit(root)
       @record
     rescue StandardError => e
-      @record.update!(status: 'failed', error_message: e.message.truncate(500))
+      @record.update!(
+        status: 'failed',
+        error_message: e.message.truncate(500),
+        # The kind, not the prose. A site refusing this server is the one
+        # failure another machine can fix, and the admin screen offers that
+        # route — which it cannot do by matching on a sentence.
+        report: @record.report.to_h.merge('failure_kind' => render_verdict.to_s.presence)
+      )
       raise
     ensure
       # However the scan ended, the browser goes with it. Chrome runs in the
