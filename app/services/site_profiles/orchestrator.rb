@@ -30,7 +30,12 @@ module SiteProfiles
       @record.update!(status: 'fetching')
 
       root = @fetcher.get(@record.source_url)
-      raise Fetcher::FetchError, "Could not load #{@record.source_url}" if root.nil?
+      # Not "Could not load <url>". By the time the fetch returns nothing we
+      # have already tried the wire, a browser and the archive, and we know
+      # which of them refused us — a bare "could not load" throws that away and
+      # leaves an admin with nothing to act on. Reported from production, where
+      # it was the only thing a failed scan said.
+      raise Fetcher::FetchError, unreadable_message(nil) if root.nil?
 
       @from_archive = root.try(:from_archive?).present?
       @rendered_pages += 1 if root.try(:rendered?)
@@ -141,6 +146,13 @@ module SiteProfiles
     end
 
     def unreadable_reason(root)
+      # An archived copy that turned out to be a placeholder is its own answer,
+      # whatever the renderer made of the live page beforehand.
+      if root.try(:from_archive?).present?
+        return 'refused our request, and the web archive holds only a placeholder ' \
+               'copy of it, so there was nothing to read.'
+      end
+
       case render_verdict
       when :off
         'could not be read, and rendering is switched off, so a site that needs a ' \
@@ -157,9 +169,8 @@ module SiteProfiles
         'loaded in a browser but never drew any content , its text is built by ' \
           'JavaScript that did not finish.'
       else
-        if root.try(:from_archive?).present?
-          'refused our request, and the web archive holds only a placeholder copy ' \
-            'of it, so there was nothing to read.'
+        if root.nil?
+          'could not be loaded at all, and the web archive has no usable copy of it.'
         else
           'returned a page with no readable content.'
         end

@@ -15,13 +15,15 @@ RSpec.describe SiteProfiles::Orchestrator do
                                status: 'pending')
   end
 
-  def message_for(outcome, from_archive: false)
+  def message_for(outcome, from_archive: false, root: :page)
     fetcher = instance_double(SiteProfiles::Fetcher,
                               render_notes: { 'https://thehomeplus.com' => outcome })
-    root = SiteProfiles::Fetcher::Response.new(url: 'https://thehomeplus.com', status: 200,
-                                               body: '', content_type: 'text/html',
-                                               from_archive: from_archive)
-    described_class.new(profile, fetcher: fetcher).send(:unreadable_message, root)
+    response = if root == :page
+                 SiteProfiles::Fetcher::Response.new(url: 'https://thehomeplus.com', status: 200,
+                                                     body: '', content_type: 'text/html',
+                                                     from_archive: from_archive)
+               end
+    described_class.new(profile, fetcher: fetcher).send(:unreadable_message, response)
   end
 
   it 'says so when rendering was never switched on' do
@@ -46,6 +48,18 @@ RSpec.describe SiteProfiles::Orchestrator do
 
   it 'still explains a placeholder in the archive when no render was tried' do
     expect(message_for(nil, from_archive: true)).to include('web archive holds only a placeholder')
+  end
+
+  # What production said on the second attempt: the fetch, the browser and the
+  # archive had all been tried and the only thing reported was "Could not load
+  # https://thehomeplus.com", which names none of them.
+  it 'explains a page that never arrived at all' do
+    expect(message_for(nil, root: nil)).to include('could not be loaded at all')
+    expect(message_for(nil, root: nil)).not_to eq('Could not load https://thehomeplus.com')
+  end
+
+  it 'still names the bot check when nothing could be loaded because of one' do
+    expect(message_for(:still_challenged, root: nil)).to include('refusing this server')
   end
 
   it 'always names the site and what to do instead' do
