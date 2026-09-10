@@ -161,8 +161,9 @@ module SiteProfiles
         'could not be read, and the browser that would have rendered it failed to ' \
           'start on this server.'
       when :still_challenged
-        'is behind a bot check that did not clear even in a real browser. That ' \
-          'usually means the check is refusing this server rather than the browser.'
+        'is behind a bot check that did not clear even in a real browser' \
+          "#{render_detail}. That usually means the check is refusing this server, " \
+          'or that its proof-of-work needs longer than we waited on a CPU this slow.'
       when :error, :empty
         'could not be read: the browser did not return a page.'
       when :rendered
@@ -181,6 +182,12 @@ module SiteProfiles
     def render_verdict
       notes = @fetcher.try(:render_notes) || {}
       notes[@record.source_url] || notes.values.first
+    end
+
+    def render_detail
+      details = @fetcher.try(:render_details) || {}
+      detail = details[@record.source_url] || details.values.compact.first
+      detail.present? ? " (#{detail})" : ''
     end
 
     def collect_digests(root)
