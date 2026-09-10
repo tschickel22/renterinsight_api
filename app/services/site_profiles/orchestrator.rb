@@ -16,6 +16,14 @@ module SiteProfiles
       @record = profile_record
       @fetcher = fetcher
       @warnings = []
+      # Whether any page in this scan had to come from the Wayback Machine.
+      # Recorded on the report because it is the usual explanation for a scan
+      # that read one page, and for imagery that could not be rehosted.
+      @from_archive = false
+      # How many pages had to be loaded in a browser. Worth knowing per scan:
+      # it is the difference between a site we can read cheaply and one that
+      # costs a rendering credit per page.
+      @rendered_pages = 0
     end
 
     def call
@@ -24,11 +32,16 @@ module SiteProfiles
       root = @fetcher.get(@record.source_url)
       raise Fetcher::FetchError, "Could not load #{@record.source_url}" if root.nil?
 
+      @from_archive = root.try(:from_archive?).present?
+      @rendered_pages += 1 if root.try(:rendered?)
+
       robots_allowed = @fetcher.robots_allows?(@record.source_url)
       @warnings << 'robots.txt disallows crawling this site; scanned anyway at admin request.' unless robots_allowed
 
       digests = collect_digests(root)
       raise Fetcher::FetchError, 'No readable pages found.' if digests.empty?
+
+      ensure_site_was_actually_read!(digests, root)
 
       @record.update!(status: 'extracting')
 
@@ -69,9 +82,63 @@ module SiteProfiles
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
       raise
+    ensure
+      # However the scan ended, the browser goes with it. Chrome runs in the
+      # same container as Puma here, so one leaked process is one the box keeps
+      # paying for until it restarts.
+      @fetcher.try(:close)
     end
 
     private
+
+    # Words below which a page is a shell, not a site.
+    #
+    # Measured against the digest, not the raw HTML, since that is all the rest
+    # of the pipeline ever sees. Vercel's security checkpoint digests to 3
+    # words and the parked-domain stub to 0, while a dealer home page with a
+    # hero and two short paragraphs clears 60 without trying. Set well above the
+    # first pair and well below the last: a thin but real page must still scan.
+    MIN_READABLE_WORDS = 60
+
+    # Refuse to build a demo out of a page that is not the dealer's site.
+    #
+    # A bot wall answers every request, so a scan can "succeed" having read
+    # nothing. Measured on thehomeplus.com: the live site returns Vercel's
+    # security checkpoint to any non-browser agent, and the only copy the Wayback
+    # Machine holds is a 114-byte parked redirect. Both parse as valid HTML and
+    # neither is the dealership. Left alone we built a Content Profile out of the
+    # stub, graded THAT 36 out of 100 "across 1 page", and put the number in
+    # front of the prospect as an audit of their website , with no logo, no
+    # copy and no second page, because there was never anything to read.
+    #
+    # Failing loudly here costs an admin one message. The alternative costs them
+    # a meeting.
+    def ensure_site_was_actually_read!(digests, root)
+      return if digests.any? { |d| readable_words(d) >= MIN_READABLE_WORDS }
+
+      raise Fetcher::FetchError, unreadable_message(root)
+    end
+
+    def readable_words(digest)
+      [
+        digest.title.to_s,
+        Array(digest.headings).map { |h| h[:text] || h['text'] }.join(' '),
+        Array(digest.paragraphs).join(' ')
+      ].join(' ').split(/\s+/).count { |w| w.present? }
+    end
+
+    def unreadable_message(root)
+      host = host_of(@record.source_url) || @record.source_url
+      if root.try(:from_archive?).present?
+        "#{host} refused our request and the web archive holds only a placeholder " \
+          'copy of it, so there was nothing to read. Upload a brochure or build the ' \
+          'demo by hand instead.'
+      else
+        "#{host} returned a page with no readable content , usually a bot check or a " \
+          'site whose text is drawn entirely by JavaScript. Upload a brochure or build ' \
+          'the demo by hand instead.'
+      end
+    end
 
     def collect_digests(root)
       root_digest = PageDigest.new(root).call
@@ -86,6 +153,8 @@ module SiteProfiles
           @warnings << "Could not read #{url}."
           next
         end
+        @from_archive ||= response.try(:from_archive?).present?
+        @rendered_pages += 1 if response.try(:rendered?)
         pages[url] = response
       end
 
@@ -166,7 +235,10 @@ module SiteProfiles
 
     def sitemap_urls(base)
       uri = URI.parse(base)
-      response = @fetcher.get(URI.join("#{uri.scheme}://#{uri.host}", '/sitemap.xml').to_s)
+      # allow_render: false — XML, not a page. A browser would return its own
+      # rendering of the tree rather than the document.
+      response = @fetcher.get(URI.join("#{uri.scheme}://#{uri.host}", '/sitemap.xml').to_s,
+                              allow_render: false)
       return [] if response.nil?
 
       Nokogiri::XML(response.body).css('url > loc').map(&:text).first(50)
@@ -277,6 +349,13 @@ module SiteProfiles
       {
         'pages_scanned' => digests.map(&:url),
         'page_count' => digests.size,
+        # Why a scan came back with one page is otherwise invisible to the admin
+        # looking at "1 pages scanned" and wondering which of the site's twenty
+        # we picked. Every page we tried and could not read is already in
+        # @warnings; this is the count beside it.
+        'pages_unreadable' => @warnings.count { |w| w.start_with?('Could not read') },
+        'from_archive' => @from_archive,
+        'pages_rendered' => @rendered_pages,
         'integrations' => integrations.map do |i|
           { 'vendor' => i.vendor, 'category' => i.category, 'disposition' => i.disposition }
         end,
