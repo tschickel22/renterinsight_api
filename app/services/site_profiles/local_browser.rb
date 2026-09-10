@@ -16,8 +16,36 @@ module SiteProfiles
   # when the scan ends. Nothing memoizes it at class level: a Chrome left alive
   # in a web container is a leak that outlives the request that made it.
   class LocalBrowser
-    CHROME_BIN = ENV.fetch('CHROME_BIN', '/usr/bin/chromium')
-    CHROMEDRIVER_BIN = ENV.fetch('CHROMEDRIVER_BIN', '/usr/bin/chromedriver')
+    # Where a browser might be, most explicit first.
+    #
+    # Three environments have to work: the Docker image (Debian's chromium at
+    # /usr/bin), Render's native Ruby environment (no root, no apt, so
+    # bin/install-chrome.sh downloads Chrome for Testing into the project
+    # directory), and a developer's laptop (nothing set; Selenium Manager finds
+    # whatever Chrome is installed). Assuming the first of those is why the
+    # browser never started on a native service: the Dockerfile that installs
+    # chromium is not built there at all.
+    CHROME_CANDIDATES = [
+      ENV['CHROME_BIN'],
+      File.join(Dir.pwd, 'vendor/chrome/chrome-headless-shell-linux64/chrome-headless-shell'),
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/google-chrome'
+    ].compact.freeze
+
+    CHROMEDRIVER_CANDIDATES = [
+      ENV['CHROMEDRIVER_BIN'],
+      File.join(Dir.pwd, 'vendor/chrome/chromedriver-linux64/chromedriver'),
+      '/usr/bin/chromedriver'
+    ].compact.freeze
+
+    def self.chrome_binary
+      CHROME_CANDIDATES.find { |path| File.executable?(path) }
+    end
+
+    def self.chromedriver_binary
+      CHROMEDRIVER_CANDIDATES.find { |path| File.executable?(path) }
+    end
 
     PAGE_LOAD_TIMEOUT = 30
     # How long to keep waiting for a page to become readable — a challenge to
@@ -68,9 +96,15 @@ module SiteProfiles
     # spent and a browser version are the two facts that tell a slow proof-of-
     # work apart from a check refusing the machine outright.
     def diagnostic
+      return "no Chrome found; looked in #{CHROME_CANDIDATES.join(', ')}" if @unavailable && @browser_version.nil?
+      return "the browser started (Chromium #{@browser_version}) but then failed" if @unavailable
+
       parts = []
-      parts << "waited #{CHALLENGE_WAIT}s" if @waited_for_challenge.nil?
-      parts << "cleared the check after #{@waited_for_challenge}s" if @waited_for_challenge
+      parts << if @waited_for_challenge
+                 "cleared the check after #{@waited_for_challenge}s"
+               else
+                 "waited #{CHALLENGE_WAIT}s"
+               end
       parts << "Chromium #{@browser_version}" if @browser_version
       parts.join('; ').presence
     end
@@ -124,19 +158,17 @@ module SiteProfiles
     # whatever Chrome is installed, so passing no service is the right answer
     # rather than a broken path.
     def service
-      return nil unless File.exist?(CHROMEDRIVER_BIN)
+      path = self.class.chromedriver_binary
+      return nil if path.nil?
 
-      Selenium::WebDriver::Chrome::Service.new(path: CHROMEDRIVER_BIN)
+      Selenium::WebDriver::Chrome::Service.new(path: path)
     end
 
     def chrome_options
       # Same reasoning as #service: an explicit binary in the image, and
       # Chrome's own default everywhere else.
-      options = if File.exist?(CHROME_BIN)
-                  Selenium::WebDriver::Chrome::Options.new(binary: CHROME_BIN)
-                else
-                  Selenium::WebDriver::Chrome::Options.new
-                end
+      binary = self.class.chrome_binary
+      options = binary ? Selenium::WebDriver::Chrome::Options.new(binary: binary) : Selenium::WebDriver::Chrome::Options.new
       [
         '--headless=new',
         # Required to run as root in a container, which is how the image runs.

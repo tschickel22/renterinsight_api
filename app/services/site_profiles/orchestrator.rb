@@ -146,36 +146,45 @@ module SiteProfiles
     end
 
     def unreadable_reason(root)
-      # An archived copy that turned out to be a placeholder is its own answer,
-      # whatever the renderer made of the live page beforehand.
-      if root.try(:from_archive?).present?
-        return 'refused our request, and the web archive holds only a placeholder ' \
-               'copy of it, so there was nothing to read.'
-      end
+      # The renderer's verdict comes FIRST, and the archive is a footnote to it.
+      #
+      # This was the other way round for one deploy, on the reasoning that a
+      # placeholder in the archive is its own answer. It is not: reaching the
+      # archive at all means the live site refused us AND the browser failed,
+      # and which of those failed is the only actionable fact here. Ordering it
+      # second hid exactly the diagnosis this message was added to deliver, and
+      # cost a deploy to find out.
+      [live_site_reason(root), archive_note(root)].compact.join(', and ') + '.'
+    end
 
+    def live_site_reason(root)
       case render_verdict
       when :off
         'could not be read, and rendering is switched off, so a site that needs a ' \
-          'browser cannot be scanned. Set SITE_SCAN_RENDERER=chrome.'
+          'browser cannot be scanned. Set SITE_SCAN_RENDERER=chrome'
       when :unavailable
         'could not be read, and the browser that would have rendered it failed to ' \
-          'start on this server.'
+          "start on this server#{render_detail}"
       when :still_challenged
         'is behind a bot check that did not clear even in a real browser' \
           "#{render_detail}. That usually means the check is refusing this server, " \
-          'or that its proof-of-work needs longer than we waited on a CPU this slow.'
+          'or that its proof-of-work needs longer than we waited on a CPU this slow'
       when :error, :empty
-        'could not be read: the browser did not return a page.'
+        "could not be read: the browser did not return a page#{render_detail}"
       when :rendered
         'loaded in a browser but never drew any content , its text is built by ' \
-          'JavaScript that did not finish.'
+          'JavaScript that did not finish'
       else
-        if root.nil?
-          'could not be loaded at all, and the web archive has no usable copy of it.'
-        else
-          'returned a page with no readable content.'
-        end
+        # No verdict at all: the renderer was never reached, so the wire is all
+        # we tried.
+        root.nil? ? 'could not be loaded at all' : 'refused our request'
       end
+    end
+
+    def archive_note(root)
+      return nil unless root.try(:from_archive?).present?
+
+      'the web archive holds only a placeholder copy of it, so there was nothing to read'
     end
 
     # The verdict on the page the scan was actually built from.

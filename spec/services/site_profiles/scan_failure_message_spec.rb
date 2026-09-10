@@ -50,6 +50,20 @@ RSpec.describe SiteProfiles::Orchestrator do
     expect(message_for(nil, from_archive: true)).to include('web archive holds only a placeholder')
   end
 
+  # The failure production actually reported. Reaching the archive means the
+  # live site refused us AND the browser failed, and the second half is the only
+  # actionable one — reporting the archive alone hid it for a whole deploy.
+  it 'names the browser failure even when the archive answered' do
+    message = message_for(:still_challenged, from_archive: true)
+
+    expect(message).to include('did not clear even in a real browser')
+    expect(message).to include('web archive holds only a placeholder')
+  end
+
+  it 'names a browser that would not start even when the archive answered' do
+    expect(message_for(:unavailable, from_archive: true)).to include('failed to start on this server')
+  end
+
   # What production said on the second attempt: the fetch, the browser and the
   # archive had all been tried and the only thing reported was "Could not load
   # https://thehomeplus.com", which names none of them.
