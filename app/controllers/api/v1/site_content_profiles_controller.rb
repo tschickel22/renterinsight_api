@@ -24,12 +24,17 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     SiteProfiles::DocumentIngestor::TEXT_TYPES
   ).freeze
 
-  skip_before_action :authenticate, only: %i[by_token import]
+  # Actions a machine may drive, not just a browser: pushing a demo scanned
+  # elsewhere, then reading the list and adjusting which designs and which lot
+  # it offers. All four authenticate either way — see #authorize_key_or_login!.
+  MACHINE_DRIVEN = %i[import update index inventory_lots].freeze
+  OPEN_OR_SELF_GUARDED = ([:by_token] + MACHINE_DRIVEN).freeze
 
-  before_action :require_platform_admin!, except: %i[by_token import]
-  before_action :set_company_scope, except: %i[by_token import]
-  # import authenticates either way , see #authorize_import!
-  before_action :authorize_import!, only: [:import]
+  skip_before_action :authenticate, only: OPEN_OR_SELF_GUARDED
+
+  before_action :require_platform_admin!, except: OPEN_OR_SELF_GUARDED
+  before_action :set_company_scope, except: OPEN_OR_SELF_GUARDED
+  before_action :authorize_key_or_login!, only: MACHINE_DRIVEN
   before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement run_seo_audit seo_report_pdf]
 
   def index
@@ -480,21 +485,21 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   # A browser login OR an API key.
   #
-  # Everything else here is platform-admin-only through a JWT, which is right
-  # for a screen. This one is called from a rake task on somebody's laptop, on a
-  # schedule set by prospects rather than by us, and a JWT expires after 7 days
-  # — so the workflow would break every week for no reason anyone could see. An
-  # API key does not expire and can be scoped and revoked on its own, which is
-  # the better credential for a machine.
+  # The rest of this controller is platform-admin-only through a JWT, which is
+  # right for a screen. These four are called from a rake task on somebody's
+  # laptop, on a schedule set by prospects rather than by us, and a JWT expires
+  # after 7 days — so the workflow would break every week for no reason anyone
+  # could see. An API key does not expire and can be scoped and revoked on its
+  # own, which is the better credential for a machine.
   #
   # The bar is the same either way: platform admin, or a key that carries
   # websites:write. A key with no permissions set is unrestricted by this
   # system's own rule, and that is deliberate elsewhere, so it passes here too.
-  def authorize_import!
+  def authorize_key_or_login!
     token = request.headers['Authorization'].to_s.split(' ').last
 
     if token.to_s.start_with?('ri_')
-      authorize_import_with_api_key!(token)
+      authorize_with_api_key!(token)
     else
       authenticate
       return if performed?
@@ -507,7 +512,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     end
   end
 
-  def authorize_import_with_api_key!(token)
+  def authorize_with_api_key!(token)
     key = ApiKey.active.find_by(key: token)
     return render json: { error: 'Invalid or revoked API key' }, status: :unauthorized if key.nil?
 

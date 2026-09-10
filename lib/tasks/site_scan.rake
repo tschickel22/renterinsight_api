@@ -33,6 +33,27 @@ module SiteScanTasks
     "could not reach #{target}: #{e.class}: #{e.message}"
   end
 
+  # Demo management from a machine: the same credential the push uses.
+  def request_json(method, target, path, token, body: nil, company_id: nil)
+    uri = URI.join("#{target}/", path)
+    request = case method
+              when :get   then Net::HTTP::Get.new(uri)
+              when :patch then Net::HTTP::Patch.new(uri)
+              end
+    request['Content-Type'] = 'application/json'
+    request['Authorization'] = "Bearer #{token}"
+    request['X-Company-ID'] = company_id if company_id.present?
+    request.body = body.to_json if body
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.read_timeout = 60
+    response = http.request(request)
+    raise "HTTP #{response.code}: #{response.body.to_s[0, 200]}" unless response.is_a?(Net::HTTPSuccess)
+
+    JSON.parse(response.body)
+  end
+
   def describe(token)
     if token.start_with?('ri_') then 'API key (does not expire)'
     elsif token.start_with?('eyJ') then 'browser login (expires after 7 days)'
@@ -260,4 +281,55 @@ namespace :site_scan do
     puts problem || 'ready. The credential was accepted and nothing was created.'
   end
 
+  # Which lots a demo can borrow inventory from, with the ids the next task
+  # wants. Only lots that would actually render: public inventory on, a token
+  # issued, and homes to show.
+  #
+  #   rake site_scan:lots
+  desc 'List the inventory lots a demo can be pointed at'
+  task lots: :environment do
+    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    abort('No token. See rake site_scan:push.') if token.blank?
+
+    data = SiteScanTasks.request_json(:get, target, 'api/v1/site_content_profiles/inventory_lots',
+                                      token, company_id: ENV['COMPANY_ID'])
+    data['items'].each { |lot| puts format('  %-6s %-40s %s homes', lot['id'], lot['name'], lot['home_count']) }
+  end
+
+  # Change which designs a demo offers, and which lot it shows, WITHOUT
+  # rescanning. The link stays the same, which is the point: it may already be
+  # in a prospect's inbox.
+  #
+  #   TEMPLATES=cedar-ridge-community,coastal-living LOT=47 \
+  #     rake "site_scan:configure[<preview token>]"
+  desc 'Set the designs and inventory lot on an existing demo'
+  task :configure, [:preview_token] => :environment do |_t, args|
+    preview_token = args[:preview_token].presence || abort('usage: rake "site_scan:configure[<preview token>]"')
+    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    abort('No token. See rake site_scan:push.') if token.blank?
+
+    templates = (ENV['TEMPLATES'] || '').split(',').map(&:strip).reject(&:empty?)
+    lot = ENV['LOT'].presence
+    abort('Nothing to change. Set TEMPLATES and/or LOT.') if templates.empty? && lot.nil?
+
+    listing = SiteScanTasks.request_json(:get, target, 'api/v1/site_content_profiles',
+                                         token, company_id: ENV['COMPANY_ID'])
+    demo = listing['items'].find { |item| item['preview_token'] == preview_token }
+    abort("No demo on #{target} with that preview token.") if demo.nil?
+
+    body = {}
+    body[:preview_template_ids] = templates if templates.any?
+    body[:inventory_company_id] = lot if lot
+
+    updated = SiteScanTasks.request_json(:patch, target,
+                                         "api/v1/site_content_profiles/#{demo['id']}",
+                                         token, body: body, company_id: ENV['COMPANY_ID'])
+
+    puts "updated #{updated['display_name']}"
+    puts "  designs:   #{Array(updated['preview_template_ids']).size} offered"
+    puts "  inventory: company #{updated['inventory_company_id'] || '(resolver default)'}"
+    puts "  link unchanged"
+  end
 end

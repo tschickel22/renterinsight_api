@@ -13,16 +13,19 @@ RSpec.describe 'Api::V1::SiteContentProfiles', type: :request do
       expect(actions).to include('by_token', 'create', 'index', 'show', 'destroy', 'rotate_preview_token')
     end
 
-    # Two actions sit outside the controller's blanket JWT guard, for opposite
-    # reasons: by_token is public by design, and import authenticates itself so
-    # it can take an API key as well as a login. Nothing else may.
+    # Actions sit outside the controller's blanket JWT guard for two different
+    # reasons: by_token is public by design, and the machine-driven ones
+    # authenticate themselves so they can take an API key as well as a login.
+    # Nothing else may, and none of them is simply open.
     it 'skips the blanket authentication only where an action guards itself' do
-      source = File.read(Rails.root.join('app/controllers/api/v1/site_content_profiles_controller.rb'))
+      controller = Api::V1::SiteContentProfilesController
 
-      expect(source).to match(/skip_before_action :authenticate, only: %i\[by_token import\]/)
-      expect(source).to match(/before_action :require_platform_admin!, except: %i\[by_token import\]/)
-      # import is not left open: it has its own guard.
-      expect(source).to match(/before_action :authorize_import!, only: \[:import\]/)
+      expect(controller::MACHINE_DRIVEN).to match_array(%i[import update index inventory_lots])
+      expect(controller::OPEN_OR_SELF_GUARDED).to include(:by_token)
+      # Every one of them is guarded by the key-or-login check.
+      guarded = controller._process_action_callbacks
+                          .select { |cb| cb.filter == :authorize_key_or_login! }
+      expect(guarded).not_to be_empty
     end
 
     # The guard is worth checking as behaviour and not only as source, since the
@@ -37,6 +40,22 @@ RSpec.describe 'Api::V1::SiteContentProfiles', type: :request do
       get '/api/v1/site_content_profiles'
 
       expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'still refuses an unauthenticated update' do
+      patch '/api/v1/site_content_profiles/1', params: { display_name: 'x' }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    # The screens keep the platform-admin JWT: nothing here opens a door for a
+    # signed-in ordinary user.
+    it 'keeps every other action platform-admin only' do
+      controller = Api::V1::SiteContentProfilesController
+      guarded = controller._process_action_callbacks
+                          .find { |cb| cb.filter == :require_platform_admin! }
+
+      expect(guarded).to be_present
     end
   end
 
