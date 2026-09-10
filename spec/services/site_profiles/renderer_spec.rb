@@ -76,6 +76,52 @@ RSpec.describe SiteProfiles::Renderer do
     end
   end
 
+  # The bug this guard was added for, and then lost.
+  #
+  # The chrome branch returned local_browser.render(url) directly, jumping the
+  # challenge check below it. In production that meant a Vercel checkpoint which
+  # never cleared came back as a successful render, so the scan built a profile
+  # from an interstitial and failed with a message blaming JavaScript.
+  describe 'local chrome' do
+    let(:browser) { instance_double(SiteProfiles::LocalBrowser, available?: true) }
+
+    before do
+      configure(provider: 'chrome', token: nil)
+      ENV.delete('SITE_SCAN_RENDER_TOKEN')
+      allow(SiteProfiles::LocalBrowser).to receive(:new).and_return(browser)
+    end
+
+    it 'needs no API key' do
+      expect(described_class).to be_enabled
+    end
+
+    it 'passes a real page through' do
+      allow(browser).to receive(:render).and_return('<html><body><h1>Sunshine Homes</h1></body></html>')
+
+      renderer = described_class.new
+      expect(renderer.call('https://dealer.com/')).to include('Sunshine Homes')
+      expect(renderer.last_outcome).to eq(:rendered)
+    end
+
+    it 'refuses a checkpoint the browser could not clear' do
+      allow(browser).to receive(:render)
+        .and_return('<html><head><title>Vercel Security Checkpoint</title></head></html>')
+
+      renderer = described_class.new
+      expect(renderer.call('https://dealer.com/')).to be_nil
+      expect(renderer.last_outcome).to eq(:still_challenged)
+    end
+
+    it 'reports a browser that would not start, rather than an empty page' do
+      allow(browser).to receive(:render).and_return(nil)
+      allow(browser).to receive(:available?).and_return(false)
+
+      renderer = described_class.new
+      expect(renderer.call('https://dealer.com/')).to be_nil
+      expect(renderer.last_outcome).to eq(:unavailable)
+    end
+  end
+
   def stub_http(response_class, body)
     response = instance_double(response_class, body: body)
     allow(response).to receive(:is_a?) { |klass| klass == response_class || klass == Net::HTTPResponse }
