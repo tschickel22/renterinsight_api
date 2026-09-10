@@ -69,8 +69,10 @@ module SiteProfiles
       archived_url = "https://web.archive.org/web/#{timestamp}id_/#{original}"
 
       # allow_archive: false, or a failure to reach the archive would recurse
-      # back into the archive.
-      response = @fetcher.get(archived_url, allow_archive: false)
+      # back into the archive. allow_render: false because the archive serves
+      # the bytes it stored — there is no JavaScript left to run, and paying a
+      # rendering credit to re-read them would be pure waste.
+      response = @fetcher.get(archived_url, allow_archive: false, allow_render: false)
       return nil if response.nil?
 
       Fetcher::Response.new(
@@ -99,7 +101,7 @@ module SiteProfiles
         fl: 'timestamp,original'
       )
 
-      response = @fetcher.get("#{CDX_ENDPOINT}?#{query}", allow_archive: false)
+      response = @fetcher.get("#{CDX_ENDPOINT}?#{query}", allow_archive: false, allow_render: false)
       return nil if response.nil? || response.body.blank?
 
       rows = JSON.parse(response.body)

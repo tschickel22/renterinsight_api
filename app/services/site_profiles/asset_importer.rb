@@ -88,6 +88,10 @@ module SiteProfiles
     def import(url)
       return @map[url] if @map.key?(url)
       return url if already_ours?(url)
+      # An inline SVG logo arrives as a data: URI. It depends on nobody's host
+      # staying up, which is the only reason this class exists, so there is
+      # nothing to rehost and a download attempt would only log a warning.
+      return url if url.to_s.start_with?('data:')
 
       downloaded = download(url)
       if downloaded.nil?

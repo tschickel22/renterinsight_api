@@ -21,13 +21,19 @@ module SiteProfiles
     # Wayback Machine is still usable but is no longer necessarily current, and
     # anything shown to a prospect has to say so.
     Response = Struct.new(:url, :status, :body, :content_type, :from_archive, :archived_at,
-                          keyword_init: true) do
+                          :rendered, keyword_init: true) do
       def html?
         content_type.to_s.include?('html')
       end
 
       def from_archive?
         from_archive.present?
+      end
+
+      # Read through a browser rather than straight off the wire. Recorded so a
+      # scan can say how it got what it got.
+      def rendered?
+        rendered.present?
       end
     end
 
@@ -40,16 +46,36 @@ module SiteProfiles
     # page must not kill a whole scan.
     # allow_archive is false when fetching FROM the archive, so a failure there
     # cannot recurse back into it.
-    def get(url, redirects_left: MAX_REDIRECTS, allow_archive: true)
+    def get(url, redirects_left: MAX_REDIRECTS, allow_archive: true, allow_render: true)
       uri, = UrlGuard.validate!(url)
 
       response = perform(uri)
       body = response.is_a?(Net::HTTPSuccess) ? truncate(response.body) : ''
       status = response.code.to_i
+      html_response = response['content-type'].to_s.include?('html')
 
       # A bot wall can answer 403/429 or, worse, 200 with an interstitial that
       # would otherwise be scanned as if it were the site's own content.
-      if allow_archive && ArchiveFallback.challenged?(status, body)
+      blocked = ArchiveFallback.challenged?(status, body)
+
+      # A page that answers 200 with an empty shell is the other half of the
+      # same problem: the content is drawn by JavaScript we cannot run, so what
+      # we hold says nothing about the dealer. Both are fixed by loading the
+      # page in a browser, so both route to the renderer.
+      needs_js = !blocked && html_response && response.is_a?(Net::HTTPSuccess) && shell?(body)
+
+      if allow_render && (blocked || needs_js) && Renderer.enabled?
+        @logger.info("[SiteProfiles::Fetcher] #{url} #{blocked ? "challenged (HTTP #{status})" : 'looks client-rendered'}; rendering")
+        rendered = renderer.call(uri.to_s)
+        if rendered.present?
+          return Response.new(url: uri.to_s, status: 200, body: rendered,
+                              content_type: 'text/html', rendered: true)
+        end
+      end
+
+      # The archive is the last resort, and a distant one: it is whatever the
+      # site looked like the last time a crawler happened to save it.
+      if allow_archive && blocked
         @logger.info("[SiteProfiles::Fetcher] #{url} challenged (HTTP #{status}); trying the archive")
         archived = ArchiveFallback.new(fetcher: self, logger: @logger).call(uri.to_s)
         return archived if archived
@@ -63,7 +89,8 @@ module SiteProfiles
         return nil if location.blank?
 
         get(URI.join(uri, location).to_s, redirects_left: redirects_left - 1,
-                                          allow_archive: allow_archive)
+                                          allow_archive: allow_archive,
+                                          allow_render: allow_render)
       when Net::HTTPSuccess
         Response.new(
           url: uri.to_s,
@@ -79,11 +106,30 @@ module SiteProfiles
       nil
     end
 
+    # Release anything the fetcher is holding open. With local Chrome that is a
+    # browser process, so a caller that scans must call this when it is done ,
+    # see Orchestrator#call. Safe to call more than once, and a no-op when
+    # nothing was ever rendered.
+    def close
+      @renderer&.close
+      @renderer = nil
+    end
+
+    # One renderer, therefore one browser, for every page of a scan. A bot
+    # wall's cookie belongs to the session that solved for it: a fresh browser
+    # per page would re-run the proof-of-work on all ten.
+    def renderer
+      @renderer ||= Renderer.new(logger: @logger)
+    end
+
     # robots.txt is advisory for us (we are scanning at the site owner's
     # request) but we record and honour it rather than assume consent.
     def robots_allows?(url, path = '/')
       uri, = UrlGuard.validate!(url)
-      robots = get(URI.join("#{uri.scheme}://#{uri.host}:#{uri.port}", '/robots.txt').to_s)
+      # allow_render: false — robots.txt is a text file, and a browser would
+      # hand it back wrapped in markup.
+      robots = get(URI.join("#{uri.scheme}://#{uri.host}:#{uri.port}", '/robots.txt').to_s,
+                   allow_render: false)
       return true if robots.nil? || robots.body.blank?
 
       RobotsPolicy.new(robots.body).allows?(path)
@@ -92,6 +138,19 @@ module SiteProfiles
     end
 
     private
+
+    # Roughly the word count the page would contribute to a profile. Below this
+    # there is nothing to extract, whatever the markup weighs. Deliberately the
+    # same floor the orchestrator uses to decide a scan read anything at all.
+    SHELL_WORD_COUNT = 60
+
+    def shell?(body)
+      text = body.to_s
+                 .gsub(%r{<script\b[^>]*>.*?</script>}mi, ' ')
+                 .gsub(%r{<style\b[^>]*>.*?</style>}mi, ' ')
+                 .gsub(/<[^>]+>/, ' ')
+      text.split(/\s+/).count { |w| w.present? } < SHELL_WORD_COUNT
+    end
 
     def perform(uri)
       http = Net::HTTP.new(uri.host, uri.port)

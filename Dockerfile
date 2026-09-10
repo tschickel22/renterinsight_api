@@ -25,15 +25,32 @@ WORKDIR /rails
 # pages go to Claude as image blocks so the model can see the design it is being
 # asked to match. Without this the landing page importer reads a spec sheet as a
 # wall of text.
+#
+# chromium + chromium-driver render prospect sites that a plain fetch cannot
+# read, for SiteProfiles::LocalBrowser. Two kinds of site need it and both are
+# common among competitor builds: a bot wall that answers every request with a
+# JavaScript challenge (Vercel's Attack Challenge Mode returns HTTP 429 and a
+# "Security Checkpoint" until the puzzle is solved), and a client-rendered site
+# whose HTML is an empty shell. Neither can be read without a JS engine, and
+# without one a scan produces a demo with no logo, no copy and one page.
+#
+# This is the largest thing in the image (~400MB with its fonts and libraries).
+# The alternative was a hosted rendering service, which at ten to twenty scans a
+# month costs more per year than the disk does. fonts-liberation is not
+# optional: Chrome with no fonts lays text out wrongly, and layout decides what
+# our own SEO checks see.
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y ca-certificates curl libjemalloc2 libvips poppler-utils sqlite3 qpdf && \
+    apt-get install --no-install-recommends -y ca-certificates curl libjemalloc2 libvips poppler-utils sqlite3 qpdf \
+      chromium chromium-driver fonts-liberation && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Set production environment
 ENV RAILS_ENV="production" \
     BUNDLE_DEPLOYMENT="1" \
     BUNDLE_PATH="/usr/local/bundle" \
-    BUNDLE_WITHOUT="development"
+    BUNDLE_WITHOUT="development" \
+    CHROME_BIN="/usr/bin/chromium" \
+    CHROMEDRIVER_BIN="/usr/bin/chromedriver"
 
 # Throw-away build stage to reduce size of final image
 FROM base AS build
