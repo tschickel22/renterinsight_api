@@ -179,4 +179,48 @@ namespace :site_scan do
 
     puts "\ndone. #{app}/preview/templates/#{remote['preview_token']}"
   end
+
+  # Is the credential good, before spending six minutes finding out?
+  #
+  # A scan runs a browser over ten pages and calls a model before the push is
+  # even attempted, so a credential problem surfaces at the very end. This asks
+  # the same question in one request, and creates nothing: the body is
+  # deliberately incomplete, so a credential that works answers 422 for the
+  # missing profile rather than storing a demo.
+  #
+  #   rake site_scan:check
+  desc 'Check the push credential and target without scanning anything'
+  task check: :environment do
+    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    abort('No token. See rake site_scan:push for where it comes from.') if token.blank?
+
+    kind = if token.start_with?('ri_') then 'API key (does not expire)'
+           elsif token.start_with?('eyJ') then 'browser login (expires after 7 days)'
+           else 'unrecognised — expected ri_live_... or eyJ...'
+           end
+    puts "credential: #{kind}"
+    puts "target:     #{target}"
+
+    uri = URI.join("#{target}/", 'api/v1/site_content_profiles/import')
+    request = Net::HTTP::Post.new(uri)
+    request['Content-Type'] = 'application/json'
+    request['Authorization'] = "Bearer #{token}"
+    request['X-Company-ID'] = ENV['COMPANY_ID'] if ENV['COMPANY_ID'].present?
+    request.body = {}.to_json
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.read_timeout = 60
+    response = http.request(request)
+
+    puts case response.code.to_i
+         when 422 then 'ready. The credential was accepted and nothing was created.'
+         when 401 then 'refused: expired, revoked, or issued by a different host.'
+         when 400 then 'refused: platform-level API key. Add COMPANY_ID to name the tenant.'
+         when 403 then "refused: #{response.body.to_s[0, 160]}"
+         when 404 then 'the target has not deployed the import endpoint yet.'
+         else "unexpected HTTP #{response.code}: #{response.body.to_s[0, 160]}"
+         end
+  end
 end
