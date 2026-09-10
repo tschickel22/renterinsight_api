@@ -169,6 +169,89 @@ RSpec.describe 'POST /api/v1/site_content_profiles/import', type: :request do
     end
   end
 
+  # Adjusting a demo after it exists, with the same credential that created it.
+  # The link is already in a prospect's inbox, so changing which designs it
+  # offers must not mean rescanning and reissuing it.
+  describe 'configuring a demo with an API key' do
+    before do
+      Resource.find_or_create_by!(key: 'websites') { |r| r.name = 'Websites' }
+    end
+
+    let(:key) do
+      ApiKey.create!(name: "cfg-#{SecureRandom.hex(3)}", company: company,
+                     created_by_user: user_with('platform_admin'), status: 'active',
+                     permissions: { 'websites' => ['write'] }, rate_limit: 1000)
+    end
+
+    let(:demo) do
+      SiteContentProfile.create!(company: company, source_url: 'https://thehomeplus.com',
+                                 status: 'ready', preview_template_ids: [], profile: { 'brand' => {} })
+    end
+
+    def key_headers
+      { 'Authorization' => "Bearer #{key.key}", 'CONTENT_TYPE' => 'application/json' }
+    end
+
+    it 'narrows the designs a demo offers' do
+      patch "/api/v1/site_content_profiles/#{demo.id}",
+            params: { preview_template_ids: %w[manufactured-home-elite coastal-living] }.to_json,
+            headers: key_headers
+
+      expect(response).to have_http_status(:ok)
+      expect(demo.reload.preview_template_ids).to eq(%w[manufactured-home-elite coastal-living])
+    end
+
+    it 'points it at a different inventory lot' do
+      lot = create(:company)
+
+      patch "/api/v1/site_content_profiles/#{demo.id}",
+            params: { inventory_company_id: lot.id }.to_json, headers: key_headers
+
+      expect(demo.reload.inventory_company_id).to eq(lot.id)
+    end
+
+    it 'leaves the shareable link alone' do
+      before_token = demo.preview_token
+
+      patch "/api/v1/site_content_profiles/#{demo.id}",
+            params: { preview_template_ids: ['coastal-living'] }.to_json, headers: key_headers
+
+      expect(demo.reload.preview_token).to eq(before_token)
+    end
+
+    it 'lists demos so a task can find one by its link' do
+      demo
+
+      get '/api/v1/site_content_profiles', headers: key_headers
+
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)['items'].map { |i| i['preview_token'] }).to include(demo.preview_token)
+    end
+
+    it 'refuses a key that cannot write websites' do
+      read_only = ApiKey.create!(name: "ro-#{SecureRandom.hex(3)}", company: company,
+                                 created_by_user: user_with('platform_admin'), status: 'active',
+                                 permissions: { 'websites' => ['read'] }, rate_limit: 1000)
+
+      patch "/api/v1/site_content_profiles/#{demo.id}",
+            params: { preview_template_ids: ['coastal-living'] }.to_json,
+            headers: { 'Authorization' => "Bearer #{read_only.key}", 'CONTENT_TYPE' => 'application/json' }
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    # Another company's demo is not reachable with this key, key or no key.
+    it 'cannot touch a demo belonging to someone else' do
+      other = SiteContentProfile.create!(company: create(:company), source_url: 'https://x.com',
+                                         status: 'ready', profile: {})
+
+      patch "/api/v1/site_content_profiles/#{other.id}",
+            params: { preview_template_ids: ['coastal-living'] }.to_json, headers: key_headers
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
   it 'refuses an unauthenticated request' do
     post '/api/v1/site_content_profiles/import', params: payload.to_json,
                                                  headers: { 'CONTENT_TYPE' => 'application/json' }
