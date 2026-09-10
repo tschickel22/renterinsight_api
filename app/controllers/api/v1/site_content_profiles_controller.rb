@@ -394,6 +394,14 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       preview_template_ids: profile.preview_template_ids,
       created_at: profile.created_at,
       page_count: profile.report['page_count'],
+      # Pages we tried and could not read, and whether anything came from the
+      # Wayback Machine. Between them they explain a scan that came back with
+      # one page, which the list otherwise reports as a bare "1 pages scanned".
+      pages_unreadable: profile.report['pages_unreadable'],
+      from_archive: profile.report['from_archive'],
+      # Why a scan failed. The list said only "Scan failed", so the one sentence
+      # telling an admin what to do instead was written and never shown.
+      error_message: profile.error_message,
       source_kind: profile.source_kind,
       document_filename: profile.document_filename,
       # Zero means the document was read as text only — worth surfacing, since
@@ -423,7 +431,6 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       report: profile.report,
       schema_version: profile.schema_version,
       robots_allowed: profile.robots_allowed,
-      error_message: profile.error_message,
       inventory_embed_config: inventory_config_for(profile)
     )
   end

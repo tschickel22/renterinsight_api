@@ -104,6 +104,26 @@ class Public::InventoryController < ApplicationController
       @vehicles = @vehicles.where(condition: params[:condition])
     end
     
+    # Photographed homes only.
+    #
+    # Demo previews ask for this: a prospect judging our work reads a grid of
+    # grey placeholder cards as our design failing, not as gaps in that lot's
+    # photography. Filtered here rather than in the browser so the total and
+    # the page count stay honest , dropping rows client-side would show "12 of
+    # 40" and paginate over homes that were never displayed.
+    #
+    # images is a json column, so json_array_length rather than the jsonb form.
+    # COALESCE covers rows written before the default existed, where it is NULL.
+    if ActiveModel::Type::Boolean.new.cast(params[:has_images])
+      # json_typeof guards the length call: json_array_length raises on a row
+      # whose images somehow holds an object or a bare string, which would 500
+      # the whole listing rather than skip one bad home.
+      @vehicles = @vehicles.where(
+        "json_typeof(COALESCE(vehicles.images, '[]'::json)) = 'array' " \
+        "AND json_array_length(COALESCE(vehicles.images, '[]'::json)) > 0"
+      )
+    end
+
     # Vehicle filters
     @vehicles = @vehicles.where(make: params[:make]) if params[:make].present?
     @vehicles = @vehicles.where(model: params[:model]) if params[:model].present?
