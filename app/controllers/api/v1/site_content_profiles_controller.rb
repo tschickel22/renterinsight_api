@@ -513,11 +513,19 @@ class Api::V1::SiteContentProfilesController < ApplicationController
                     status: :forbidden
     end
 
-    # A company-scoped key names its own tenant; a platform-level key has to be
-    # told which one the demo belongs to.
-    @company = key.company || Company.find_by(id: request.headers['X-Company-ID'])
+    # Which tenant owns the demo, in order of how deliberate the answer is: an
+    # explicit header, the key's own company, or failing both, the company of
+    # whoever minted the key.
+    #
+    # That last one is not a guess. A platform-level key belongs to one admin,
+    # and demanding a tenant id they have to go and look up — after a six minute
+    # scan has already run — buys nothing over defaulting to their own, which is
+    # where they would file it anyway.
+    @company = Company.find_by(id: request.headers['X-Company-ID']) ||
+               key.company ||
+               key.created_by_user&.company
     if @company.nil?
-      return render json: { error: 'Platform-level API keys must send X-Company-ID.' },
+      return render json: { error: 'Could not tell which company this demo belongs to. Send X-Company-ID.' },
                     status: :bad_request
     end
 
