@@ -56,6 +56,10 @@ module Catalog
       return fail_run(run, 'No matching adapter for adapter_type') if adapter.nil?
 
       homes, errors = collect_homes(adapter, run: run)
+      # Everything past this point used to run without touching the row, so the
+      # slow tail of a healthy run — archiving thousands of images, then
+      # ingesting into every subscriber — looked exactly like a dead one.
+      @run = run
       rates    = ExtractionStats.rates(homes)
       degraded = ExtractionStats.degraded?(rates, @source.extraction_threshold, untracked: @source.untracked_fields)
 
@@ -98,8 +102,9 @@ module Catalog
       # Pass the raw config value: ImageArchiver decides what a missing or zero
       # delay means. Calling .to_i here turned "unset" into "no delay at all".
       archiver = ImageArchiver.new(crawl_delay: @source.config['image_crawl_delay'])
-      homes.each do |home|
+      homes.each_with_index do |home, index|
         home.images = archiver.archive(home.images)
+        heartbeat! if (index % 5).zero?
       end
 
       r = archiver.result
@@ -175,8 +180,18 @@ module Catalog
         totals[:inactivated] += result.inactivated
 
         totals[:inactivated] += inactivate_deselected_locations(sub.company, target_locations)
+        heartbeat!
       end
       totals
+    end
+
+    # Says "someone is still here" without writing anything meaningful. Cheap
+    # enough to call per subscriber and per few images; a run that stops calling
+    # it is reaped, which is the point.
+    def heartbeat!
+      @run&.touch
+    rescue StandardError
+      nil
     end
 
     # Soft-delete catalog copies at locations the subscription no longer targets
