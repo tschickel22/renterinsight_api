@@ -72,6 +72,13 @@ module SiteProfiles
       # page in a browser, so both route to the renderer.
       needs_js = !blocked && html_response && response.is_a?(Net::HTTPSuccess) && shell?(body)
 
+      if allow_render && (blocked || needs_js) && !Renderer.enabled?
+        # Worth recording rather than skipping in silence: this page needed a
+        # browser and there was none configured, which is a different problem
+        # from the site refusing us and has a different fix.
+        @render_notes[uri.to_s] = :off
+      end
+
       if allow_render && (blocked || needs_js) && Renderer.enabled?
         @logger.info("[SiteProfiles::Fetcher] #{url} #{blocked ? "challenged (HTTP #{status})" : 'looks client-rendered'}; rendering")
         rendered = renderer.call(uri.to_s)

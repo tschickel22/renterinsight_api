@@ -15,6 +15,8 @@ namespace :site_scan do
   task :probe, [:url] => :environment do |_t, args|
     url = args[:url].presence || abort('usage: rake "site_scan:probe[https://example.com]"')
 
+    ENV['SITE_SCAN_RENDERER'] ||= 'chrome'
+
     puts "probing #{url}"
     puts "renderer: #{SiteProfiles::Renderer.provider || 'off'} (enabled=#{SiteProfiles::Renderer.enabled?})"
     puts "challenge budget: #{SiteProfiles::LocalBrowser::CHALLENGE_WAIT}s"
@@ -120,6 +122,11 @@ namespace :site_scan do
     profile = SiteContentProfile.new(company: company, source_url: url, status: 'pending',
                                      display_name: args[:label].presence)
     profile.save!(validate: false)
+
+    # The entire point of this task is to render locally, so it does not also
+    # require someone to remember a switch. Without it the scan silently falls
+    # back to a plain fetch and gives up on exactly the sites this exists for.
+    ENV['SITE_SCAN_RENDERER'] ||= 'chrome'
 
     puts "scanning #{url} locally (this takes a few minutes)"
     started = Time.current
