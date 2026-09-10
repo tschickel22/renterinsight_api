@@ -24,10 +24,12 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     SiteProfiles::DocumentIngestor::TEXT_TYPES
   ).freeze
 
-  skip_before_action :authenticate, only: [:by_token]
+  skip_before_action :authenticate, only: %i[by_token import]
 
-  before_action :require_platform_admin!, except: [:by_token]
-  before_action :set_company_scope, except: [:by_token]
+  before_action :require_platform_admin!, except: %i[by_token import]
+  before_action :set_company_scope, except: %i[by_token import]
+  # import authenticates either way , see #authorize_import!
+  before_action :authorize_import!, only: [:import]
   before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement run_seo_audit seo_report_pdf]
 
   def index
@@ -37,6 +39,54 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   def show
     render json: detail(@profile)
+  end
+
+  # POST /api/v1/site_content_profiles/import
+  #
+  # Takes a profile that was scanned somewhere else and makes it shareable here.
+  #
+  # For the sites this server cannot read. A bot check that refuses a datacenter
+  # address clears in a tenth of a second on a laptop with a normal home
+  # connection, and no amount of waiting or browser tuning changes that — the
+  # address is what is being refused. So the scan runs where it works, on the
+  # admin's own machine against this same codebase, and only the finished
+  # profile is sent up. See rake site_scan:push.
+  #
+  # No crawl, no browser and no model call happen here: everything expensive
+  # already happened on the machine that could reach the site.
+  def import
+    profile_json = params.require(:profile)
+    profile_json = profile_json.to_unsafe_h if profile_json.respond_to?(:to_unsafe_h)
+
+    profile = SiteContentProfile.new(
+      company_id: @company.id,
+      created_by: @import_actor,
+      source_url: params[:source_url].presence,
+      source_kind: 'url',
+      display_name: params[:display_name].presence,
+      preview_template_ids: Array(params[:preview_template_ids]).map(&:to_s),
+      inventory_company_id: params[:inventory_company_id].presence,
+      suggested_subdomain: params[:suggested_subdomain].presence,
+      profile: profile_json,
+      schema_version: params[:schema_version].presence || SiteProfiles::ProfileSchema::VERSION,
+      report: (params[:report] || {}).then { |r| r.respond_to?(:to_unsafe_h) ? r.to_unsafe_h : r },
+      seo_report: (params[:seo_report] || {}).then { |r| r.respond_to?(:to_unsafe_h) ? r.to_unsafe_h : r },
+      robots_allowed: params[:robots_allowed].nil? ? true : params[:robots_allowed],
+      status: 'ready'
+    )
+
+    # Says on the record that this one was read elsewhere, so a demo that looks
+    # stale later can be explained without guesswork.
+    profile.report = profile.report.to_h.merge('imported_at' => Time.current.iso8601)
+
+    profile.save!
+    # The lot the demo will borrow has to have a form on it, exactly as a local
+    # scan would arrange.
+    ensure_lead_form_for(profile)
+
+    render json: detail(profile), status: :created
+  rescue ActionController::ParameterMissing => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   # POST /api/v1/site_content_profiles
@@ -423,6 +473,66 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       show_seo_report: profile.show_seo_report,
       show_seo_teaser: profile.show_seo_teaser
     }
+  end
+
+  # A browser login OR an API key.
+  #
+  # Everything else here is platform-admin-only through a JWT, which is right
+  # for a screen. This one is called from a rake task on somebody's laptop, on a
+  # schedule set by prospects rather than by us, and a JWT expires after 7 days
+  # — so the workflow would break every week for no reason anyone could see. An
+  # API key does not expire and can be scoped and revoked on its own, which is
+  # the better credential for a machine.
+  #
+  # The bar is the same either way: platform admin, or a key that carries
+  # websites:write. A key with no permissions set is unrestricted by this
+  # system's own rule, and that is deliberate elsewhere, so it passes here too.
+  def authorize_import!
+    token = request.headers['Authorization'].to_s.split(' ').last
+
+    if token.to_s.start_with?('ri_')
+      authorize_import_with_api_key!(token)
+    else
+      authenticate
+      return if performed?
+
+      require_platform_admin!
+      return if performed?
+
+      set_company_scope
+      @import_actor = current_user
+    end
+  end
+
+  def authorize_import_with_api_key!(token)
+    key = ApiKey.active.find_by(key: token)
+    return render json: { error: 'Invalid or revoked API key' }, status: :unauthorized if key.nil?
+
+    unless key.has_permission?('websites', 'write')
+      return render json: { error: 'That API key cannot create demos. It needs websites:write.' },
+                    status: :forbidden
+    end
+
+    # A company-scoped key names its own tenant; a platform-level key has to be
+    # told which one the demo belongs to.
+    @company = key.company || Company.find_by(id: request.headers['X-Company-ID'])
+    if @company.nil?
+      return render json: { error: 'Platform-level API keys must send X-Company-ID.' },
+                    status: :bad_request
+    end
+
+    # Provenance, so a demo can be traced to whoever minted the key.
+    @import_actor = key.created_by_user
+  end
+
+  def ensure_lead_form_for(profile)
+    config = SiteProfiles::DemoInventoryResolver.config_for_profile(profile)
+    return if config.blank?
+
+    company = Company.find_by(id: config['company_id'])
+    Websites::DefaultLeadForm.ensure_for(company) if company
+  rescue StandardError => e
+    Rails.logger.warn("[SiteContentProfiles#import] lead form setup failed: #{e.message}")
   end
 
   def detail(profile)

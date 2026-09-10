@@ -30,7 +30,12 @@ module SiteProfiles
       @record.update!(status: 'fetching')
 
       root = @fetcher.get(@record.source_url)
-      raise Fetcher::FetchError, "Could not load #{@record.source_url}" if root.nil?
+      # Not "Could not load <url>". By the time the fetch returns nothing we
+      # have already tried the wire, a browser and the archive, and we know
+      # which of them refused us — a bare "could not load" throws that away and
+      # leaves an admin with nothing to act on. Reported from production, where
+      # it was the only thing a failed scan said.
+      raise Fetcher::FetchError, unreadable_message(nil) if root.nil?
 
       @from_archive = root.try(:from_archive?).present?
       @rendered_pages += 1 if root.try(:rendered?)
@@ -141,35 +146,67 @@ module SiteProfiles
     end
 
     def unreadable_reason(root)
+      # The renderer's verdict comes FIRST, and the archive is a footnote to it.
+      #
+      # This was the other way round for one deploy, on the reasoning that a
+      # placeholder in the archive is its own answer. It is not: reaching the
+      # archive at all means the live site refused us AND the browser failed,
+      # and which of those failed is the only actionable fact here. Ordering it
+      # second hid exactly the diagnosis this message was added to deliver, and
+      # cost a deploy to find out.
+      [live_site_reason(root), archive_note(root)].compact.join(', and ') + '.'
+    end
+
+    def live_site_reason(root)
       case render_verdict
       when :off
         'could not be read, and rendering is switched off, so a site that needs a ' \
-          'browser cannot be scanned. Set SITE_SCAN_RENDERER=chrome.'
+          'browser cannot be scanned. Set SITE_SCAN_RENDERER=chrome'
       when :unavailable
         'could not be read, and the browser that would have rendered it failed to ' \
-          'start on this server.'
+          "start on this server#{render_detail}"
       when :still_challenged
-        'is behind a bot check that did not clear even in a real browser. That ' \
-          'usually means the check is refusing this server rather than the browser.'
+        'is behind a bot check that will not clear for this server' \
+          "#{render_detail}#{hosted_renderer_hint}"
       when :error, :empty
-        'could not be read: the browser did not return a page.'
+        "could not be read: the browser did not return a page#{render_detail}"
       when :rendered
         'loaded in a browser but never drew any content , its text is built by ' \
-          'JavaScript that did not finish.'
+          'JavaScript that did not finish'
       else
-        if root.try(:from_archive?).present?
-          'refused our request, and the web archive holds only a placeholder copy ' \
-            'of it, so there was nothing to read.'
-        else
-          'returned a page with no readable content.'
-        end
+        # No verdict at all: the renderer was never reached, so the wire is all
+        # we tried.
+        root.nil? ? 'could not be loaded at all' : 'refused our request'
       end
+    end
+
+    # Measured, not guessed: the same site clears in a tenth of a second from a
+    # home connection with the same browser build, and never in two minutes from
+    # here. Waiting longer or changing browsers does not fix an address that is
+    # being refused, and only one thing does.
+    def hosted_renderer_hint
+      return '' if Renderer.hosted_configured?
+
+      '. The check is refusing this machine rather than the browser, so only a ' \
+        'renderer with residential egress can read it (SITE_SCAN_RENDER_TOKEN)'
+    end
+
+    def archive_note(root)
+      return nil unless root.try(:from_archive?).present?
+
+      'the web archive holds only a placeholder copy of it, so there was nothing to read'
     end
 
     # The verdict on the page the scan was actually built from.
     def render_verdict
       notes = @fetcher.try(:render_notes) || {}
       notes[@record.source_url] || notes.values.first
+    end
+
+    def render_detail
+      details = @fetcher.try(:render_details) || {}
+      detail = details[@record.source_url] || details.values.compact.first
+      detail.present? ? " (#{detail})" : ''
     end
 
     def collect_digests(root)

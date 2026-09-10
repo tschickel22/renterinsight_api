@@ -45,9 +45,27 @@ module SiteProfiles
       def enabled?
         case provider
         when 'chrome' then true
-        when 'browserless', 'scrapingbee' then ENV['SITE_SCAN_RENDER_TOKEN'].present?
+        when 'browserless', 'scrapingbee' then hosted_configured?
         else false
         end
+      end
+
+      # A hosted renderer can be configured alongside local Chrome, as the
+      # answer to the one thing our own browser cannot fix: a check that refuses
+      # this server's address rather than its browser. Their egress is not a
+      # Render IP, so the page opens.
+      #
+      # Only reached when local Chrome has already failed on a challenge, so a
+      # site that reads normally never costs a credit.
+      def hosted_fallback
+        return nil unless hosted_configured?
+
+        ENV['SITE_SCAN_HOSTED_RENDERER'].to_s.strip.downcase.presence ||
+          (%w[browserless scrapingbee].include?(provider) ? provider : 'browserless')
+      end
+
+      def hosted_configured?
+        ENV['SITE_SCAN_RENDER_TOKEN'].present?
       end
     end
 
@@ -66,9 +84,16 @@ module SiteProfiles
 
     attr_reader :last_outcome
 
+    # Free-text detail from the last attempt, when there is any: how long the
+    # wait was and which Chromium ran it. Quoted in the failure message, because
+    # "the check refused us" and "the check needed longer than we waited" read
+    # identically without it.
+    attr_reader :last_detail
+
     def initialize(logger: Rails.logger)
       @logger = logger
       @last_outcome = nil
+      @last_detail = nil
     end
 
     # @return [String, nil] rendered HTML, or nil when rendering is off, the
@@ -82,10 +107,21 @@ module SiteProfiles
                rendered = browser.render(url)
                return record(:unavailable, nil) unless browser.available?
 
-               rendered
+               if still_challenged?(rendered)
+                 # Our own browser could not get past the wall. If a hosted
+                 # renderer is configured, this is exactly what it is for.
+                 # Failing that, report the wall rather than an empty result:
+                 # they are different problems and only one of them is ours.
+                 walled = rendered.present?
+                 hosted = hosted_retry(url)
+                 return record(walled ? :still_challenged : :empty, nil) if hosted.blank?
+
+                 hosted
+               else
+                 rendered
+               end
              else
-               response = post_or_get(url)
-               response.is_a?(Net::HTTPSuccess) ? truncate(response.body) : nil
+               hosted_html(url, self.class.provider)
              end
 
       return record(:empty, nil) if html.blank?
@@ -113,8 +149,30 @@ module SiteProfiles
 
     private
 
+    def still_challenged?(html)
+      html.blank? || ArchiveFallback.challenged?(200, html)
+    end
+
+    def hosted_retry(url)
+      provider = self.class.hosted_fallback
+      return nil if provider.nil?
+
+      @logger.info("[SiteProfiles::Renderer] #{url} still walled after local Chrome; trying #{provider}")
+      @used_hosted = true
+      hosted_html(url, provider)
+    end
+
+    def hosted_html(url, provider)
+      response = post_or_get(url, provider)
+      return nil unless response.is_a?(Net::HTTPSuccess)
+
+      truncate(response.body)
+    end
+
     def record(outcome, html)
       @last_outcome = outcome
+      @last_detail = [@local_browser&.diagnostic, (@used_hosted ? 'hosted renderer also tried' : nil)]
+                     .compact.join('; ').presence
       html
     end
 
@@ -122,8 +180,8 @@ module SiteProfiles
       @local_browser ||= LocalBrowser.new(logger: @logger)
     end
 
-    def post_or_get(url)
-      case self.class.provider
+    def post_or_get(url, provider = self.class.provider)
+      case provider
       when 'browserless' then browserless(url)
       when 'scrapingbee' then scrapingbee(url)
       end
@@ -139,23 +197,50 @@ module SiteProfiles
 
       request = Net::HTTP::Post.new(endpoint)
       request['Content-Type'] = 'application/json'
-      request.body = {
+      body = {
         url: url,
         # networkidle2 rather than load: the challenge redirects to the real
         # page after its check, and `load` fires on the checkpoint.
         gotoOptions: { waitUntil: 'networkidle2', timeout: 30_000 }
-      }.to_json
+      }
+      # Same reasoning as ScrapingBee's premium proxy: without residential
+      # egress a hosted browser is refused exactly as ours is.
+      body[:proxy] = 'residential' if premium_proxy?
+      request.body = body.to_json
 
       perform(endpoint, request)
     end
 
     def scrapingbee(url)
+      params = { api_key: ENV['SITE_SCAN_RENDER_TOKEN'], url: url, render_js: 'true' }
+      # Residential egress, at a much higher credit cost per call.
+      #
+      # Not a nicety for the sites this exists for. A hosted renderer on a plain
+      # datacenter address meets the same wall our own browser does — measured
+      # on thehomeplus.com, which clears in 0.1s from a home connection and
+      # never in 120s from Render, with the same browser build. Paying for
+      # rendering without paying for the egress buys nothing here.
+      case proxy_mode
+      when 'premium' then params[:premium_proxy] = 'true'
+      # Their anti-bot tier. A checkpoint that refuses a datacenter address may
+      # refuse a plain residential one too, and this is the setting that exists
+      # for that; it costs three times premium, so it is not the default.
+      when 'stealth' then params[:stealth_proxy] = 'true'
+      end
       endpoint = URI.parse('https://app.scrapingbee.com/api/v1/')
-      endpoint.query = URI.encode_www_form(
-        api_key: ENV['SITE_SCAN_RENDER_TOKEN'], url: url, render_js: 'true'
-      )
+      endpoint.query = URI.encode_www_form(params)
 
       perform(endpoint, Net::HTTP::Get.new(endpoint))
+    end
+
+    # premium (default) | stealth | none. Credits per request at ScrapingBee,
+    # with JS rendering on: 5 plain, 25 premium, 75 stealth.
+    def proxy_mode
+      ENV.fetch('SITE_SCAN_RENDER_PROXY', 'premium').to_s.strip.downcase
+    end
+
+    def premium_proxy?
+      proxy_mode != 'none'
     end
 
     def perform(uri, request)

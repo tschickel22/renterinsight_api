@@ -83,7 +83,7 @@ RSpec.describe SiteProfiles::Renderer do
   # never cleared came back as a successful render, so the scan built a profile
   # from an interstitial and failed with a message blaming JavaScript.
   describe 'local chrome' do
-    let(:browser) { instance_double(SiteProfiles::LocalBrowser, available?: true) }
+    let(:browser) { instance_double(SiteProfiles::LocalBrowser, available?: true, diagnostic: nil) }
 
     before do
       configure(provider: 'chrome', token: nil)

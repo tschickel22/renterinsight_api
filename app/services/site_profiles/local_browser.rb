@@ -16,21 +16,64 @@ module SiteProfiles
   # when the scan ends. Nothing memoizes it at class level: a Chrome left alive
   # in a web container is a leak that outlives the request that made it.
   class LocalBrowser
-    CHROME_BIN = ENV.fetch('CHROME_BIN', '/usr/bin/chromium')
-    CHROMEDRIVER_BIN = ENV.fetch('CHROMEDRIVER_BIN', '/usr/bin/chromedriver')
+    # Where a browser might be, most explicit first.
+    #
+    # Three environments have to work: the Docker image (Debian's chromium at
+    # /usr/bin), Render's native Ruby environment (no root, no apt, so
+    # bin/install-chrome.sh downloads Chrome for Testing into the project
+    # directory), and a developer's laptop (nothing set; Selenium Manager finds
+    # whatever Chrome is installed). Assuming the first of those is why the
+    # browser never started on a native service: the Dockerfile that installs
+    # chromium is not built there at all.
+    CHROME_CANDIDATES = [
+      ENV['CHROME_BIN'],
+      File.join(Dir.pwd, 'vendor/chrome/chrome-headless-shell-linux64/chrome-headless-shell'),
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/google-chrome'
+    ].compact.freeze
+
+    CHROMEDRIVER_CANDIDATES = [
+      ENV['CHROMEDRIVER_BIN'],
+      File.join(Dir.pwd, 'vendor/chrome/chromedriver-linux64/chromedriver'),
+      '/usr/bin/chromedriver'
+    ].compact.freeze
+
+    def self.chrome_binary
+      CHROME_CANDIDATES.find { |path| File.executable?(path) }
+    end
+
+    def self.chromedriver_binary
+      CHROMEDRIVER_CANDIDATES.find { |path| File.executable?(path) }
+    end
 
     PAGE_LOAD_TIMEOUT = 30
     # How long to keep waiting for a page to become readable — a challenge to
     # hand over the real site, and then a framework to draw it. The measured
     # clear on thehomeplus.com is about two seconds; hydration a moment after.
+    # How long to wait for a page to draw itself once it is ours to read.
     SETTLE_TIMEOUT = 35
     POLL = 0.5
 
-    # A checkpoint sets its cookie and reloads itself. When that reload does not
-    # happen — and on a slow container it sometimes does not — one navigation of
-    # our own with the cookie now in hand lands the real page. Tried once, after
-    # the wall has had a fair chance to clear on its own.
-    RELOAD_AFTER = 8
+    # How long to wait for a bot check to clear, which is a different quantity
+    # and a much larger one.
+    #
+    # Vercel's checkpoint is a JavaScript proof-of-work, so the wait is set by
+    # how fast the CPU running it is: measured at 1.2s on an Apple M5 laptop and
+    # far slower on a shared container vCPU, where single-threaded JS can run
+    # tens of times slower. The first version capped this at the same 35s the
+    # content wait used, which is roughly where a 30x slower box would land —
+    # so a scan could time out at the moment it was about to succeed.
+    CHALLENGE_WAIT = ENV.fetch('SITE_SCAN_CHALLENGE_WAIT', 120).to_i
+
+    # Reloading restarts the proof-of-work.
+    #
+    # This was 8 seconds, on the theory that a checkpoint which has not replaced
+    # itself needs a nudge. On a slow box that is actively harmful: it throws
+    # away a computation that was 8 seconds into a 40 second job, then does it
+    # again, and again, so a page that would have cleared never does. Left as a
+    # late last resort for a genuinely stuck checkpoint rather than a nudge.
+    RELOAD_AFTER = 90
 
     # What "drawn" means. Both are needed: a Next.js page serves its streaming
     # payload as script long before any of it becomes markup, so the document is
@@ -47,6 +90,23 @@ module SiteProfiles
     # a scan, so the first failure is remembered.
     def available?
       !@unavailable
+    end
+
+    # What to say about the last attempt when it did not work. A wait that was
+    # spent and a browser version are the two facts that tell a slow proof-of-
+    # work apart from a check refusing the machine outright.
+    def diagnostic
+      return "no Chrome found; looked in #{CHROME_CANDIDATES.join(', ')}" if @unavailable && @browser_version.nil?
+      return "the browser started (Chromium #{@browser_version}) but then failed" if @unavailable
+
+      parts = []
+      parts << if @waited_for_challenge
+                 "cleared the check after #{@waited_for_challenge}s"
+               else
+                 "waited #{CHALLENGE_WAIT}s"
+               end
+      parts << "Chromium #{@browser_version}" if @browser_version
+      parts.join('; ').presence
     end
 
     # @return [String, nil] the DOM once the page has settled, or nil if it
@@ -80,6 +140,8 @@ module SiteProfiles
       @driver ||= begin
         d = Selenium::WebDriver.for(:chrome, **{ options: chrome_options, service: service }.compact)
         d.manage.timeouts.page_load = PAGE_LOAD_TIMEOUT
+        @browser_version = d.capabilities.browser_version
+        @logger.info("[SiteProfiles::LocalBrowser] Chromium #{@browser_version}")
         d
       rescue StandardError => e
         # No browser here, or one Selenium cannot drive. Say so once and stop
@@ -96,19 +158,17 @@ module SiteProfiles
     # whatever Chrome is installed, so passing no service is the right answer
     # rather than a broken path.
     def service
-      return nil unless File.exist?(CHROMEDRIVER_BIN)
+      path = self.class.chromedriver_binary
+      return nil if path.nil?
 
-      Selenium::WebDriver::Chrome::Service.new(path: CHROMEDRIVER_BIN)
+      Selenium::WebDriver::Chrome::Service.new(path: path)
     end
 
     def chrome_options
       # Same reasoning as #service: an explicit binary in the image, and
       # Chrome's own default everywhere else.
-      options = if File.exist?(CHROME_BIN)
-                  Selenium::WebDriver::Chrome::Options.new(binary: CHROME_BIN)
-                else
-                  Selenium::WebDriver::Chrome::Options.new
-                end
+      binary = self.class.chrome_binary
+      options = binary ? Selenium::WebDriver::Chrome::Options.new(binary: binary) : Selenium::WebDriver::Chrome::Options.new
       [
         '--headless=new',
         # Required to run as root in a container, which is how the image runs.
@@ -151,14 +211,16 @@ module SiteProfiles
     # Gives up quietly at the cap and lets the caller judge what it got — a
     # thin page that never grows is still worth what it says.
     def settle(url = nil)
-      deadline = Time.current + SETTLE_TIMEOUT
-      reload_at = Time.current + RELOAD_AFTER
+      started = Time.current
+      challenge_deadline = started + CHALLENGE_WAIT
+      reload_at = started + RELOAD_AFTER
       reloaded = false
+      @waited_for_challenge = nil
 
       loop do
-        break if Time.current >= deadline
-
         if ArchiveFallback.challenged?(200, driver.page_source.to_s)
+          break if Time.current >= challenge_deadline
+
           if !reloaded && Time.current >= reload_at
             reloaded = true
             url ? driver.navigate.to(url) : driver.navigate.refresh
@@ -166,6 +228,10 @@ module SiteProfiles
           next sleep(POLL)
         end
 
+        # Past the wall. Anything still missing is the page drawing itself,
+        # which is a much shorter wait and a separate budget.
+        @waited_for_challenge ||= (Time.current - started).round(1)
+        break if Time.current >= (started + @waited_for_challenge + SETTLE_TIMEOUT)
         break if rendered?
 
         sleep POLL

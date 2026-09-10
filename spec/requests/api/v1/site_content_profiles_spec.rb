@@ -13,17 +13,30 @@ RSpec.describe 'Api::V1::SiteContentProfiles', type: :request do
       expect(actions).to include('by_token', 'create', 'index', 'show', 'destroy', 'rotate_preview_token')
     end
 
-    it 'skips authentication ONLY for by_token' do
-      skipped = Api::V1::SiteContentProfilesController
-                ._process_action_callbacks
-                .select { |cb| cb.filter == :authenticate }
-                .flat_map { |cb| Array(cb.instance_variable_get(:@if)) }
-
-      # The controller declares skip_before_action :authenticate, only: [:by_token]
+    # Two actions sit outside the controller's blanket JWT guard, for opposite
+    # reasons: by_token is public by design, and import authenticates itself so
+    # it can take an API key as well as a login. Nothing else may.
+    it 'skips the blanket authentication only where an action guards itself' do
       source = File.read(Rails.root.join('app/controllers/api/v1/site_content_profiles_controller.rb'))
-      expect(source).to match(/skip_before_action :authenticate, only: \[:by_token\]/)
-      expect(source).to match(/before_action :require_platform_admin!, except: \[:by_token\]/)
-      expect(skipped).to be_an(Array)
+
+      expect(source).to match(/skip_before_action :authenticate, only: %i\[by_token import\]/)
+      expect(source).to match(/before_action :require_platform_admin!, except: %i\[by_token import\]/)
+      # import is not left open: it has its own guard.
+      expect(source).to match(/before_action :authorize_import!, only: \[:import\]/)
+    end
+
+    # The guard is worth checking as behaviour and not only as source, since the
+    # source assertions above cannot tell a guard from a comment.
+    it 'still refuses an unauthenticated import' do
+      post '/api/v1/site_content_profiles/import', params: { profile: { brand: {} } }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'still refuses an unauthenticated index' do
+      get '/api/v1/site_content_profiles'
+
+      expect(response).to have_http_status(:unauthorized)
     end
   end
 

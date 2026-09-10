@@ -71,14 +71,30 @@ module SiteProfiles
              images: [], inventory_images: [])
       started = Time.current
       @inventory_images = Array(inventory_images)
-      response = call_claude(
-        system_prompt: system_prompt(document: images.present?),
-        user_message: build_content(user_message(digests, brand, source_url), images),
-        model: AiModel.for(:generation),
-        max_tokens: MAX_TOKENS
-      )
+      system = system_prompt(document: images.present?)
+      message = build_content(user_message(digests, brand, source_url), images)
+      model = AiModel.for(:generation)
 
-      raw = parse_json(response[:text])
+      response = call_claude(system_prompt: system, user_message: message, model: model,
+                             max_tokens: MAX_TOKENS)
+
+      raw = begin
+        parse_json(response[:text])
+      rescue GenerationError => e
+        # One retry, saying what was wrong with the last answer.
+        #
+        # A scan is minutes of crawling, rendering and reading before the model
+        # is called at all, and it died here on a single unescaped quote inside
+        # a business name — measured on a real scan, after 3 minutes of work.
+        # Throwing all of that away because one character came back wrong is the
+        # wrong trade when asking again costs one more call.
+        Rails.logger.warn("[SiteProfiles::ProfileBuilder] #{e.message}; asking once more")
+        response = call_claude(
+          system_prompt: "#{system}\n\n#{JSON_REPAIR_NOTE}",
+          user_message: message, model: model, max_tokens: MAX_TOKENS
+        )
+        parse_json(response[:text])
+      end
       profile, warnings = ProfileSchema.coerce(raw)
 
       profile = merge_deterministic(profile, brand:, links:, integrations:, contact:, digests:, source_url:)
@@ -161,6 +177,7 @@ module SiteProfiles
 
       !PageDigest::PROMOTIONAL.match?(value) &&
         !PageDigest::NOT_A_HOME.match?(value) &&
+        !PageDigest::FLOOR_PLAN.match?(value) &&
         !PageDigest::JUNK_IMAGE.match?(value)
     end
 
@@ -261,11 +278,32 @@ module SiteProfiles
       "Extract the content profile from these pages:\n\n#{JSON.pretty_generate(payload)}"
     end
 
+    # Appended to the system prompt on the one retry. Names the failure mode
+    # actually seen rather than repeating "return JSON", which the prompt says
+    # already and which the model believed it was doing.
+    JSON_REPAIR_NOTE = <<~TEXT
+      Your previous reply could not be parsed as JSON. Return ONLY the JSON
+      object, with no commentary and no code fence. Escape every double quote
+      that appears inside a string value as \\" — a business name that quotes
+      itself is the usual cause.
+    TEXT
+
     def parse_json(text)
       cleaned = text.to_s.strip
       cleaned = cleaned.gsub(/\A```(?:json)?\s*/, '').gsub(/\s*```\z/, '')
       JSON.parse(cleaned)
     rescue JSON::ParserError => e
+      # Prose either side of a valid object is the other common shape, and it is
+      # recoverable without another call.
+      salvaged = cleaned[/\{.*\}/m]
+      if salvaged
+        begin
+          return JSON.parse(salvaged)
+        rescue JSON::ParserError
+          nil
+        end
+      end
+
       raise GenerationError, "AI returned invalid JSON: #{e.message[0, 200]}"
     end
 

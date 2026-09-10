@@ -44,9 +44,10 @@ module SiteProfiles
       # started and a bot check that never cleared read identically from the
       # outside and want opposite fixes.
       @render_notes = {}
+      @render_details = {}
     end
 
-    attr_reader :render_notes
+    attr_reader :render_notes, :render_details
 
     # Returns a Response, or nil when the page could not be fetched. Callers
     # treat a nil page as "skip and warn", never as a fatal error — one bad
@@ -71,10 +72,18 @@ module SiteProfiles
       # page in a browser, so both route to the renderer.
       needs_js = !blocked && html_response && response.is_a?(Net::HTTPSuccess) && shell?(body)
 
+      if allow_render && (blocked || needs_js) && !Renderer.enabled?
+        # Worth recording rather than skipping in silence: this page needed a
+        # browser and there was none configured, which is a different problem
+        # from the site refusing us and has a different fix.
+        @render_notes[uri.to_s] = :off
+      end
+
       if allow_render && (blocked || needs_js) && Renderer.enabled?
         @logger.info("[SiteProfiles::Fetcher] #{url} #{blocked ? "challenged (HTTP #{status})" : 'looks client-rendered'}; rendering")
         rendered = renderer.call(uri.to_s)
         @render_notes[uri.to_s] = renderer.last_outcome
+        @render_details[uri.to_s] = renderer.last_detail
         if rendered.present?
           return Response.new(url: uri.to_s, status: 200, body: rendered,
                               content_type: 'text/html', rendered: true)
