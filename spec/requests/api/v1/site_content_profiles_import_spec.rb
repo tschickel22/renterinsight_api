@@ -128,10 +128,21 @@ RSpec.describe 'POST /api/v1/site_content_profiles/import', type: :request do
       expect(response).to have_http_status(:created)
     end
 
-    it 'refuses a platform-level key that does not' do
+    # Falling back to the admin's own company rather than demanding a tenant id
+    # they would have to go and look up — after a six minute scan has run.
+    it 'files a platform-level key under whoever minted it when no tenant is named' do
       post_with(key_with(permissions: { 'websites' => ['write'] }))
 
-      expect(response).to have_http_status(:bad_request)
+      expect(response).to have_http_status(:created)
+      expect(SiteContentProfile.last.company_id).to eq(company.id)
+    end
+
+    it 'lets an explicit tenant win over the key own company' do
+      other = create(:company)
+      post_with(key_with(permissions: { 'websites' => ['write'] }, company: company),
+                'X-Company-ID' => other.id.to_s)
+
+      expect(SiteContentProfile.last.company_id).to eq(other.id)
     end
 
     it 'refuses a key that cannot write websites' do

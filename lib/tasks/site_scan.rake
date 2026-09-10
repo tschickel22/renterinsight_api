@@ -1,5 +1,46 @@
 # frozen_string_literal: true
 
+# Shared by site_scan:check and the pre-flight inside site_scan:push.
+module SiteScanTasks
+  module_function
+
+  # One request that creates nothing: the body is deliberately incomplete, so a
+  # credential that works answers 422 for the missing profile.
+  #
+  # @return [String, nil] what is wrong, or nil when the credential is good.
+  def credential_problem(target:, token:, company_id: nil)
+    uri = URI.join("#{target}/", 'api/v1/site_content_profiles/import')
+    request = Net::HTTP::Post.new(uri)
+    request['Content-Type'] = 'application/json'
+    request['Authorization'] = "Bearer #{token}"
+    request['X-Company-ID'] = company_id if company_id.present?
+    request.body = {}.to_json
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.read_timeout = 60
+    response = http.request(request)
+
+    case response.code.to_i
+    when 422 then nil
+    when 401 then "refused by #{target}: expired, revoked, or issued by a different host."
+    when 400 then "refused by #{target}: platform-level API key. Add COMPANY_ID to name the tenant."
+    when 403 then "refused by #{target}: #{response.body.to_s[0, 160]}"
+    when 404 then "#{target} has not deployed the import endpoint yet."
+    else "unexpected HTTP #{response.code} from #{target}: #{response.body.to_s[0, 160]}"
+    end
+  rescue StandardError => e
+    "could not reach #{target}: #{e.class}: #{e.message}"
+  end
+
+  def describe(token)
+    if token.start_with?('ri_') then 'API key (does not expire)'
+    elsif token.start_with?('eyJ') then 'browser login (expires after 7 days)'
+    else 'unrecognised — expected ri_live_... or eyJ...'
+    end
+  end
+end
+
 namespace :site_scan do
   # Answers one question that cannot be answered from a laptop: what happens
   # when THIS server tries to read a site.
@@ -128,6 +169,15 @@ namespace :site_scan do
     # back to a plain fetch and gives up on exactly the sites this exists for.
     ENV['SITE_SCAN_RENDERER'] ||= 'chrome'
 
+    # Say where this is going BEFORE spending six minutes getting there. TARGET
+    # defaults to staging, so a production credential with no TARGET set scans
+    # for six minutes and then 401s against the wrong host — which is exactly
+    # what happened.
+    puts "target: #{target}"
+    problem = SiteScanTasks.credential_problem(target: target, token: token,
+                                               company_id: ENV['COMPANY_ID'])
+    abort("#{problem}\n\nNothing was scanned.") if problem
+
     puts "scanning #{url} locally (this takes a few minutes)"
     started = Time.current
     begin
@@ -202,32 +252,12 @@ namespace :site_scan do
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
     abort('No token. See rake site_scan:push for where it comes from.') if token.blank?
 
-    kind = if token.start_with?('ri_') then 'API key (does not expire)'
-           elsif token.start_with?('eyJ') then 'browser login (expires after 7 days)'
-           else 'unrecognised — expected ri_live_... or eyJ...'
-           end
-    puts "credential: #{kind}"
+    puts "credential: #{SiteScanTasks.describe(token)}"
     puts "target:     #{target}"
 
-    uri = URI.join("#{target}/", 'api/v1/site_content_profiles/import')
-    request = Net::HTTP::Post.new(uri)
-    request['Content-Type'] = 'application/json'
-    request['Authorization'] = "Bearer #{token}"
-    request['X-Company-ID'] = ENV['COMPANY_ID'] if ENV['COMPANY_ID'].present?
-    request.body = {}.to_json
-
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = uri.scheme == 'https'
-    http.read_timeout = 60
-    response = http.request(request)
-
-    puts case response.code.to_i
-         when 422 then 'ready. The credential was accepted and nothing was created.'
-         when 401 then 'refused: expired, revoked, or issued by a different host.'
-         when 400 then 'refused: platform-level API key. Add COMPANY_ID to name the tenant.'
-         when 403 then "refused: #{response.body.to_s[0, 160]}"
-         when 404 then 'the target has not deployed the import endpoint yet.'
-         else "unexpected HTTP #{response.code}: #{response.body.to_s[0, 160]}"
-         end
+    problem = SiteScanTasks.credential_problem(target: target, token: token,
+                                               company_id: ENV['COMPANY_ID'])
+    puts problem || 'ready. The credential was accepted and nothing was created.'
   end
+
 end
