@@ -220,15 +220,27 @@ module SiteProfiles
       # on thehomeplus.com, which clears in 0.1s from a home connection and
       # never in 120s from Render, with the same browser build. Paying for
       # rendering without paying for the egress buys nothing here.
-      params[:premium_proxy] = 'true' if premium_proxy?
+      case proxy_mode
+      when 'premium' then params[:premium_proxy] = 'true'
+      # Their anti-bot tier. A checkpoint that refuses a datacenter address may
+      # refuse a plain residential one too, and this is the setting that exists
+      # for that; it costs three times premium, so it is not the default.
+      when 'stealth' then params[:stealth_proxy] = 'true'
+      end
       endpoint = URI.parse('https://app.scrapingbee.com/api/v1/')
       endpoint.query = URI.encode_www_form(params)
 
       perform(endpoint, Net::HTTP::Get.new(endpoint))
     end
 
+    # premium (default) | stealth | none. Credits per request at ScrapingBee,
+    # with JS rendering on: 5 plain, 25 premium, 75 stealth.
+    def proxy_mode
+      ENV.fetch('SITE_SCAN_RENDER_PROXY', 'premium').to_s.strip.downcase
+    end
+
     def premium_proxy?
-      ActiveModel::Type::Boolean.new.cast(ENV.fetch('SITE_SCAN_RENDER_PREMIUM', 'true'))
+      proxy_mode != 'none'
     end
 
     def perform(uri, request)
