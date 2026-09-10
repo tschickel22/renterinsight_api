@@ -58,31 +58,50 @@ module SiteProfiles
     READ_TIMEOUT = 45
     MAX_BODY_BYTES = 5 * 1024 * 1024
 
+    # Why the last render did or did not produce a page. Carried out to the
+    # failure message, because "no readable content" on its own cannot tell a
+    # browser that never started from a bot check that never cleared, and those
+    # want opposite fixes.
+    OUTCOMES = %i[rendered still_challenged empty unavailable error off].freeze
+
+    attr_reader :last_outcome
+
     def initialize(logger: Rails.logger)
       @logger = logger
+      @last_outcome = nil
     end
 
     # @return [String, nil] rendered HTML, or nil when rendering is off, the
     #   provider failed, or it returned something that is not a page. Every
     #   caller treats nil as "carry on with what you had".
     def call(url)
-      return nil unless self.class.enabled?
-      return local_browser.render(url) if self.class.provider == 'chrome'
+      return record(:off, nil) unless self.class.enabled?
 
-      response = post_or_get(url)
-      return nil unless response.is_a?(Net::HTTPSuccess)
+      html = if self.class.provider == 'chrome'
+               browser = local_browser
+               rendered = browser.render(url)
+               return record(:unavailable, nil) unless browser.available?
 
-      html = truncate(response.body)
-      return nil if html.blank?
+               rendered
+             else
+               response = post_or_get(url)
+               response.is_a?(Net::HTTPSuccess) ? truncate(response.body) : nil
+             end
 
-      # A provider that hands back the challenge page has not rendered anything
-      # useful, and passing it on would put an interstitial into the profile.
-      return nil if ArchiveFallback.challenged?(200, html)
+      return record(:empty, nil) if html.blank?
 
-      html
+      # A render that hands back the challenge page has produced nothing useful,
+      # and passing it on would put an interstitial into the profile — which is
+      # precisely the bug this class exists to prevent. Applies to a browser of
+      # our own exactly as it does to a hosted one: this check used to sit after
+      # an early return for chrome, so a checkpoint that never cleared was
+      # treated as a successful render.
+      return record(:still_challenged, nil) if ArchiveFallback.challenged?(200, html)
+
+      record(:rendered, html)
     rescue StandardError => e
       @logger.warn("[SiteProfiles::Renderer] #{url}: #{e.class}: #{e.message}")
-      nil
+      record(:error, nil)
     end
 
     # Ends the browser session, if this renderer started one. Called once a scan
@@ -93,6 +112,11 @@ module SiteProfiles
     end
 
     private
+
+    def record(outcome, html)
+      @last_outcome = outcome
+      html
+    end
 
     def local_browser
       @local_browser ||= LocalBrowser.new(logger: @logger)

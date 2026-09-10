@@ -39,7 +39,14 @@ module SiteProfiles
 
     def initialize(logger: Rails.logger)
       @logger = logger
+      # url => the renderer's verdict, for the failure message. A scan that
+      # comes back empty has to be able to say WHY: a browser that never
+      # started and a bot check that never cleared read identically from the
+      # outside and want opposite fixes.
+      @render_notes = {}
     end
+
+    attr_reader :render_notes
 
     # Returns a Response, or nil when the page could not be fetched. Callers
     # treat a nil page as "skip and warn", never as a fatal error — one bad
@@ -67,6 +74,7 @@ module SiteProfiles
       if allow_render && (blocked || needs_js) && Renderer.enabled?
         @logger.info("[SiteProfiles::Fetcher] #{url} #{blocked ? "challenged (HTTP #{status})" : 'looks client-rendered'}; rendering")
         rendered = renderer.call(uri.to_s)
+        @render_notes[uri.to_s] = renderer.last_outcome
         if rendered.present?
           return Response.new(url: uri.to_s, status: 200, body: rendered,
                               content_type: 'text/html', rendered: true)

@@ -127,17 +127,49 @@ module SiteProfiles
       ].join(' ').split(/\s+/).count { |w| w.present? }
     end
 
+    # Name the actual failure.
+    #
+    # The first version of this message offered "usually a bot check or a site
+    # whose text is drawn entirely by JavaScript" , a guess covering four
+    # different failures that want four different fixes, and it sent us looking
+    # in the wrong place. The renderer knows which one happened; say it.
+    FALLBACK = 'Upload a brochure or build the demo by hand instead.'
+
     def unreadable_message(root)
       host = host_of(@record.source_url) || @record.source_url
-      if root.try(:from_archive?).present?
-        "#{host} refused our request and the web archive holds only a placeholder " \
-          'copy of it, so there was nothing to read. Upload a brochure or build the ' \
-          'demo by hand instead.'
+      "#{host} #{unreadable_reason(root)} #{FALLBACK}"
+    end
+
+    def unreadable_reason(root)
+      case render_verdict
+      when :off
+        'could not be read, and rendering is switched off, so a site that needs a ' \
+          'browser cannot be scanned. Set SITE_SCAN_RENDERER=chrome.'
+      when :unavailable
+        'could not be read, and the browser that would have rendered it failed to ' \
+          'start on this server.'
+      when :still_challenged
+        'is behind a bot check that did not clear even in a real browser. That ' \
+          'usually means the check is refusing this server rather than the browser.'
+      when :error, :empty
+        'could not be read: the browser did not return a page.'
+      when :rendered
+        'loaded in a browser but never drew any content , its text is built by ' \
+          'JavaScript that did not finish.'
       else
-        "#{host} returned a page with no readable content , usually a bot check or a " \
-          'site whose text is drawn entirely by JavaScript. Upload a brochure or build ' \
-          'the demo by hand instead.'
+        if root.try(:from_archive?).present?
+          'refused our request, and the web archive holds only a placeholder copy ' \
+            'of it, so there was nothing to read.'
+        else
+          'returned a page with no readable content.'
+        end
       end
+    end
+
+    # The verdict on the page the scan was actually built from.
+    def render_verdict
+      notes = @fetcher.try(:render_notes) || {}
+      notes[@record.source_url] || notes.values.first
     end
 
     def collect_digests(root)

@@ -23,8 +23,14 @@ module SiteProfiles
     # How long to keep waiting for a page to become readable — a challenge to
     # hand over the real site, and then a framework to draw it. The measured
     # clear on thehomeplus.com is about two seconds; hydration a moment after.
-    SETTLE_TIMEOUT = 20
+    SETTLE_TIMEOUT = 35
     POLL = 0.5
+
+    # A checkpoint sets its cookie and reloads itself. When that reload does not
+    # happen — and on a slow container it sometimes does not — one navigation of
+    # our own with the cookie now in hand lands the real page. Tried once, after
+    # the wall has had a fair chance to clear on its own.
+    RELOAD_AFTER = 8
 
     # What "drawn" means. Both are needed: a Next.js page serves its streaming
     # payload as script long before any of it becomes markup, so the document is
@@ -49,7 +55,7 @@ module SiteProfiles
       return nil unless available?
 
       driver.navigate.to(url)
-      settle
+      settle(url)
       html = driver.page_source
       html.presence
     rescue StandardError => e
@@ -116,8 +122,14 @@ module SiteProfiles
         # We read markup, never pixels: every image URL we want is an attribute
         # in the DOM. Not downloading them is most of the memory and most of the
         # time on a page of home photography.
-        '--blink-settings=imagesEnabled=false'
+        '--blink-settings=imagesEnabled=false',
+        # Chrome otherwise advertises that it is under automation, in the DOM
+        # and in a command-line switch. We are a real browser loading a public
+        # marketing page at the site owner's prospective request; being refused
+        # for carrying a flag that says "started by a script" helps nobody.
+        '--disable-blink-features=AutomationControlled'
       ].each { |arg| options.add_argument(arg) }
+      options.exclude_switches << 'enable-automation'
 
       # Chrome's own user agent with the word Headless removed. It is the same
       # engine either way; several bot walls refuse the headless string on
@@ -138,12 +150,22 @@ module SiteProfiles
     #
     # Gives up quietly at the cap and lets the caller judge what it got — a
     # thin page that never grows is still worth what it says.
-    def settle
+    def settle(url = nil)
       deadline = Time.current + SETTLE_TIMEOUT
+      reload_at = Time.current + RELOAD_AFTER
+      reloaded = false
 
       loop do
         break if Time.current >= deadline
-        next sleep(POLL) if ArchiveFallback.challenged?(200, driver.page_source.to_s)
+
+        if ArchiveFallback.challenged?(200, driver.page_source.to_s)
+          if !reloaded && Time.current >= reload_at
+            reloaded = true
+            url ? driver.navigate.to(url) : driver.navigate.refresh
+          end
+          next sleep(POLL)
+        end
+
         break if rendered?
 
         sleep POLL
