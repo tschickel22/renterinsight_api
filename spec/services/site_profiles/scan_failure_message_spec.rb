@@ -43,17 +43,26 @@ RSpec.describe SiteProfiles::Orchestrator do
 
   # Every other explanation was eliminated by measurement — user agent, wait,
   # and browser binary all clear the same site in a tenth of a second from a
-  # home connection. So the message names the one remaining fix rather than
+  # home connection. So the message points at the route that works instead of
   # inviting another round of tuning.
-  it 'names residential egress as the only remaining fix' do
-    expect(message_for(:still_challenged)).to include('residential egress')
+  it 'points at scanning from a machine that can reach the site' do
+    message = message_for(:still_challenged)
+
+    expect(message).to include('site_scan:push')
+    expect(message).to include('refusing this machine rather than the browser')
   end
 
-  it 'drops the hint once a hosted renderer is configured' do
-    ENV['SITE_SCAN_RENDER_TOKEN'] = 'key_1'
+  # A UI message is read by whoever pressed the button, and an environment
+  # variable name tells them nothing they can act on.
+  it 'keeps environment variable names out of it' do
     expect(message_for(:still_challenged)).not_to include('SITE_SCAN_RENDER_TOKEN')
-  ensure
-    ENV.delete('SITE_SCAN_RENDER_TOKEN')
+  end
+
+  # Every other failure still ends the way it did: those are not fixed by
+  # running the same scan somewhere else.
+  it 'offers the brochure route for failures a different machine would not fix' do
+    expect(message_for(:rendered)).to include('Upload a brochure')
+    expect(message_for(:rendered)).not_to include('site_scan:push')
   end
 
   it 'distinguishes a page that rendered but drew nothing' do
@@ -92,6 +101,8 @@ RSpec.describe SiteProfiles::Orchestrator do
 
   it 'always names the site and what to do instead' do
     expect(message_for(:still_challenged)).to start_with('thehomeplus.com')
-    expect(message_for(:still_challenged)).to include('Upload a brochure')
+    # For this failure the route that works is a different machine; the brochure
+    # is the fallback after it, not the headline.
+    expect(message_for(:still_challenged)).to include('upload a brochure')
   end
 end
