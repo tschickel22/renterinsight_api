@@ -64,14 +64,42 @@ namespace :site_scan do
   #   TOKEN=... TARGET=https://renterinsight-api-prod.onrender.com \
   #     rake "site_scan:push[https://theirsite.com,Their Label]"
   #
-  # TOKEN is a platform-admin bearer token: open the app, and it is authToken in
-  # localStorage. COMPANY_ID sets which tenant owns the demo (defaults to the
-  # token's own company). LOT sets the inventory lot the demo borrows.
+  # The token is YOUR DEALERTIDE LOGIN, not anything on this machine: open the
+  # app you are pushing to, DevTools, Application, Local Storage, authToken. It
+  # is a platform-admin bearer token and lasts 7 days, and it belongs to the
+  # host it came from — a staging token pushed at production is a 401.
+  #
+  # Put it in .env as SITE_SCAN_PUSH_TOKEN (dotenv is loaded in development, so
+  # the task picks it up), or pass TOKEN= inline for a one-off.
+  #
+  # COMPANY_ID sets which tenant owns the demo (defaults to the token's own
+  # company). LOT sets the inventory lot the demo borrows.
   desc 'Scan a site locally and push the finished profile to staging or production'
   task :push, %i[url label] => :environment do |_t, args|
     url = args[:url].presence || abort('usage: rake "site_scan:push[https://example.com]"')
     target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
-    token = ENV['TOKEN'].presence || abort('TOKEN is required (authToken from localStorage)')
+    # Where a human signs in, which is not where the API lives. The token is
+    # copied from the browser, so the message has to name the address the
+    # browser knows.
+    app = target.include?('staging') ? 'https://staging.dealertide.com' : 'https://app.dealertide.com'
+    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    if token.blank?
+      abort(<<~TEXT)
+        No push token.
+
+        It comes from DealerTide, not from this machine: sign in to
+        #{app}, open DevTools, Application, Local Storage, and copy
+        authToken. It lasts 7 days.
+
+        Then either put it in this repo's .env:
+
+            SITE_SCAN_PUSH_TOKEN=eyJhbGci...
+
+        or pass it for one run:
+
+            TOKEN=eyJhbGci... rake "site_scan:push[#{url}]"
+      TEXT
+    end
 
     company = Company.find_by(id: ENV['LOCAL_COMPANY_ID']) || Company.first
     abort('no company in the local database to scan under') if company.nil?
@@ -120,14 +148,22 @@ namespace :site_scan do
     response = http.request(request)
 
     unless response.is_a?(Net::HTTPSuccess)
-      abort("push failed: HTTP #{response.code} #{response.body.to_s[0, 300]}")
+      # The two failures worth naming, because the body does not explain either:
+      # a token is bound to the host that issued it and expires after a week.
+      case response.code.to_i
+      when 401
+        abort("push refused (401). That token is expired, or it came from a different host than #{app}.")
+      when 403
+        abort('push refused (403). That login is not a platform admin on the target.')
+      else
+        abort("push failed: HTTP #{response.code} #{response.body.to_s[0, 300]}")
+      end
     end
 
     remote = JSON.parse(response.body)
     # The local copy has done its job; the shareable one lives on the server.
     profile.destroy
 
-    site = target.include?('staging') ? 'https://staging.dealertide.com' : 'https://app.dealertide.com'
-    puts "\ndone. #{site}/preview/templates/#{remote['preview_token']}"
+    puts "\ndone. #{app}/preview/templates/#{remote['preview_token']}"
   end
 end
