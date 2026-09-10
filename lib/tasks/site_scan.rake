@@ -64,13 +64,22 @@ namespace :site_scan do
   #   TOKEN=... TARGET=https://renterinsight-api-prod.onrender.com \
   #     rake "site_scan:push[https://theirsite.com,Their Label]"
   #
-  # The token is YOUR DEALERTIDE LOGIN, not anything on this machine: open the
-  # app you are pushing to, DevTools, Application, Local Storage, authToken. It
-  # is a platform-admin bearer token and lasts 7 days, and it belongs to the
-  # host it came from — a staging token pushed at production is a 401.
+  # Two kinds of credential work, and one of them is much better here.
+  #
+  #   An API KEY (ri_live_...) from Settings, carrying websites:write. It does
+  #   not expire, so a workflow that runs whenever a prospect turns up keeps
+  #   working. Preferred.
+  #
+  #   A browser login (eyJ...), copied from the app you are pushing to:
+  #   DevTools, Application, Local Storage, authToken. Fine for a one-off, but
+  #   it dies after 7 days.
+  #
+  # Either belongs to the host it came from — one from staging pushed at
+  # production is a 401.
   #
   # Put it in .env as SITE_SCAN_PUSH_TOKEN (dotenv is loaded in development, so
-  # the task picks it up), or pass TOKEN= inline for a one-off.
+  # the task picks it up), or pass TOKEN= inline for a one-off. A platform-level
+  # API key also needs COMPANY_ID, to say which tenant owns the demo.
   #
   # COMPANY_ID sets which tenant owns the demo (defaults to the token's own
   # company). LOT sets the inventory lot the demo borrows.
@@ -87,9 +96,13 @@ namespace :site_scan do
       abort(<<~TEXT)
         No push token.
 
-        It comes from DealerTide, not from this machine: sign in to
-        #{app}, open DevTools, Application, Local Storage, and copy
-        authToken. It lasts 7 days.
+        It comes from DealerTide, not from this machine. Either:
+
+          an API key from Settings carrying websites:write (starts ri_live_,
+          never expires — the better one for this), or
+
+          your browser login: sign in to #{app}, DevTools,
+          Application, Local Storage, copy authToken (lasts 7 days).
 
         Then either put it in this repo's .env:
 
@@ -152,9 +165,9 @@ namespace :site_scan do
       # a token is bound to the host that issued it and expires after a week.
       case response.code.to_i
       when 401
-        abort("push refused (401). That token is expired, or it came from a different host than #{app}.")
+        abort("push refused (401). Expired, revoked, or issued by a host other than #{app}.")
       when 403
-        abort('push refused (403). That login is not a platform admin on the target.')
+        abort("push refused (403). #{response.body.to_s[0, 200]}")
       else
         abort("push failed: HTTP #{response.code} #{response.body.to_s[0, 300]}")
       end

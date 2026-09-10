@@ -92,6 +92,72 @@ RSpec.describe 'POST /api/v1/site_content_profiles/import', type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
+  # An API key rather than a browser login, because this is called from a rake
+  # task on a schedule set by prospects: a JWT expires after 7 days and the
+  # workflow would break every week for no visible reason.
+  describe 'authenticating with an API key' do
+    # Resources are seeded by migration in a real database; the test one starts
+    # empty, and ApiKey validates its permissions against them.
+    before do
+      Resource.find_or_create_by!(key: 'websites') { |r| r.name = 'Websites' }
+      Resource.find_or_create_by!(key: 'leads') { |r| r.name = 'Leads' }
+    end
+
+    def key_with(permissions:, company: nil)
+      ApiKey.create!(name: "push-#{SecureRandom.hex(3)}", company: company,
+                     created_by_user: user_with('platform_admin'),
+                     status: 'active', permissions: permissions, rate_limit: 1000)
+    end
+
+    def post_with(key, extra = {})
+      post '/api/v1/site_content_profiles/import', params: payload.to_json,
+                                                   headers: { 'Authorization' => "Bearer #{key.key}",
+                                                              'CONTENT_TYPE' => 'application/json' }.merge(extra)
+    end
+
+    it 'accepts a company-scoped key carrying websites:write' do
+      post_with(key_with(permissions: { 'websites' => ['write'] }, company: company))
+
+      expect(response).to have_http_status(:created)
+      expect(SiteContentProfile.last.company_id).to eq(company.id)
+    end
+
+    it 'accepts a platform-level key when it says which tenant' do
+      post_with(key_with(permissions: { 'websites' => ['write'] }), 'X-Company-ID' => company.id.to_s)
+
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'refuses a platform-level key that does not' do
+      post_with(key_with(permissions: { 'websites' => ['write'] }))
+
+      expect(response).to have_http_status(:bad_request)
+    end
+
+    it 'refuses a key that cannot write websites' do
+      post_with(key_with(permissions: { 'leads' => ['read'] }, company: company))
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'refuses a revoked key' do
+      key = key_with(permissions: { 'websites' => ['write'] }, company: company)
+      key.update!(status: 'revoked')
+
+      post_with(key)
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'refuses a key that does not exist' do
+      post '/api/v1/site_content_profiles/import', params: payload.to_json,
+                                                   headers: { 'Authorization' => 'Bearer ri_live_nope',
+                                                              'CONTENT_TYPE' => 'application/json' }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
   it 'refuses an unauthenticated request' do
     post '/api/v1/site_content_profiles/import', params: payload.to_json,
                                                  headers: { 'CONTENT_TYPE' => 'application/json' }

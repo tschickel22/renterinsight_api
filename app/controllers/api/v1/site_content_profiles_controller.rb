@@ -24,10 +24,12 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     SiteProfiles::DocumentIngestor::TEXT_TYPES
   ).freeze
 
-  skip_before_action :authenticate, only: [:by_token]
+  skip_before_action :authenticate, only: %i[by_token import]
 
-  before_action :require_platform_admin!, except: [:by_token]
-  before_action :set_company_scope, except: [:by_token]
+  before_action :require_platform_admin!, except: %i[by_token import]
+  before_action :set_company_scope, except: %i[by_token import]
+  # import authenticates either way , see #authorize_import!
+  before_action :authorize_import!, only: [:import]
   before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement run_seo_audit seo_report_pdf]
 
   def index
@@ -58,7 +60,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
     profile = SiteContentProfile.new(
       company_id: @company.id,
-      created_by: current_user,
+      created_by: @import_actor,
       source_url: params[:source_url].presence,
       source_kind: 'url',
       display_name: params[:display_name].presence,
@@ -471,6 +473,56 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       show_seo_report: profile.show_seo_report,
       show_seo_teaser: profile.show_seo_teaser
     }
+  end
+
+  # A browser login OR an API key.
+  #
+  # Everything else here is platform-admin-only through a JWT, which is right
+  # for a screen. This one is called from a rake task on somebody's laptop, on a
+  # schedule set by prospects rather than by us, and a JWT expires after 7 days
+  # — so the workflow would break every week for no reason anyone could see. An
+  # API key does not expire and can be scoped and revoked on its own, which is
+  # the better credential for a machine.
+  #
+  # The bar is the same either way: platform admin, or a key that carries
+  # websites:write. A key with no permissions set is unrestricted by this
+  # system's own rule, and that is deliberate elsewhere, so it passes here too.
+  def authorize_import!
+    token = request.headers['Authorization'].to_s.split(' ').last
+
+    if token.to_s.start_with?('ri_')
+      authorize_import_with_api_key!(token)
+    else
+      authenticate
+      return if performed?
+
+      require_platform_admin!
+      return if performed?
+
+      set_company_scope
+      @import_actor = current_user
+    end
+  end
+
+  def authorize_import_with_api_key!(token)
+    key = ApiKey.active.find_by(key: token)
+    return render json: { error: 'Invalid or revoked API key' }, status: :unauthorized if key.nil?
+
+    unless key.has_permission?('websites', 'write')
+      return render json: { error: 'That API key cannot create demos. It needs websites:write.' },
+                    status: :forbidden
+    end
+
+    # A company-scoped key names its own tenant; a platform-level key has to be
+    # told which one the demo belongs to.
+    @company = key.company || Company.find_by(id: request.headers['X-Company-ID'])
+    if @company.nil?
+      return render json: { error: 'Platform-level API keys must send X-Company-ID.' },
+                    status: :bad_request
+    end
+
+    # Provenance, so a demo can be traced to whoever minted the key.
+    @import_actor = key.created_by_user
   end
 
   def ensure_lead_form_for(profile)
