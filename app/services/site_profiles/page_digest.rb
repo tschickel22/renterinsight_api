@@ -75,6 +75,16 @@ module SiteProfiles
       |map|direction|hours|coupon|certificate
     /xi
 
+    # A drawing, not a photograph. Wrong behind a headline however good it is,
+    # and dealer sites are full of them.
+    FLOOR_PLAN = /floor[-_ ]?plans?|site[-_ ]?plan|\bblueprint\b|plan[-_ ]?view/i
+
+    # What a hero should be. Manufacturer feeds label these consistently:
+    # measured on a live site, "Ironclad 3276-21 hero, elevation, and exterior"
+    # beside "Ironclad 3276-21 floor plan home features", on images whose URLs
+    # are both opaque CDN hashes.
+    EXTERIOR = /\bexterior\b|\belevation\b|\bhero\b|curb[-_ ]?appeal|front[-_ ]?view/i
+
     CSS_URL = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/i
     IMAGE_EXTENSION = /\.(jpe?g|png|webp|avif|gif)(\?|#|\z)/i
 
@@ -113,11 +123,45 @@ module SiteProfiles
       # Returning one pre-concatenated array per page meant a flat_map across
       # pages interleaved them — the home page's flag graphic landed ahead of an
       # interior page's real photography, which is how it reached hero_images[0].
+      # Classified on the alt text as well as the URL, and ordered so a
+      # photograph of the outside of a home wins.
+      #
+      # A URL alone decides nothing on a modern site: every image on the one
+      # this was measured against is a CDN hash, and after our own asset import
+      # they are hashes again. The alt text is the only thing left that knows a
+      # drawing from a photograph — which is why a scan put a floor plan behind
+      # the headline of a demo.
+      #
+      # Note which patterns read the alt and which do not. FLOOR_PLAN and
+      # EXTERIOR do; PROMOTIONAL and NOT_A_HOME stay on the URL, because a
+      # dealer's alt text says "for sale" on half the homes on the lot and
+      # PROMOTIONAL matches \bsale\b.
       def partitioned_images
         @partitioned_images ||= begin
-          all = (Array(background_images) + Array(images).map { |i| i[:src] }).uniq
-          all.partition { |url| !PROMOTIONAL.match?(url) && !NOT_A_HOME.match?(url) }
+          records = (Array(background_images).map { |src| { src: src } } + Array(images))
+                    .uniq { |record| record[:src] }
+
+          photos, rejected = records.partition { |record| hero_candidate?(record) }
+
+          # sort_by is not stable in Ruby, and page order is meaningful — it is
+          # roughly reading order — so the index carries it.
+          ordered = photos.each_with_index
+                          .sort_by { |record, index| [exterior?(record) ? 0 : 1, index] }
+                          .map(&:first)
+
+          [ordered.map { |record| record[:src] }, rejected.map { |record| record[:src] }]
         end
+      end
+
+      def hero_candidate?(record)
+        url = record[:src].to_s
+        return false if PROMOTIONAL.match?(url) || NOT_A_HOME.match?(url)
+
+        !FLOOR_PLAN.match?("#{url} #{record[:alt]}")
+      end
+
+      def exterior?(record)
+        EXTERIOR.match?("#{record[:src]} #{record[:alt]}")
       end
     end
 

@@ -177,6 +177,7 @@ module SiteProfiles
 
       !PageDigest::PROMOTIONAL.match?(value) &&
         !PageDigest::NOT_A_HOME.match?(value) &&
+        !PageDigest::FLOOR_PLAN.match?(value) &&
         !PageDigest::JUNK_IMAGE.match?(value)
     end
 
