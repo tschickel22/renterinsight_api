@@ -166,9 +166,8 @@ module SiteProfiles
         'could not be read, and the browser that would have rendered it failed to ' \
           "start on this server#{render_detail}"
       when :still_challenged
-        'is behind a bot check that did not clear even in a real browser' \
-          "#{render_detail}. That usually means the check is refusing this server, " \
-          'or that its proof-of-work needs longer than we waited on a CPU this slow'
+        'is behind a bot check that will not clear for this server' \
+          "#{render_detail}#{hosted_renderer_hint}"
       when :error, :empty
         "could not be read: the browser did not return a page#{render_detail}"
       when :rendered
@@ -179,6 +178,17 @@ module SiteProfiles
         # we tried.
         root.nil? ? 'could not be loaded at all' : 'refused our request'
       end
+    end
+
+    # Measured, not guessed: the same site clears in a tenth of a second from a
+    # home connection with the same browser build, and never in two minutes from
+    # here. Waiting longer or changing browsers does not fix an address that is
+    # being refused, and only one thing does.
+    def hosted_renderer_hint
+      return '' if Renderer.hosted_configured?
+
+      '. The check is refusing this machine rather than the browser, so only a ' \
+        'renderer with residential egress can read it (SITE_SCAN_RENDER_TOKEN)'
     end
 
     def archive_note(root)

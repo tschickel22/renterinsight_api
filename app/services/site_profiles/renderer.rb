@@ -197,23 +197,38 @@ module SiteProfiles
 
       request = Net::HTTP::Post.new(endpoint)
       request['Content-Type'] = 'application/json'
-      request.body = {
+      body = {
         url: url,
         # networkidle2 rather than load: the challenge redirects to the real
         # page after its check, and `load` fires on the checkpoint.
         gotoOptions: { waitUntil: 'networkidle2', timeout: 30_000 }
-      }.to_json
+      }
+      # Same reasoning as ScrapingBee's premium proxy: without residential
+      # egress a hosted browser is refused exactly as ours is.
+      body[:proxy] = 'residential' if premium_proxy?
+      request.body = body.to_json
 
       perform(endpoint, request)
     end
 
     def scrapingbee(url)
+      params = { api_key: ENV['SITE_SCAN_RENDER_TOKEN'], url: url, render_js: 'true' }
+      # Residential egress, at a much higher credit cost per call.
+      #
+      # Not a nicety for the sites this exists for. A hosted renderer on a plain
+      # datacenter address meets the same wall our own browser does — measured
+      # on thehomeplus.com, which clears in 0.1s from a home connection and
+      # never in 120s from Render, with the same browser build. Paying for
+      # rendering without paying for the egress buys nothing here.
+      params[:premium_proxy] = 'true' if premium_proxy?
       endpoint = URI.parse('https://app.scrapingbee.com/api/v1/')
-      endpoint.query = URI.encode_www_form(
-        api_key: ENV['SITE_SCAN_RENDER_TOKEN'], url: url, render_js: 'true'
-      )
+      endpoint.query = URI.encode_www_form(params)
 
       perform(endpoint, Net::HTTP::Get.new(endpoint))
+    end
+
+    def premium_proxy?
+      ActiveModel::Type::Boolean.new.cast(ENV.fetch('SITE_SCAN_RENDER_PREMIUM', 'true'))
     end
 
     def perform(uri, request)

@@ -195,15 +195,29 @@ module SiteProfiles
     # surrounding heading.
     def paragraphs
       budget = MAX_TEXT_CHARS
-      @content.css('p').filter_map do |p|
-        break if budget <= 0
+      collected = []
+
+      # An each loop rather than filter_map, because `break` inside filter_map
+      # makes the whole call return nil, and `nil.first(MAX_ITEMS)` then raises.
+      #
+      # The break only fires once a page has spent its text budget, so this
+      # crashed on exactly the pages worth reading: measured on a live scan,
+      # /terms, /homes and /locations all rendered fine and were then thrown
+      # away with "undefined method `first' for nil". The rescue in the
+      # orchestrator turned each one into a warning nobody read, so a scan
+      # quietly dropped its longest pages and looked like it had merely found
+      # fewer.
+      @content.css('p').each do |p|
+        break if budget <= 0 || collected.size >= MAX_ITEMS
 
         text = separated_text(p)
         next if text.length < MIN_PARAGRAPH_CHARS
 
         budget -= text.length
-        text.truncate(500)
-      end.first(MAX_ITEMS)
+        collected << text.truncate(500)
+      end
+
+      collected
     end
 
     def images

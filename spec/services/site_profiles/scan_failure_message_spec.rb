@@ -38,8 +38,22 @@ RSpec.describe SiteProfiles::Orchestrator do
   # refuse a datacenter address all day, and that is worth saying out loud
   # rather than leaving someone to re-test from their desk and see it work.
   it 'distinguishes a bot check that would not clear for the server' do
-    expect(message_for(:still_challenged))
-      .to include('did not clear even in a real browser', 'refusing this server')
+    expect(message_for(:still_challenged)).to include('will not clear for this server')
+  end
+
+  # Every other explanation was eliminated by measurement — user agent, wait,
+  # and browser binary all clear the same site in a tenth of a second from a
+  # home connection. So the message names the one remaining fix rather than
+  # inviting another round of tuning.
+  it 'names residential egress as the only remaining fix' do
+    expect(message_for(:still_challenged)).to include('residential egress')
+  end
+
+  it 'drops the hint once a hosted renderer is configured' do
+    ENV['SITE_SCAN_RENDER_TOKEN'] = 'key_1'
+    expect(message_for(:still_challenged)).not_to include('SITE_SCAN_RENDER_TOKEN')
+  ensure
+    ENV.delete('SITE_SCAN_RENDER_TOKEN')
   end
 
   it 'distinguishes a page that rendered but drew nothing' do
@@ -56,7 +70,7 @@ RSpec.describe SiteProfiles::Orchestrator do
   it 'names the browser failure even when the archive answered' do
     message = message_for(:still_challenged, from_archive: true)
 
-    expect(message).to include('did not clear even in a real browser')
+    expect(message).to include('will not clear for this server')
     expect(message).to include('web archive holds only a placeholder')
   end
 
@@ -73,7 +87,7 @@ RSpec.describe SiteProfiles::Orchestrator do
   end
 
   it 'still names the bot check when nothing could be loaded because of one' do
-    expect(message_for(:still_challenged, root: nil)).to include('refusing this server')
+    expect(message_for(:still_challenged, root: nil)).to include('will not clear for this server')
   end
 
   it 'always names the site and what to do instead' do
