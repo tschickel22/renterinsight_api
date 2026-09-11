@@ -61,6 +61,18 @@ RSpec.describe 'POST /api/v1/site_content_profiles/import', type: :request do
 
   # Where it was read matters later, when a demo looks stale and nobody
   # remembers it came from a laptop.
+  # Which client's Demo Sites list it landed in. A platform-level key defaults
+  # to its owner's tenant, so a demo built for a client can end up somewhere
+  # that client cannot see — and "it worked" did not say where it went.
+  it 'says which tenant owns the demo it just created' do
+    post '/api/v1/site_content_profiles/import', params: payload.to_json,
+                                                 headers: headers_for(user_with('platform_admin'))
+
+    body = JSON.parse(response.body)
+    expect(body['company_id']).to eq(company.id)
+    expect(body['company_name']).to eq(company.name)
+  end
+
   it 'records that it was imported' do
     post '/api/v1/site_content_profiles/import', params: payload.to_json,
                                                  headers: headers_for(user_with('platform_admin'))

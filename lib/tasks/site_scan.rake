@@ -38,6 +38,7 @@ module SiteScanTasks
     uri = URI.join("#{target}/", path)
     request = case method
               when :get   then Net::HTTP::Get.new(uri)
+              when :post  then Net::HTTP::Post.new(uri)
               when :patch then Net::HTTP::Patch.new(uri)
               end
     request['Content-Type'] = 'application/json'
@@ -145,8 +146,11 @@ namespace :site_scan do
   # the task picks it up), or pass TOKEN= inline for a one-off. A platform-level
   # API key also needs COMPANY_ID, to say which tenant owns the demo.
   #
-  # COMPANY_ID sets which tenant owns the demo (defaults to the token's own
-  # company). LOT sets the inventory lot the demo borrows.
+  # COMPANY_ID decides WHOSE Demo Sites list it appears in, and is usually the
+  # thing you actually want to set: a platform-level key defaults to its own
+  # owner's tenant, so a demo built for a client lands somewhere that client
+  # cannot see. rake site_scan:lots prints the ids. LOT sets the inventory lot
+  # the demo borrows, and defaults to the same tenant.
   desc 'Scan a site locally and push the finished profile to staging or production'
   task :push, %i[url label] => :environment do |_t, args|
     url = args[:url].presence || abort('usage: rake "site_scan:push[https://example.com]"')
@@ -255,7 +259,14 @@ namespace :site_scan do
     # The local copy has done its job; the shareable one lives on the server.
     profile.destroy
 
-    puts "\ndone. #{app}/preview/templates/#{remote['preview_token']}"
+    # Which client's Demo Sites list it went into, not just that it worked.
+    # A platform-level key defaults to its owner's tenant, so a demo built for a
+    # client can land in the wrong list and be invisible to the person who
+    # wanted to build a site from it. Set COMPANY_ID to choose, and
+    # rake site_scan:lots prints the ids.
+    where = remote['company_name'] || "company #{remote['company_id']}"
+    puts "\nadded to Demo Sites for #{where}"
+    puts "#{app}/preview/templates/#{remote['preview_token']}"
   end
 
   # Is the credential good, before spending six minutes finding out?
@@ -331,5 +342,47 @@ namespace :site_scan do
     puts "  designs:   #{Array(updated['preview_template_ids']).size} offered"
     puts "  inventory: company #{updated['inventory_company_id'] || '(resolver default)'}"
     puts "  link unchanged"
+  end
+
+  # Copy an existing demo into another tenant's Demo Sites list.
+  #
+  # A demo lands in whichever tenant the credential named, and a platform-level
+  # key defaults to its owner's — so a demo built for a client can end up in the
+  # wrong list, invisible to the person who wants to build a site from it.
+  #
+  # This re-imports the profile that already exists rather than crawling again:
+  # same content, no six minute scan, no second trip to the client's site. The
+  # original is left alone.
+  #
+  #   COMPANY_ID=21 rake "site_scan:clone[<preview token>]"
+  desc "Copy an existing demo into another tenant's demo list"
+  task :clone, [:preview_token] => :environment do |_t, args|
+    preview_token = args[:preview_token].presence || abort('usage: rake "site_scan:clone[<preview token>]"')
+    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    abort('No token. See rake site_scan:push.') if token.blank?
+    company_id = ENV['COMPANY_ID'].presence || abort('COMPANY_ID is required — which tenant should own it. rake site_scan:lots lists them.')
+
+    # The public preview endpoint holds everything a demo renders from, and
+    # needs no credential at all.
+    source = SiteScanTasks.request_json(:get, target,
+                                        "api/v1/site_content_profiles/by_token/#{preview_token}", token)
+
+    body = {
+      source_url: source['source_url'],
+      display_name: source['display_name'],
+      profile: source['profile'],
+      seo_report: source['seo_report'],
+      preview_template_ids: source['template_ids'] || [],
+      inventory_company_id: ENV['LOT'].presence || company_id
+    }.compact
+
+    created = SiteScanTasks.request_json(:post, target, 'api/v1/site_content_profiles/import',
+                                         token, body: body, company_id: company_id)
+
+    app = target.include?('staging') ? 'https://staging.dealertide.com' : 'https://app.dealertide.com'
+    puts "copied #{created['display_name']} into #{created['company_name'] || "company #{company_id}"}"
+    puts "  #{app}/preview/templates/#{created['preview_token']}"
+    puts '  it is now in that client\'s Demo Sites list, ready for Use This Design'
   end
 end
