@@ -727,6 +727,8 @@ class Api::V1::WebsitesController < ApplicationController
       )
     end
     
+    ensure_sign_in_page(website)
+
     Rails.logger.info "[Website] Successfully created #{pages.length} pages for website #{website.id}"
   rescue => e
     Rails.logger.error "[Website] Failed to create pages from template: #{e.message}"
@@ -734,6 +736,34 @@ class Api::V1::WebsitesController < ApplicationController
     # Don't fail the website creation, just log the error
   end
   
+  # Somewhere for the header's Sign In link to land.
+  #
+  # Every design offers Sign In, and without this page that link is the one
+  # thing on a dealer's site that throws a visitor onto our login in a new tab:
+  # the dealer's brand disappears at the exact moment their client, contractor
+  # or salesperson is asked to type a password. The page holds the same sign-in
+  # embedded, so the credentials still go to the origin that owns the session
+  # while the visitor stays on the site they trust.
+  #
+  # Out of the nav: the header link is how it is reached, and listing it as well
+  # would put Sign In in the header twice.
+  def ensure_sign_in_page(website)
+    return if website.website_pages.exists?(path: '/sign-in')
+
+    website.website_pages.create!(
+      title: 'Sign In',
+      path: '/sign-in',
+      order: website.website_pages.maximum(:order).to_i + 1,
+      is_visible: true,
+      show_in_nav: false,
+      show_in_footer: false,
+      blocks: [{ 'id' => SecureRandom.uuid, 'type' => 'signIn', 'order' => 0, 'content' => {} }]
+    )
+  rescue StandardError => e
+    # A site is worth having without it; the header falls back to our login.
+    Rails.logger.warn("[Website] could not add a sign-in page to #{website.id}: #{e.message}")
+  end
+
   # Helper to ensure color has # prefix
   def normalize_color(color)
     return nil if color.blank?
