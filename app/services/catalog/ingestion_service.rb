@@ -289,8 +289,11 @@ module Catalog
       "v#{INGESTION_VERSION}:#{home.content_hash}"
     end
 
+    # A source's name is an operator's label, not a manufacturer — see
+    # Catalog::ManufacturerName, which is shared with the Cavco seeder because
+    # both wrote the same wrong thing onto a listing card.
     def manufacturer_name
-      @source.config['manufacturer_name'].presence || @source.name
+      Catalog::ManufacturerName.for(@source)
     end
   end
 end
