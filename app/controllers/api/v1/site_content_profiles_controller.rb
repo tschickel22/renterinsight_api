@@ -448,6 +448,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       preview_expires_at: profile.preview_expires_at,
       preview_template_ids: profile.preview_template_ids,
       created_at: profile.created_at,
+      # Which tenant's Demo Sites list this appears in. A demo pushed from a
+      # laptop lands wherever the credential says, and "it worked" is not much
+      # use without knowing where it went.
+      company_id: profile.company_id,
+      company_name: profile.company&.name,
       page_count: profile.report['page_count'],
       # Pages we tried and could not read, and whether anything came from the
       # Wayback Machine. Between them they explain a scan that came back with
