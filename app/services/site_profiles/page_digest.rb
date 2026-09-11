@@ -269,7 +269,7 @@ module SiteProfiles
         src = img['src'] || img['data-src'] || img['data-lazy-src'] || first_srcset(img)
         next if src.blank? || src.start_with?('data:')
 
-        absolute = absolutize(src)
+        absolute = full_size_image(absolutize(src))
         next if junk_image?(absolute, img)
 
         {
@@ -320,7 +320,7 @@ module SiteProfiles
                next if raw.blank? || raw.start_with?('data:')
                next unless raw.match?(IMAGE_EXTENSION)
 
-               url = absolutize(raw)
+               url = full_size_image(absolutize(raw))
                next if junk_image?(url)
 
                url
@@ -360,6 +360,40 @@ module SiteProfiles
       return 0.0 if @html.empty?
 
       @doc.text.squish.length.to_f / @html.length
+    end
+
+    # The picture, not the thumbnail the page happened to lay out.
+    #
+    # A hero taken from a page is stretched across the full width of ours, so a
+    # 600px file arrives visibly soft beside the client's own site. Measured on
+    # thehomeplus.com: every <img> carries ?width=600 for a 1600x1000 original,
+    # and the demo's hero was 600x375 against their sharp full-size one.
+    #
+    # Two shapes to undo, and only these two — anything not recognised is left
+    # exactly as it was, because a URL we do not understand is one we can only
+    # break.
+    SIZE_PARAMS = %w[w width h height q quality dpr size].freeze
+
+    def full_size_image(url)
+      uri = URI.parse(url)
+      return url if uri.query.blank?
+
+      params = URI.decode_www_form(uri.query)
+
+      # Next.js serves everything through /_next/image?url=<original>&w=640,
+      # so the original is sitting right there in the query string.
+      inner = params.find { |key, _| key == 'url' }&.last if uri.path.include?('/_next/image')
+      return full_size_image(URI.join(url, inner).to_s) if inner.present?
+
+      # Crop and format are deliberate framing, kept. Only the size knobs go:
+      # dropping them is what the CDN treats as "give me the original".
+      kept = params.reject { |key, _| SIZE_PARAMS.include?(key.downcase) }
+      return url if kept.size == params.size
+
+      uri.query = kept.any? ? URI.encode_www_form(kept) : nil
+      uri.to_s
+    rescue StandardError
+      url
     end
 
     def absolutize(href)
