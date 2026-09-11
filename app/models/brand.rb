@@ -55,6 +55,17 @@ class Brand
     Rails.env.production? ? 'https://app.dealertide.com' : 'https://localhost:5173'
   end
 
+  # Where a person signs in, for this environment.
+  #
+  # Sent to every surface that offers a Sign In link, because the alternative —
+  # a constant compiled into the frontend — names one environment for all of
+  # them. Measured: a staging demo embedded production's login, so the panel
+  # came from a different deploy and its dealer lookup ran against a different
+  # database, answering with whichever company happened to hold that id there.
+  def self.login_url(company: nil)
+    "#{app_url(company: company).to_s.chomp('/')}/login"
+  end
+
   # Platform sender identity, for the last-resort fallback in mailers,
   # services and jobs that first look for a company/location/platform
   # communications config. Previously each of those hardcoded its own
