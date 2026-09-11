@@ -49,7 +49,7 @@ RSpec.describe Catalog::RunService do
 
       run = run_with([FakeCatalogAdapter.home('1')])
 
-      expect(dead.reload.status).to eq 'failed'
+      expect(dead.reload.status).to eq 'interrupted'
       expect(run).to be_present
       expect(run.status).to eq 'success'
     end

@@ -15,12 +15,16 @@ RSpec.describe ScrapeRun do
   # live in the admin controller and fire ONLY on Run Now, so until somebody
   # pressed that button every other reader saw a phantom crawl in progress.
   describe '.reap_stale!' do
-    it 'fails a run that has stopped making progress' do
+    # Interrupted, not failed. The worker runs inside Puma, so a deploy kills
+    # whatever is crawling — reporting that as a failure sent someone to
+    # investigate a Clayton dealer page that was working perfectly well, on a
+    # run that had already parsed 55 homes.
+    it 'marks a run that stopped making progress as interrupted' do
       run = running_run(started_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
       run.update_columns(updated_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
 
       expect(described_class.reap_stale!).to eq 1
-      expect(run.reload.status).to eq 'failed'
+      expect(run.reload.status).to eq 'interrupted'
       expect(run.finished_at).to be_present
       expect(run.error_log.first['message']).to match(/worker stopped/i)
     end
@@ -31,7 +35,27 @@ RSpec.describe ScrapeRun do
 
       described_class.reap_stale!
 
-      expect(source.reload.last_run_status).to eq 'failed'
+      expect(source.reload.last_run_status).to eq 'interrupted'
+    end
+
+    # Picking up where the deploy left off, rather than waiting for someone to
+    # notice a badge days later.
+    it 'queues the interrupted source to run again' do
+      source.update!(enabled: true)
+      running_run(started_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
+        .update_columns(updated_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
+
+      expect { described_class.reap_stale! }
+        .to have_enqueued_job(CatalogSourceRunJob).with(source.id, trigger: 'scheduled')
+    end
+
+    # Somebody switched it off on purpose.
+    it 'leaves a disabled source switched off' do
+      source.update!(enabled: false)
+      running_run(started_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
+        .update_columns(updated_at: (described_class::PROGRESS_STALE_AFTER + 5.minutes).ago)
+
+      expect { described_class.reap_stale! }.not_to have_enqueued_job(CatalogSourceRunJob)
     end
 
     it 'leaves a genuinely in-flight run alone' do
@@ -65,7 +89,7 @@ RSpec.describe ScrapeRun do
 
       described_class.reap_stale!(source.scrape_runs)
 
-      expect(mine.reload.status).to eq 'failed'
+      expect(mine.reload.status).to eq 'interrupted'
       expect(theirs.reload.status).to eq 'running'
     end
 
