@@ -7,6 +7,24 @@ RSpec.describe Brand, type: :model do
     Setting.where(scope_type: 'Platform', scope_id: 0).destroy_all
   end
 
+  # Where a person signs in, for THIS environment. A constant compiled into the
+  # frontend names one of them for every build, so a staging demo embedded
+  # production's login: a different deploy, reading a different database, which
+  # answered the dealer lookup with whichever company held that id there.
+  describe '.login_url' do
+    it "is the sign-in on this environment's own app" do
+      allow(described_class).to receive(:app_url).and_return('https://staging.dealertide.com')
+
+      expect(described_class.login_url).to eq('https://staging.dealertide.com/login')
+    end
+
+    it 'does not double the slash when the app url carries one' do
+      allow(described_class).to receive(:app_url).and_return('https://app.dealertide.com/')
+
+      expect(described_class.login_url).to eq('https://app.dealertide.com/login')
+    end
+  end
+
   describe '.current with defaults only' do
     it 'exposes the ENV-fallback kernel from PlatformSetting.general' do
       brand = Brand.current

@@ -267,10 +267,14 @@ module SiteProfiles
         (r - b).abs <= NEUTRAL_TOLERANCE
     end
 
+    # Absolute, and at the size the client actually has rather than the size
+    # their header lays out. Every caller here , logo, og:image, favicon , wants
+    # the original: a mark captured at 188x96 is soft in any header that shows
+    # it larger, and ours does.
     def absolutize(href, base)
       return nil if href.blank?
 
-      URI.join(base.to_s, href).to_s
+      ImageUrl.full_size(URI.join(base.to_s, href).to_s)
     rescue StandardError
       href
     end

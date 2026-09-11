@@ -4,6 +4,24 @@
 module SiteScanTasks
   module_function
 
+  STAGING = 'https://renterinsight-api-staging.onrender.com'
+  PRODUCTION = 'https://renterinsight-api-prod.onrender.com'
+
+  # Where a push or a demo edit is aimed.
+  #
+  # TARGET for a one-off, SITE_SCAN_PUSH_TARGET in .env for the host you always
+  # use. The credential decides this in practice — a key issued by production is
+  # a 401 anywhere else — so pairing the two in .env is what stops the mismatch
+  # that wasted a run: the token was set there and the host was not.
+  def target
+    (ENV['TARGET'].presence || ENV['SITE_SCAN_PUSH_TARGET'].presence || STAGING).chomp('/')
+  end
+
+  # The far side of the pair, named in a 401 so the fix is in the message.
+  def counterpart(target)
+    target.include?('staging') ? PRODUCTION : STAGING
+  end
+
   # One request that creates nothing: the body is deliberately incomplete, so a
   # credential that works answers 422 for the missing profile.
   #
@@ -23,7 +41,17 @@ module SiteScanTasks
 
     case response.code.to_i
     when 422 then nil
-    when 401 then "refused by #{target}: expired, revoked, or issued by a different host."
+    when 401
+      # A credential belongs to the host that issued it, and that is the likely
+      # story whenever the other environment would have accepted it: an API key
+      # cannot expire, so for those it is the only story.
+      if token.to_s.start_with?('ri_')
+        "refused by #{target}: an API key never expires, so this one was issued by " \
+          "another host or has been revoked. Try TARGET=#{counterpart(target)}"
+      else
+        "refused by #{target}: expired (a browser login lasts 7 days), revoked, or " \
+          "issued by another host. Try TARGET=#{counterpart(target)}"
+      end
     when 400 then "refused by #{target}: platform-level API key. Add COMPANY_ID to name the tenant."
     when 403 then "refused by #{target}: #{response.body.to_s[0, 160]}"
     when 404 then "#{target} has not deployed the import endpoint yet."
@@ -154,7 +182,7 @@ namespace :site_scan do
   desc 'Scan a site locally and push the finished profile to staging or production'
   task :push, %i[url label] => :environment do |_t, args|
     url = args[:url].presence || abort('usage: rake "site_scan:push[https://example.com]"')
-    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    target = SiteScanTasks.target
     # Where a human signs in, which is not where the API lives. The token is
     # copied from the browser, so the message has to name the address the
     # browser knows.
@@ -194,10 +222,10 @@ namespace :site_scan do
     # back to a plain fetch and gives up on exactly the sites this exists for.
     ENV['SITE_SCAN_RENDERER'] ||= 'chrome'
 
-    # Say where this is going BEFORE spending six minutes getting there. TARGET
-    # defaults to staging, so a production credential with no TARGET set scans
-    # for six minutes and then 401s against the wrong host — which is exactly
-    # what happened.
+    # Say where this is going BEFORE spending six minutes getting there. The
+    # target defaults to staging, so a production credential with nothing set
+    # scans for six minutes and then 401s against the wrong host — which is
+    # exactly what happened.
     puts "target: #{target}"
     problem = SiteScanTasks.credential_problem(target: target, token: token,
                                                company_id: ENV['COMPANY_ID'])
@@ -280,7 +308,7 @@ namespace :site_scan do
   #   rake site_scan:check
   desc 'Check the push credential and target without scanning anything'
   task check: :environment do
-    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
     abort('No token. See rake site_scan:push for where it comes from.') if token.blank?
 
@@ -299,7 +327,7 @@ namespace :site_scan do
   #   rake site_scan:lots
   desc 'List the inventory lots a demo can be pointed at'
   task lots: :environment do
-    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
     abort('No token. See rake site_scan:push.') if token.blank?
 
@@ -317,7 +345,7 @@ namespace :site_scan do
   desc 'Set the designs and inventory lot on an existing demo'
   task :configure, [:preview_token] => :environment do |_t, args|
     preview_token = args[:preview_token].presence || abort('usage: rake "site_scan:configure[<preview token>]"')
-    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
     abort('No token. See rake site_scan:push.') if token.blank?
 
@@ -358,7 +386,7 @@ namespace :site_scan do
   desc "Copy an existing demo into another tenant's demo list"
   task :clone, [:preview_token] => :environment do |_t, args|
     preview_token = args[:preview_token].presence || abort('usage: rake "site_scan:clone[<preview token>]"')
-    target = ENV.fetch('TARGET', 'https://renterinsight-api-staging.onrender.com').chomp('/')
+    target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
     abort('No token. See rake site_scan:push.') if token.blank?
     company_id = ENV['COMPANY_ID'].presence || abort('COMPANY_ID is required — which tenant should own it. rake site_scan:lots lists them.')

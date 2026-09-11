@@ -134,9 +134,14 @@ module Public
     end
 
     def lead_capture_config
-      # A demo must never write into the lot company's CRM, so the chat offers
-      # the form there instead of collecting details it would have to discard.
-      return { enabled: false, form_path: '/contact' } if demo?
+      # A demo collects in the chat exactly like a live site and then keeps
+      # nothing: #lead answers 'demo' rather than writing into the lot
+      # company's CRM. Handing the visitor to the contact page instead was the
+      # bug behind "request a callback does nothing, it just closes the chat" ,
+      # the panel shut, the preview swapped to a page nobody asked for, and the
+      # one thing the assistant exists to do never happened in front of the
+      # prospect being sold to.
+      return { enabled: true, consent_text: capture.consent_text, form_path: '/contact' } if demo?
 
       { enabled: capture.available?, consent_text: capture.consent_text, form_path: '/contact' }
     rescue StandardError
@@ -145,7 +150,8 @@ module Public
 
     def platform_brand
       brand = Brand.current(company: company)
-      { name: brand.name, url: brand.website_url, favicon_url: brand.favicon_url }
+      { name: brand.name, url: brand.website_url, favicon_url: brand.favicon_url,
+        login_url: Brand.login_url(company: company) }
     rescue StandardError
       {}
     end
