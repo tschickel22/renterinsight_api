@@ -41,6 +41,23 @@ RSpec.describe 'Public::Concierge', type: :request do
       expect(json['quick_actions']).to include(hash_including('type' => 'capture', 'intent' => 'contact'))
     end
 
+    # The demo is the thing a prospect is shown. Handing them to the contact
+    # page closed the panel and swapped the preview to a page nobody asked for,
+    # which read as the callback button doing nothing at all. It collects in the
+    # chat like a live site; #lead is what refuses to keep any of it.
+    it 'takes details in the chat on a shared demo too' do
+      profile = SiteContentProfile.create!(company: company, source_url: 'https://dealer.com',
+                                           status: 'ready', source_kind: 'url',
+                                           preview_token: SecureRandom.urlsafe_base64(24))
+
+      post "/concierge/#{token}",
+           params: { message: 'hello', demo_token: profile.preview_token }.to_json,
+           headers: { 'Content-Type' => 'application/json' }
+
+      expect(json['lead_capture']).to include('enabled' => true)
+      expect(json['quick_actions']).to include(hash_including('type' => 'capture', 'intent' => 'contact'))
+    end
+
     it 'sends the form instead when the dealer made a CAPTCHA mandatory' do
       form.update!(captcha_required: true)
 

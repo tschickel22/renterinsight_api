@@ -90,9 +90,12 @@ module Concierge
     end
 
     def answer_phone
+      # contact_action, not a hardcoded form: this is the one answer where the
+      # visitor has just been told there is no number to ring, so bouncing them
+      # to a page to type what they were about to say is worst here.
       return { text: 'I do not have a number listed here. Leave your details and someone will ' \
                      'call you straight back.',
-               actions: [{ type: 'form', label: 'Request a callback', path: @lead_form_path || '/contact' }] } if facts[:phone].blank?
+               actions: [contact_action('Request a callback', 'callback')] } if facts[:phone].blank?
 
       { text: "You can reach us on #{facts[:phone]}.",
         actions: [{ type: 'link', label: 'Call now', url: "tel:#{facts[:phone].gsub(/[^\d+]/, '')}" }] }

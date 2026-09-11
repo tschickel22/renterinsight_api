@@ -78,6 +78,21 @@ RSpec.describe Concierge::Responder do
       expect(result.source).to eq('rules')
       expect(result.actions.first[:type]).to eq('form')
     end
+
+    # The one answer where a hand-off costs most: the visitor has just been told
+    # there is no number to ring, so "type it all again on another page" is the
+    # worst possible next step. This branch was the only one that skipped the
+    # in-chat route even where the dealer's form allowed it.
+    it 'keeps the callback in the chat when the dealer can take it there' do
+      bare = Company.create!(name: 'No Details Co')
+      site = Website.create!(company_id: bare.id, location_id: bare.locations.create!(name: 'L').id,
+                             name: 'Bare', slug: "s-#{SecureRandom.hex(4)}")
+
+      result = described_class.new(website: site, message: 'what is your phone number?',
+                                   capture_enabled: true).call
+
+      expect(result.actions.first).to include(type: 'capture', intent: 'callback')
+    end
   end
 
   describe 'inventory questions' do
