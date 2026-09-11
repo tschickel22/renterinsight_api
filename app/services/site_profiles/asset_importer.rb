@@ -93,7 +93,16 @@ module SiteProfiles
       # nothing to rehost and a download attempt would only log a warning.
       return url if url.to_s.start_with?('data:')
 
-      downloaded = download(url)
+      # Ask for the original, not the size the page laid out. Belt and braces
+      # with PageDigest and BrandExtractor, which already strip the size knobs:
+      # this is the one place every image passes through, so an image reaching
+      # us from anywhere else still gets copied at full size.
+      full = ImageUrl.full_size(url)
+      downloaded = download(full)
+      # A CDN that requires its size parameter answers nothing without one, and
+      # a sharper image is not worth losing the image. Fall back to what the
+      # page itself asked for.
+      downloaded = download(url) if downloaded.nil? && full != url
       if downloaded.nil?
         @skipped += 1
         return @map[url] = nil

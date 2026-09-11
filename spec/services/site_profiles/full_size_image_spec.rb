@@ -70,3 +70,23 @@ RSpec.describe SiteProfiles::PageDigest do
     expect(digest.background_images).to include('https://cdn.example.com/hero.jpg')
   end
 end
+
+# The logo never went through this rule: it comes from BrandExtractor, not from
+# a page digest. Measured on thehomeplus.com, the header asks its CDN for
+# ?height=96 of a 531x271 original, so every scanned logo was a 188x96 thumbnail
+# shown larger than that.
+RSpec.describe SiteProfiles::BrandExtractor do
+  def logo_from(html)
+    described_class.new([{ url: 'https://thehomeplus.com', html: html }]).call['logo_url']
+  end
+
+  it 'takes the logo at full size rather than the size the header asked for' do
+    html = <<~HTML
+      <html><body><header>
+        <img src="https://trove.b-cdn.net/images/bdr3zvrl9k9.png?height=96" alt="Dealer logo">
+      </header></body></html>
+    HTML
+
+    expect(logo_from(html)).to eq('https://trove.b-cdn.net/images/bdr3zvrl9k9.png')
+  end
+end
