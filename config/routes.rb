@@ -162,6 +162,10 @@ Rails.application.routes.draw do
   # ==================== PUBLIC SYNDICATION FEEDS ====================
   namespace :public do
     get 'feeds/:id', to: 'syndication_feeds#show', as: :syndication_feed
+
+    # A dealer's name, logo and brand colour, for the sign-in page their own
+    # website sends visitors to. Pre-auth by necessity — see the controller.
+    get 'branding', to: 'branding#show'
     
     # ==================== PUBLIC INVENTORY (Vehicle Catalog) ====================
     resources :inventory, only: [:index, :show], controller: 'inventory' do
