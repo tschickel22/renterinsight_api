@@ -252,6 +252,14 @@ class Public::InventoryController < ApplicationController
       full_address: contact_location&.full_address,
       location_name: contact_location&.name
     }
+
+    # On a demo, the dealer whose brand is on the page, not the lot lending the
+    # homes. A demo borrows a real lot so a design can be shown with real stock
+    # in it; the lot's address came with them, so a prospect in North Carolina
+    # read an Indiana address under every home, directly above their own in the
+    # footer. Nothing here is new to the caller: it is the same brand and
+    # contact the demo already renders.
+    company_data = demo_company_data || company_data
     
     render json: {
       vehicle: vehicle_detail_json(@vehicle),
@@ -361,6 +369,39 @@ class Public::InventoryController < ApplicationController
   end
   
   private
+
+  # The brand a shared demo is wearing, when the request names one.
+  #
+  # Proven by the demo's own preview token rather than asserted: only a platform
+  # admin can create one and it can be withdrawn, so this cannot be used to put
+  # arbitrary contact details on a dealer's real listings.
+  def demo_company_data
+    token = params[:demo_token].presence
+    return nil if token.blank?
+
+    profile = SiteContentProfile.find_by(preview_token: token)
+    return nil unless profile&.shareable?
+
+    brand = profile.profile.to_h['brand'].to_h
+    contact = profile.profile.to_h['contact'].to_h
+    name = brand['name'].presence || profile.display_name
+    address = contact['address'].presence
+    return nil if name.blank? && address.blank?
+
+    {
+      name: name,
+      phone: contact['phone'].presence,
+      email: contact['email'].presence,
+      # Scans produce one address line, not the parts, so it travels whole and
+      # the city/state/zip stay empty rather than being guessed at.
+      address: address,
+      city: nil,
+      state: nil,
+      zip: nil,
+      full_address: address,
+      location_name: nil
+    }
+  end
 
   # Apply Listing Source scope. Mirrors api/v1/vehicles_controller#index.
   # Unknown / blank / 'all' values are a no-op so the public catalog stays
