@@ -6,7 +6,14 @@
 class ScrapeRun < ApplicationRecord
   belongs_to :catalog_source
 
-  STATUSES = %w[running success partial failed].freeze
+  # 'interrupted' is not a failure of the source.
+  #
+  # The worker runs inside Puma here, so a deploy kills whatever is crawling.
+  # Reporting that as "Failed" sent someone to look at a Clayton dealer page
+  # that was working perfectly well — the run had parsed 55 homes and was
+  # killed by our own deploy. Naming it for what it is keeps the failed count
+  # meaning what it says.
+  STATUSES = %w[running success partial failed interrupted].freeze
   # 'subscription' distinguishes the run a dealer opting in triggers from the
   # nightly crawl. Both used to record 'scheduled', so run history could not
   # explain why a source suddenly started crawling in the middle of the day.
@@ -46,19 +53,37 @@ class ScrapeRun < ApplicationRecord
   # Mark abandoned runs failed and un-stick the sources pointing at them.
   # Safe on any read path: it only touches rows that have stopped moving, and
   # does nothing when there are none.
+  def self.requeue_interrupted(source_ids)
+    return if source_ids.blank?
+
+    CatalogSource.enabled.where(id: source_ids).find_each do |source|
+      CatalogSourceRunJob.perform_later(source.id, trigger: 'scheduled')
+    end
+  rescue StandardError => e
+    # A reap runs on read paths; failing to re-queue must never break a page.
+    Rails.logger.warn("[ScrapeRun] could not re-queue interrupted sources: #{e.message}")
+  end
+
   def self.reap_stale!(scope = all)
     stale_runs = scope.stale.to_a
     return 0 if stale_runs.empty?
 
     stale_runs.each do |run|
       run.update_columns(
-        status: 'failed', finished_at: Time.current,
+        status: 'interrupted', finished_at: Time.current,
         error_log: [{ 'message' => 'Run did not finish (worker stopped, most likely a deploy) — marked stale' }]
       )
     end
 
-    CatalogSource.where(id: stale_runs.map(&:catalog_source_id).uniq, last_run_status: 'running')
-                 .update_all(last_run_status: 'failed')
+    source_ids = stale_runs.map(&:catalog_source_id).uniq
+    CatalogSource.where(id: source_ids, last_run_status: 'running')
+                 .update_all(last_run_status: 'interrupted')
+
+    # Pick up where the deploy left off, rather than waiting for a human to
+    # notice a badge. The job re-checks for a run in progress before starting,
+    # so this cannot stack crawls, and a disabled source is deliberately left
+    # alone — somebody switched it off.
+    requeue_interrupted(source_ids)
     stale_runs.size
   end
 

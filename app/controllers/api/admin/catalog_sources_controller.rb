@@ -50,6 +50,9 @@ class Api::Admin::CatalogSourcesController < ApplicationController
         total:           sources.size,
         enabled:         sources.count(&:enabled),
         degraded:        sources.count(&:degraded?),
+        # 'interrupted' is deliberately not counted: a deploy killing a crawl is
+        # our doing, not the source's, and folding it in here sent someone to
+        # investigate a dealer page that was working.
         failed_last_run: sources.count { |s| s.last_run_status == 'failed' }
       }
     }

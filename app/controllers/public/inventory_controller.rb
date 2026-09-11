@@ -104,6 +104,20 @@ class Public::InventoryController < ApplicationController
       @vehicles = @vehicles.where(condition: params[:condition])
     end
     
+    # Homes you can walk through.
+    #
+    # A 3D tour is among the most persuasive things on a listing and there was
+    # no way for a shopper to ask for one. Matches any of the three columns,
+    # since which is populated depends on how the home was imported: measured on
+    # the development database, 207 of 848 homes have a tour and 124 of those
+    # carry a Matterport link.
+    if ActiveModel::Type::Boolean.new.cast(params[:has_3d_tour])
+      @vehicles = @vehicles.where(
+        "COALESCE(NULLIF(vehicles.matterport_url, ''), NULLIF(vehicles.virtual_tour_url, ''), " \
+        "NULLIF(vehicles.virtual_tour, '')) IS NOT NULL"
+      )
+    end
+
     # Photographed homes only.
     #
     # Demo previews ask for this: a prospect judging our work reads a grid of
@@ -533,6 +547,14 @@ class Public::InventoryController < ApplicationController
     branding
   end
   
+  # The one link worth showing, in the order a dealer would choose it: a
+  # Matterport walkthrough beats a generic 360 embed, which beats the legacy
+  # column kept from an older import.
+  def tour_url_for(vehicle)
+    [vehicle.matterport_url, vehicle.virtual_tour_url, vehicle.try(:virtual_tour)]
+      .find(&:present?)
+  end
+
   # Extract plain URL strings from images array
   # Images can be stored as [{"url"=>"https://..."}, ...] or ["https://...", ...]
   def extract_image_urls(images)
@@ -641,6 +663,12 @@ class Public::InventoryController < ApplicationController
       # Media flags for list view icons
       has_virtual_tour: vehicle.virtual_tour_url.present?,
       has_video: vehicle.video_url.present?,
+      # A walkthrough, from whichever column holds it. Three exist on vehicles —
+      # matterport_url, virtual_tour_url and the legacy virtual_tour — and the
+      # Matterport one was never published, so a listing linked to a generic 360
+      # embed when a full walkthrough was sitting on the record.
+      has_3d_tour: tour_url_for(vehicle).present?,
+      tour_url: tour_url_for(vehicle),
       
       # Timestamps
       created_at: vehicle.created_at,
@@ -732,6 +760,9 @@ class Public::InventoryController < ApplicationController
       
       # Media links
       virtual_tour_url: vehicle.virtual_tour_url,
+      matterport_url: vehicle.matterport_url,
+      # What a visitor should actually be sent to, already resolved.
+      tour_url: tour_url_for(vehicle),
       video_url: vehicle.video_url,
       floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
       
