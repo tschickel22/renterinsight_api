@@ -25,9 +25,9 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   ).freeze
 
   # Actions a machine may drive, not just a browser: pushing a demo scanned
-  # elsewhere, then reading the list and adjusting which designs and which lot
-  # it offers. All four authenticate either way — see #authorize_key_or_login!.
-  MACHINE_DRIVEN = %i[import update index inventory_lots].freeze
+  # elsewhere, reading it back, and adjusting which designs and which lot it
+  # offers. Each authenticates either way — see #authorize_key_or_login!.
+  MACHINE_DRIVEN = %i[import update index show inventory_lots].freeze
   OPEN_OR_SELF_GUARDED = ([:by_token] + MACHINE_DRIVEN).freeze
 
   skip_before_action :authenticate, only: OPEN_OR_SELF_GUARDED

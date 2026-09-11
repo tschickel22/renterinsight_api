@@ -363,17 +363,30 @@ namespace :site_scan do
     abort('No token. See rake site_scan:push.') if token.blank?
     company_id = ENV['COMPANY_ID'].presence || abort('COMPANY_ID is required — which tenant should own it. rake site_scan:lots lists them.')
 
-    # The public preview endpoint holds everything a demo renders from, and
-    # needs no credential at all.
+    # Read from the authenticated detail rather than the public preview.
+    #
+    # The public payload is deliberately narrow — it carries what a browser
+    # needs to RENDER a demo, and not its provenance. Copying from it produced a
+    # profile with no source_url, which the model rejects for a scanned demo,
+    # and the import answered 422 with nothing to read.
+    listing = SiteScanTasks.request_json(:get, target, 'api/v1/site_content_profiles',
+                                         token, company_id: ENV['SOURCE_COMPANY_ID'].presence)
+    demo = listing['items'].find { |item| item['preview_token'] == preview_token }
+    abort("No demo on #{target} with that preview token. SOURCE_COMPANY_ID names the tenant it is in now.") if demo.nil?
+
     source = SiteScanTasks.request_json(:get, target,
-                                        "api/v1/site_content_profiles/by_token/#{preview_token}", token)
+                                        "api/v1/site_content_profiles/#{demo['id']}", token,
+                                        company_id: ENV['SOURCE_COMPANY_ID'].presence)
 
     body = {
       source_url: source['source_url'],
       display_name: source['display_name'],
       profile: source['profile'],
+      report: source['report'],
       seo_report: source['seo_report'],
-      preview_template_ids: source['template_ids'] || [],
+      schema_version: source['schema_version'],
+      suggested_subdomain: source['suggested_subdomain'],
+      preview_template_ids: source['preview_template_ids'] || [],
       inventory_company_id: ENV['LOT'].presence || company_id
     }.compact
 

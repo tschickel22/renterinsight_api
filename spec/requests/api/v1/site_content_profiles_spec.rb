@@ -20,7 +20,7 @@ RSpec.describe 'Api::V1::SiteContentProfiles', type: :request do
     it 'skips the blanket authentication only where an action guards itself' do
       controller = Api::V1::SiteContentProfilesController
 
-      expect(controller::MACHINE_DRIVEN).to match_array(%i[import update index inventory_lots])
+      expect(controller::MACHINE_DRIVEN).to match_array(%i[import update index show inventory_lots])
       expect(controller::OPEN_OR_SELF_GUARDED).to include(:by_token)
       # Every one of them is guarded by the key-or-login check.
       guarded = controller._process_action_callbacks
