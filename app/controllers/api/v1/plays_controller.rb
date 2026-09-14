@@ -9,7 +9,23 @@ module Api
 
       before_action :set_company_scope
       require_module! 'marketing.automation'
-      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads]
+      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey]
+
+      # GET /api/v1/plays/:id/leads/:lead_id
+      # One lead's journey through the play, and where it is now.
+      def lead_journey
+        return unless authorize_action!('workflow_automation', 'read')
+        return unless (installation = require_installation)
+
+        lead = @company.leads.find_by(id: params[:lead_id])
+        place = lead && tracking_for(installation, lead_id: lead.id).place_of(lead.id)
+        return render(json: { error: 'That lead is not in this play.' }, status: :not_found) unless place
+
+        render json: {
+          lead: place.merge(phone: lead.phone),
+          events: Plays::LeadTimeline.new(installation: installation, lead: lead).events.map(&:as_json)
+        }
+      end
 
       # GET /api/v1/plays/:id/performance?period=90
       # Where leads are in the play, counts per step, and whether it works.
@@ -102,7 +118,7 @@ module Api
       # Lead names and results follow the same location rules as every other
       # lead list: a location-tier user sees their locations, and the location
       # selector narrows further.
-      def tracking_for(installation)
+      def tracking_for(installation, lead_id: nil)
         location_ids = nil
         if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
@@ -110,7 +126,7 @@ module Api
         if Current.location_filtered?
           location_ids = location_ids ? location_ids & [Current.location_id] : [Current.location_id]
         end
-        Plays::Tracking.new(installation: installation, period: params[:period], location_ids: location_ids)
+        Plays::Tracking.new(installation: installation, period: params[:period], location_ids: location_ids, lead_id: lead_id)
       end
 
       # Answers are validated and scoped to this company by the play itself;

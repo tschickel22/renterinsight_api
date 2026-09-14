@@ -37,15 +37,23 @@ module Plays
     Entry = Struct.new(:run, :lead, :stage, :detail, :detail_at, :map_step, keyword_init: true)
 
     # location_ids: nil for every location, or the locations this viewer may see.
-    def initialize(installation:, period: DEFAULT_PERIOD, location_ids: nil, now: Time.current)
+    # lead_id:      limit to one lead (for its journey), across all time.
+    def initialize(installation:, period: DEFAULT_PERIOD, location_ids: nil, lead_id: nil, now: Time.current)
       @installation = installation
       @company_id = installation.company_id
-      @period = PERIODS.key?(period.to_s) ? period.to_s : DEFAULT_PERIOD
+      @period = lead_id ? 'all' : (PERIODS.key?(period.to_s) ? period.to_s : DEFAULT_PERIOD)
       @location_ids = location_ids&.map(&:to_i)
+      @lead_id = lead_id&.to_i
       @now = now
     end
 
     attr_reader :period
+
+    # Where one lead is now, or nil when it is not in this play (or not visible).
+    def place_of(lead_id)
+      entry = entries.find { |e| e.lead.id == lead_id.to_i }
+      entry && lead_json(entry)
+    end
 
     def summary
       entries = self.entries
@@ -97,6 +105,7 @@ module Plays
     def latest_runs
       scope = WorkflowRun.where(company_id: @company_id, entity_type: 'Lead', workflow_rule_id: @installation.asset_ids(:workflow_rule_ids))
       scope = scope.where('workflow_runs.started_at >= ?', @now - PERIODS[@period].days) if PERIODS[@period]
+      scope = scope.where(entity_id: @lead_id) if @lead_id
       scope.order(started_at: :desc, id: :desc).to_a.uniq(&:entity_id)
     end
 

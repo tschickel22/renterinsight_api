@@ -551,6 +551,7 @@ Rails.application.routes.draw do
           post :uninstall
           get :performance
           get :leads
+          get 'leads/:lead_id', action: :lead_journey, as: :lead_journey
         end
       end
       resources :workflow_approvals, only: [:index, :show] do
