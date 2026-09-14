@@ -107,6 +107,7 @@ class Lead < ApplicationRecord
 
   # Lifecycle webhook for lead conversion
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_is_converted?
+  after_commit :stop_nurture_on_conversion, if: -> { saved_change_to_is_converted? && is_converted == true }
 
   # Workflow engine emit hooks
   after_commit :emit_workflow_created, on: :create
@@ -186,6 +187,12 @@ class Lead < ApplicationRecord
 
   def emit_workflow_deleted
     WorkflowEngine.emit('lead.deleted', self, { id: id })
+  end
+
+  def stop_nurture_on_conversion
+    NurtureAutoStop.for_conversion(self)
+  rescue => e
+    Rails.logger.error "[Lead] Failed to stop nurture on conversion: #{e.message}"
   end
 
   # Fire lead.converted lifecycle webhook when is_converted changes to true

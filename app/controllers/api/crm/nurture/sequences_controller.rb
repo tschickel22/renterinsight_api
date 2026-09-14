@@ -48,7 +48,11 @@ module Api
             sequence.description = params[:description] if params.key?(:description)
             sequence.is_active = params[:is_active] != false if params.key?(:is_active)
             sequence.is_active = params[:isActive] != false if params.key?(:isActive)
-            
+            { stop_on_reply: :stopOnReply, stop_on_conversion: :stopOnConversion }.each do |attr, camel|
+              key = params.key?(attr) ? attr : (params.key?(camel) ? camel : nil)
+              sequence[attr] = ActiveModel::Type::Boolean.new.cast(params[key]) || false if key
+            end
+
             sequence.save!
             
             # ✅ FIX: Handle steps array if provided
@@ -214,7 +218,7 @@ module Api
         end
 
         def sequence_params
-          params.require(:sequence).permit(:name, :description, :is_active)
+          params.require(:sequence).permit(:name, :description, :is_active, :stop_on_reply, :stop_on_conversion)
         end
 
         def sequence_json(sequence)
@@ -226,6 +230,10 @@ module Api
             description: sequence.description || '',
             is_active: sequence.is_active,
             isActive: sequence.is_active,
+            stop_on_reply: sequence.stop_on_reply,
+            stopOnReply: sequence.stop_on_reply,
+            stop_on_conversion: sequence.stop_on_conversion,
+            stopOnConversion: sequence.stop_on_conversion,
             nurture_steps: steps.map { |s| step_json(s) },
             steps: steps.map { |s| step_json(s) },
             created_at: sequence.created_at&.iso8601,

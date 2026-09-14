@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_14_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4535,6 +4535,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
     t.datetime "updated_at", null: false
     t.text "description"
     t.bigint "company_id"
+    t.boolean "stop_on_reply", default: false, null: false
+    t.boolean "stop_on_conversion", default: false, null: false
     t.index ["company_id"], name: "index_nurture_sequences_on_company_id"
   end
 
