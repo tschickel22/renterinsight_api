@@ -9,7 +9,25 @@ module Api
 
       before_action :set_company_scope
       require_module! 'marketing.automation'
-      before_action :set_play, only: [:show, :install, :customize, :uninstall]
+      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads]
+
+      # GET /api/v1/plays/:id/performance?period=90
+      # Where leads are in the play, counts per step, and whether it works.
+      def performance
+        return unless authorize_action!('workflow_automation', 'read')
+        return unless (installation = require_installation)
+
+        render json: tracking_for(installation).summary
+      end
+
+      # GET /api/v1/plays/:id/leads?period=90&stage=replied&page=1
+      def leads
+        return unless authorize_action!('workflow_automation', 'read')
+        return unless (installation = require_installation)
+
+        render json: tracking_for(installation).leads(stage: params[:stage], page: params[:page] || 1,
+                                                      per_page: params[:per_page] || 25)
+      end
 
       # GET /api/v1/plays
       # Offered plays, plus any retired play this company still has on.
@@ -73,6 +91,26 @@ module Api
 
       def active_installation(play)
         PlayInstallation.active.find_by(company_id: @company.id, play_key: play::KEY)
+      end
+
+      def require_installation
+        installation = active_installation(@play)
+        render json: { error: "#{@play::NAME} is not on." }, status: :not_found unless installation
+        installation
+      end
+
+      # Lead names and results follow the same location rules as every other
+      # lead list: a location-tier user sees their locations, and the location
+      # selector narrows further.
+      def tracking_for(installation)
+        location_ids = nil
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+        end
+        if Current.location_filtered?
+          location_ids = location_ids ? location_ids & [Current.location_id] : [Current.location_id]
+        end
+        Plays::Tracking.new(installation: installation, period: params[:period], location_ids: location_ids)
       end
 
       # Answers are validated and scoped to this company by the play itself;

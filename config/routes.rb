@@ -549,6 +549,8 @@ Rails.application.routes.draw do
           post :install
           patch :customize
           post :uninstall
+          get :performance
+          get :leads
         end
       end
       resources :workflow_approvals, only: [:index, :show] do
