@@ -544,9 +544,10 @@ Rails.application.routes.draw do
           post :activate
         end
       end
-      resources :plays, only: [:index] do
+      resources :plays, only: [:index, :show] do
         member do
           post :install
+          patch :customize
           post :uninstall
         end
       end

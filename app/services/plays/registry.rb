@@ -1,10 +1,15 @@
 # frozen_string_literal: true
 
 module Plays
-  # The starter plays a dealer can turn on, by key.
+  # The starter plays, by key. Hidden plays are no longer offered but stay
+  # registered so an install that is already on can be managed.
   module Registry
     def self.all
-      [Plays::NewLeadAnyChannel]
+      [Plays::NewFacebookLead, Plays::WalkInVisit, Plays::NewLeadAnyChannel]
+    end
+
+    def self.offered
+      all.reject(&:hidden?)
     end
 
     def self.find(key)
