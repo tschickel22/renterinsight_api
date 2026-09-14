@@ -544,6 +544,12 @@ Rails.application.routes.draw do
           post :activate
         end
       end
+      resources :plays, only: [:index] do
+        member do
+          post :install
+          post :uninstall
+        end
+      end
       resources :workflow_approvals, only: [:index, :show] do
         member do
           post :approve
