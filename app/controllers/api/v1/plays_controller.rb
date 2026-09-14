@@ -81,14 +81,18 @@ module Api
       end
 
       # GET /api/v1/plays/:id/leads/:lead_id
-      # One lead's journey through the play, and where it is now.
+      # One record's journey through the play, and where it is now. A lead,
+      # unless the play follows another kind of record (a deal).
       def lead_journey
         return unless authorize_action!('workflow_automation', 'read')
         return unless (installation = require_installation)
 
-        lead = @company.leads.find_by(id: params[:lead_id])
-        journey = lead && @play.lead_journey_for(installation, lead, location_ids: visible_location_ids)
-        return render(json: { error: 'That lead is not in this play.' }, status: :not_found) unless journey
+        own_record = @play.respond_to?(:journey_record)
+        record = own_record ? @play.journey_record(@company, params[:lead_id]) : @company.leads.find_by(id: params[:lead_id])
+        journey = record && @play.lead_journey_for(installation, record, location_ids: visible_location_ids)
+        unless journey
+          return render(json: { error: "That #{own_record ? 'deal' : 'lead'} is not in this play." }, status: :not_found)
+        end
 
         render json: journey
       end
