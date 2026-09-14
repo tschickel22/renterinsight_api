@@ -119,9 +119,11 @@ module Campaigns
       end
     end
 
+    # Test sends are excluded: a test goes to the admin who pressed the button,
+    # and counting that address shut out any real recipient who shares it.
     def existing_snapshot_values
       col = @campaign.email_channel? ? :email_address_snapshot : :sms_phone_snapshot
-      values = @campaign.campaign_enrollments.where.not(col => nil).pluck(col)
+      values = @campaign.campaign_enrollments.real.where.not(col => nil).pluck(col)
       @campaign.email_channel? ? values.map { |v| v.to_s.downcase } : values
     end
 

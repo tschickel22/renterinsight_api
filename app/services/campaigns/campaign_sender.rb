@@ -137,11 +137,17 @@ module Campaigns
     # This step already went out for this enrollment. Only a send that actually
     # left counts: a CampaignSend with no sent_at is a row from an attempt that
     # failed, and that must stay retryable.
+    #
+    # A recurring campaign sends the same step again every cycle, so only this
+    # cycle's sends are duplicates.
     def already_sent?(step)
-      @enrollment.campaign_sends
-                 .where(campaign_step_id: step.id)
-                 .where.not(sent_at: nil)
-                 .exists?
+      sends = @enrollment.campaign_sends
+                         .where(campaign_step_id: step.id)
+                         .where.not(sent_at: nil)
+      if @campaign.recurring? && @campaign.cycle_started_at
+        sends = sends.where('sent_at >= ?', @campaign.cycle_started_at)
+      end
+      sends.exists?
     end
 
     # Duplicate dispatch is not a failure of the enrollment, so it must not mark

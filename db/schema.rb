@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_14_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_14_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1420,6 +1420,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_14_160000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "channel", default: "email", null: false
+    t.datetime "cycle_started_at"
     t.index ["campaign_type", "status"], name: "index_campaigns_on_campaign_type_and_status"
     t.index ["company_id", "channel"], name: "index_campaigns_on_company_id_and_channel"
     t.index ["company_id", "status"], name: "index_campaigns_on_company_id_and_status"

@@ -200,93 +200,18 @@ module Campaigns
       campaign
     end
 
-    # Walk the plan's filter_tree, collect any tag names referenced by
-    # tag conditions (operator starts with 'tags_'), and find_or_create
-    # each one on this company. Ids are left alone — if the AI referenced
-    # a numeric id that doesn't exist, that's a caller/plan bug and we
-    # want the enroller to skip it rather than fabricate a tag.
+    # The AI can invent tag names in the plan's filter tree. Shared with the
+    # template gallery; see Campaigns::AudienceTags.
     def ensure_referenced_tags_exist!(node)
-      return unless node.is_a?(Hash)
-      names = Set.new
-      collect_tag_names(node, names)
-      return if names.empty?
-      names.each do |raw|
-        name = raw.to_s.strip
-        next if name.blank?
-        # Match TagsController#create semantics: name is scoped by
-        # company_id and case-sensitive.
-        existing = @company.tags.find_by(name: name)
-        next if existing
-        @company.tags.create(
-          name: name,
-          description: 'Auto-created from AI campaign audience',
-          color: '#6B7280',
-          is_active: true,
-          is_system: false
-        )
-      end
+      audience_tags.ensure_exist!(node)
     end
 
-    def collect_tag_names(node, into)
-      return unless node.is_a?(Hash)
-      op = node['operator'].to_s
-      if op.start_with?('tags_')
-        vals = node['value']
-        Array(vals).each do |v|
-          # Numeric strings/ints are ids — skip (see comment above).
-          next if v.is_a?(Integer)
-          next if v.is_a?(String) && v =~ /\A\d+\z/
-          into << v if v.is_a?(String)
-        end
-      end
-      # A leaf with field="tags" but no operator is treated as a tag
-      # condition for name-collection purposes too, so we auto-create
-      # even when the AI forgot the operator.
-      if op.empty? && node['field'].to_s == 'tags'
-        vals = node['value']
-        Array(vals).each do |v|
-          next if v.is_a?(Integer)
-          next if v.is_a?(String) && v =~ /\A\d+\z/
-          into << v if v.is_a?(String)
-        end
-      end
-      Array(node['children']).each { |c| collect_tag_names(c, into) }
-    end
-
-    # Second pass over the filter tree: patch tag leaves in-place so the
-    # persisted tree matches what CampaignBuilder authors manually. Runs
-    # AFTER ensure_referenced_tags_exist! so the tags are guaranteed to
-    # exist and be resolvable by name.
     def normalize_tag_leaves!(node)
-      return unless node.is_a?(Hash)
-      is_tag_leaf = node['field'].to_s == 'tags' || node['operator'].to_s.start_with?('tags_')
-      if is_tag_leaf
-        # Default the operator if the AI omitted it — the UI shows an
-        # empty operator picker otherwise. Multi-value defaults to
-        # tags_any_of, single-value defaults to tags_include.
-        if node['operator'].to_s.empty? || !node['operator'].to_s.start_with?('tags_')
-          node['operator'] = node['value'].is_a?(Array) && node['value'].length > 1 ? 'tags_any_of' : 'tags_include'
-        end
-        node['field'] = 'tags'
-        # Rewrite name-strings to ids so the FE tag chip displays the
-        # label. FilterCompiler handles either shape, but the FE tag
-        # dropdown keys tags by id.
-        vals = node['value']
-        rewritten = Array(vals).map { |v|
-          if v.is_a?(Integer) || (v.is_a?(String) && v =~ /\A\d+\z/)
-            v.to_i
-          elsif v.is_a?(String)
-            tag = @company.tags.find_by(name: v.strip)
-            tag ? tag.id : v
-          else
-            v
-          end
-        }
-        # Preserve scalar-vs-array shape: tags_include takes a scalar,
-        # tags_any_of takes an array.
-        node['value'] = node['operator'] == 'tags_any_of' ? rewritten : rewritten.first
-      end
-      Array(node['children']).each { |c| normalize_tag_leaves!(c) }
+      audience_tags.normalize!(node)
+    end
+
+    def audience_tags
+      @audience_tags ||= Campaigns::AudienceTags.new(company: @company, description: 'Auto-created from AI campaign audience')
     end
 
     private

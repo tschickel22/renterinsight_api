@@ -238,7 +238,13 @@ class Api::V1::CampaignsController < ApplicationController
     end
 
     new_status = (@campaign.scheduled_at.present? && @campaign.scheduled_at > Time.current) ? 'scheduled' : 'running'
-    @campaign.update!(status: new_status, started_at: Time.current)
+    # A recurring campaign starting now opens its first cycle now. One that
+    # starts later opens it when the scheduler promotes it.
+    @campaign.update!(
+      status: new_status,
+      started_at: Time.current,
+      cycle_started_at: (Time.current if new_status == 'running' && @campaign.recurring?)
+    )
 
     if new_status == 'running' && defined?(WebhookService)
       WebhookService.fire(company_id: @company.id, event: 'campaign.started', payload: { campaign_id: @campaign.id })
