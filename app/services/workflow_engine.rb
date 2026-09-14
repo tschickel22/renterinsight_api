@@ -135,6 +135,9 @@ module WorkflowEngine
       if (activity_payload = event&.payload&.dig('activity')).is_a?(Hash)
         vars['activity'] = activity_payload
       end
+      # Same merge tag campaign emails use, so a dealer who types
+      # {{rep_booking_link}} gets the owning rep's link here too.
+      vars['rep_booking_link'] = vars['entity']['owner_booking_url']
       vars.merge!(related_entity_snapshots(entity))
       vars
     end
@@ -150,6 +153,9 @@ module WorkflowEngine
         hash['owner_email'] ||= owner.try(:email)
         hash['owner_phone'] ||= owner.try(:phone)
         hash['owner_name']  ||= full_name_for(owner) || owner.try(:email)
+        # The record owner's own booking link, so one rule sends each prospect
+        # their rep's calendar rather than whoever wrote the rule.
+        hash['owner_booking_url'] ||= owner.try(:booking_url).presence
       end
 
       account = entity.try(:account) || entity.try(:converted_account)
