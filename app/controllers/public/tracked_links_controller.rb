@@ -21,7 +21,7 @@ module Public
           user_agent: request.user_agent
         )
         # Bridge into campaign analytics when this link belongs to a campaign email.
-        CampaignSend.record_click_for_communication(tracked_link.communication_id)
+        CampaignSend.record_click_for_communication(tracked_link.communication_id, url: tracked_link.redirect_url)
 
         target = tracked_link.redirect_url
         if target.blank?
@@ -36,16 +36,8 @@ module Public
       campaign_token = CampaignLinkToken.find_by(token: params[:token])
       if campaign_token
         campaign_token.record_click!
-        cs = campaign_token.campaign_send
-        if cs
-          # A click implies an open (see CampaignSend.record_click_for_communication).
-          cs.update_columns(
-            clicked_at: cs.clicked_at || Time.current,
-            click_count: cs.click_count + 1,
-            opened_at:  cs.opened_at || Time.current,
-            open_count: [cs.open_count, 1].max
-          )
-        end
+        # A click implies an open (see CampaignSend.record_click_for_communication).
+        CampaignSend.record_click_for_send(campaign_token.campaign_send, url: campaign_token.target_url)
         redirect_to campaign_token.target_url, allow_other_host: true
         return
       end

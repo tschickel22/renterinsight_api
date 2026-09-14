@@ -23,12 +23,16 @@ module Campaigns
 
       ooo = ooo?(parsed_email)
       inbound = nil
+      first_reply = false
+      first_open = false
 
       ActiveRecord::Base.transaction do
         unless ooo
           # A reply implies an open (open pixels are often blocked) — stamp opened_at so the
           # overview stats, analytics, and workqueue count it, mirroring click-implies-open.
           now = Time.current
+          first_reply = send.replied_at.nil?
+          first_open = send.opened_at.nil?
           send.update_columns(
             replied_at: send.replied_at || now,
             opened_at:  send.opened_at || now,
@@ -94,6 +98,9 @@ module Campaigns
           communication: inbound,
           outbound_communication: send.communication
         )
+        # After the commit, so a workflow never starts on a reply that rolled back.
+        Campaigns::WorkflowBridge.emit(:opened, send: send) if first_open
+        Campaigns::WorkflowBridge.emit(:replied, send: send) if first_reply
       end
 
       Result.new(handled: true, enrollment_id: enrollment.id, send_id: send.id, is_ooo: ooo)

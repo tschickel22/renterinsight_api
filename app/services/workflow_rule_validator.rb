@@ -11,6 +11,7 @@ class WorkflowRuleValidator
     deal_activity.created deal_activity.updated deal_activity.completed
     contact_activity.created contact_activity.updated contact_activity.completed
     account_activity.created account_activity.updated account_activity.completed
+    campaign.opened campaign.clicked campaign.replied campaign.bounced campaign.unsubscribed
     inbound.webhook
     cron.minutely cron.hourly cron.daily cron.weekly
   ].freeze

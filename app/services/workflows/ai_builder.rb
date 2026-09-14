@@ -23,6 +23,7 @@ module Workflows
       deal_activity.created deal_activity.updated deal_activity.completed
       contact_activity.created contact_activity.updated contact_activity.completed
       account_activity.created account_activity.updated account_activity.completed
+      campaign.opened campaign.clicked campaign.replied campaign.bounced campaign.unsubscribed
       inbound.webhook cron.minutely cron.hourly cron.daily cron.weekly
     ].freeze
 
@@ -263,6 +264,9 @@ module Workflows
           available as trigger.from and trigger.to; to act on one stage, add a condition on trigger.to (not on stage).
         - deal.won / deal.lost fire once when a deal enters a won or lost stage of the dealer's pipeline. Prefer these over
           matching a stage name, since dealers name their won and lost stages differently.
+        - campaign.opened / campaign.clicked / campaign.replied / campaign.bounced / campaign.unsubscribed fire on the campaign
+          recipient (Lead, Contact or Account). Opens, clicks and replies fire once per email sent. Scope a rule to one campaign
+          with a condition on trigger.campaign_id; campaign.clicked also carries trigger.url.
         - contact.created, contact.updated, contact.status_changed, contact.deleted
         - account.created, account.updated, account.status_changed, account.deleted
         - service_ticket.created, service_ticket.updated, service_ticket.status_changed
