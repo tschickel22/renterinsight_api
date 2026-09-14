@@ -78,7 +78,6 @@ class ProcessFacebookLeadJob < ApplicationJob
     end
 
     trigger_default_workflow(integration, lead)
-    SeedLeadNurtureFromSocialJob.perform_later(lead.id)
 
     Rails.logger.info "[ProcessFacebookLeadJob] Created Lead ##{lead.id} from FB leadgen_id=#{leadgen_id}"
     lead
