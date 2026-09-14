@@ -103,12 +103,36 @@ module Plays
         false
       end
 
+      def kind
+        'lead_response'
+      end
+
+      # ── Results, shared interface with other kinds of play ───────────────
+
+      def performance_for(installation, period:, location_ids:)
+        Plays::Tracking.new(installation: installation, period: period, location_ids: location_ids).summary
+      end
+
+      def leads_for(installation, period:, location_ids:, stage:, page:, per_page:)
+        Plays::Tracking.new(installation: installation, period: period, location_ids: location_ids)
+                       .leads(stage: stage, page: page, per_page: per_page)
+      end
+
+      # nil when the lead is not in this play or not visible to the viewer.
+      def lead_journey_for(installation, lead, location_ids:)
+        place = Plays::Tracking.new(installation: installation, location_ids: location_ids, lead_id: lead.id).place_of(lead.id)
+        return nil unless place
+
+        { lead: place.merge(phone: lead.phone), events: Plays::LeadTimeline.new(installation: installation, lead: lead).events.map(&:as_json) }
+      end
+
       def definition(company)
         texting = texting_ready?(company)
         {
           key: self::KEY,
           name: self::NAME,
           description: self::DESCRIPTION,
+          kind: kind,
           hidden: hidden?,
           assignment: assignment.to_s,
           default_sources: default_sources,

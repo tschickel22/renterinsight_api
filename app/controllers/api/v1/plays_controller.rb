@@ -3,47 +3,14 @@
 module Api
   module V1
     # Starter plays: bundles a dealer turns on with a few answers instead of
-    # building each workflow, form and sequence by hand, then customizes.
+    # building each workflow, form, sequence or campaign by hand, then
+    # customizes and watches.
     class PlaysController < ApplicationController
       include ModuleAccessRequired
 
       before_action :set_company_scope
       require_module! 'marketing.automation'
       before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey]
-
-      # GET /api/v1/plays/:id/leads/:lead_id
-      # One lead's journey through the play, and where it is now.
-      def lead_journey
-        return unless authorize_action!('workflow_automation', 'read')
-        return unless (installation = require_installation)
-
-        lead = @company.leads.find_by(id: params[:lead_id])
-        place = lead && tracking_for(installation, lead_id: lead.id).place_of(lead.id)
-        return render(json: { error: 'That lead is not in this play.' }, status: :not_found) unless place
-
-        render json: {
-          lead: place.merge(phone: lead.phone),
-          events: Plays::LeadTimeline.new(installation: installation, lead: lead).events.map(&:as_json)
-        }
-      end
-
-      # GET /api/v1/plays/:id/performance?period=90
-      # Where leads are in the play, counts per step, and whether it works.
-      def performance
-        return unless authorize_action!('workflow_automation', 'read')
-        return unless (installation = require_installation)
-
-        render json: tracking_for(installation).summary
-      end
-
-      # GET /api/v1/plays/:id/leads?period=90&stage=replied&page=1
-      def leads
-        return unless authorize_action!('workflow_automation', 'read')
-        return unless (installation = require_installation)
-
-        render json: tracking_for(installation).leads(stage: params[:stage], page: params[:page] || 1,
-                                                      per_page: params[:per_page] || 25)
-      end
 
       # GET /api/v1/plays
       # Offered plays, plus any retired play this company still has on.
@@ -77,9 +44,7 @@ module Api
       # PATCH /api/v1/plays/:id/customize
       def customize
         return unless authorize_action!('workflow_automation', 'update')
-
-        installation = active_installation(@play)
-        return render(json: { error: "#{@play::NAME} is not on." }, status: :not_found) unless installation
+        return unless (installation = require_installation)
 
         @play.new(company: @company, user: current_user, answers: answers_param, installation: installation).customize!
         render json: { play: play_json(@play) }
@@ -90,12 +55,42 @@ module Api
       # POST /api/v1/plays/:id/uninstall
       def uninstall
         return unless authorize_action!('workflow_automation', 'update')
-
-        installation = active_installation(@play)
-        return render(json: { error: "#{@play::NAME} is not on." }, status: :not_found) unless installation
+        return unless (installation = require_installation)
 
         @play.uninstall!(installation)
         render json: { play: play_json(@play) }
+      end
+
+      # GET /api/v1/plays/:id/performance?period=90
+      # Where leads are in the play, counts per step, and whether it works.
+      def performance
+        return unless authorize_action!('workflow_automation', 'read')
+        return unless (installation = require_installation)
+
+        render json: @play.performance_for(installation, period: params[:period], location_ids: visible_location_ids)
+      end
+
+      # GET /api/v1/plays/:id/leads?period=90&stage=replied&page=1
+      def leads
+        return unless authorize_action!('workflow_automation', 'read')
+        return unless (installation = require_installation)
+
+        render json: @play.leads_for(installation, period: params[:period], location_ids: visible_location_ids,
+                                                   stage: params[:stage], page: params[:page] || 1,
+                                                   per_page: params[:per_page] || 25)
+      end
+
+      # GET /api/v1/plays/:id/leads/:lead_id
+      # One lead's journey through the play, and where it is now.
+      def lead_journey
+        return unless authorize_action!('workflow_automation', 'read')
+        return unless (installation = require_installation)
+
+        lead = @company.leads.find_by(id: params[:lead_id])
+        journey = lead && @play.lead_journey_for(installation, lead, location_ids: visible_location_ids)
+        return render(json: { error: 'That lead is not in this play.' }, status: :not_found) unless journey
+
+        render json: journey
       end
 
       private
@@ -117,8 +112,8 @@ module Api
 
       # Lead names and results follow the same location rules as every other
       # lead list: a location-tier user sees their locations, and the location
-      # selector narrows further.
-      def tracking_for(installation, lead_id: nil)
+      # selector narrows further. nil means every location.
+      def visible_location_ids
         location_ids = nil
         if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
@@ -126,7 +121,7 @@ module Api
         if Current.location_filtered?
           location_ids = location_ids ? location_ids & [Current.location_id] : [Current.location_id]
         end
-        Plays::Tracking.new(installation: installation, period: params[:period], location_ids: location_ids, lead_id: lead_id)
+        location_ids
       end
 
       # Answers are validated and scoped to this company by the play itself;

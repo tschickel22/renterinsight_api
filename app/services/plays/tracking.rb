@@ -59,6 +59,7 @@ module Plays
       entries = self.entries
       {
         period: @period,
+        stages: STAGES.map { |key, label| { key: key, label: label } },
         stage_counts: STAGES.keys.to_h { |stage| [stage, entries.count { |e| e.stage == stage }] },
         step_counts: entries.filter_map(&:map_step).tally,
         metrics: metrics(entries)

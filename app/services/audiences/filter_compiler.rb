@@ -342,7 +342,9 @@ module Audiences
     def allowed_columns_for_source
       case @source_type
       when 'Lead'
-        %w[first_name last_name email phone status source_id health_score opt_in_sms last_activity_at created_at updated_at company_name title location_id owner_id]
+        # is_converted: a recurring audience ("every lead who wants the weekly
+        # homes email") must be able to let a lead go once it becomes a deal.
+        %w[first_name last_name email phone status source_id health_score opt_in_sms last_activity_at created_at updated_at company_name title location_id owner_id is_converted]
       when 'Contact'
         %w[first_name last_name email phone opt_in_sms account_id created_at updated_at company_name title location_id owner_id]
       when 'Account'
