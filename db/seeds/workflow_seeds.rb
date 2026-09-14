@@ -53,18 +53,13 @@ new_lead_alert = {
 
 deal_closed_notification = {
   name: 'Deal Closed Notification',
-  description: 'Notify the deal owner when a deal is marked closed_won.',
+  description: 'Notify the deal owner when a deal is won, whatever the dealer calls that stage.',
   entity_type: 'Deal',
   status: 'active',
-  trigger: { 'event_type' => 'deal.status_changed', 'entity_type_filter' => 'Deal' },
-  conditions: [
-    {
-      'type' => 'and',
-      'conditions' => [
-        { 'field' => 'stage', 'operator' => 'equals', 'value' => 'closed_won' }
-      ]
-    }
-  ],
+  # deal.won follows the tenant's pipeline, so a dealer whose won stage is
+  # "sold" or "won" is covered. Checking stage == 'closed_won' was not.
+  trigger: { 'event_type' => 'deal.won', 'entity_type_filter' => 'Deal' },
+  conditions: [],
   steps: {
     'nodes' => [
       {

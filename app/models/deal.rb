@@ -1029,6 +1029,28 @@ class Deal < ApplicationRecord
     changes = saved_changes.keys
     return if changes.blank?
     WorkflowEngine.emit('deal.updated', self, { id: id, changes: changes })
+    return unless saved_change_to_attribute?(:stage)
+
+    # Stage keys are the dealer's own, custom pipelines included. This records
+    # the move; it adds no stages and assumes none.
+    from, to = saved_change_to_attribute(:stage)
+    WorkflowEngine.emit('deal.status_changed', self, { id: id, from: from, to: to })
+    emit_workflow_outcome(from: from, to: to)
+  end
+
+  # Won and lost follow the tenant's pipeline (probability 100 or 0), the same
+  # rule the deal.won / deal.lost webhooks use. Moving between two won stages is
+  # not a second win. Only transitions count: a deal created already closed (an
+  # imported sale) must not send a thank-you to a customer from last year.
+  def emit_workflow_outcome(from:, to:)
+    previous = from.to_s.downcase
+    if stage_is_won?
+      return if company&.won_stage_keys&.include?(previous)
+      WorkflowEngine.emit('deal.won', self, { id: id, from: from, to: to })
+    elsif stage_is_lost?
+      return if company&.lost_stage_keys&.include?(previous)
+      WorkflowEngine.emit('deal.lost', self, { id: id, from: from, to: to })
+    end
   end
 
   def emit_workflow_deleted

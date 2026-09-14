@@ -227,7 +227,8 @@ templates << {
   description: 'Celebrate a won deal and kick off onboarding.',
   preview_description: 'Sends a thank-you email to the customer and creates an onboarding kickoff task when a deal is marked as won.',
   required_integrations: [],
-  trigger: { 'event_type' => 'deal.updated', 'entity_type_filter' => 'Deal' },
+  # Was deal.updated with no condition, which fired on every save of any deal.
+  trigger: { 'event_type' => 'deal.won', 'entity_type_filter' => 'Deal' },
   conditions: [],
   steps: {
     'nodes' => [
@@ -259,7 +260,8 @@ templates << {
   description: 'Create a postmortem task when a deal is lost.',
   preview_description: 'Creates a postmortem task assigned to the deal owner to capture lessons learned when a deal is marked as lost.',
   required_integrations: [],
-  trigger: { 'event_type' => 'deal.updated', 'entity_type_filter' => 'Deal' },
+  # Was deal.updated with no condition, which fired on every save of any deal.
+  trigger: { 'event_type' => 'deal.lost', 'entity_type_filter' => 'Deal' },
   conditions: [],
   steps: {
     'nodes' => [

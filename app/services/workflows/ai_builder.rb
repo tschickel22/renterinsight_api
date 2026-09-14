@@ -15,7 +15,7 @@ module Workflows
 
     TRIGGER_EVENT_TYPES = %w[
       lead.created lead.updated lead.status_changed lead.deleted
-      deal.created deal.updated deal.status_changed deal.deleted
+      deal.created deal.updated deal.status_changed deal.won deal.lost deal.deleted
       contact.created contact.updated contact.status_changed contact.deleted
       account.created account.updated account.status_changed account.deleted
       service_ticket.created service_ticket.updated service_ticket.status_changed
@@ -258,7 +258,11 @@ module Workflows
 
         TRIGGER EVENT TYPES (use the EXACT string in trigger.event_type):
         - lead.created, lead.updated, lead.status_changed, lead.deleted
-        - deal.created, deal.updated, deal.status_changed, deal.deleted
+        - deal.created, deal.updated, deal.deleted
+        - deal.status_changed fires when a deal moves to another pipeline stage. Stage keys are the dealer's own. The move is
+          available as trigger.from and trigger.to; to act on one stage, add a condition on trigger.to (not on stage).
+        - deal.won / deal.lost fire once when a deal enters a won or lost stage of the dealer's pipeline. Prefer these over
+          matching a stage name, since dealers name their won and lost stages differently.
         - contact.created, contact.updated, contact.status_changed, contact.deleted
         - account.created, account.updated, account.status_changed, account.deleted
         - service_ticket.created, service_ticket.updated, service_ticket.status_changed
