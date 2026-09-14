@@ -24,6 +24,15 @@ class ProcessFacebookLeadJob < ApplicationJob
       return
     end
 
+    # Meta can deliver the same lead more than once, and a retried job would
+    # otherwise create it again. Checked before the Graph call, which it saves.
+    if Lead.exists?(company_id: integration.company_id, facebook_leadgen_id: leadgen_id.to_s)
+      Rails.logger.info "[ProcessFacebookLeadJob] leadgen_id=#{leadgen_id} already recorded, skipping"
+      return
+    end
+
+    company = Company.find(integration.company_id)
+
     begin
       raw = MetaGraphApi.fetch_lead(leadgen_id, integration.page_access_token)
     rescue MetaGraphApi::ExpiredTokenError => e
@@ -48,7 +57,10 @@ class ProcessFacebookLeadJob < ApplicationJob
 
     lead_attrs = {
       company_id:  integration.company_id,
-      location_id: integration.location_id,
+      # A page with no location of its own still lands the lead somewhere a rep
+      # works. See Company#inbound_lead_location.
+      location_id: integration.location_id || company.inbound_lead_location&.id,
+      facebook_leadgen_id: leadgen_id.to_s,
       first_name:  first_name,
       last_name:   last_name,
       email:       attrs['email'],
@@ -70,6 +82,13 @@ class ProcessFacebookLeadJob < ApplicationJob
       notes: build_notes(raw, leadgen_id, form_id)
     }.compact
 
+    # Someone already on file: fold the inquiry into their record and tell a
+    # person, exactly as a Zapier lead does, instead of creating a duplicate.
+    if (match = identity_match(company, lead_attrs))
+      absorb_repeat_inquiry(integration, company, match, lead_attrs, survey)
+      return match.record
+    end
+
     lead = Lead.create!(lead_attrs)
 
     integration.with_lock do
@@ -81,6 +100,10 @@ class ProcessFacebookLeadJob < ApplicationJob
 
     Rails.logger.info "[ProcessFacebookLeadJob] Created Lead ##{lead.id} from FB leadgen_id=#{leadgen_id}"
     lead
+  rescue ActiveRecord::RecordNotUnique
+    # Two deliveries of one lead raced past the check above; the other won.
+    Rails.logger.info "[ProcessFacebookLeadJob] leadgen_id=#{leadgen_id} created concurrently, skipping"
+    nil
   rescue => e
     Rails.logger.error "[ProcessFacebookLeadJob] Failed: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
     raise
@@ -147,10 +170,30 @@ class ProcessFacebookLeadJob < ApplicationJob
 
     rule = WorkflowRule.active.find_by(id: integration.default_workflow_id, company_id: integration.company_id)
     return unless rule
+    # A rule that already listens for new leads is started by the lead.created
+    # event this lead just emitted. Starting it here as well ran it twice.
+    return if rule.trigger.is_a?(Hash) && rule.trigger['event_type'] == 'lead.created'
 
     WorkflowEngine.start_run(rule: rule, entity: lead)
   rescue => e
     Rails.logger.error "[ProcessFacebookLeadJob] trigger_default_workflow: #{e.message}"
+  end
+
+  def identity_match(company, lead_attrs)
+    return nil if lead_attrs[:email].blank? && lead_attrs[:phone].blank?
+
+    IdentityResolver.new(company, email: lead_attrs[:email], phone: lead_attrs[:phone]).resolve
+  end
+
+  def absorb_repeat_inquiry(integration, company, match, lead_attrs, survey)
+    InboundInquiryAbsorber.new(
+      company: company,
+      source_label: ['Facebook Lead Ads', integration.page_name.presence].compact.join(': '),
+      raw_answers: survey,
+      # With no owner on the matched record, the page's default owner hears it.
+      recipient_candidates: ->(_attrs) { [integration.default_owner_id] },
+      origin: 'facebook_lead_ads'
+    ).call(match, lead_attrs)
   end
 
   def build_notes(raw, leadgen_id, form_id)
