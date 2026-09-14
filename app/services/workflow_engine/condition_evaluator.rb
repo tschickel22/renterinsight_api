@@ -147,8 +147,14 @@ module WorkflowEngine
     # fallback to fire when the segment is a JSONB key rather than a real
     # column. This picks the fallback when the AR model doesn't have the
     # attribute at all.
+    #
+    # Associations count as present. Their readers are neither columns nor
+    # methods defined on the class itself, so `source.name` fell through to the
+    # custom-field lookup, came back nil, and every rule conditioned on a lead's
+    # source (the seeded Champion round robin among them) silently never ran.
     def attribute_missing?(record, name)
       return false unless record.class.respond_to?(:column_names)
+      return false if record.class.respond_to?(:reflect_on_association) && record.class.reflect_on_association(name.to_sym)
       !record.class.column_names.include?(name.to_s) &&
         !record.class.instance_methods(false).include?(name.to_sym)
     end
