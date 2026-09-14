@@ -665,15 +665,14 @@ class IntakeSubmission < ApplicationRecord
   
   # Deterministic fallback location for a company so intake leads are never
   # orphaned (a null location_id hides the lead from location-scoped users).
-  # Prefers the Corporate location, then the first active location by id.
+  # It used to prefer the Corporate location, which is usually an
+  # administrative shell no rep works: the lead was placed, and nobody saw it.
+  # See Company#inbound_lead_location.
   def company_default_location_id(company_id)
     company = Company.find_by(id: company_id)
     return nil unless company
-    
-    corporate = company.locations.corporate.active.order(:id).first
-    return corporate.id if corporate
-    
-    company.locations.active.order(:id).first&.id
+
+    company.inbound_lead_location&.id
   rescue => e
     Rails.logger.error "[IntakeSubmission] company_default_location_id failed: #{e.message}"
     nil
