@@ -10,17 +10,22 @@ module Api
 
       before_action :set_company_scope
       require_module! 'marketing.automation'
-      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey, :start]
+      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey, :start,
+                                      :dismiss, :restore]
 
       MAX_START_LEADS = 500
 
-      # GET /api/v1/plays
-      # Offered plays, plus any retired play this company still has on.
+      # GET /api/v1/plays(?include_dismissed=true)
+      # Offered plays, plus any retired play this company still has on. Plays the
+      # company hid are left out unless asked for.
       def index
         return unless authorize_action!('workflow_automation', 'read')
 
+        include_dismissed = ActiveModel::Type::Boolean.new.cast(params[:include_dismissed])
         plays = Plays::Registry.all.select do |play|
-          !play.hidden? || active_installation(play).present?
+          next false if play.hidden? && active_installation(play).nil?
+
+          include_dismissed || !dismissed?(play)
         end
         render json: { plays: plays.map { |play| play_json(play) } }
       end
@@ -38,7 +43,13 @@ module Api
         return render(json: { error: "#{@play::NAME} is no longer offered." }, status: :unprocessable_entity) if @play.hidden?
 
         @play.new(company: @company, user: current_user, answers: answers_param).install!
-        render json: { play: play_json(@play) }, status: :created
+        undismiss(@play)
+
+        notices = []
+        if @play.kind == 'lead_response' && ActiveModel::Type::Boolean.new.cast(params[:turn_on_weekly_homes])
+          notices << turn_on_weekly_homes
+        end
+        render json: { play: play_json(@play), notices: notices.compact }, status: :created
       rescue Plays::InstallError => e
         render json: { error: e.message }, status: :unprocessable_entity
       end
@@ -54,12 +65,39 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
-      # POST /api/v1/plays/:id/uninstall
+      # POST /api/v1/plays/:id/uninstall  { remove: true }
+      # Turning off always stops what the play started and keeps its history.
+      # With remove, the play also leaves Starter Plays, and anything it built
+      # that would still show elsewhere (a landing page) is deleted.
       def uninstall
         return unless authorize_action!('workflow_automation', 'update')
         return unless (installation = require_installation)
 
         @play.uninstall!(installation)
+        if ActiveModel::Type::Boolean.new.cast(params[:remove])
+          @play.remove_built!(installation) if @play.respond_to?(:remove_built!)
+          dismiss_play!(@play)
+        end
+        render json: { play: play_json(@play) }
+      end
+
+      # POST /api/v1/plays/:id/dismiss
+      # Hides a play that is off from Starter Plays, for this company.
+      def dismiss
+        return unless authorize_action!('workflow_automation', 'update')
+        if active_installation(@play)
+          return render json: { error: "Turn #{@play::NAME} off before hiding it." }, status: :unprocessable_entity
+        end
+
+        dismiss_play!(@play)
+        render json: { play: play_json(@play) }
+      end
+
+      # POST /api/v1/plays/:id/restore
+      def restore
+        return unless authorize_action!('workflow_automation', 'update')
+
+        undismiss(@play)
         render json: { play: play_json(@play) }
       end
 
@@ -139,6 +177,35 @@ module Api
 
       private
 
+      def dismissed?(play)
+        @dismissed_keys ||= PlayInstallation.dismissed.where(company_id: @company.id).pluck(:play_key)
+        @dismissed_keys.include?(play::KEY)
+      end
+
+      def dismiss_play!(play)
+        PlayInstallation.find_or_create_by!(company_id: @company.id, play_key: play::KEY, status: 'dismissed')
+        @dismissed_keys = nil
+      end
+
+      def undismiss(play)
+        PlayInstallation.dismissed.where(company_id: @company.id, play_key: play::KEY).delete_all
+        @dismissed_keys = nil
+      end
+
+      # A lead response play tags every lead for the weekly homes email, so setup
+      # offers to turn that on in the same step. A notice either way; a failure
+      # here must not undo the play that did turn on.
+      def turn_on_weekly_homes
+        weekly = Plays::WeeklyHomesEmail
+        return nil if PlayInstallation.active.exists?(company_id: @company.id, play_key: weekly::KEY)
+
+        weekly.new(company: @company, user: current_user, answers: {}).install!
+        undismiss(weekly)
+        "#{weekly::NAME} is on too."
+      rescue Plays::InstallError => e
+        "#{weekly::NAME} was not turned on: #{e.message}"
+      end
+
       def set_play
         @play = Plays::Registry.find(params[:id])
         render json: { error: 'Play not found' }, status: :not_found unless @play
@@ -178,7 +245,8 @@ module Api
 
       def play_json(play)
         installation = active_installation(play)
-        play.definition(@company).merge(installation: installation && play.installation_json(installation))
+        play.definition(@company).merge(installation: installation && play.installation_json(installation),
+                                        dismissed: dismissed?(play))
       end
     end
   end

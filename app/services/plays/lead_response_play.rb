@@ -153,6 +153,8 @@ module Plays
           start_tag: start_tag,
           default_start_tag: start_tag,
           weekly_homes_tag: WEEKLY_HOMES_TAG,
+          # Setup offers to turn it on too, since this play tags every lead for it.
+          weekly_homes_on: PlayInstallation.active.exists?(company_id: company.id, play_key: WeeklyHomesEmail::KEY),
           texting_ready: texting,
           fields: { messages: MESSAGE_FIELDS.keys, follow_up_emails: FOLLOW_UP_FIELDS.keys },
           default_content: default_content,

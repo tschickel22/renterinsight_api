@@ -180,6 +180,13 @@ module Plays
         installation
       end
 
+      # "Turn off and remove": the page is deleted outright, so it leaves Landing
+      # Pages too. Its form, submissions and leads stay.
+      def remove_built!(installation)
+        page = page_for(installation)
+        page&.update!(is_deleted: true, deleted_at: Time.current, published_at: nil, is_visible: false)
+      end
+
       def map_for(company:, content:, page:, follower:)
         url = page && LandingPages::PublicUrl.for(page)
         location = company.inbound_lead_location
