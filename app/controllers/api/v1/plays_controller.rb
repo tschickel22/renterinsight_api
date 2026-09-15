@@ -11,7 +11,7 @@ module Api
       before_action :set_company_scope
       require_module! 'marketing.automation'
       before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey, :start,
-                                      :dismiss, :restore, :duplicate]
+                                      :dismiss, :restore, :duplicate, :readiness]
 
       MAX_START_LEADS = 500
 
@@ -91,6 +91,14 @@ module Api
 
         dismiss_play!(@play)
         render json: { play: play_json(@play) }
+      end
+
+      # GET /api/v1/plays/:id/readiness
+      # What the play needs to work well, checked now, with where to fix each.
+      def readiness
+        return unless authorize_action!('workflow_automation', 'read')
+
+        render json: Plays::Readiness.new(play: @play, company: @company, installation: active_installation(@play)).call
       end
 
       # POST /api/v1/plays/:id/duplicate  { name:, sources: [], start_tag: }

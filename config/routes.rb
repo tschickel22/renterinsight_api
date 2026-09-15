@@ -556,6 +556,7 @@ Rails.application.routes.draw do
           post :dismiss
           post :restore
           post :duplicate
+          get :readiness
         end
       end
       resources :workflow_approvals, only: [:index, :show] do
