@@ -314,7 +314,7 @@ module Plays
           user = User.find_by(company_id: company.id, id: content['sender_user_id'])
           user ? "From #{LeadResponsePlay.display_name(user)}" : 'From the person you choose'
         else
-          "From each lead's own rep. A lead with no rep, or whose rep has no connected mailbox, is skipped."
+          "From each lead's own rep. A lead with no rep, or whose rep has no connected mailbox, gets them from your location's email, then your company's, then the platform's."
         end
       end
 
@@ -466,7 +466,10 @@ module Plays
                  else { from_identity_type: 'Owner', from_identity_id: nil }
                  end
       # A reply or a click stops the rest of the sequence.
-      identity.merge(goal_config: { 'primary_goal' => 'replied', 'additional_goals' => ['clicked'],
+      # email_waterfall: a lead with no rep, or a rep with no mailbox, still gets the
+      # emails, from the location, company or platform sender.
+      identity.merge(email_waterfall: true,
+                     goal_config: { 'primary_goal' => 'replied', 'additional_goals' => ['clicked'],
                                     'goal_actions' => { 'replied' => 'stop', 'clicked' => 'stop' } })
     end
 

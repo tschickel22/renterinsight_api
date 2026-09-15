@@ -106,8 +106,9 @@ class Campaign < ApplicationRecord
     if step_channels.include?('email') || (step_channels.empty? && email_channel?)
       # Owner mode defers resolution to send time (per-recipient), so we
       # can't preflight a single connection here. Allow start; the sender
-      # gates each individual send instead.
-      return false unless owner_identity? || !resolve_email_connection_for_step.nil?
+      # gates each individual send instead. A waterfall campaign always has a
+      # sender: the location, company or platform settings.
+      return false unless owner_identity? || email_waterfall? || !resolve_email_connection_for_step.nil?
     end
     if step_channels.include?('sms') || (step_channels.empty? && sms_channel?)
       return false if resolve_sms_sender_for_step.nil?

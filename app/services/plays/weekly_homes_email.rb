@@ -314,7 +314,7 @@ module Plays
           user = User.find_by(company_id: company.id, id: content['sender_user_id'])
           user ? "From #{LeadResponsePlay.display_name(user)}" : 'From the person you choose'
         else
-          "From each lead's own rep. A lead with no rep, or whose rep has no connected mailbox, is skipped that week."
+          "From each lead's own rep. A lead with no rep, or whose rep has no connected mailbox, gets it from your location's email, then your company's, then the platform's."
         end
       end
 
@@ -436,7 +436,9 @@ module Plays
                  when 'user' then { from_identity_type: 'User', from_identity_id: content['sender_user_id'] }
                  else { from_identity_type: 'Owner', from_identity_id: nil }
                  end
-      { recurrence_cron: "#{minute} #{hour} * * #{CRON_DAY.fetch(content['day'])}" }.merge(identity)
+      # email_waterfall: a lead with no rep, or a rep with no mailbox, still gets the
+      # email, from the location, company or platform sender.
+      { recurrence_cron: "#{minute} #{hour} * * #{CRON_DAY.fetch(content['day'])}", email_waterfall: true }.merge(identity)
     end
 
     def step_settings

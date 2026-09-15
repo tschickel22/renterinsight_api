@@ -77,8 +77,13 @@ module Campaigns
           # recipient so we look up THIS recipient's owner's connection,
           # not a global campaign-wide one.
           conn_preflight = @campaign.resolve_email_connection_for_step(recipient: recipient)
-          return mark_failed('no_valid_email_connection') if conn_preflight.nil?
-          connection_key = Campaign.connection_key_for(conn_preflight)
+          if conn_preflight
+            connection_key = Campaign.connection_key_for(conn_preflight)
+          elsif @campaign.email_waterfall?
+            connection_key = waterfall_connection_key
+          else
+            return mark_failed('no_valid_email_connection')
+          end
         end
       else
         return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender_for_step.nil?
@@ -203,6 +208,11 @@ module Campaigns
       # without any owner's OAuth connection being wired up. The rendered
       # content is unchanged so the test still reflects the real campaign.
       conn = test_platform_send? ? nil : @campaign.resolve_email_connection_for_step(recipient: recipient)
+      # No mailbox for this recipient (no rep, or a rep who never connected one):
+      # a waterfall campaign sends the way every other email does. With no from or
+      # provider given, CommunicationService takes both from the recipient's
+      # location settings, then the company's, then the platform's.
+      waterfall = conn.nil? && !test_platform_send? && @campaign.email_waterfall?
       rendered = Messaging::EmailRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: send_record, company: @company, base_url: @base_url
@@ -214,14 +224,16 @@ module Campaigns
       tracked_link_records  = Array(rendered[:tracked_link_records])
       attachment_metadata   = Array(rendered[:attachment_metadata])
 
-      from_address = formatted_from_for(conn) || platform_test_from_address
+      from_address = waterfall ? nil : (formatted_from_for(conn) || platform_test_from_address)
       # Was hardcoded to mail.renterinsight.com behind ENV['INBOUND_EMAIL_DOMAIN'], a name
       # nothing else in the app sets or reads (the real variable is INBOUND_MAIL_DOMAIN),
       # so every campaign reply-to fell through to the literal regardless of configuration.
       # A DealerTide campaign then carried a Renter Insight reply address.
       reply_to = ReplyToAddressService.campaign_address(send_record, company: @company)
 
-      provider_sym = if test_platform_send?
+      provider_sym = if waterfall
+                       nil
+                     elsif test_platform_send?
                        :aws_ses
                      else
                        case conn.try(:provider).to_s
@@ -254,7 +266,8 @@ module Campaigns
         attachments: inline_uploads.presence,
         metadata: metadata_hash.deep_stringify_keys,
         skip_preference_check: true,
-        sender_user_id: conn.try(:user_id),
+        # A waterfall send still belongs to the recipient's rep, so replies reach them.
+        sender_user_id: conn.try(:user_id) || (waterfall ? recipient.try(:owner_id) : nil),
         user: conn.try(:user)
       )
 
@@ -338,6 +351,14 @@ module Campaigns
     rescue => e
       Rails.logger.error "[CampaignSender#deliver_sms] #{e.class}: #{e.message}"
       { success: false, error: e.message.to_s[0, 200] }
+    end
+
+    # Rate limits are counted per sending mailbox. A waterfall send goes out
+    # through the recipient's location settings when it has a location, else the
+    # company's, so it is paced against those.
+    def waterfall_connection_key
+      location_id = recipient.try(:location_id)
+      location_id ? "EmailWaterfall:location:#{location_id}" : "EmailWaterfall:company:#{@company.id}"
     end
 
     def formatted_from_for(conn)
