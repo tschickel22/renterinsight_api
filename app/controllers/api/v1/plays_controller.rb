@@ -11,7 +11,7 @@ module Api
       before_action :set_company_scope
       require_module! 'marketing.automation'
       before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey, :start,
-                                      :dismiss, :restore]
+                                      :dismiss, :restore, :duplicate]
 
       MAX_START_LEADS = 500
 
@@ -22,7 +22,7 @@ module Api
         return unless authorize_action!('workflow_automation', 'read')
 
         include_dismissed = ActiveModel::Type::Boolean.new.cast(params[:include_dismissed])
-        plays = Plays::Registry.all.select do |play|
+        plays = Plays::Registry.all_for(@company).select do |play|
           next false if play.hidden? && active_installation(play).nil?
 
           include_dismissed || !dismissed?(play)
@@ -91,6 +91,23 @@ module Api
 
         dismiss_play!(@play)
         render json: { play: play_json(@play) }
+      end
+
+      # POST /api/v1/plays/:id/duplicate  { name:, sources: [], start_tag: }
+      # A copy of a lead response play for another channel ("New Google lead"),
+      # starting from the original's current messages. It starts off; the dealer
+      # sets it up like any other play.
+      def duplicate
+        return unless authorize_action!('workflow_automation', 'create')
+
+        installation = active_installation(@play)
+        content = installation ? @play.answers_for(installation)['content'] : @play.try(:default_content)
+        base = (@play.respond_to?(:base_play) && @play.base_play) || @play
+        copy = Plays::PlayCopy.create!(company: @company, user: current_user, base: base, name: params[:name],
+                                       sources: params[:sources], start_tag: params[:start_tag], content: content)
+        render json: { play: play_json(copy) }, status: :created
+      rescue Plays::InstallError => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # POST /api/v1/plays/:id/restore
@@ -207,7 +224,7 @@ module Api
       end
 
       def set_play
-        @play = Plays::Registry.find(params[:id])
+        @play = Plays::Registry.find(params[:id], company: @company)
         render json: { error: 'Play not found' }, status: :not_found unless @play
       end
 

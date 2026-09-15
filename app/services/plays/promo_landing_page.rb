@@ -88,7 +88,7 @@ module Plays
       # Lead response plays that are on, which the page's leads can go to.
       def follow_up_options(company)
         PlayInstallation.active.where(company_id: company.id).filter_map do |installation|
-          play = Plays::Registry.find(installation.play_key)
+          play = Plays::Registry.find(installation.play_key, company: installation.company_id)
           next unless play&.kind == 'lead_response'
 
           { key: play::KEY, name: play::NAME }
@@ -99,7 +99,7 @@ module Plays
       # from this page's source, however the source got there.
       def follower_for(company)
         PlayInstallation.active.where(company_id: company.id).each do |installation|
-          play = Plays::Registry.find(installation.play_key)
+          play = Plays::Registry.find(installation.play_key, company: installation.company_id)
           next unless play&.kind == 'lead_response'
           return { key: play::KEY, name: play::NAME, installation: installation } if play.answers_for(installation)['sources'].include?(SOURCE_NAME)
         end
@@ -327,7 +327,7 @@ module Plays
 
         rule_plays = {}
         PlayInstallation.active.where(company_id: company_id).each do |installation|
-          play = Plays::Registry.find(installation.play_key)
+          play = Plays::Registry.find(installation.play_key, company: installation.company_id)
           next unless play&.kind == 'lead_response'
 
           installation.asset_ids(:workflow_rule_ids).each { |id| rule_plays[id.to_i] = play::NAME }
@@ -478,11 +478,12 @@ module Plays
       return if wanted == NO_FOLLOW_UP
 
       installation = PlayInstallation.active.find_by(company_id: @company.id, play_key: wanted)
-      move_source!({ key: wanted, name: Plays::Registry.find(wanted)::NAME, installation: installation }, remove: false)
+      move_source!({ key: wanted, name: Plays::Registry.find(wanted, company: @company)::NAME, installation: installation },
+                   remove: false)
     end
 
     def move_source!(target, remove:)
-      play = Plays::Registry.find(target[:key])
+      play = Plays::Registry.find(target[:key], company: @company)
       answers = play.answers_for(target[:installation])
       sources = remove ? answers['sources'] - [SOURCE_NAME] : (answers['sources'] + [SOURCE_NAME]).uniq
       if sources.empty?

@@ -13,7 +13,19 @@ module Plays
       all.reject(&:hidden?)
     end
 
-    def self.find(key)
+    # Every play a company can see: the catalog, plus the company's own copies.
+    def self.all_for(company)
+      all + Plays::PlayCopy.all(company&.id)
+    end
+
+    # A copy belongs to one company, so finding one needs the company (a
+    # Company or its id). Catalog plays are found without it.
+    def self.find(key, company: nil)
+      if Plays::PlayCopy.copy_key?(key)
+        company_id = company.respond_to?(:id) ? company.id : company
+        return Plays::PlayCopy.find(company_id, key)
+      end
+
       all.find { |play| play::KEY == key.to_s }
     end
   end

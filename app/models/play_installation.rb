@@ -5,9 +5,10 @@
 # touches exactly those and nothing a dealer built by hand.
 #
 # A 'dismissed' row is not an install: it marks a play the company hid from
-# Starter Plays. It carries no answers or assets.
+# Starter Plays. It carries no answers or assets. A 'copy' row is not an install
+# either: its answers define a company's copy of a play (see Plays::PlayCopy).
 class PlayInstallation < ApplicationRecord
-  STATUSES = %w[active uninstalled dismissed].freeze
+  STATUSES = %w[active uninstalled dismissed copy].freeze
 
   belongs_to :company
   belongs_to :installed_by, class_name: 'User', foreign_key: 'installed_by_user_id', optional: true

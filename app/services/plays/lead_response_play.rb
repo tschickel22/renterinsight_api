@@ -102,6 +102,15 @@ module Plays
         false
       end
 
+      # A dealer's copy of a play (Plays::PlayCopy) says so, and which play it copies.
+      def copy?
+        false
+      end
+
+      def base_play
+        nil
+      end
+
       def default_content
         raise NotImplementedError
       end
@@ -146,6 +155,7 @@ module Plays
           description: self::DESCRIPTION,
           kind: kind,
           hidden: hidden?,
+          copy_of: copy? ? { key: base_play::KEY, name: base_play::NAME } : nil,
           assignment: assignment.to_s,
           default_sources: default_sources,
           available_sources: company.sources.active.order(:name).pluck(:name).uniq,
@@ -559,7 +569,7 @@ module Plays
     # Starting tags other active plays use, tag => play name.
     def claimed_tags
       PlayInstallation.active.where(company_id: @company.id).where.not(id: @installation&.id).each_with_object({}) do |installation, acc|
-        play = Plays::Registry.find(installation.play_key)
+        play = Plays::Registry.find(installation.play_key, company: installation.company_id)
         tag = play.respond_to?(:start_tag_for) && play.kind == 'lead_response' ? play.start_tag_for(installation) : nil
         acc[tag] = play::NAME if tag
       end
@@ -575,7 +585,7 @@ module Plays
     # Sources other active plays already start from, name => play name.
     def claimed_sources
       PlayInstallation.active.where(company_id: @company.id).where.not(id: @installation&.id).each_with_object({}) do |installation, acc|
-        play = Plays::Registry.find(installation.play_key)
+        play = Plays::Registry.find(installation.play_key, company: installation.company_id)
         next unless play
 
         play.answers_for(installation)['sources'].each { |name| acc[name] = play::NAME }
