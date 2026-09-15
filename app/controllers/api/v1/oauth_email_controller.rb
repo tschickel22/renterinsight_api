@@ -393,6 +393,9 @@ class Api::V1::OauthEmailController < ApplicationController
     new_attrs      = email_attrs.stringify_keys
     is_disconnect  = new_attrs['provider'] == 'smtp'
     merged_email   = is_disconnect ? existing_email.merge(new_attrs).compact : existing_email.merge(new_attrs)
+    # Connecting or disconnecting starts the sender over, so a failure recorded
+    # against the old grant no longer applies.
+    merged_email.delete(EmailConnectionHealth::HEALTH_KEY)
     merged_comms   = existing.stringify_keys.merge('email' => merged_email)
 
     Setting.set(scope_class, id, 'communications', merged_comms)

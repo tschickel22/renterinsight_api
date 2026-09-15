@@ -10,6 +10,14 @@ class CampaignEnrollment < ApplicationRecord
   validates :recipient_id, uniqueness: { scope: [:campaign_id, :recipient_type] }
   validate :contact_snapshot_present
 
+  # Every unsubscribe that names an enrollment (the unsubscribe page, SMS STOP,
+  # a carrier opt-out, a spam complaint) goes through update!, so a callback
+  # sees it. The sweep that also unsubscribes the person's other campaigns uses
+  # update_all on purpose: one unsubscribe should start one workflow, not one
+  # per campaign.
+  after_update_commit :emit_unsubscribe_to_workflows,
+                      if: -> { saved_change_to_status? && status == 'unsubscribed' }
+
   scope :active, -> { where(status: %w[pending active]) }
   # Only enrollments whose parent campaign is actually running are due. Without
   # the join, pausing a campaign doesn't stop delivery — pause flips
@@ -58,5 +66,11 @@ class CampaignEnrollment < ApplicationRecord
         last_sent_at: Time.current
       )
     end
+  end
+
+  private
+
+  def emit_unsubscribe_to_workflows
+    Campaigns::WorkflowBridge.emit(:unsubscribed, enrollment: self)
   end
 end

@@ -188,12 +188,22 @@ class UserEmailConnection < ApplicationRecord
     update_column(:last_used_at, Time.current)
   end
   
+  REAUTH_MARKER = 'Reauth required:'.freeze
+  NOT_FLAGGED_SQL = 'last_error_message IS NULL OR last_error_message NOT LIKE ?'.freeze
+
   # Record error
+  #
+  # A "Reauth required" flag is cleared by reconnecting or by a later success,
+  # never by another error. The bounce harvester used to write its Graph 401
+  # over the flag, needs_reauth? went false, and the next poll notified the
+  # owner again: three notices in ten minutes for one revoked grant. The
+  # condition is in SQL because the writer is usually holding a copy of the
+  # row loaded before another job flagged it.
   def record_error!(message)
-    update_columns(
-      last_error_at: Time.current,
-      last_error_message: message.to_s.truncate(500)
-    )
+    text = message.to_s.truncate(500)
+    scope = self.class.where(id: id)
+    scope = scope.where(NOT_FLAGGED_SQL, "#{REAUTH_MARKER}%") unless text.start_with?(REAUTH_MARKER)
+    write_error_columns(scope, text)
   end
 
   # Clear error state
@@ -226,7 +236,18 @@ class UserEmailConnection < ApplicationRecord
   # user so the failure isn't invisible. Callers should invoke this whenever a
   # send fails with a pattern from REAUTH_ERROR_PATTERNS.
   def mark_needs_reauth!(exception_message)
-    record_error!("Reauth required: #{exception_message}")
+    # Claimed in one conditional UPDATE. The sent-mail sync and the bounce
+    # harvester both run on the ten minute mark and reach the same dead grant
+    # in the same second, and a check-then-write let both of them notify.
+    flagged = write_error_columns(
+      self.class.where(id: id).where(NOT_FLAGGED_SQL, "#{REAUTH_MARKER}%"),
+      "#{REAUTH_MARKER} #{exception_message}".truncate(500)
+    )
+    unless flagged
+      self.last_error_at, self.last_error_message = self.class.where(id: id).pick(:last_error_at, :last_error_message)
+      clear_attribute_changes(%w[last_error_at last_error_message])
+      return
+    end
     return unless user_id.present?
     NotificationService.create(
       recipient: user,
@@ -542,6 +563,17 @@ class UserEmailConnection < ApplicationRecord
   end
 
   private
+
+  # Returns true when this call wrote the row.
+  def write_error_columns(scope, text)
+    now = Time.current
+    return false unless scope.update_all(last_error_at: now, last_error_message: text) == 1
+
+    self.last_error_at = now
+    self.last_error_message = text
+    clear_attribute_changes(%w[last_error_at last_error_message])
+    true
+  end
 
   def set_company_from_user
     self.company_id ||= user&.company_id

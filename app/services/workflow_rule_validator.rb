@@ -3,7 +3,7 @@
 class WorkflowRuleValidator
   KNOWN_EVENT_TYPES = %w[
     lead.created lead.updated lead.deleted lead.status_changed lead.tagged
-    deal.created deal.updated deal.deleted deal.status_changed deal.tagged
+    deal.created deal.updated deal.deleted deal.status_changed deal.won deal.lost deal.tagged
     contact.created contact.updated contact.deleted contact.status_changed contact.tagged
     account.created account.updated account.deleted account.status_changed account.tagged
     service_ticket.created service_ticket.updated service_ticket.status_changed
@@ -11,6 +11,7 @@ class WorkflowRuleValidator
     deal_activity.created deal_activity.updated deal_activity.completed
     contact_activity.created contact_activity.updated contact_activity.completed
     account_activity.created account_activity.updated account_activity.completed
+    campaign.opened campaign.clicked campaign.replied campaign.bounced campaign.unsubscribed
     inbound.webhook
     cron.minutely cron.hourly cron.daily cron.weekly
   ].freeze

@@ -92,7 +92,7 @@ module Catalog
         source:        Catalog::IngestionService::SEEDED_VEHICLE_SOURCE,
         status:        self.class.status_for(doc['inventory_availability']),
         condition:     doc['sale_type'].to_s.casecmp('pre-owned').zero? ? 'used' : 'new',
-        make:          doc['brand_name'].presence || @source.name,
+        make:          Catalog::ManufacturerName.for(@source, brand: doc['brand_name']),
         model:         model_for(doc),
         year:          ship_year(doc) || Date.current.year,
         bedrooms:      positive_int(doc['number_of_bedrooms']),

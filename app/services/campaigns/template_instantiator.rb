@@ -11,6 +11,13 @@ module Campaigns
       from_identity_type = @params[:from_identity_type] || (@template.channel == 'sms' ? 'Company' : 'User')
       from_identity_id = @params[:from_identity_id] || (@template.channel == 'sms' ? @company.id : @user.id)
 
+      # Seeded recurring templates carry their cadence inside the send window.
+      # It used to be copied there and nowhere else, so "Weekly Inventory Digest
+      # (recurring)" started as a one-time blast with a frozen recipient list.
+      send_window = (@template.send_window_template || {}).deep_dup
+      recurrence_cron = send_window.delete('recurrence_cron').presence
+      recurring = recurrence_cron.present?
+
       campaign = nil
       ActiveRecord::Base.transaction do
         campaign = @company.campaigns.create!(
@@ -18,13 +25,15 @@ module Campaigns
           description: @template.description,
           status: 'draft',
           channel: @template.channel || 'email',
-          campaign_type: @template.steps_template.is_a?(Array) && @template.steps_template.length > 1 ? 'drip' : 'blast',
-          audience_mode: 'static',
+          campaign_type: campaign_type_for(recurring),
+          # A recurring audience has to take in people tagged after launch.
+          audience_mode: recurring ? 'dynamic' : 'static',
+          recurrence_cron: recurrence_cron,
           from_identity_type: from_identity_type,
           from_identity_id: from_identity_id,
           from_display_name: @params[:from_display_name],
           goal_config: @template.goal_config_template || {},
-          send_window: @template.send_window_template || {},
+          send_window: send_window,
           utm_source: 'campaign',
           utm_medium: @template.channel == 'sms' ? 'sms' : 'email',
           utm_campaign: @template.slug,
@@ -48,13 +57,23 @@ module Campaigns
           )
         end
 
-        audience_hint = @template.audience_hint || {}
+        # deep_dup: the tag pass rewrites the tree in place, and the template's
+        # own audience must stay as authored for the next company.
+        audience_hint = (@template.audience_hint || {}).deep_dup
+        filter_tree = AudienceTags.new(company: @company).prepare!(audience_hint['filter_tree'] || {})
         campaign.create_campaign_audience!(
           source_type: audience_hint['source_type'] || 'Lead',
-          filter_tree: audience_hint['filter_tree'] || {}
+          filter_tree: filter_tree
         )
       end
       campaign
+    end
+
+    private
+
+    def campaign_type_for(recurring)
+      return 'recurring_digest' if recurring
+      @template.steps_template.is_a?(Array) && @template.steps_template.length > 1 ? 'drip' : 'blast'
     end
   end
 end

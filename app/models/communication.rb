@@ -59,7 +59,8 @@ class Communication < ApplicationRecord
   has_many :tracked_links, dependent: :nullify
 
   after_create :notify_workflow_of_inbound, if: :should_notify_workflow?
-  
+  after_create :stop_nurture_on_reply, if: -> { direction == 'inbound' && communicable.present? }
+
   # ActiveStorage attachments
   has_many_attached :attachments
   
@@ -400,6 +401,13 @@ class Communication < ApplicationRecord
     WorkflowEngine.handle_inbound_reply(workflow_run_id: parent.workflow_run_id, inbound_communication: self)
   rescue => e
     Rails.logger.error "[Communication#notify_workflow_of_inbound] failed: #{e.message}"
+  end
+
+  # A reply must always be stored, so a nurture problem is logged, never raised.
+  def stop_nurture_on_reply
+    NurtureAutoStop.for_reply(self)
+  rescue => e
+    Rails.logger.error "[Communication#stop_nurture_on_reply] failed: #{e.message}"
   end
 
   def push_portal_message_to_buyer

@@ -245,8 +245,11 @@ class ActivityReminderService
     return unless notification.is_a?(Notification)
     
     begin
-      NotificationService.send_email(notification, user)
-      Rails.logger.info("[ActivityReminderService] Email sent to #{user.email}")
+      if NotificationService.send_email(notification, user)
+        Rails.logger.info("[ActivityReminderService] Email sent to #{user.email}")
+      else
+        Rails.logger.warn("[ActivityReminderService] Email to #{user.email} was not sent")
+      end
     rescue => e
       Rails.logger.error("[ActivityReminderService] Error sending email: #{e.message}")
       Rails.logger.error(e.backtrace.join("\n"))

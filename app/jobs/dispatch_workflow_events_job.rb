@@ -19,7 +19,8 @@ class DispatchWorkflowEventsJob < ApplicationJob
 
         conditions_pass = WorkflowEngine::ConditionEvaluator.evaluate(
           rule.conditions,
-          entity
+          entity,
+          trigger: event.payload || {}
         )
         next unless conditions_pass
 

@@ -992,6 +992,15 @@ class Company < ApplicationRecord
   def default_location
     locations.find_by(is_default: true) || locations.first
   end
+
+  # Where an inbound lead lands when nothing names a location: the default
+  # location, else the first active one. Never the corporate location, which is
+  # usually an administrative shell no rep works, so a lead parked there is a
+  # lead nobody sees.
+  def inbound_lead_location
+    candidates = locations.active.where(is_corporate: false)
+    candidates.find_by(is_default: true) || candidates.order(:id).first
+  end
   
   # Soft delete
   def soft_delete!

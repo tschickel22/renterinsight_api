@@ -85,6 +85,7 @@ module WorkflowEngine
           # a user id — coerce here so we don't crash on a type mismatch.
           value = STRING_ID_COLS.include?(owner_col) ? new_owner_id.to_s : new_owner_id
           entity.update!(owner_col => value)
+          refresh_entity_variables(entity)
           { status: 'success', output: { owner_id: new_owner_id, column: owner_col }, next_step_id: next_step_from_edges, wait: nil, error: {} }
         else
           { status: 'skipped', output: { reason: 'no_user_selected' }, next_step_id: next_step_from_edges, wait: nil, error: {} }
@@ -94,6 +95,20 @@ module WorkflowEngine
       end
 
       private
+
+      # Run variables are a snapshot taken when the run started. Without this, a
+      # message sent after assignment still named the previous owner (or none)
+      # and carried their booking link: exactly the "assign a rep, then text the
+      # lead from that rep" sequence a new-lead workflow runs.
+      def refresh_entity_variables(entity)
+        entity_vars = WorkflowEngine.entity_hash(entity.reload)
+        @run.update!(variables: (@run.variables || {}).merge(
+          'entity' => entity_vars,
+          'rep_booking_link' => entity_vars['owner_booking_url']
+        ))
+      rescue => e
+        Rails.logger.warn "[AssignOwner] could not refresh run variables: #{e.message}"
+      end
 
       def skipped(reason)
         { status: 'skipped', output: { reason: reason }, next_step_id: next_step_from_edges, wait: nil, error: {} }

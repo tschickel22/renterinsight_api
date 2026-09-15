@@ -4,7 +4,7 @@ module Api
       include RbacAuthorization
       include ModuleAccessRequired
       before_action :set_company_scope
-      require_module! 'management.workflows'
+      require_any_module! 'management.workflows', 'marketing.automation'
       rbac_resource :workflow_automation, read_actions: [:index]
 
       def index

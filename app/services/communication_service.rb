@@ -308,6 +308,7 @@ class CommunicationService
 
       # Track send event
       @communication.track_event('sent', result)
+      EmailConnectionHealth.clear_send_failure!(user: @sending_user, communicable: communicable) if channel.to_s == 'email'
 
       # Log SMS usage for billing tracking
       if channel == 'sms'
@@ -321,10 +322,13 @@ class CommunicationService
 
       { success: true, communication: @communication, provider: provider, external_id: result[:external_id] }
     rescue => e
-      # If the rep's own mailbox rejected our token, tell them. Background
-      # sends have nobody watching the response, so without this the failure
-      # is invisible.
-      EmailConnectionHealth.flag_for_user!(@sending_user, e) if channel.to_s == 'email'
+      # Tell the people who can fix whichever level this send resolved to: the
+      # rep's own mailbox, or the location, company or platform sender.
+      # Background sends have nobody watching the response, so without this
+      # the failure is invisible.
+      if channel.to_s == 'email'
+        EmailConnectionHealth.flag_send_failure!(error: e, user: @sending_user, communicable: communicable, to_address: to)
+      end
       @communication.mark_as_failed!(e.message)
       { success: false, communication: @communication, error: e.message }
     end
@@ -349,11 +353,20 @@ class CommunicationService
       # Track send event
       communication.track_event('sent', result)
       
+      if communication.channel.to_s == 'email'
+        EmailConnectionHealth.clear_send_failure!(user: communication.user, communicable: communication.communicable)
+      end
+
       { success: true, communication: communication, provider: communication.provider }
     rescue => e
       # Same reasoning as send_communication: this runs from SendCommunicationJob,
-      # so a dead token would otherwise fail silently.
-      EmailConnectionHealth.flag_for_user!(communication.user, e) if communication.channel.to_s == 'email'
+      # so a broken sender would otherwise fail silently.
+      if communication.channel.to_s == 'email'
+        EmailConnectionHealth.flag_send_failure!(
+          error: e, user: communication.user, communicable: communication.communicable,
+          to_address: communication.to_address
+        )
+      end
       communication.mark_as_failed!(e.message)
       { success: false, communication: communication, error: e.message }
     end

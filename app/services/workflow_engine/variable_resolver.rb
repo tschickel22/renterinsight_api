@@ -52,8 +52,11 @@ module WorkflowEngine
       end
     end
 
+    # Associations count as present, or `{{entity.source.name}}` on a live
+    # record falls through to custom fields and renders blank.
     def attribute_missing?(record, name)
       return false unless record.class.respond_to?(:column_names)
+      return false if record.class.respond_to?(:reflect_on_association) && record.class.reflect_on_association(name.to_sym)
       !record.class.column_names.include?(name.to_s) &&
         !record.class.instance_methods(false).include?(name.to_sym)
     end

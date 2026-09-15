@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_15_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1420,6 +1420,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "channel", default: "email", null: false
+    t.datetime "cycle_started_at"
+    t.boolean "email_waterfall", default: false, null: false
     t.index ["campaign_type", "status"], name: "index_campaigns_on_campaign_type_and_status"
     t.index ["company_id", "channel"], name: "index_campaigns_on_company_id_and_channel"
     t.index ["company_id", "status"], name: "index_campaigns_on_company_id_and_status"
@@ -3837,10 +3839,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
     t.bigint "merged_into_id"
     t.datetime "merged_at"
     t.bigint "merged_by_id"
+    t.string "facebook_leadgen_id"
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
     t.index ["company_id", "champion_salesforce_id"], name: "idx_leads_company_champion_sf_id", unique: true
+    t.index ["company_id", "facebook_leadgen_id"], name: "idx_leads_company_facebook_leadgen_id", unique: true
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id", "merged_into_id"], name: "index_leads_on_company_id_and_merged_into"
     t.index ["company_id"], name: "index_leads_on_company_id"
@@ -4535,6 +4539,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
     t.datetime "updated_at", null: false
     t.text "description"
     t.bigint "company_id"
+    t.boolean "stop_on_reply", default: false, null: false
+    t.boolean "stop_on_conversion", default: false, null: false
     t.index ["company_id"], name: "index_nurture_sequences_on_company_id"
   end
 
@@ -4935,6 +4941,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_27_160038) do
     t.index ["company_id"], name: "index_pending_import_links_on_company_id"
     t.index ["entity_type", "entity_id"], name: "idx_pending_links_entity"
     t.index ["import_job_id"], name: "index_pending_import_links_on_import_job_id"
+  end
+
+  create_table "play_installations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "play_key", null: false
+    t.string "status", default: "active", null: false
+    t.jsonb "answers", default: {}, null: false
+    t.jsonb "assets", default: {}, null: false
+    t.bigint "installed_by_user_id"
+    t.datetime "installed_at"
+    t.datetime "uninstalled_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "play_key"], name: "idx_play_installations_one_active_per_play", unique: true, where: "((status)::text = 'active'::text)"
+    t.index ["company_id", "play_key"], name: "index_play_installations_on_company_id_and_play_key"
   end
 
   create_table "portal_documents", force: :cascade do |t|

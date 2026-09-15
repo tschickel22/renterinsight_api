@@ -158,9 +158,13 @@ module Messaging
       %(<tr><td style="padding:8px 24px;text-align:center;">#{img}</td></tr>)
     end
 
+    # Seeded campaign templates write buttons as label/url (their button_block
+    # helper) while the builder writes text/href. Reading only text/href turned
+    # every templated button, the weekly digest's "Browse all homes" among
+    # them, into "Click here" pointing at "#".
     def render_button(block)
-      text = block['text'] || block[:text] || 'Click here'
-      href = block['href'] || block[:href] || '#'
+      text = block['text'] || block[:text] || block['label'] || block[:label] || 'Click here'
+      href = block['href'] || block[:href] || block['url'] || block[:url] || '#'
       resolved_text = MergeTagResolver.resolve(text, @context)
       resolved_href = MergeTagResolver.resolve(href, @context)
       %(<tr><td style="padding:16px 24px;text-align:center;">

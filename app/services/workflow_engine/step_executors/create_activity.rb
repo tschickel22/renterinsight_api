@@ -34,9 +34,15 @@ module WorkflowEngine
         }
         # Optional fields the AI builder emits — passed through only if the
         # column exists, so we don't crash on models missing them.
-        %w[status priority].each do |opt|
+        %w[status priority call_direction].each do |opt|
           next unless config[opt].present? && klass.column_names.include?(opt)
           attrs[opt.to_sym] = resolve_variables(config[opt].to_s)
+        end
+        # A call activity requires a direction. None was ever passed, so every
+        # call task a workflow created failed validation and failed its run.
+        # A task a workflow creates is a call the rep makes.
+        if attrs[:activity_type] == 'call' && attrs[:call_direction].blank? && klass.column_names.include?('call_direction')
+          attrs[:call_direction] = 'outbound'
         end
 
         attrs[:company_id] = @run.company_id if klass.column_names.include?('company_id')
@@ -93,7 +99,9 @@ module WorkflowEngine
       #      whose date mirrors a lead field like "next_appointment".
       #   2. due_date: literal ISO string (with {{}} resolution) — power users.
       #   3. due_in_days + optional due_time: relative day offset.
-      #   4. due_in_hours: relative hour offset (legacy default was 24h).
+      #   4. due_in_minutes: relative minute offset. "Call a new lead within 15
+      #      minutes" cannot be said in whole hours.
+      #   5. due_in_hours: relative hour offset (legacy default was 24h).
       def resolve_due_date(config)
         if config['due_date_field'].present?
           base_date = value_from_entity(config['due_date_field'].to_s)
@@ -109,6 +117,10 @@ module WorkflowEngine
           days = config['due_in_days'].to_i
           base = Date.current + days.days
           return combine_date_and_time(base.iso8601, config['due_time'])
+        end
+
+        if config['due_in_minutes'].present?
+          return Time.current + config['due_in_minutes'].to_i.minutes
         end
 
         hours = (config['due_in_hours'] || 24).to_i

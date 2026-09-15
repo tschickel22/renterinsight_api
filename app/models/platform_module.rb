@@ -36,7 +36,12 @@ class PlatformModule
     # enabling a TenantModuleOverride (or a dedicated add-on plan).
     # The display name is registry data on purpose: renaming the product must not
     # require a code sweep (same principle as the brand kernel in CLAUDE.md).
-    'marketing.automation' => { name: 'Campaign Desk', category: 'Marketing', icon: 'Wand2', description: 'One prompt to a full multi-channel campaign — email, SMS, social, landing page, and the follow-up workflow, drawn before you publish' },
+    # works_without: standalone products whose engines Campaign Desk drives on its
+    # own (the engine controllers accept either key). Owning them adds their own
+    # pages and nav items; Campaign Desk never grants those. Shown to operators so
+    # a Starter + Campaign Desk tenant is sold knowingly (v3 plan §20).
+    'marketing.automation' => { name: 'Campaign Desk', category: 'Marketing', icon: 'Wand2', description: 'One prompt to a full multi-channel campaign — email, SMS, social, landing page, and the follow-up workflow, drawn before you publish',
+                                works_without: %w[marketing.campaigns management.workflows marketing.social_media marketing.website] },
     # Paid add-on, same shape as Campaign Desk: absent from every PLAN_TEMPLATE
     # so professional/enterprise don't grant it free.
     #

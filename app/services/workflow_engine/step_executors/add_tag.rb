@@ -9,12 +9,17 @@ module WorkflowEngine
         tag_names.each do |name|
           tag = Tag.for_company(@run.company_id).find_by(name: name) ||
                 Tag.create!(name: name, company_id: @run.company_id)
+          # assigned_at is NOT NULL. Without it the insert raised, the rescue
+          # below reported "skipped", and no workflow ever tagged anything.
           TagAssignment.find_or_create_by!(
             tag_id: tag.id,
             entity_type: entity.class.name,
             entity_id: entity.id,
             company_id: @run.company_id
-          )
+          ) do |assignment|
+            assignment.assigned_at = Time.current
+            assignment.assigned_by = 'workflow'
+          end
           added << name
         end
         { status: 'success', output: { tags_added: added }, next_step_id: next_step_from_edges, wait: nil, error: {} }

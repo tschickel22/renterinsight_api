@@ -15,7 +15,7 @@ module Workflows
 
     TRIGGER_EVENT_TYPES = %w[
       lead.created lead.updated lead.status_changed lead.deleted
-      deal.created deal.updated deal.status_changed deal.deleted
+      deal.created deal.updated deal.status_changed deal.won deal.lost deal.deleted
       contact.created contact.updated contact.status_changed contact.deleted
       account.created account.updated account.status_changed account.deleted
       service_ticket.created service_ticket.updated service_ticket.status_changed
@@ -23,6 +23,7 @@ module Workflows
       deal_activity.created deal_activity.updated deal_activity.completed
       contact_activity.created contact_activity.updated contact_activity.completed
       account_activity.created account_activity.updated account_activity.completed
+      campaign.opened campaign.clicked campaign.replied campaign.bounced campaign.unsubscribed
       inbound.webhook cron.minutely cron.hourly cron.daily cron.weekly
     ].freeze
 
@@ -258,7 +259,14 @@ module Workflows
 
         TRIGGER EVENT TYPES (use the EXACT string in trigger.event_type):
         - lead.created, lead.updated, lead.status_changed, lead.deleted
-        - deal.created, deal.updated, deal.status_changed, deal.deleted
+        - deal.created, deal.updated, deal.deleted
+        - deal.status_changed fires when a deal moves to another pipeline stage. Stage keys are the dealer's own. The move is
+          available as trigger.from and trigger.to; to act on one stage, add a condition on trigger.to (not on stage).
+        - deal.won / deal.lost fire once when a deal enters a won or lost stage of the dealer's pipeline. Prefer these over
+          matching a stage name, since dealers name their won and lost stages differently.
+        - campaign.opened / campaign.clicked / campaign.replied / campaign.bounced / campaign.unsubscribed fire on the campaign
+          recipient (Lead, Contact or Account). Opens, clicks and replies fire once per email sent. Scope a rule to one campaign
+          with a condition on trigger.campaign_id; campaign.clicked also carries trigger.url.
         - contact.created, contact.updated, contact.status_changed, contact.deleted
         - account.created, account.updated, account.status_changed, account.deleted
         - service_ticket.created, service_ticket.updated, service_ticket.status_changed
@@ -375,7 +383,7 @@ module Workflows
         - Match the brand voice from context.company.brand_voice when set; lean on context.company.business_description / target_audience / unique_value_props for what to say.
         - When referring to the sender's own business in copy, use context.company.display_name (NOT {{company.name}}, which refers to the platform's company record).
         - Never use placeholders like "[Your name]". If context.sender.signature is present, use it verbatim at the end of email bodies. Otherwise build a sign-off from context.sender.full_name + title + phone + display_name (omit blank pieces, but display_name MUST be in the sign-off — that's how the recipient knows who's reaching out). SMS = first name only.
-        - If context.sender.booking_url is present and an action's natural CTA is to schedule / demo / tour / talk live: for send_email actions, render as HTML — `<a href="booking_url">Book here</a>` inside a body wrapped in `<p>` tags so the mail renderer treats it as HTML. For send_sms, include the raw URL with framing like "Book a time:". Don't shove it into unrelated steps.
+        - If context.sender.booking_url is present, reps book through their own links. When an action's natural CTA is to schedule / demo / tour / talk live, link to {{entity.owner_booking_url}}, which fills in the booking link of the rep who owns that record when the message sends. Do not paste context.sender.booking_url: that is only the author's link, and one rule serves many reps. For send_email actions, render it as HTML, `<a href="{{entity.owner_booking_url}}">Book here</a>`, inside a body wrapped in `<p>` tags so the mail renderer treats it as HTML. For send_sms, include it with framing like "Book a time:". Don't shove it into unrelated steps.
       SYS
 
       mode == :refine ? base + "\n\nThe user is iterating on a previous plan. Apply their feedback and return the COMPLETE updated plan in the same JSON shape." : base

@@ -359,21 +359,29 @@ class NotificationService
     end
   end
   
+  # Returns true only when the email actually went out.
   def self.send_email(notification, user)
-    return unless user.email.present?
-    
+    return false unless user.email.present?
+
     begin
       # Use ActionMailer to send email
       NotificationMailer.broadcast_notification(
         user: user,
         notification: notification
       ).deliver_now
-      
+
       notification.update(email_sent: true, email_sent_at: Time.current)
       Rails.logger.info "[NotificationService] Email sent to #{user.email}: #{notification.title}"
+      EmailConnectionHealth.clear_system_mail_failure!(notification: notification)
+      true
     rescue => e
       Rails.logger.error("[NotificationService] Failed to send notification email: #{e.message}")
       Rails.logger.error(e.backtrace.first(5).join("\n"))
+      # These go out from the location or company From address. When the
+      # provider refuses it (an unverified SES identity), every notification
+      # email for that tenant fails, and until now only the log knew.
+      EmailConnectionHealth.flag_system_mail_failure!(notification: notification, recipient: user, error: e)
+      false
     end
   end
   

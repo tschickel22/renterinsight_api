@@ -3,6 +3,9 @@ class Api::V1::CampaignStepsController < ApplicationController
   ALLOWED_DELIVERY_MODES = %w[tracked_link inline_attachment].freeze
 
   before_action :set_company_scope
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
   before_action :set_campaign
   before_action :set_step, only: %i[update destroy upload_attachment remove_attachment update_attachment_mode]
 

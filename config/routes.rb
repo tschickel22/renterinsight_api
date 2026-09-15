@@ -544,6 +544,26 @@ Rails.application.routes.draw do
           post :activate
         end
       end
+      resources :plays, only: [:index, :show] do
+        collection do
+          get :board
+          get :demo_clock
+          patch :demo_clock
+        end
+        member do
+          post :install
+          patch :customize
+          post :uninstall
+          get :performance
+          get :leads
+          get 'leads/:lead_id', action: :lead_journey, as: :lead_journey
+          post :start
+          post :dismiss
+          post :restore
+          post :duplicate
+          get :readiness
+        end
+      end
       resources :workflow_approvals, only: [:index, :show] do
         member do
           post :approve

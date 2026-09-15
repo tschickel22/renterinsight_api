@@ -11,6 +11,9 @@ class Api::V1::CampaignsController < ApplicationController
   }.freeze
 
   before_action :set_company_scope
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
   before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
 
   def index
@@ -238,7 +241,13 @@ class Api::V1::CampaignsController < ApplicationController
     end
 
     new_status = (@campaign.scheduled_at.present? && @campaign.scheduled_at > Time.current) ? 'scheduled' : 'running'
-    @campaign.update!(status: new_status, started_at: Time.current)
+    # A recurring campaign starting now opens its first cycle now. One that
+    # starts later opens it when the scheduler promotes it.
+    @campaign.update!(
+      status: new_status,
+      started_at: Time.current,
+      cycle_started_at: (Time.current if new_status == 'running' && @campaign.recurring?)
+    )
 
     if new_status == 'running' && defined?(WebhookService)
       WebhookService.fire(company_id: @company.id, event: 'campaign.started', payload: { campaign_id: @campaign.id })

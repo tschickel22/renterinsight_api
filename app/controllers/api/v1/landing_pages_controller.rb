@@ -376,13 +376,25 @@ class Api::V1::LandingPagesController < ApplicationController
       title: title.presence || 'Landing Page',
       fields: params[:form_fields],
       location: target_location,
-      notified_user: current_user
+      notified_user: current_user,
+      source: landing_page_source
     ).call
   rescue StandardError => e
     # A page without a form is recoverable — the editor can bind one. A failed
     # create is not.
     Rails.logger.warn("[LandingPages] form build failed: #{e.message}")
     nil
+  end
+
+  # A form with no source files its leads under "Web Form", so a dealer cannot
+  # tell landing page leads from any other website lead. A caller (a starter
+  # play, for one) may name the source; otherwise it is "Landing Page".
+  def landing_page_source
+    if params[:source_id].present?
+      named = @company.sources.find_by(id: params[:source_id])
+      return named if named
+    end
+    @company.sources.find_or_create_by(name: 'Landing Page') { |source| source.is_active = true }
   end
 
   # SiteRenderer reads the form id off the contact block, so the column and the
@@ -558,20 +570,7 @@ class Api::V1::LandingPagesController < ApplicationController
     )
   end
 
-  # Built from the same resolution order Websites::HostResolver uses, so what
-  # the builder shows is what a visitor would actually type.
   def public_url_for(page)
-    site = page.website
-    return nil if site.nil?
-
-    host = site.company_domains.detect(&:web_enabled?)&.hostname
-    host ||= site.domain.presence
-    # site_host_root, not subdomain_root: the platform domain has no wildcard
-    # record, so a URL built on it named a host that does not resolve and the
-    # View button opened a browser error page.
-    host ||= Websites::SiteAddress.host_for(site) if site.subdomain.present?
-    return nil if host.blank?
-
-    "https://#{host}#{page.path}"
+    LandingPages::PublicUrl.for(page)
   end
 end

@@ -14,6 +14,9 @@ class CampaignSchedulerJob < ApplicationJob
   def promote_scheduled_to_running
     Campaign.where(status: 'scheduled').where('scheduled_at <= ?', Time.current).find_each do |c|
       c.update!(status: 'running')
+      # Put last cycle's recipients back on the first step before the enroller
+      # adds anyone new. See Campaigns::RecurringCycle.
+      Campaigns::RecurringCycle.new(campaign: c).start! if c.recurring?
       if defined?(WebhookService)
         WebhookService.fire(company_id: c.company_id, event: 'campaign.started', payload: { campaign_id: c.id })
       end
@@ -59,9 +62,13 @@ class CampaignSchedulerJob < ApplicationJob
 
   def finalize_completed_campaigns
     Campaign.running.find_each do |c|
-      total = c.campaign_enrollments.count
+      # Test sends don't count. A test enrollment has no send time and never
+      # completes, so it held Evangeline's weekly digest in its first cycle
+      # for two months.
+      enrollments = c.campaign_enrollments.real
+      total = enrollments.count
       next if total.zero?
-      remaining = c.campaign_enrollments.where(status: %w[pending active]).count
+      remaining = enrollments.where(status: %w[pending active]).count
       next if remaining.positive?
 
       # Recurring-digest campaigns cycle forever — the user's INTENT is

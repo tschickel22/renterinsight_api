@@ -2,34 +2,38 @@ module WorkflowEngine
   module ConditionEvaluator
     module_function
 
-    def evaluate(conditions, context)
+    # trigger: the event payload that started the rule. A field beginning with
+    # "trigger." reads from it, so a rule can act on the stage a deal moved TO
+    # rather than whatever stage it happens to sit in. Branch steps already pass
+    # a hash context carrying 'trigger' and don't use this argument.
+    def evaluate(conditions, context, trigger: nil)
       return true if conditions.blank?
       return true if conditions.is_a?(Array) && conditions.empty?
       return true if conditions.is_a?(Hash) && conditions.empty?
-      evaluate_node(conditions, context)
+      evaluate_node(conditions, context, trigger)
     end
 
-    def evaluate_node(node, context)
+    def evaluate_node(node, context, trigger = nil)
       case node
       when Array
-        node.all? { |n| evaluate_node(n, context) }
+        node.all? { |n| evaluate_node(n, context, trigger) }
       when Hash
         type = node['type'] || node['logic']
         children = node['children'] || node['conditions']
         if type == 'and'
-          Array(children).all? { |c| evaluate_node(c, context) }
+          Array(children).all? { |c| evaluate_node(c, context, trigger) }
         elsif type == 'or'
-          Array(children).any? { |c| evaluate_node(c, context) }
+          Array(children).any? { |c| evaluate_node(c, context, trigger) }
         else
-          evaluate_leaf(node, context)
+          evaluate_leaf(node, context, trigger)
         end
       else
         true
       end
     end
 
-    def evaluate_leaf(leaf, context)
-      field_value = resolve_field(leaf['field'], context)
+    def evaluate_leaf(leaf, context, trigger = nil)
+      field_value = resolve_leaf_field(leaf['field'], context, trigger)
       value = leaf['value']
       case leaf['operator'].to_s
       when 'equals' then field_value == value
@@ -99,6 +103,14 @@ module WorkflowEngine
       end
     end
 
+    def resolve_leaf_field(path, context, trigger)
+      if trigger && path.to_s.start_with?('trigger.')
+        resolve_field(path.to_s.delete_prefix('trigger.'), trigger)
+      else
+        resolve_field(path, context)
+      end
+    end
+
     def resolve_field(path, context)
       return nil if path.blank?
       parts = path.to_s.split('.')
@@ -135,8 +147,14 @@ module WorkflowEngine
     # fallback to fire when the segment is a JSONB key rather than a real
     # column. This picks the fallback when the AR model doesn't have the
     # attribute at all.
+    #
+    # Associations count as present. Their readers are neither columns nor
+    # methods defined on the class itself, so `source.name` fell through to the
+    # custom-field lookup, came back nil, and every rule conditioned on a lead's
+    # source (the seeded Champion round robin among them) silently never ran.
     def attribute_missing?(record, name)
       return false unless record.class.respond_to?(:column_names)
+      return false if record.class.respond_to?(:reflect_on_association) && record.class.reflect_on_association(name.to_sym)
       !record.class.column_names.include?(name.to_s) &&
         !record.class.instance_methods(false).include?(name.to_sym)
     end

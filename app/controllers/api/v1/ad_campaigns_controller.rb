@@ -2,6 +2,9 @@
 
 class Api::V1::AdCampaignsController < ApplicationController
   before_action :set_company_scope
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true
   before_action :set_campaign, only: %i[show pause resume destroy ad_sets]
 
   MAX_PER_PAGE = 100
