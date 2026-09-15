@@ -10,7 +10,9 @@ module Api
 
       before_action :set_company_scope
       require_module! 'marketing.automation'
-      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey]
+      before_action :set_play, only: [:show, :install, :customize, :uninstall, :performance, :leads, :lead_journey, :start]
+
+      MAX_START_LEADS = 500
 
       # GET /api/v1/plays
       # Offered plays, plus any retired play this company still has on.
@@ -97,6 +99,44 @@ module Api
         render json: journey
       end
 
+      # POST /api/v1/plays/:id/start  { lead_ids: [...] }
+      # Starts a play for leads a rep picked by adding the play's starting tag,
+      # so they go through exactly what a tagged lead does. A lead that already
+      # has the tag is not started again.
+      def start
+        return unless authorize_action!('leads', 'update')
+        return unless (installation = require_installation)
+
+        tag_name = @play.respond_to?(:start_tag_for) ? @play.start_tag_for(installation) : nil
+        if tag_name.blank?
+          return render json: { error: "#{@play::NAME} can't be started by hand." }, status: :unprocessable_entity
+        end
+
+        ids = Array(params[:lead_ids]).map(&:to_i).select(&:positive?).uniq
+        return render(json: { error: 'Choose at least one lead.' }, status: :unprocessable_entity) if ids.empty?
+        if ids.size > MAX_START_LEADS
+          return render json: { error: "Start a play for up to #{MAX_START_LEADS} leads at a time." }, status: :unprocessable_entity
+        end
+
+        leads = @company.leads.where(id: ids)
+        leads = leads.where(location_id: visible_location_ids) if visible_location_ids
+        tag = @company.tags.find_or_create_by!(name: tag_name) do |t|
+          t.color = '#0F766E'
+          t.is_active = true
+          t.is_system = false
+        end
+        already = TagAssignment.where(tag_id: tag.id, entity_type: 'Lead', entity_id: leads.select(:id)).pluck(:entity_id)
+
+        started = 0
+        leads.where.not(id: already).find_each do |lead|
+          TagAssignment.create!(company_id: @company.id, tag: tag, entity_type: 'Lead', entity_id: lead.id,
+                                assigned_by: current_user.id.to_s, assigned_at: Time.current)
+          started += 1
+        end
+
+        render json: { started: started, already_started: already.size, not_found: ids.size - started - already.size, tag: tag.name }
+      end
+
       private
 
       def set_play
@@ -133,7 +173,7 @@ module Api
       def answers_param
         raw = params[:answers]
         raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
-        (raw || {}).to_h.slice('sources', 'reps_by_location', 'send_texts', 'content')
+        (raw || {}).to_h.slice('sources', 'start_tag', 'reps_by_location', 'send_texts', 'content')
       end
 
       def play_json(play)

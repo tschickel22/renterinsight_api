@@ -18,6 +18,10 @@ module Plays
         [{ name: 'Facebook Contact', source: 'Facebook', fields: :contact }]
       end
 
+      def start_tag
+        'facebook-lead'
+      end
+
       def default_content
         {
           'first_touch_wait_minutes' => 0,

@@ -73,9 +73,21 @@ module Plays
         []
       end
 
-      # A tag a rep can add to start the play by hand, or nil.
+      # The tag that starts the play when a rep adds it, before the dealer
+      # changes it. Each install keeps its own (answers['start_tag']).
       def start_tag
         nil
+      end
+
+      # A dealer's tag, as tags are stored: lowercase, words joined by hyphens.
+      # Blank means the play has no starting tag.
+      def normalize_tag(value)
+        value.to_s.strip.downcase.gsub(/\s+/, '-').gsub(/[^a-z0-9_-]/, '').presence
+      end
+
+      # The tag that starts this install by hand, for "Start a play".
+      def start_tag_for(installation)
+        answers_for(installation)['start_tag']
       end
 
       # :rotation assigns every lead from the rotation. :keep_owner leaves a
@@ -139,6 +151,8 @@ module Plays
           available_sources: company.sources.active.order(:name).pluck(:name).uniq,
           forms: forms.map { |form| form[:name] },
           start_tag: start_tag,
+          default_start_tag: start_tag,
+          weekly_homes_tag: WEEKLY_HOMES_TAG,
           texting_ready: texting,
           fields: { messages: MESSAGE_FIELDS.keys, follow_up_emails: FOLLOW_UP_FIELDS.keys },
           default_content: default_content,
@@ -158,11 +172,12 @@ module Plays
           installed_at: installation.installed_at&.iso8601,
           updated_at: installation.updated_at&.iso8601,
           sources: answers['sources'],
+          start_tag: answers['start_tag'],
           reps_by_location: answers['reps_by_location'],
           send_texts: answers['send_texts'],
           content: answers['content'],
           map: map_for(company: company, sources: answers['sources'], content: answers['content'],
-                       rep_names: rep_names, send_texts: answers['send_texts']),
+                       rep_names: rep_names, send_texts: answers['send_texts'], tag: answers['start_tag']),
           intake_forms: IntakeForm.where(company_id: company.id, id: installation.asset_ids(:intake_form_ids)).map do |form|
             { id: form.id, name: form.name, source: form.source&.name, public_url: form.public_url,
               embed_code: form.embed_code, is_active: form.is_active }
@@ -182,6 +197,8 @@ module Plays
         stored = (installation.answers || {}).deep_stringify_keys
         {
           'sources' => Array(stored['sources']).presence || legacy_sources(stored),
+          # Installs from before the tag was editable stored none; they keep the preset's.
+          'start_tag' => stored.key?('start_tag') ? normalize_tag(stored['start_tag']) : start_tag,
           'reps_by_location' => stored['reps_by_location'] || {},
           'send_texts' => ActiveModel::Type::Boolean.new.cast(stored['send_texts']) || false,
           'content' => normalize_content(stored['content'])
@@ -305,13 +322,13 @@ module Plays
       # What the play does, in order, with each message previewed on sample
       # values. Drawn before a play is on (from its defaults) and after (from
       # the dealer's content), so what they see is what runs.
-      def map_for(company:, sources:, content:, rep_names:, send_texts:)
+      def map_for(company:, sources:, content:, rep_names:, send_texts:, tag: start_tag)
         sample = SAMPLE_VALUES.merge('rep_name' => rep_names.first || 'Your rep', 'dealership' => company.name)
         steps = []
 
         trigger_detail = []
         trigger_detail << "Forms: #{forms.map { |f| f[:name] }.join(', ')}" if forms.any?
-        trigger_detail << "Or when a rep tags a lead #{start_tag}" if start_tag
+        trigger_detail << "Or when a rep tags a lead #{tag}" if tag
         steps << { key: 'trigger', kind: 'trigger', title: "New lead from #{Array(sources).join(', ')}",
                    detail: trigger_detail.join('. ').presence }
 
@@ -432,9 +449,7 @@ module Plays
         steps = steps_graph(nurture: nurture, rotations: rotations)
 
         rules = [create_rule("#{self.class::NAME}: new lead", new_lead_trigger, source_conditions(source_records), steps)]
-        if self.class.start_tag
-          rules << create_rule("#{self.class::NAME}: tagged #{self.class.start_tag}", tag_trigger, tag_conditions, steps)
-        end
+        rules << create_rule("#{self.class::NAME}: tagged #{start_tag}", tag_trigger, tag_conditions, steps) if start_tag
 
         PlayInstallation.create!(
           company_id: @company.id,
@@ -474,16 +489,30 @@ module Plays
         sync_nurture_steps(nurture)
         steps = steps_graph(nurture: nurture, rotations: rotations)
 
-        rules = WorkflowRule.where(company_id: @company.id, id: Array(assets['workflow_rule_ids'])).to_a
-        rules.each do |rule|
-          conditions = rule.trigger['event_type'] == 'lead.tagged' ? tag_conditions : source_conditions(source_records)
-          rule.update!(steps: steps, conditions: conditions)
+        rules = WorkflowRule.where(company_id: @company.id, id: Array(assets['workflow_rule_ids'])).where.not(status: 'archived').to_a
+        tag_rule = rules.find { |rule| rule.trigger['event_type'] == 'lead.tagged' }
+        (rules - [tag_rule]).each do |rule|
+          rule.update!(steps: steps, conditions: source_conditions(source_records))
           ensure_valid!(rule)
+        end
+
+        # The starting tag can be added, changed or removed after install.
+        rule_ids = Array(assets['workflow_rule_ids'])
+        if start_tag && tag_rule
+          tag_rule.update!(name: unique_name(@company.workflow_rules.where.not(status: 'archived').where.not(id: tag_rule.id),
+                                             "#{self.class::NAME}: tagged #{start_tag}"),
+                           steps: steps, conditions: tag_conditions)
+          ensure_valid!(tag_rule)
+        elsif start_tag
+          rule_ids += [create_rule("#{self.class::NAME}: tagged #{start_tag}", tag_trigger, tag_conditions, steps).id]
+        elsif tag_rule
+          tag_rule.update!(status: 'archived')
         end
 
         @installation.update!(
           answers: stored_answers,
           assets: assets.merge(
+            'workflow_rule_ids' => rule_ids.uniq,
             'nurture_sequence_ids' => [nurture.id],
             'round_robin_list_ids' => (Array(assets['round_robin_list_ids']) + rotations.values.map(&:id)).uniq,
             'round_robin_lists' => rotations.transform_values(&:id)
@@ -508,7 +537,30 @@ module Plays
                             'A lead can only start one play, or it would get two first messages.'
       end
 
+      if start_tag == WEEKLY_HOMES_TAG
+        raise InstallError, "#{WEEKLY_HOMES_TAG} is the weekly homes email tag, and this play adds it to every lead. Choose another starting tag."
+      end
+      if start_tag && (other = claimed_tags[start_tag])
+        raise InstallError, "The tag #{start_tag} already starts #{other}. Choose another tag, or change it on that play first."
+      end
+
       self.class.validate_content!(content)
+    end
+
+    # nil when the play has no starting tag.
+    def start_tag
+      return @start_tag if defined?(@start_tag)
+
+      @start_tag = @answers.key?('start_tag') ? self.class.normalize_tag(@answers['start_tag']) : self.class.start_tag
+    end
+
+    # Starting tags other active plays use, tag => play name.
+    def claimed_tags
+      PlayInstallation.active.where(company_id: @company.id).where.not(id: @installation&.id).each_with_object({}) do |installation, acc|
+        play = Plays::Registry.find(installation.play_key)
+        tag = play.respond_to?(:start_tag_for) && play.kind == 'lead_response' ? play.start_tag_for(installation) : nil
+        acc[tag] = play::NAME if tag
+      end
     end
 
     def sources
@@ -560,6 +612,7 @@ module Plays
     def stored_answers
       {
         sources: sources,
+        start_tag: start_tag,
         reps_by_location: reps_by_location.to_h { |location, ids| [location.id.to_s, ids] },
         send_texts: send_texts?,
         content: content
@@ -577,7 +630,7 @@ module Plays
     end
 
     def ensure_tags
-      [self.class.start_tag, WEEKLY_HOMES_TAG].compact.each do |name|
+      [start_tag, WEEKLY_HOMES_TAG].compact.each do |name|
         tag = @company.tags.find_or_create_by!(name: name) do |t|
           t.color = '#0F766E'
           t.is_active = true
@@ -746,7 +799,7 @@ module Plays
     end
 
     def tag_conditions
-      [{ 'field' => 'trigger.tag_name', 'operator' => 'equals', 'value' => self.class.start_tag }]
+      [{ 'field' => 'trigger.tag_name', 'operator' => 'equals', 'value' => start_tag }]
     end
 
     def unique_name(scope, base)

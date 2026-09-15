@@ -106,6 +106,11 @@ module Plays
         }
       end
 
+      # "Start a play" adds this tag; the next send picks the lead up.
+      def start_tag_for(_installation)
+        TAG
+      end
+
       # Other plays ask which lead sources a play claims; this one claims none.
       def answers_for(installation)
         { 'sources' => [], 'content' => normalize_content((installation.answers || {})['content']) }
@@ -132,6 +137,7 @@ module Plays
             status: campaign.status,
             next_send_at: next_send_at(campaign)&.iso8601
           },
+          start_tag: TAG,
           sources: [], reps_by_location: {}, send_texts: false,
           intake_forms: [], workflow_rules: [], nurture_sequences: [], rotations: []
         }

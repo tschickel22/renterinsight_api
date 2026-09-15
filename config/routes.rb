@@ -552,6 +552,7 @@ Rails.application.routes.draw do
           get :performance
           get :leads
           get 'leads/:lead_id', action: :lead_journey, as: :lead_journey
+          post :start
         end
       end
       resources :workflow_approvals, only: [:index, :show] do

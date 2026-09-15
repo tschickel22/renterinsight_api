@@ -58,10 +58,12 @@ RSpec.describe Plays::LeadResponsePlay do
     it 'switches on a valid workflow, its form, rotations and follow-up emails' do
       installation = install(described_class)
 
+      # A new-lead rule, and one for its starting tag.
       rules = WorkflowRule.where(id: installation.asset_ids(:workflow_rule_ids))
-      expect(rules.map(&:status)).to eq(['active'])
-      expect(WorkflowRuleValidator.new(rules.first).validate).to be_valid
-      expect(rules.first.conditions.first['value']).to eq(['Facebook'])
+      expect(rules.map(&:status)).to eq(%w[active active])
+      new_lead = rules.find { |rule| rule.trigger['event_type'] == 'lead.created' }
+      expect(WorkflowRuleValidator.new(new_lead).validate).to be_valid
+      expect(new_lead.conditions.first['value']).to eq(['Facebook'])
 
       form = IntakeForm.find(installation.asset_ids(:intake_form_ids).first)
       expect(form).to have_attributes(name: 'Facebook Contact', is_active: true)
