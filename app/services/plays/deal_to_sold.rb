@@ -16,9 +16,9 @@ module Plays
   class DealToSold
     KEY = 'deal_to_sold'
     NAME = 'Deal to sold'
-    DESCRIPTION = 'When a deal is won, the buyer gets a thank-you, a review request and a referral ask from their rep, ' \
-                  'and the rep gets a check-in call. Reps also get a task when a deal reaches a stage you choose, ' \
-                  'and a reminder to check back on lost deals.'
+    DESCRIPTION = 'When a deal is won, the buyer gets an onboarding series from their rep: congratulations, next steps ' \
+                  'and what to expect, then a review request and a referral ask, while the rep gets a check-in call. ' \
+                  'Reps also get a task when a deal reaches a stage you choose, and a reminder to check back on lost deals.'
 
     DONE_TAG = 'after-sale-done'
     MAX_STAGE_TASKS = 6
@@ -45,7 +45,9 @@ module Plays
 
     # The touches after a win, each some days after it.
     AFTER_SALE = {
-      'thank_you' => { type: :email, title: 'Thank-you email' },
+      'thank_you' => { type: :email, title: 'Congratulations email' },
+      'next_steps' => { type: :email, title: 'Next steps email' },
+      'what_to_expect' => { type: :email, title: 'What to expect email' },
       'check_in' => { type: :task, title: 'Check-in call for the rep' },
       'review_request' => { type: :email, title: 'Review request' },
       'referral_ask' => { type: :email, title: 'Referral ask' }
@@ -72,9 +74,27 @@ module Plays
       def default_content
         {
           'thank_you' => {
-            'enabled' => true, 'day' => 0, 'subject' => 'Thank you, {{first_name}}',
-            'body' => "Hi {{first_name}},\n\nThank you for choosing {{dealership}}. It was a pleasure working with you, " \
-                      "and I am here for anything you need while we get your home ready.\n\n{{rep_name}}\n{{rep_phone}}"
+            'enabled' => true, 'day' => 0, 'subject' => 'Congratulations on your new home, {{first_name}}!',
+            'body' => "Hi {{first_name}},\n\nCongratulations on your new home, and thank you for choosing {{dealership}}. " \
+                      'It was a pleasure working with you. Over the next few days I will send you what happens next ' \
+                      "and what to expect, so nothing catches you by surprise.\n\n{{rep_name}}\n{{rep_phone}}"
+          },
+          'next_steps' => {
+            'enabled' => true, 'day' => 1, 'subject' => 'What happens next, {{first_name}}',
+            'body' => "Hi {{first_name}},\n\nHere is what happens next with your home:\n\n" \
+                      "1. We finalize your paperwork and financing.\n2. We confirm your site is ready for delivery.\n" \
+                      "3. We schedule delivery and setup, and let you know the date.\n" \
+                      "4. We walk through your home with you before move-in.\n\n" \
+                      "If anything changes on your side, reply here and I will take care of it.\n\n{{rep_name}}"
+          },
+          'what_to_expect' => {
+            'enabled' => true, 'day' => 3, 'subject' => 'What to expect before move-in',
+            'body' => "Hi {{first_name}},\n\nA few things to expect before you move in:\n\n" \
+                      "Delivery and setup take a few weeks, depending on your site and the weather.\n" \
+                      "Our delivery and setup team may call to confirm access to your site.\n" \
+                      "Utilities are usually connected after setup, so plan those calls ahead.\n" \
+                      "We will do a final walk-through together and answer any questions.\n\n" \
+                      "Reply any time with questions.\n\n{{rep_name}}"
           },
           'check_in' => { 'enabled' => true, 'day' => 7, 'subject' => 'Check in with {{buyer_name}}' },
           'review_request' => {
@@ -100,6 +120,12 @@ module Plays
 
         AFTER_SALE.each_key do |key|
           base = defaults[key]
+          # Content saved before the onboarding emails existed (it has a thank-you
+          # but not them) starts with them off, so saving an older install does not
+          # quietly add emails its dealer never saw.
+          if %w[next_steps what_to_expect].include?(key) && given.key?('thank_you') && !given.key?(key)
+            base = base.merge('enabled' => false)
+          end
           merged = base.merge((given[key].is_a?(Hash) ? given[key] : {}).slice(*base.keys))
           content[key] = base.keys.to_h do |field|
             value = case field
@@ -334,6 +360,7 @@ module Plays
             thank_yous_sent: sent.call('thank_you'),
             review_requests_sent: sent.call('review_request'),
             referral_asks_sent: sent.call('referral_ask'),
+            onboarding_emails_sent: sent.call('next_steps') + sent.call('what_to_expect'),
             won_without_email: no_email,
             check_ins: check_ins,
             check_ins_done: check_ins_done,

@@ -69,7 +69,8 @@ RSpec.describe Plays::DealToSold do
 
       branches = described_class.installation_json(installation)[:map].first[:branches]
       expect(branches.map { |b| b[:label] }).to eq(['Won (Closed Won)', 'Reaches a stage you chose', 'Lost'])
-      expect(branches.first[:steps].map { |s| s[:key] }).to eq(%w[thank_you check_in review_request referral_ask])
+      expect(branches.first[:steps].map { |s| s[:key] })
+        .to eq(%w[thank_you next_steps what_to_expect check_in review_request referral_ask])
     end
 
     it 'refuses a review request with no link, a won stage task, an unknown field, and nothing turned on' do
@@ -86,7 +87,7 @@ RSpec.describe Plays::DealToSold do
 
   describe 'a won deal' do
     it 'thanks the buyer, gives the rep a check-in, asks for a review and a referral, then marks the deal done' do
-      install('review_request' => review)
+      install('review_request' => review, 'next_steps' => { 'enabled' => false }, 'what_to_expect' => { 'enabled' => false })
       deal = deal_for(buyer)
       start = Time.current
       deal.update!(stage: 'closed_won')
@@ -94,7 +95,7 @@ RSpec.describe Plays::DealToSold do
 
       advance(run)
       expect(CommunicationService).to have_received(:send_email)
-        .with(hash_including(to: 'tia@example.com', subject: 'Thank you, Tia'))
+        .with(hash_including(to: 'tia@example.com', subject: 'Congratulations on your new home, Tia!'))
       # A waiting run already points at the step the wait leads to.
       expect(run).to have_attributes(status: 'waiting', current_step_id: 'check_in')
 
@@ -114,7 +115,8 @@ RSpec.describe Plays::DealToSold do
 
     it "skips buyer emails when the deal's contact has no email, and still gives the rep the check-in" do
       install('check_in' => { 'enabled' => true, 'day' => 0, 'subject' => 'Call {{buyer_name}}' },
-              'referral_ask' => { 'enabled' => false })
+              'referral_ask' => { 'enabled' => false }, 'next_steps' => { 'enabled' => false },
+              'what_to_expect' => { 'enabled' => false })
       deal = deal_for(no_email)
       deal.update!(stage: 'closed_won')
       run = advance(runs_for(deal).first)
@@ -122,6 +124,36 @@ RSpec.describe Plays::DealToSold do
       expect(run.status).to eq('completed')
       expect(CommunicationService).not_to have_received(:send_email)
       expect(DealActivity.where(deal_id: deal.id).count).to eq(1)
+    end
+  end
+
+  describe 'onboarding series' do
+    it 'sends congratulations, next steps and what to expect, in that order, before the check-in' do
+      install
+      deal = deal_for(buyer)
+      start = Time.current
+      deal.update!(stage: 'closed_won')
+      run = advance(runs_for(deal).first)
+
+      expect(CommunicationService).to have_received(:send_email)
+        .with(hash_including(subject: 'Congratulations on your new home, Tia!'))
+      expect(run.current_step_id).to eq('has_email_next_steps')
+
+      travel_to(start + 1.day + 1.hour) { advance(run) }
+      expect(CommunicationService).to have_received(:send_email)
+        .with(hash_including(subject: 'What happens next, Tia', body: include('We schedule delivery and setup')))
+
+      travel_to(start + 3.days + 2.hours) { advance(run) }
+      expect(CommunicationService).to have_received(:send_email).with(hash_including(subject: 'What to expect before move-in'))
+      expect(run.current_step_id).to eq('check_in')
+    end
+
+    it 'leaves the new onboarding emails off for plays saved before they existed' do
+      saved = { 'thank_you' => { 'enabled' => true, 'day' => 0, 'subject' => 'Hi', 'body' => 'Hi' } }
+
+      expect(described_class.normalize_content(saved)['next_steps']['enabled']).to be false
+      expect(described_class.normalize_content(saved)['what_to_expect']['enabled']).to be false
+      expect(described_class.normalize_content(nil)['next_steps']['enabled']).to be true
     end
   end
 
@@ -190,12 +222,12 @@ RSpec.describe Plays::DealToSold do
 
       summary = described_class.performance_for(installation, period: '30', location_ids: nil)
       expect(summary[:stage_counts]).to include('after_sale' => 1, 'in_pipeline' => 1)
-      expect(summary[:step_counts]).to eq('check_in' => 1)
+      expect(summary[:step_counts]).to eq('next_steps' => 1)
       expect(summary[:metrics]).to include(deals_won: 1, thank_yous_sent: 1, check_ins: 0, stage_tasks: 1, stage_tasks_done: 0)
 
       list = described_class.leads_for(installation, period: '30', location_ids: nil, stage: 'after_sale', page: 1, per_page: 25)
       expect(list[:items].first).to include(lead_id: won.id, record_path: "/deals/#{won.id}",
-                                            detail: 'Next: Check-in call for the rep on')
+                                            detail: 'Next: Next steps email on')
       expect(described_class.leads_for(installation, period: '30', location_ids: [0], stage: nil, page: 1, per_page: 25)[:meta][:total]).to eq(0)
 
       journey = described_class.lead_journey_for(installation, won, location_ids: nil)
