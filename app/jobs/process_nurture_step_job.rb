@@ -60,7 +60,7 @@ class ProcessNurtureStepJob < ApplicationJob
       # Schedule next step
       next_step = steps[next_index]
       wait_days = next_step.wait_days || 0
-      ProcessNurtureStepJob.set(wait: wait_days.days).perform_later(enrollment.id)
+      ProcessNurtureStepJob.set(wait: DemoClock.scale(enrollment.company, wait_days.days)).perform_later(enrollment.id)
     else
       # Sequence completed
       enrollment.update!(status: 'completed')

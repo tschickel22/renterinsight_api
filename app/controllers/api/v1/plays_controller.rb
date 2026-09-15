@@ -93,6 +93,31 @@ module Api
         render json: { play: play_json(@play) }
       end
 
+      # GET /api/v1/plays/board
+      # The journey board: everyone in a play that is on, in the furthest step
+      # they have reached, for the locations this viewer can see.
+      def board
+        return unless authorize_action!('workflow_automation', 'read')
+
+        render json: Plays::Board.new(company: @company, location_ids: visible_location_ids).call
+      end
+
+      # GET /api/v1/plays/demo_clock, PATCH { enabled: }
+      # Days run as minutes, for a booth demo. Demo companies only.
+      def demo_clock
+        if request.patch?
+          return unless authorize_action!('workflow_automation', 'update')
+          unless DemoClock.available?(@company)
+            return render json: { error: 'The demo clock only runs on demo companies.' }, status: :unprocessable_entity
+          end
+
+          DemoClock.enable!(@company, ActiveModel::Type::Boolean.new.cast(params[:enabled]))
+        else
+          return unless authorize_action!('workflow_automation', 'read')
+        end
+        render json: { available: DemoClock.available?(@company), enabled: DemoClock.enabled?(@company) }
+      end
+
       # GET /api/v1/plays/:id/readiness
       # What the play needs to work well, checked now, with where to fix each.
       def readiness

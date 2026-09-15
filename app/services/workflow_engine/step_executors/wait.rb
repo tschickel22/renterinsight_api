@@ -7,7 +7,8 @@ module WorkflowEngine
         unit = (config['unit'] || 'minutes').to_s
         unit = 'minutes' unless %w[minutes hours days].include?(unit)
 
-        wait_until = Time.current + duration.send(unit)
+        # A demo company with the demo clock on runs days as minutes.
+        wait_until = Time.current + DemoClock.scale(@run.company, duration.send(unit))
         Rails.logger.info "[Wait] run=#{@run.id} step=#{@step['id']} until=#{wait_until}"
 
         {

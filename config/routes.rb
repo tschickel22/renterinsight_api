@@ -545,6 +545,11 @@ Rails.application.routes.draw do
         end
       end
       resources :plays, only: [:index, :show] do
+        collection do
+          get :board
+          get :demo_clock
+          patch :demo_clock
+        end
         member do
           post :install
           patch :customize

@@ -33,7 +33,7 @@ module WorkflowEngine
         end
 
         timeout_hours = (cfg['timeout_hours'] || 72).to_i
-        deadline = Time.current + timeout_hours.hours
+        deadline = Time.current + DemoClock.scale(@run.company, timeout_hours.hours)
         @run.update!(variables: (@run.variables || {}).merge(
           state_key => { 'started_at' => Time.current.iso8601(6), 'deadline' => deadline.iso8601(6) }
         ))
