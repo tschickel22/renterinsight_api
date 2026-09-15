@@ -4,6 +4,9 @@ module Api
   module V1
     class CampaignUploadsController < ApplicationController
       before_action :set_company_scope
+      include ModuleAccessRequired
+      # Log only until plan data grants these modules everywhere (v3 plan §18).
+      require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
 
       # POST /api/v1/campaigns/:campaign_id/uploads
       # Uploads an image to S3 for inline use in email campaign step content (TipTap editor)

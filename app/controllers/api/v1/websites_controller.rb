@@ -6,6 +6,9 @@ class Api::V1::WebsitesController < ApplicationController
   skip_before_action :authenticate, only: [:by_token, :by_slug_public]
   
   before_action :set_company_scope, except: [:by_token, :by_slug_public]
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_module! 'marketing.website', log_only: true, except: [:by_token, :by_slug_public]
   before_action :set_website, only: [:show, :update, :destroy, :publish, :unpublish, :sync_branding, :analytics]
 
   def index

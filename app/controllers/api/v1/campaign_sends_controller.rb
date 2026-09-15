@@ -1,5 +1,8 @@
 class Api::V1::CampaignSendsController < ApplicationController
   before_action :set_company_scope
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
   before_action :set_campaign
 
   def index

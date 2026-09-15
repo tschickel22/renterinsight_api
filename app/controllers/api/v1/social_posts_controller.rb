@@ -3,6 +3,9 @@
 class Api::V1::SocialPostsController < ApplicationController
   skip_before_action :authenticate, only: [:skip, :email_approve, :email_decline]
   before_action :set_company_scope, except: [:skip, :email_approve, :email_decline]
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true, except: [:skip, :email_approve, :email_decline]
   before_action :set_post, only: %i[show update destroy approve publish schedule duplicate]
 
   MAX_PER_PAGE = 200

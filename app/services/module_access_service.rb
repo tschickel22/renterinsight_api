@@ -192,10 +192,17 @@ class ModuleAccessService
         description: category[:description],
         modules: category[:modules].map do |mod|
           status = modules_status[mod[:key]] || { enabled: false, source: 'none' }
+          # Standalone products this module drives without granting (Campaign Desk:
+          # campaigns, workflows) that this company does not own, so an operator
+          # sees what the tenant will and will not get.
+          works_without_missing = Array(mod[:works_without] || PlatformModule::MODULES.dig(mod[:key], :works_without))
+                                  .reject { |key| modules_status.dig(key, :enabled) }
+                                  .map { |key| { key: key, name: PlatformModule::MODULES.dig(key, :name) || key } }
           mod.merge(
             enabled: status[:enabled],
             source: status[:source],
-            override_reason: status[:reason]
+            override_reason: status[:reason],
+            works_without_missing: works_without_missing
           )
         end
       }

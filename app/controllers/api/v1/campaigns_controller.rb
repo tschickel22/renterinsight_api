@@ -11,6 +11,9 @@ class Api::V1::CampaignsController < ApplicationController
   }.freeze
 
   before_action :set_company_scope
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
   before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
 
   def index

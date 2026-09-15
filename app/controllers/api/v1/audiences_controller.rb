@@ -2,6 +2,9 @@ require 'csv'
 
 class Api::V1::AudiencesController < ApplicationController
   before_action :set_company_scope
+  include ModuleAccessRequired
+  # Log only until plan data grants these modules everywhere (v3 plan §18).
+  require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
   before_action :set_audience, only: %i[show update destroy preview refresh archive unarchive members export add_members remove_members]
 
   def index
