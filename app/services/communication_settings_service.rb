@@ -351,8 +351,10 @@ class CommunicationSettingsService
         refreshed = perform_oauth_token_refresh(config)
         if refreshed
           persist_refreshed_tokens(refreshed, config, user_connection: user_connection)
+          clear_shared_mailbox_flag!
           return refreshed[:access_token]
         end
+        flag_shared_mailbox!(@last_oauth_refresh_error) if @last_oauth_refresh_error.present?
       end
     end
 
@@ -363,6 +365,7 @@ class CommunicationSettingsService
   end
 
   def perform_oauth_token_refresh(config)
+    @last_oauth_refresh_error = nil
     provider      = config['oauthProvider'] || config[:oauthProvider]
     refresh_token = config['oauthRefreshToken'] || config[:oauthRefreshToken]
     return nil if refresh_token.blank?
@@ -394,7 +397,10 @@ class CommunicationSettingsService
     tokens = JSON.parse(res.body)
 
     if tokens['error'].present?
-      Rails.logger.error "[CommunicationSettingsService] OAuth refresh error: #{tokens['error_description'] || tokens['error']}"
+      # Keep the error code. The dead-grant classifier keys on invalid_grant,
+      # and Microsoft's description (AADSTS50173 ...) never contains it.
+      @last_oauth_refresh_error = [tokens['error'], tokens['error_description']].compact_blank.join(' - ')
+      Rails.logger.error "[CommunicationSettingsService] OAuth refresh error: #{@last_oauth_refresh_error}"
       return nil
     end
 
@@ -432,6 +438,24 @@ class CommunicationSettingsService
     Setting.set(scope_class, scope_id, 'communications', merged_comms)
   rescue => e
     Rails.logger.error "[CommunicationSettingsService] Failed to persist refreshed tokens: #{e.message}"
+  end
+
+  # A Location, Company or Platform mailbox is shared, so nobody owns its
+  # failure the way a rep owns their own connection. Before this a revoked
+  # grant here only ever reached the log.
+  def flag_shared_mailbox!(error)
+    scope_type, scope_id = find_oauth_settings_scope
+    return unless scope_type
+
+    EmailConnectionHealth.flag_shared!(
+      scope_type: scope_type, scope_id: scope_id, error: error, channel: 'mailbox',
+      company: company, location: location, sending_user: user
+    )
+  end
+
+  def clear_shared_mailbox_flag!
+    scope_type, scope_id = find_oauth_settings_scope
+    EmailConnectionHealth.clear_shared!(scope_type: scope_type, scope_id: scope_id, channel: 'mailbox') if scope_type
   end
 
   def find_oauth_settings_scope
