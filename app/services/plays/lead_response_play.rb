@@ -985,9 +985,21 @@ module Plays
     end
 
     # Plain text to HTML: a blank line starts a paragraph, a single line break
-    # stays a line break. Escaped first, so a dealer's "<" is never markup.
+    # stays a line break, and a web address becomes a link (a video, a price
+    # sheet). Escaped first, so a dealer's "<" is never markup.
     def paragraphs(text)
-      ERB::Util.html_escape(text.to_s).split(/\n{2,}/).map { |p| "<p>#{p.strip.gsub("\n", '<br>')}</p>" }.join
+      ERB::Util.html_escape(text.to_s).split(/\n{2,}/).map { |p| "<p>#{link_urls(p.strip).gsub("\n", '<br>')}</p>" }.join
+    end
+
+    WEB_ADDRESS = %r{https?://[^\s<>"]+}
+
+    # Runs on escaped text. Punctuation that ends a sentence stays outside the link.
+    def link_urls(html)
+      html.gsub(WEB_ADDRESS) do |match|
+        url = match.sub(/[.,;:!?)]+\z/, '')
+        trailing = match[url.length..]
+        %(<a href="#{url}">#{url}</a>#{trailing})
+      end
     end
   end
 end
