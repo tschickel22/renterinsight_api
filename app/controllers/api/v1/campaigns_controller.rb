@@ -14,7 +14,7 @@ class Api::V1::CampaignsController < ApplicationController
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
   require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -77,6 +77,9 @@ class Api::V1::CampaignsController < ApplicationController
 
     @campaign = @company.campaigns.build(campaign_params)
     @campaign.created_by_user_id = current_user.id
+    if (sender_error = from_identity_error(@campaign))
+      return render(json: { error: sender_error }, status: :unprocessable_entity)
+    end
 
     ActiveRecord::Base.transaction do
       @campaign.save!
@@ -125,7 +128,12 @@ class Api::V1::CampaignsController < ApplicationController
       return
     end
 
-    if @campaign.update(campaign_params)
+    @campaign.assign_attributes(campaign_params)
+    if (sender_error = from_identity_error(@campaign))
+      return render(json: { error: sender_error }, status: :unprocessable_entity)
+    end
+
+    if @campaign.save
       render json: campaign_json(@campaign, full: true)
     else
       render json: { errors: @campaign.errors.full_messages }, status: :unprocessable_entity
@@ -260,7 +268,8 @@ class Api::V1::CampaignsController < ApplicationController
   def pause
     return unless authorize_action!('campaigns', 'update')
     return render(json: { error: "Cannot pause #{@campaign.status} campaign" }, status: :unprocessable_entity) unless %w[running scheduled].include?(@campaign.status)
-    @campaign.update!(status: 'paused')
+    # A person paused it, so there is no system reason to show.
+    @campaign.update!(status: 'paused', paused_at: Time.current, pause_reason: nil)
     if defined?(WebhookService)
       WebhookService.fire(company_id: @company.id, event: 'campaign.paused', payload: { campaign_id: @campaign.id })
     end
@@ -294,7 +303,15 @@ class Api::V1::CampaignsController < ApplicationController
     end
 
     return render(json: { error: "Cannot resume #{@campaign.status} campaign" }, status: :unprocessable_entity) unless @campaign.status == 'paused'
-    @campaign.update!(status: 'running')
+
+    # Resuming into a sender that still cannot send would only pause it again on
+    # the first recipient. Say what is wrong instead.
+    if (problem = Campaigns::SenderHealth.problem_for(@campaign))
+      return render(json: { error: problem.message, code: problem.code, reconnect_path: problem.reconnect_path },
+                    status: :unprocessable_entity)
+    end
+
+    @campaign.update!(status: 'running', pause_reason: nil, paused_at: nil)
     if defined?(WebhookService)
       WebhookService.fire(company_id: @company.id, event: 'campaign.resumed', payload: { campaign_id: @campaign.id })
     end
@@ -304,6 +321,20 @@ class Api::V1::CampaignsController < ApplicationController
     # campaign, so nothing enrolled those new matches at edit time. Re-enroll on
     # the way back up rather than making the user wait for the scheduler tick.
     CampaignAudienceEnrollerJob.perform_later(@campaign.id) if defined?(CampaignAudienceEnrollerJob)
+    render json: campaign_json(@campaign, full: true)
+  end
+
+  # Completed is otherwise a dead end: it cannot be paused, so it cannot be
+  # edited, so nothing about it can be changed and resumed. Reopening puts it
+  # back to paused, where editing and Resume both work.
+  def reopen
+    return unless authorize_action!('campaigns', 'update')
+    unless @campaign.status == 'completed'
+      return render(json: { error: "Only a completed campaign can be reopened (this one is #{@campaign.status})" },
+                    status: :unprocessable_entity)
+    end
+
+    @campaign.update!(status: 'paused', completed_at: nil, paused_at: Time.current, pause_reason: nil)
     render json: campaign_json(@campaign, full: true)
   end
 
@@ -909,6 +940,25 @@ class Api::V1::CampaignsController < ApplicationController
     params[:saved_audience_id].presence || params.dig(:campaign, :saved_audience_id)
   end
 
+  # A campaign may send as a member of this company, or as the platform admin
+  # making the change. from_identity_id used to accept any user id at all, which
+  # was harmless while senders only resolved inside the company; now that
+  # Campaign#identity_user resolves platform admins, a tenant could otherwise
+  # point a campaign at an admin's mailbox. A sender already saved on the
+  # campaign stays allowed, so a tenant admin can still edit a campaign that a
+  # platform admin set up to send as themselves.
+  def from_identity_error(campaign)
+    return nil unless campaign.from_identity_type == 'User' && campaign.from_identity_id.present?
+    return nil unless campaign.new_record? || campaign.will_save_change_to_from_identity_id? ||
+                      campaign.will_save_change_to_from_identity_type?
+
+    sender_id = campaign.from_identity_id.to_i
+    return nil if User.where(company_id: @company.id).exists?(id: sender_id)
+    return nil if sender_id == current_user.id && (current_user.platform_admin? || current_user.super_admin?)
+
+    'Choose a sender from this company.'
+  end
+
   def campaign_params
     params.require(:campaign).permit(
       :name, :description, :campaign_type, :audience_mode, :channel,
@@ -944,6 +994,9 @@ class Api::V1::CampaignsController < ApplicationController
       scheduled_at: c.scheduled_at,
       started_at: c.started_at,
       completed_at: c.completed_at,
+      paused_at: c.paused_at,
+      # Set only when the system paused the campaign because its sender cannot send.
+      pause_reason: c.pause_reason,
       recurrence_cron: c.recurrence_cron,
       next_recurrence_at: c.try(:next_recurrence_at),
       created_by_user_id: c.created_by_user_id,

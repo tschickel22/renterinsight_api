@@ -328,6 +328,8 @@ class LocationEmailConnection < ApplicationRecord
     return if last_error_message.to_s.start_with?('Reauth required:')
 
     record_error!("Reauth required: #{message}")
+    # Campaigns sending as this location pause now instead of failing recipients.
+    Campaigns::SenderHealth.pause_campaigns_for_connection!(self)
   end
 
   private

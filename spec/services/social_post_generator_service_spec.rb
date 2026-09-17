@@ -34,6 +34,50 @@ RSpec.describe SocialPostGeneratorService do
     end
   end
 
+  # The context is saved onto every generated post. Keeping whole recent post
+  # records in it made each post carry all of its predecessors' contexts, which
+  # doubled in size every post until it crashed Postgres and filled the
+  # production disk on 2026-09-17.
+  describe 'recent posts in the saved context' do
+    def context
+      described_class.send(
+        :build_context,
+        company: company, vehicle: nil, user: nil, intent_category: 'feature_spotlight',
+        post_type: 'company_page', platform: 'facebook', tone: 'friendly'
+      )
+    end
+
+    it 'keeps a short summary of each recent post, not the record' do
+      published_post(caption: 'Work Queue is now live in DealerTide')
+
+      summary = context[:recent_posts].first
+
+      expect(summary).to be_a(Hash)
+      expect(summary.keys).to contain_exactly(:id, :intent_category, :posted_on, :opening)
+      expect(summary[:opening]).to eq('Work Queue is now live in DealerTide')
+    end
+
+    it 'does not copy a recent post\'s own saved context forward' do
+      earlier = published_post(caption: 'An earlier post')
+      earlier.update_columns(generation_context: { 'recent_posts' => [{ 'caption' => 'NESTED-MARKER ' * 5_000 }] })
+
+      saved = context.to_json
+
+      expect(saved).not_to include('NESTED-MARKER')
+      expect(saved.bytesize).to be < 20_000
+    end
+
+    it 'formats a context read back from the database the same as a fresh one' do
+      published_post(caption: 'Already said this')
+      fresh = context
+      read_back = JSON.parse(fresh.to_json).deep_symbolize_keys
+      read_back[:recent_posts] = JSON.parse(fresh[:recent_posts].to_json)
+
+      expect(described_class.send(:format_recent_posts, read_back[:recent_posts]))
+        .to eq(described_class.send(:format_recent_posts, fresh[:recent_posts]))
+    end
+  end
+
   describe '.past_examples' do
     it 'backfills to the limit instead of shrinking when ids are excluded' do
       excluded = published_post(caption: 'Excluded post')

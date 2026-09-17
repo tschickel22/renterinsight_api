@@ -169,7 +169,7 @@ class SocialPostGeneratorService
         voice:           post_type == 'rep_personal' ? 'first_person' : 'company_plural',
         length_hint:     platform.to_s == 'instagram' ? 'short (80-120 words)' : 'up to 250 words',
         hashtag_hint:    platform.to_s == 'instagram' ? '8-15 hashtags' : '3-6 hashtags',
-        recent_posts:    recents,
+        recent_posts:    recents.map { |post| recent_post_summary(post) },
         past_examples:   past_examples(company: company, intent_category: intent_category,
                                        platform: platform, exclude_ids: recents.map(&:id))
       }
@@ -420,10 +420,36 @@ class SocialPostGeneratorService
       return '' if posts.blank?
 
       posts.each_with_index.map do |post, i|
-        when_posted = (post.published_at || post.scheduled_at || post.created_at)&.to_date
-        opening = post.caption.to_s.squish.first(140)
-        "#{i + 1}. [#{post.intent_category}#{when_posted ? ", #{when_posted}" : ''}] #{opening}"
+        summary = recent_post_summary(post)
+        "#{i + 1}. [#{summary[:intent_category]}#{summary[:posted_on] ? ", #{summary[:posted_on]}" : ''}] #{summary[:opening]}"
       end.join("\n")
+    end
+
+    # What the context keeps of a recent post: only what the prompt shows.
+    #
+    # It used to keep the whole SocialPost record, and the context is saved onto
+    # the new post, so each post carried its eight predecessors, each carrying
+    # their own eight, all the way back. The saved context doubled with every
+    # post (130 KB on 2026-08-28, 50 MB by 2026-09-15). Loading and writing that
+    # crashed Postgres at the top of every hour from 2026-09-16, which took Puma
+    # down through Solid Queue, and filled the disk until Render suspended the
+    # production database on 2026-09-17.
+    #
+    # Accepts a record or an already-summarized hash, so a context read back from
+    # the database formats the same way as one built fresh.
+    def recent_post_summary(post)
+      if post.is_a?(Hash)
+        h = post.symbolize_keys
+        return { id: h[:id], intent_category: h[:intent_category], posted_on: h[:posted_on], opening: h[:opening] }
+      end
+
+      when_posted = (post.published_at || post.scheduled_at || post.created_at)&.to_date
+      {
+        id:              post.id,
+        intent_category: post.intent_category,
+        posted_on:       when_posted&.iso8601,
+        opening:         post.caption.to_s.squish.first(140)
+      }
     end
 
     def format_past_examples(examples)

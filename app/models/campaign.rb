@@ -118,11 +118,12 @@ class Campaign < ApplicationRecord
 
   # Email connection resolution — NEVER falls back to platform.
   # All lookups MUST be scoped to self.company_id to prevent cross-tenant leaks.
+  # The one exception is a platform admin sending as themselves; see #identity_user.
   def resolve_email_connection
     return nil if sms_channel?
     case from_identity_type
     when 'User'
-      UserEmailConnection.where(company_id: company_id, user_id: from_identity_id, is_active: true).first
+      identity_user_mailbox
     when 'Location'
       LocationEmailConnection.where(company_id: company_id, location_id: from_identity_id, is_active: true).first
     when 'Company'
@@ -176,7 +177,7 @@ class Campaign < ApplicationRecord
   def resolve_mailbox_connection_for_step(recipient: nil)
     case from_identity_type
     when 'User'
-      UserEmailConnection.where(company_id: company_id, user_id: from_identity_id, is_active: true).first
+      identity_user_mailbox
     when 'Location'
       LocationEmailConnection.where(company_id: company_id, location_id: from_identity_id, is_active: true).first
     when 'Company'
@@ -225,11 +226,42 @@ class Campaign < ApplicationRecord
   # The address this campaign's identity would send as, independent of any OAuth mailbox.
   def identity_email_address(recipient = nil)
     case from_identity_type
-    when 'User'     then User.where(company_id: company_id).find_by(id: from_identity_id)&.email
+    when 'User'     then identity_user&.email
     when 'Location' then Location.where(company_id: company_id).find_by(id: from_identity_id)&.email
     when 'Company'  then Company.find_by(id: company_id)&.email
     when 'Owner'    then owner_user_for(recipient)&.email
     end
+  end
+
+  # The user a User-identity campaign sends as.
+  #
+  # Normally a member of this campaign's company. A platform admin is the one
+  # exception: they work inside every tenant through the company switcher but
+  # belong to their own home company, so a campaign they set up to send as
+  # themselves resolved to nobody, and every recipient failed with "no valid
+  # email connection" (campaign 26, September 2026). Only platform and super
+  # admins get this. A tenant user from another company still resolves to nil,
+  # and CampaignsController only lets an admin pick themselves, never another
+  # admin.
+  def identity_user
+    return nil unless from_identity_type == 'User' && from_identity_id.present?
+
+    User.where(company_id: company_id).find_by(id: from_identity_id) ||
+      User.platform_admins.find_by(id: from_identity_id)
+  end
+
+  # The mailbox a User-identity campaign sends through: one connected in this
+  # company, as always. A platform admin with none here falls back to their own
+  # mailbox from any company.
+  def identity_user_mailbox
+    return nil unless from_identity_type == 'User' && from_identity_id.present?
+
+    mailboxes = UserEmailConnection.where(user_id: from_identity_id, is_active: true)
+    in_company = mailboxes.where(company_id: company_id).first
+    return in_company if in_company
+    return nil unless User.platform_admins.exists?(id: from_identity_id)
+
+    mailboxes.order(:id).first
   end
 
   # Look up the recipient's owner and their active email connection. Kept

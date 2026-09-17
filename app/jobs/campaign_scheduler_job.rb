@@ -104,6 +104,14 @@ class CampaignSchedulerJob < ApplicationJob
         next
       end
 
+      # A dynamic audience means "whoever matches, whenever they match", so
+      # nobody pending right now is not the end of the campaign. Completing it
+      # switched off enroll_running_dynamic for good: new leads stopped being
+      # added and the campaign could no longer be paused or edited. Campaign 26
+      # stopped enrolling that way on 2026-09-15. It stays running until a person
+      # pauses or archives it.
+      next if c.audience_mode == 'dynamic'
+
       c.update!(status: 'completed', completed_at: Time.current)
       if defined?(WebhookService)
         WebhookService.fire(company_id: c.company_id, event: 'campaign.completed', payload: { campaign_id: c.id })

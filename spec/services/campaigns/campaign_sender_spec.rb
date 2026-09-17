@@ -62,13 +62,46 @@ RSpec.describe Campaigns::CampaignSender do
       expect(CampaignSend.where(campaign_enrollment_id: enrollment.id).count).to eq(1)
     end
 
-    it 'fails enrollment when email connection is missing' do
+    # A missing sender is the campaign's problem, not the recipient's. Failing
+    # the enrollment is how campaign 26 lost 586 recipients in September 2026.
+    it 'pauses the campaign and keeps the enrollment when the email connection is missing' do
+      email_campaign.update!(status: 'running')
       enrollment = make_email_enrollment(email_campaign)
       user_email_conn.update!(is_active: false)
-      result = described_class.new(enrollment: enrollment).deliver_current_step
-      expect(result).to be false
+
+      sender = described_class.new(enrollment: enrollment)
+      expect(sender.deliver_current_step).to be false
+
+      expect(enrollment.reload).to have_attributes(status: 'pending', failure_reason: nil, current_step_index: 0)
+      expect(email_campaign.reload.status).to eq('paused')
+      expect(email_campaign.pause_reason['code']).to eq('sender_not_connected')
+      expect(sender.last_skip_reason).to eq('sender_paused:sender_not_connected')
+      expect(CommunicationService).not_to have_received(:send_email)
+    end
+
+    it 'pauses instead of failing when the provider rejects the sender mid-send' do
+      email_campaign.update!(status: 'running')
+      enrollment = make_email_enrollment(email_campaign)
+      allow(CommunicationService).to receive(:send_email)
+        .and_return({ success: false, error: 'InvalidAuthenticationToken: Lifetime validation failed' })
+
+      expect(described_class.new(enrollment: enrollment).deliver_current_step).to be false
+
+      expect(enrollment.reload).to have_attributes(status: 'pending', failure_reason: nil)
+      expect(email_campaign.reload.status).to eq('paused')
+      # The failed attempt is not a send, so resuming delivers this step again.
+      expect(CampaignSend.where(campaign_enrollment_id: enrollment.id).where.not(sent_at: nil)).to be_empty
+    end
+
+    it 'still fails just the recipient for an ordinary delivery error' do
+      email_campaign.update!(status: 'running')
+      enrollment = make_email_enrollment(email_campaign)
+      allow(CommunicationService).to receive(:send_email).and_return({ success: false, error: 'message too large' })
+
+      described_class.new(enrollment: enrollment).deliver_current_step
+
       expect(enrollment.reload.status).to eq('failed')
-      expect(enrollment.failure_reason).to eq('no_valid_email_connection')
+      expect(email_campaign.reload.status).to eq('running')
     end
 
     # 18:05 Eastern, five minutes past the default business-hours end. This is the exact
