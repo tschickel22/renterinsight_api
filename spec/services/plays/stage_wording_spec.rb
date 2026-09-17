@@ -10,8 +10,11 @@ RSpec.describe 'Play stage wording' do
 
     expect(labels['waiting_for_reply']).to eq('Waiting for the lead to reply')
     expect(labels['replied']).to eq('Replied')
-    expect(Plays::Board.new(company: company).call[:columns].find { |c| c[:key] == 'waiting' }[:label])
-      .to eq('Waiting for the lead to reply')
+
+    columns = Plays::Board.new(company: company).call[:columns].to_h { |c| [c[:key], c[:label]] }
+    expect(columns['waiting']).to eq('Waiting for the lead to reply')
+    # A reply stops the play, so the next move is the rep's.
+    expect(columns['talking']).to eq('Replied, needs response')
   end
 
   it "uses the dealer's own word for a lead" do

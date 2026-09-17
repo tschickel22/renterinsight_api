@@ -15,7 +15,8 @@ module Plays
       { key: 'waiting', label: 'Waiting for the %{lead} to reply' },
       { key: 'follow_up', label: 'In follow-up' },
       { key: 'weekly', label: 'Weekly homes' },
-      { key: 'talking', label: 'Talking' },
+      # They answered and the play stepped back, leaving their rep a task.
+      { key: 'talking', label: 'Replied, needs response' },
       { key: 'deal', label: 'Became a deal' },
       { key: 'sold', label: 'Sold' }
     ].freeze
