@@ -23,6 +23,11 @@ module Plays
       @company_id = installation.company_id
     end
 
+    # The dealer's own word for a lead, so the wait says whose turn it is.
+    def lead_word
+      @lead_word ||= (@installation.company.resolved_labels['lead'].presence || 'lead').downcase
+    end
+
     def events
       runs = WorkflowRun.where(company_id: @company_id, entity_type: 'Lead', entity_id: @lead.id,
                                workflow_rule_id: @installation.asset_ids(:workflow_rule_ids))
@@ -139,7 +144,7 @@ module Plays
         []
       else
         detail = run.status == 'waiting' && run.wait_reason == 'reply_pause' ? until_text(run.wait_until) : nil
-        [Event.new(at: at, kind: 'wait', title: 'Waiting for a reply', detail: detail)]
+        [Event.new(at: at, kind: 'wait', title: "Waiting for the #{lead_word} to reply", detail: detail)]
       end
     end
 

@@ -59,7 +59,7 @@ RSpec.describe Plays::LeadTimeline do
       'Assigned to Rita Rep',
       'First email sent',
       'Call task for Rita Rep',
-      'Waiting for a reply',
+      'Waiting for the lead to reply',
       'Opened the email',
       'Replied by email'
     ])

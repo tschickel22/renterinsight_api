@@ -50,7 +50,9 @@ module Plays
       { name: 'First Name', label: 'First Name', type: 'text', required: true, lead_field: 'first_name' },
       { name: 'Last Name', label: 'Last Name', type: 'text', required: true, lead_field: 'last_name' },
       { name: 'Email', label: 'Email', type: 'email', required: true, lead_field: 'email' },
-      { name: 'Phone', label: 'Phone', type: 'tel', required: true, lead_field: 'phone' }
+      # 'phone' is the type every form renderer draws. 'tel' was not, which hid
+      # the field while still requiring it, and the form refused to submit.
+      { name: 'Phone', label: 'Phone', type: 'phone', required: true, lead_field: 'phone' }
     ].freeze
 
     PREQUALIFICATION_FIELDS = [
@@ -521,9 +523,16 @@ module Plays
           tag_rule.update!(status: 'archived')
         end
 
+        # A play that had no form when it was turned on, or whose form was
+        # deleted, gets one here, rather than asking a dealer to turn the play
+        # off and on to gain it.
+        form_ids = Array(assets['intake_form_ids'])
+        form_ids = self.class.forms.map { |form| create_form(form).id } if IntakeForm.where(company_id: @company.id, id: form_ids).none?
+
         @installation.update!(
           answers: stored_answers,
           assets: assets.merge(
+            'intake_form_ids' => form_ids,
             'workflow_rule_ids' => rule_ids.uniq,
             'nurture_sequence_ids' => [nurture.id],
             'round_robin_list_ids' => (Array(assets['round_robin_list_ids']) + rotations.values.map(&:id)).uniq,

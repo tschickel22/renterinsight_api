@@ -15,6 +15,12 @@ module Plays
         ['Walk-In']
       end
 
+      # A form for the lot: a tablet at the desk, or a QR code on a sign at a
+      # show, so a visitor puts themselves into the play.
+      def forms
+        [{ name: 'Walk-in Contact', source: 'Walk-In', fields: :contact }]
+      end
+
       def start_tag
         'walk-in'
       end

@@ -44,7 +44,7 @@ RSpec.describe 'Api::V1::Plays lead journey', type: :request do
     expect(response).to have_http_status(:ok)
     expect(body['lead']).to include('name' => 'Tia May', 'phone' => '3035551212', 'stage' => 'waiting_for_reply')
     expect(body['events'].first).to include('kind' => 'trigger', 'title' => 'Started the play as a new lead')
-    expect(body['events'].map { |e| e['title'] }).to include('Assigned to Rita Rep', 'Waiting for a reply')
+    expect(body['events'].map { |e| e['title'] }).to include('Assigned to Rita Rep', 'Waiting for the lead to reply')
   end
 
   it 'says when a lead is not in the play' do

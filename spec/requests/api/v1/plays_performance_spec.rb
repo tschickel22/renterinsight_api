@@ -64,7 +64,7 @@ RSpec.describe 'Api::V1::Plays performance and leads', type: :request do
       expect(response).to have_http_status(:ok)
       item = body['items'].first
       expect(item).to include('name' => 'Tia May', 'source' => 'Facebook', 'rep' => 'Rita Rep',
-                              'stage' => 'waiting_for_reply', 'stage_label' => 'Waiting for a reply')
+                              'stage' => 'waiting_for_reply', 'stage_label' => 'Waiting for the lead to reply')
       expect(item['detail_at']).to be_present
       expect(body['meta']).to include('total' => 1, 'page' => 1)
     end
