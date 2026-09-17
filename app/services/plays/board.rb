@@ -10,7 +10,9 @@ module Plays
   class Board
     COLUMNS = [
       { key: 'new', label: 'New lead' },
-      { key: 'waiting', label: 'Waiting for a reply' },
+      # %{lead} is the dealer's own word: the play has sent its messages and it
+      # is the lead's turn, not the rep's.
+      { key: 'waiting', label: 'Waiting for the %{lead} to reply' },
       { key: 'follow_up', label: 'In follow-up' },
       { key: 'weekly', label: 'Weekly homes' },
       { key: 'talking', label: 'Talking' },
@@ -59,7 +61,9 @@ module Plays
 
       list = cards.values.sort_by { |card| card[:started_at].to_s }.reverse
       {
-        columns: COLUMNS.map { |column| column.merge(count: list.count { |card| card[:column] == column[:key] }) },
+        columns: COLUMNS.map do |column|
+          column.merge(label: format(column[:label], lead: lead_word), count: list.count { |card| card[:column] == column[:key] })
+        end,
         cards: list,
         demo_clock: { available: DemoClock.available?(@company), enabled: DemoClock.enabled?(@company) },
         updated_at: Time.current.iso8601
@@ -67,6 +71,10 @@ module Plays
     end
 
     private
+
+    def lead_word
+      @lead_word ||= (@company.resolved_labels['lead'].presence || 'lead').downcase
+    end
 
     def card_for(play, row, column)
       deal = play.kind == 'deal_followup'

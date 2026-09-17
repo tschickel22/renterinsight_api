@@ -16,9 +16,12 @@ module Plays
 
     FIRST_MESSAGE_STEPS = %w[text_hello email_with_booking email_hello].freeze
 
+    # %{lead} is the dealer's own word for a lead. "Waiting for a reply" read
+    # as though the rep owed one, when the messages have gone out and it is the
+    # lead's turn.
     STAGES = {
       'first_response' => 'Getting a first response',
-      'waiting_for_reply' => 'Waiting for a reply',
+      'waiting_for_reply' => 'Waiting for the %{lead} to reply',
       'replied' => 'Replied',
       'follow_up' => 'In follow-up emails',
       'follow_up_done' => 'Follow-up finished',
@@ -38,6 +41,12 @@ module Plays
 
     # location_ids: nil for every location, or the locations this viewer may see.
     # lead_id:      limit to one lead (for its journey), across all time.
+    # Stage names in the dealer's own words ("Waiting for the guest to reply").
+    def self.stage_labels(company)
+      word = company&.resolved_labels&.[]('lead').presence || 'lead'
+      STAGES.transform_values { |label| format(label, lead: word.downcase) }
+    end
+
     def initialize(installation:, period: DEFAULT_PERIOD, location_ids: nil, lead_id: nil, now: Time.current)
       @installation = installation
       @company_id = installation.company_id
@@ -59,7 +68,7 @@ module Plays
       entries = self.entries
       {
         period: @period,
-        stages: STAGES.map { |key, label| { key: key, label: label } },
+        stages: stage_labels.map { |key, label| { key: key, label: label } },
         stage_counts: STAGES.keys.to_h { |stage| [stage, entries.count { |e| e.stage == stage }] },
         step_counts: entries.filter_map(&:map_step).tally,
         metrics: metrics(entries)
@@ -239,6 +248,10 @@ module Plays
       }
     end
 
+    def stage_labels
+      @stage_labels ||= self.class.stage_labels(@installation.company)
+    end
+
     def lead_json(entry)
       lead = entry.lead
       {
@@ -249,7 +262,7 @@ module Plays
         rep: lead.owner && LeadResponsePlay.display_name(lead.owner),
         started_at: (entry.run.started_at || entry.run.created_at)&.iso8601,
         stage: entry.stage,
-        stage_label: STAGES.fetch(entry.stage),
+        stage_label: stage_labels.fetch(entry.stage),
         detail: entry.detail,
         detail_at: entry.detail_at&.iso8601
       }
