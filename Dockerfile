@@ -93,4 +93,13 @@ USER 1000:1000
 # Migrations run via Render's preDeployCommand (`rails db:migrate`), once per
 # rollout instead of once per container start.
 EXPOSE 3000
-CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
+
+# Preload jemalloc. libjemalloc2 is installed above, but the only thing that
+# ever loaded it was bin/docker-entrypoint, and the ENTRYPOINT was removed on
+# 2025-10-23 to fix a boot error on Render. Production has run on glibc malloc
+# since, whose fragmentation under threads grows each instance from about 0.9 to
+# 1.9 GB over a week against a 2 GB limit. Same lookup the entrypoint used, done
+# here so the entrypoint's db:prepare does not come back with it. Puma and the
+# Solid Queue processes it forks keep jemalloc; config/initializers/jemalloc.rb
+# logs whether it loaded and keeps it out of child programs such as Chromium.
+CMD ["sh", "-c", "LD_PRELOAD=\"$(find /usr/lib -name libjemalloc.so.2 -print -quit)\" exec bundle exec rails server -b 0.0.0.0"]
