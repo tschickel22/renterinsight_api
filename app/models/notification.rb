@@ -90,6 +90,7 @@ class Notification < ApplicationRecord
     sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' },
     email_cap_alert: { category: 'system', priority: 'normal', title: 'Email Usage Alert' },
     email_connection_broken: { category: 'communications', priority: 'urgent', title: 'Email Connection Needs Reconnection' },
+    campaign_paused_sender: { category: 'communications', priority: 'urgent', title: 'Campaign Paused: Sender Needs Attention' },
 
     # Project / Contractor notifications
     contractor_review_submitted: { category: 'service', priority: 'high', title: 'Contractor Submitted for Review' },
@@ -128,6 +129,7 @@ class Notification < ApplicationRecord
     sms_reply_received
     email_reply_received
     email_connection_broken
+    campaign_paused_sender
     system_alert
     broadcast_message
     contractor_task_assigned

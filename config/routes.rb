@@ -2075,6 +2075,7 @@ Rails.application.routes.draw do
           post :pause
           post :refine_with_ai
           post :resume
+          post :reopen
           post :archive
           post :test_send
           get :preview

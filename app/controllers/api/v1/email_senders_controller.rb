@@ -21,11 +21,19 @@ class Api::V1::EmailSendersController < ApplicationController
     # Campaign#resolve_email_connection rejects any connection whose
     # company_id does not match the campaign's, so showing a connection
     # the resolver would refuse is a UX trap (picker succeeds, send
-    # silently fails). Platform admins in a tenant context must connect
-    # an account in that tenant if they want to send from it.
+    # silently fails).
+    #
+    # The exception mirrors Campaign#identity_user_mailbox: a platform admin
+    # working in a tenant may send as themselves through their own mailbox,
+    # so their own connections are offered when they have none here. Only
+    # their own; other admins' mailboxes are never listed.
     connections = UserEmailConnection
                     .where(company_id: @company.id, is_active: true)
-                    .includes(:user)
+                    .includes(:user).to_a
+    if platform_admin_sender? && connections.none? { |conn| conn.user_id == current_user.id }
+      connections += UserEmailConnection.where(user_id: current_user.id, is_active: true)
+                                        .includes(:user).order(:id).limit(1).to_a
+    end
 
     connections.map do |conn|
       first_name = conn.user&.first_name
@@ -103,8 +111,14 @@ class Api::V1::EmailSendersController < ApplicationController
     end
   end
 
+  def platform_admin_sender?
+    current_user.platform_admin? || current_user.super_admin?
+  end
+
   def connection_status(conn)
     return 'needs_reconnect' if conn.oauth_token_encrypted.blank?
+    # A revoked grant keeps its token columns, so expiry alone called it healthy.
+    return 'needs_reconnect' if conn.respond_to?(:needs_reauth?) && conn.needs_reauth?
 
     expiry = conn.oauth_expires_at
     return 'healthy' if expiry.nil? || expiry > Time.current

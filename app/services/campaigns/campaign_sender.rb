@@ -73,6 +73,15 @@ module Campaigns
         # through platform SES so it doesn't need any specific owner's
         # OAuth connection to exist. Skips this preflight only for that path.
         unless test_platform_send?
+          # A sender that cannot send is the campaign's problem, not this
+          # recipient's: pause the campaign and leave the enrollment where it is.
+          # See Campaigns::SenderHealth. A test send still reports the reason to
+          # the admin who pressed the button instead.
+          unless test_send?
+            problem = Campaigns::SenderHealth.problem_for(@campaign)
+            return pause_for_sender(problem) if problem
+          end
+
           # Owner mode resolves per-recipient — pass the enrollment's
           # recipient so we look up THIS recipient's owner's connection,
           # not a global campaign-wide one.
@@ -384,6 +393,9 @@ module Campaigns
           handle_hard_email_bounce(send_record, err)
         elsif SOFT_BOUNCE_PATTERNS.any? { |p| err.match?(p) }
           handle_soft_bounce(send_record, err)
+        elsif pausable_sender_failure?(err)
+          pause_for_sender(Campaigns::SenderHealth.problem_for(@campaign) ||
+                           Campaigns::SenderHealth.problem_from_error(@campaign, err))
         else
           mark_failed(err[0, 200])
         end
@@ -465,6 +477,25 @@ module Campaigns
       return if key.blank? || test_send?
       return if @enrollment.sending_connection_key == key
       @enrollment.update_column(:sending_connection_key, key)
+    end
+
+    # Pauses the campaign for a sender problem and leaves this enrollment
+    # untouched, at its current step and still due, so resuming sends it.
+    def pause_for_sender(problem)
+      @last_skip_reason = "sender_paused:#{problem.code}"
+      Campaigns::SenderHealth.pause!(@campaign, problem)
+      false
+    end
+
+    # The provider refused the send because of the sender (a dead grant, an
+    # unverified SES identity), or flagging the mailbox already paused the
+    # campaign. Only for a real send from a single fixed sender: a test send
+    # reports the error, and Owner or waterfall campaigns keep failing just the
+    # one recipient.
+    def pausable_sender_failure?(err)
+      return false if test_send? || @campaign.owner_identity? || @campaign.email_waterfall?
+
+      Campaigns::SenderHealth.sender_error?(err) || Campaign.where(id: @campaign.id, status: 'paused').exists?
     end
 
     def mark_failed(reason)

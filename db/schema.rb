@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_15_100000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_17_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1422,6 +1422,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_15_100000) do
     t.string "channel", default: "email", null: false
     t.datetime "cycle_started_at"
     t.boolean "email_waterfall", default: false, null: false
+    t.jsonb "pause_reason"
+    t.datetime "paused_at"
     t.index ["campaign_type", "status"], name: "index_campaigns_on_campaign_type_and_status"
     t.index ["company_id", "channel"], name: "index_campaigns_on_company_id_and_channel"
     t.index ["company_id", "status"], name: "index_campaigns_on_company_id_and_status"

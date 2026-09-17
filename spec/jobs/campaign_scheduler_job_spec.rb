@@ -60,4 +60,36 @@ RSpec.describe CampaignSchedulerJob do
 
     expect { described_class.perform_now }.not_to have_enqueued_job(CampaignAudienceEnrollerJob).with(campaign.id)
   end
+
+  # Completing a dynamic campaign stopped it enrolling new matches for good and
+  # left it impossible to pause or edit (campaign 26, 2026-09-15).
+  describe 'when nobody is left pending' do
+    def finished_campaign(audience_mode)
+      campaign = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: "Done-#{audience_mode}",
+                                  campaign_type: 'drip', from_identity_type: 'User', from_identity_id: user.id,
+                                  throttle_per_day: 100, status: 'running', audience_mode: audience_mode)
+      source = Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' }
+      lead = Lead.create!(company: company, source: source, first_name: 'G', last_name: 'H',
+                          email: "g-#{SecureRandom.hex(3)}@h.com")
+      CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id, recipient_type: 'Lead',
+                                 recipient_id: lead.id, email_address_snapshot: lead.email, status: 'completed')
+      campaign
+    end
+
+    it 'keeps a dynamic campaign running for the leads still to come' do
+      campaign = finished_campaign('dynamic')
+
+      described_class.perform_now
+
+      expect(campaign.reload.status).to eq('running')
+    end
+
+    it 'still completes a static campaign' do
+      campaign = finished_campaign('static')
+
+      described_class.perform_now
+
+      expect(campaign.reload.status).to eq('completed')
+    end
+  end
 end

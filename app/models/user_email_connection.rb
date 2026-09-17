@@ -248,6 +248,9 @@ class UserEmailConnection < ApplicationRecord
       clear_attribute_changes(%w[last_error_at last_error_message])
       return
     end
+    # Campaigns sending through this mailbox pause now rather than each failing
+    # its next recipient. Runs inside the claim, so once per outage.
+    Campaigns::SenderHealth.pause_campaigns_for_connection!(self)
     return unless user_id.present?
     NotificationService.create(
       recipient: user,
