@@ -14,14 +14,15 @@ class MetaGraphApi
   # subcode to tell an app-configuration gate (which the user must clear in the
   # Meta dashboard) from a bad parameter (which is our bug).
   class Error < StandardError
-    attr_reader :code, :subcode, :user_title, :user_msg
+    attr_reader :code, :subcode, :user_title, :user_msg, :fbtrace_id
 
-    def initialize(message = nil, code: nil, subcode: nil, user_title: nil, user_msg: nil)
+    def initialize(message = nil, code: nil, subcode: nil, user_title: nil, user_msg: nil, fbtrace_id: nil)
       super(message)
       @code       = code
       @subcode    = subcode
       @user_title = user_title
       @user_msg   = user_msg
+      @fbtrace_id = fbtrace_id
     end
   end
 
@@ -207,9 +208,12 @@ class MetaGraphApi
           limit:  limit)
     end
 
+    # post_clicks is the only per-post figure we show that survived Meta's
+    # 2025/2026 retirements. post_impressions, post_impressions_unique,
+    # post_engaged_users and post_views are gone, and a retired name rejects
+    # the whole call. There is no per-post reach or impressions left at all.
     def get_post_insights(post_id, access_token)
-      get("/#{post_id}/insights", access_token,
-          metric: 'post_impressions,post_reach,post_clicks,post_engaged_users')
+      get("/#{post_id}/insights", access_token, metric: 'post_clicks')
     end
 
     def get_post_basic_metrics(post_id, access_token)
@@ -487,7 +491,8 @@ class MetaGraphApi
           code:       code,
           subcode:    subcode,
           user_title: err.is_a?(Hash) ? err['error_user_title'] : nil,
-          user_msg:   err.is_a?(Hash) ? err['error_user_msg'] : nil
+          user_msg:   err.is_a?(Hash) ? err['error_user_msg'] : nil,
+          fbtrace_id: err.is_a?(Hash) ? err['fbtrace_id'] : nil
         }
 
         if [190, 102, 463].include?(code) || [458, 460, 463, 467].include?(subcode)

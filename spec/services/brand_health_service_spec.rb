@@ -2,9 +2,11 @@
 
 require 'rails_helper'
 
-# Regression: Meta rejects the whole insights call if a single metric name is
-# unknown, so the deprecated page_engaged_users / page_views_total silently
-# zeroed the entire brand-health dashboard rather than dropping two figures.
+# Meta rejects a whole multi-metric insights call if a single name is retired,
+# which is how the 2025/2026 retirements (impressions, page_fans) zeroed every
+# tile, Engagement included. Each metric is now its own request, and a metric
+# we could not read comes back as nil so the dashboard can say "Unavailable"
+# rather than 0.
 RSpec.describe BrandHealthService do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
   let!(:integration) do
@@ -28,127 +30,119 @@ RSpec.describe BrandHealthService do
     end
   end
 
-  it 'does not request metrics Meta removed in the 2024 cull' do
-    expect(described_class::METRICS).not_to include('page_engaged_users', 'page_views_total')
+  let(:views_fixture) { JSON.parse(file_fixture('meta/page_views_total_days_28.json').read) }
+
+  # A 28-day response for any metric, shaped like the real one.
+  def days_28(metric, *values)
+    { 'data' => [{ 'name' => metric, 'period' => 'days_28',
+                   'values' => values.map { |v| { 'value' => v, 'end_time' => 1.day.ago.iso8601 } } }] }
   end
 
-  it 'asks for the current engagement metric' do
-    expect(described_class::METRICS).to include('page_post_engagements')
+  def retired!
+    raise MetaGraphApi::Error.new('Meta Graph API error (100): (#100) The value must be a valid insights metric',
+                                  code: 100, fbtrace_id: 'AbCdEf123')
   end
 
-  it 'passes the metric list through on success' do
-    seen = nil
-    stub_graph(insights: ->(metric) { seen = metric; { 'data' => [] } })
+  it 'asks only for metrics that survived the 2025/2026 retirements' do
+    expect(described_class::METRICS)
+      .to contain_exactly('page_views_total', 'page_post_engagements', 'page_follows', 'page_video_views')
+    expect(described_class::METRICS).not_to include(
+      'page_impressions', 'page_impressions_unique', 'page_impressions_paid', 'page_posts_impressions',
+      'page_fans', 'page_fan_adds', 'page_engaged_users', 'page_views_logged_in_total'
+    )
+  end
+
+  it 'requests each metric on its own, as a 28-day total' do
+    calls = []
+    allow(MetaGraphApi).to receive(:get) do |path, _token, **params|
+      if path.end_with?('/insights')
+        calls << [params[:metric], params[:period]]
+        { 'data' => [] }
+      else
+        path == '/page-1' ? page_data : { 'data' => [] }
+      end
+    end
 
     described_class.fetch_for_company(company)
 
-    expect(seen).to eq(described_class::METRICS.join(','))
+    expect(calls).to match_array(described_class::METRICS.map { |m| [m, 'days_28'] })
   end
 
-  # Metric deprecation is continuous — one unknown name shouldn't cost the
-  # whole dashboard, so a rejected batch steps down a rung rather than dropping
-  # straight to the floor. Losing reach must not also cost engagement.
-  it 'retries with the next rung when the batch is rejected' do
-    attempts = []
-    stub_graph(insights: lambda { |metric|
-      attempts << metric
-      raise MetaGraphApi::Error, '(#100) The value must be a valid insights metric' if attempts.size == 1
-
-      { 'data' => [{ 'name' => 'page_fans', 'values' => [{ 'value' => 10 }] }] }
-    })
+  it 'reads the real page_views_total response' do
+    stub_graph(insights: ->(metric) { metric == 'page_views_total' ? views_fixture : days_28(metric, 1) })
 
     result = described_class.fetch_for_company(company)
 
-    expect(attempts.length).to eq(2)
-    expect(attempts.last).to eq(described_class::METRIC_LADDER[1].join(','))
-    expect(attempts.last).to include('page_post_engagements')
-    expect(result).not_to be_nil
+    expect(result[:insights]['page_views_total']).to eq(107)
   end
 
-  it 'drops to the floor only once every richer rung is refused' do
-    attempts = []
+  # The failure that cost an App Review cycle: one retired name zeroed
+  # Engagement, which still works, because it rode in the same request.
+  it 'keeps every other tile when one metric is retired' do
     stub_graph(insights: lambda { |metric|
-      attempts << metric
-      raise MetaGraphApi::Error, '(#100) unknown metric' if attempts.size < 3
+      retired! if metric == 'page_views_total'
 
-      { 'data' => [{ 'name' => 'page_fans', 'values' => [{ 'value' => 10 }] }] }
+      days_28(metric, 40)
     })
+
+    insights = described_class.fetch_for_company(company)[:insights]
+
+    expect(insights['page_views_total']).to be_nil
+    expect(insights['page_post_engagements']).to eq(40)
+    expect(insights['page_follows']).to eq(40)
+    expect(insights['page_video_views']).to eq(40)
+  end
+
+  it 'logs the metric, code and fbtrace_id of a rejection' do
+    stub_graph(insights: ->(metric) { metric == 'page_follows' ? retired! : days_28(metric, 1) })
+    allow(Rails.logger).to receive(:error)
 
     described_class.fetch_for_company(company)
 
-    expect(attempts.length).to eq(3)
-    expect(attempts.last).to eq(described_class::FALLBACK_METRICS.join(','))
+    expect(Rails.logger).to have_received(:error)
+      .with(a_string_including('metric=page_follows', 'code=100', 'fbtrace_id="AbCdEf123"'))
   end
 
-  it 'still returns page data when insights fail entirely' do
+  # Zero and unknown are different. A tile must never read 0 because a call
+  # failed, or the dashboard looks like a Page nobody sees.
+  it 'reports a failed metric as nil, never 0' do
     stub_graph(insights: ->(_m) { raise MetaGraphApi::Error, 'nope' })
 
     result = described_class.fetch_for_company(company)
 
-    expect(result).not_to be_nil
     expect(result[:page][:name]).to eq('DealerTide')
+    described_class::METRICS.each { |m| expect(result[:insights][m]).to be_nil }
   end
 
-  # The dashboard reads these straight into Number(). Returning a nested hash
-  # made every tile NaN, which rendered as 0 no matter what Meta sent — reach
-  # and engagement read zero on a page that had both.
-  describe 'insight shape' do
-    def extract(data)
-      described_class.send(:extract_insights, { 'data' => data })
-    end
+  it 'reports a metric Meta answered with no values as nil' do
+    stub_graph(insights: ->(_m) { { 'data' => [] } })
 
-    it 'returns plain numbers rather than nested hashes' do
-      result = extract([
-        { 'name' => 'page_impressions', 'values' => [{ 'value' => 10 }, { 'value' => 15 }] }
-      ])
+    insights = described_class.fetch_for_company(company)[:insights]
 
-      expect(result['page_impressions']).to be_a(Numeric)
-      expect(Float(result['page_impressions'])).to eq(15)
-    end
+    described_class::METRICS.each { |m| expect(insights[m]).to be_nil }
+  end
 
-    # We ask for period=days_28, so EACH value Meta returns is already the
-    # 28-day total ending on its own end_time, and it sends two or three such
-    # windows. Adding them counted most of the same 28 days twice or three
-    # times, which is why the dashboard read far higher than Meta Business
-    # Suite for the same page. The most recent window is the answer.
-    it 'takes the most recent window rather than summing overlapping ones' do
-      result = extract([
-        { 'name' => 'page_post_engagements',
-          'values' => [{ 'value' => 3 }, { 'value' => 4 }, { 'value' => 5 }] }
-      ])
-      expect(result['page_post_engagements']).to eq(5)
-    end
+  it 'keeps a genuine zero as zero' do
+    stub_graph(insights: ->(metric) { days_28(metric, 0) })
 
-    it 'reports reach from the unique metric, not from impressions' do
-      result = extract([
-        { 'name' => 'page_impressions_unique', 'values' => [{ 'value' => 40 }] },
-        { 'name' => 'page_impressions', 'values' => [{ 'value' => 120 }] }
-      ])
+    insights = described_class.fetch_for_company(company)[:insights]
 
-      expect(result['page_impressions_unique']).to eq(40)
-      expect(result['page_impressions']).to eq(120)
-    end
+    expect(insights['page_post_engagements']).to eq(0)
+  end
 
-    it 'takes the latest reading for a running total' do
-      result = extract([
-        { 'name' => 'page_fans', 'values' => [{ 'value' => 100 }, { 'value' => 112 }] }
-      ])
-      expect(result['page_fans']).to eq(112)
-    end
+  # With days_28 each value Meta returns is ALREADY the 28-day total ending on
+  # its own end_time, and it sends two or three such windows. Adding them
+  # counted the same days two or three times over.
+  it 'takes the most recent window rather than summing overlapping ones' do
+    stub_graph(insights: ->(metric) { days_28(metric, 3, 4, 5) })
 
-    it 'flattens a breakdown hash into one number' do
-      result = extract([
-        { 'name' => 'page_impressions',
-          'values' => [{ 'value' => { 'organic' => 5, 'paid' => 7 } }] }
-      ])
-      expect(result['page_impressions']).to eq(12)
-    end
+    expect(described_class.fetch_for_company(company)[:insights]['page_post_engagements']).to eq(5)
+  end
 
-    it 'reports zero for a metric Meta omitted, not nil' do
-      result = extract([])
-      expect(result['page_impressions']).to eq(0)
-      expect(result['page_fans']).to eq(0)
-    end
+  it 'flattens a breakdown hash into one number' do
+    stub_graph(insights: ->(metric) { days_28(metric, { 'organic' => 5, 'paid' => 7 }) })
+
+    expect(described_class.fetch_for_company(company)[:insights]['page_views_total']).to eq(12)
   end
 
   # Posts (30d) read zero because no key by that name was ever returned.

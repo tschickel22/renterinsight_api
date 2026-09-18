@@ -1,32 +1,31 @@
 # frozen_string_literal: true
 
-# Pulls page-level metrics (fans, engagement, reach, recent posts) from the
-# Meta Graph API for the brand-health dashboard.
+# Pulls page-level metrics (followers, views, engagement, recent posts) from
+# the Meta Graph API for the brand-health dashboard.
 #
-# Fails soft on insights / posts — if a token is missing a permission, we
-# still return whatever we successfully retrieved rather than 500ing.
+# Fails soft on insights / posts: if a token is missing a permission, we still
+# return whatever we successfully retrieved rather than 500ing. A metric that
+# failed comes back as nil, never 0, so the dashboard can say "Unavailable"
+# instead of reporting an empty page.
 class BrandHealthService
-  # Meta rejects the whole insights call if any single metric is unknown, so a
-  # deprecated name silently zeroes the entire dashboard. `page_engaged_users`
-  # and `page_views_total` were both removed in Meta's 2024 Page Insights
-  # cull — page_post_engagements is the current stand-in for engagement.
+  # Verified against our own Page on Graph v25.0, 2026-09-18. Meta retired the
+  # impressions family (2025-11-15) and the page_fans family (2026-06-15):
+  # page_impressions, page_impressions_unique, page_fans, page_fan_adds and
+  # page_engaged_users are all gone. There is no reach metric left at all, so
+  # "Views" (page_views_total) is the closest thing, and is what the Facebook
+  # app and Meta Business Suite now show.
   #
-  # page_impressions_unique is reach: the number of people who saw the page,
-  # counted once each. page_impressions counts every view. The dashboard used
-  # to label impressions as "Reach", which reads as a much bigger audience than
-  # the page has and disagrees with the same figure in Meta Business Suite.
-  METRICS = %w[page_impressions_unique page_impressions page_post_engagements page_fans].freeze
+  # Meta rejects a whole multi-metric call with "(#100) The value must be a
+  # valid insights metric" if ANY one name is retired. Batching them is what
+  # zeroed Engagement too, even though page_post_engagements still works. So
+  # each metric is its own request: the next retirement costs one tile, and
+  # the log line names it.
+  METRICS = %w[page_views_total page_post_engagements page_follows page_video_views].freeze
 
-  # Metric deprecation is continuous, so one bad name shouldn't cost us
-  # everything. If the batch is rejected, step down rather than straight to the
-  # floor: losing reach shouldn't also cost engagement and followers.
-  METRIC_LADDER = [
-    METRICS,
-    %w[page_impressions page_post_engagements page_fans],
-    %w[page_fans]
-  ].freeze
-
-  FALLBACK_METRICS = METRIC_LADDER.last
+  # The dashboard tiles are 28-day totals. period=day on a small Page is
+  # legitimately 0 most days, and adding daily buckets is the wrong shape
+  # anyway; days_28 returns the rolling total directly.
+  PERIOD = 'days_28'
 
   class << self
     def fetch_for_company(company)
@@ -46,8 +45,8 @@ class BrandHealthService
 
       # Temporary, see MetaAppReview: without read_insights the call can only
       # fail, and zeros would read as a page nobody sees.
-      insights_ok   = MetaAppReview.insights?(company)
-      insights_resp = insights_ok ? fetch_insights(company, page_id, token) : nil
+      insights_ok = MetaAppReview.insights?(company)
+      insights    = insights_ok ? fetch_insights(company, page_id, token) : {}
 
       # 25 rather than 10 so the 30-day count below is right for an active page;
       # the dashboard still only renders the first handful.
@@ -62,8 +61,6 @@ class BrandHealthService
 
       posts = Array(posts_resp['data'])
       owned = owned_post_ids(company, posts)
-
-      insights = insights_ok ? extract_insights(insights_resp) : {}
 
       {
         page:         page_payload(page_data),
@@ -91,25 +88,36 @@ class BrandHealthService
              .to_h
     end
 
+    # One request per metric, so a retired name cannot take the others with it.
+    # Returns { metric => number or nil }; nil means we could not get it.
     def fetch_insights(company, page_id, token)
-      last_error = nil
-
-      METRIC_LADDER.each do |metrics|
-        return request_insights(page_id, token, metrics)
-      rescue MetaGraphApi::Error => e
-        last_error = e
-        Rails.logger.warn "[BrandHealthService] company=#{company.id} " \
-                          "insights rejected for [#{metrics.join(',')}]: #{e.message}"
+      METRICS.each_with_object({}) do |metric, out|
+        out[metric] = fetch_metric(company, page_id, token, metric)
       end
-
-      Rails.logger.warn "[BrandHealthService] company=#{company.id} insights skipped: #{last_error&.message}"
-      { 'data' => [] }
     end
 
-    def request_insights(page_id, token, metrics)
-      MetaGraphApi.get("/#{page_id}/insights", token,
-        metric: metrics.join(','),
-        period: 'days_28')
+    def fetch_metric(company, page_id, token, metric)
+      response = MetaGraphApi.get("/#{page_id}/insights", token, metric: metric, period: PERIOD)
+      row = Array(response['data']).find { |r| r['name'] == metric }
+      values = Array(row && row['values'])
+
+      unless values.last.is_a?(Hash)
+        Rails.logger.warn "[BrandHealthService] company=#{company.id} metric=#{metric} returned no values"
+        return nil
+      end
+
+      # The most recent value is the answer, never the sum. With days_28 each
+      # entry is ALREADY the 28-day total ending on its own end_time, and Meta
+      # returns two or three such windows. Adding them counted most of the same
+      # 28 days two or three times over.
+      numeric_value(values.last)
+    rescue MetaGraphApi::Error => e
+      # Graph's full response body is already logged by MetaGraphApi; this line
+      # ties it to the metric, so a retirement is obvious from the logs.
+      Rails.logger.error "[BrandHealthService] company=#{company.id} metric=#{metric} period=#{PERIOD} " \
+                         "unavailable: code=#{e.code.inspect} subcode=#{e.subcode.inspect} " \
+                         "fbtrace_id=#{e.fbtrace_id.inspect} message=#{e.message}"
+      nil
     end
 
     def page_payload(page_data)
@@ -123,34 +131,13 @@ class BrandHealthService
       }
     end
 
-    # Returns plain numbers keyed by metric name. This used to return
-    # { latest:, total_28d: } per metric, which the dashboard read straight into
-    # Number() — every tile rendered NaN and displayed as 0 no matter what Meta
-    # actually returned.
-    #
-    # The most recent value is the answer, never the sum. We request
-    # period=days_28, so each entry Meta returns is ALREADY the 28-day total
-    # ending on its own end_time, and the response carries two or three such
-    # windows. Adding them together counted most of the same 28 days two or
-    # three times over, which is why the dashboard read far higher than the same
-    # figures in Meta Business Suite. (Summing would be right for period=day.)
-    def extract_insights(response)
-      rows = Array(response['data'])
-      METRICS.each_with_object({}) do |metric, out|
-        row = rows.find { |r| r['name'] == metric }
-        values = Array(row && row['values'])
-
-        out[metric] = values.last.is_a?(Hash) ? numeric_value(values.last) : 0
-      end
-    end
-
     # A metric value is either a number or a breakdown hash keyed by segment.
+    # Anything else is unreadable, which is not the same as zero.
     def numeric_value(entry)
       val = entry.is_a?(Hash) ? entry['value'] : entry
       case val
       when Numeric then val
       when Hash    then val.values.select { |x| x.is_a?(Numeric) }.sum
-      else 0
       end
     end
 
