@@ -20,15 +20,22 @@
 # permissions still waiting (comma separated), or to an empty string once both
 # are approved. Unset, the list below applies.
 #
-# The gate is also lifted for platform and super admins (so the resubmission
-# can be recorded from any tenant), and META_REVIEW_COMPANY_IDS (comma
-# separated, per environment) lifts it for named tenants, for a reviewer's test
-# login. Meta grants unapproved permissions to people with a role on the app,
-# so a connection made by one of them genuinely works.
+# The gate is also lifted for:
+#   - platform and super admins, so the resubmission can be recorded from any
+#     tenant;
+#   - named users, for Meta's reviewer and their test login. The list lives in
+#     the database so it changes without a deploy (no UI, SQL only):
+#       Setting 'Platform' / 0 / 'meta_review_user_emails' = ["t+fb@..."]
+#   - named tenants, via META_REVIEW_COMPANY_IDS (comma separated, per
+#     environment).
+# Meta grants unapproved permissions to people with a role on the app, so a
+# connection made by one of them genuinely works.
 #
 # Removal checklist lives in the backlog under "Meta App Review gate".
 module MetaAppReview
   AWAITING = %w[pages_manage_engagement read_insights].freeze
+
+  REVIEWER_SETTING_KEY = 'meta_review_user_emails'
 
   ENGAGEMENT = 'pages_manage_engagement'
   INSIGHTS   = 'read_insights'
@@ -69,8 +76,17 @@ module MetaAppReview
   # impersonating a dealer still sees the features.
   def review_user?(user)
     return false if user.nil?
+    return true if user.platform_admin? || user.super_admin?
 
-    user.platform_admin? || user.super_admin?
+    reviewer_emails.include?(user.email.to_s.strip.downcase)
+  end
+
+  def reviewer_emails
+    raw = Setting.get('Platform', 0, REVIEWER_SETTING_KEY)
+    Array(raw).map { |e| e.to_s.strip.downcase }.reject(&:blank?)
+  rescue StandardError => e
+    Rails.logger.warn "[MetaAppReview] reviewer list unreadable: #{e.message}"
+    []
   end
 
   def review_company?(company)

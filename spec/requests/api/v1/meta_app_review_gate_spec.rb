@@ -148,6 +148,18 @@ RSpec.describe 'Meta App Review gate', type: :request do
       expect(MetaAppReview.engagement?(company, user: User.new(role: 'company_admin'))).to be false
     end
 
+    # Meta's reviewer logs in as an ordinary dealer user, so the lift has to
+    # follow the person, not the role or the whole tenant.
+    it 'is lifted for a user named in the reviewer setting, and only them' do
+      Setting.set('Platform', 0, MetaAppReview::REVIEWER_SETTING_KEY, [user.email.upcase])
+      colleague = User.new(email: 'colleague@example.com', role: 'company_admin')
+
+      get '/api/v1/social-comments', headers: headers
+
+      expect(JSON.parse(response.body)['capabilities']).to eq('engagement' => true, 'insights' => true)
+      expect(MetaAppReview.engagement?(company, user: colleague)).to be false
+    end
+
     it 'lets a review tenant reply' do
       ENV['META_REVIEW_COMPANY_IDS'] = company.id.to_s
       expect(MetaGraphApi).to receive(:reply_to_comment).and_return({ 'id' => 'c_2' })
