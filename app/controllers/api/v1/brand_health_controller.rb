@@ -41,6 +41,12 @@ class Api::V1::BrandHealthController < ApplicationController
   def toggle_like(action)
     return unless authorize_action!('social_posts', 'update')
 
+    # Temporary, see MetaAppReview.
+    unless MetaAppReview.engagement?(@company)
+      return render json: { error: MetaAppReview::ENGAGEMENT_PENDING_MESSAGE, code: 'meta_permission_pending' },
+                    status: :unprocessable_entity
+    end
+
     integration = FacebookIntegration.current_for(@company)
     return render json: { error: 'No Facebook page connected' }, status: :unprocessable_entity unless integration
 

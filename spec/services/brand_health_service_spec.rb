@@ -15,6 +15,10 @@ RSpec.describe BrandHealthService do
 
   let(:page_data) { { 'id' => 'page-1', 'name' => 'DealerTide', 'fan_count' => 10 } }
 
+  # These describe behavior once Meta approves the permission. The temporary
+  # gate itself is covered in meta_app_review_gate_spec.rb.
+  before { allow(MetaAppReview).to receive(:awaiting).and_return([]) }
+
   def stub_graph(insights:)
     allow(MetaGraphApi).to receive(:get) do |path, _token, **params|
       if path == '/page-1' then page_data

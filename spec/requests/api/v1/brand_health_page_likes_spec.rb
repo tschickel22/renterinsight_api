@@ -14,6 +14,10 @@ RSpec.describe 'Api::V1::BrandHealth page likes', type: :request do
   let(:token)   { JsonWebToken.encode(user_id: user.id, company_id: company.id) }
   let(:headers) { { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' } }
 
+  # These describe behavior once Meta approves the permission. The temporary
+  # gate itself is covered in meta_app_review_gate_spec.rb.
+  before { allow(MetaAppReview).to receive(:awaiting).and_return([]) }
+
   let!(:integration) do
     company.facebook_integrations.create!(
       page_id: '55501', page_name: 'Test Page',

@@ -48,15 +48,18 @@ class SyncSocialPostMetricsJob < ApplicationJob
     }
 
     # Insights (reach/impressions/clicks) may require additional permissions;
-    # fail-soft so a permission error never breaks a whole sync run.
-    begin
-      insights = MetaGraphApi.get_post_insights(post.external_post_id, integration.page_access_token)
-      data = Array(insights['data'])
-      updates[:impressions] = insight_value(data, 'post_impressions')
-      updates[:reach]       = insight_value(data, 'post_reach')
-      updates[:link_clicks] = insight_value(data, 'post_clicks')
-    rescue MetaGraphApi::Error => e
-      Rails.logger.warn "[SyncSocialPostMetricsJob] post=#{post.id} insights skipped: #{e.message}"
+    # fail-soft so a permission error never breaks a whole sync run. Skipped
+    # outright while read_insights awaits review (temporary, see MetaAppReview).
+    if MetaAppReview.insights?(post.company)
+      begin
+        insights = MetaGraphApi.get_post_insights(post.external_post_id, integration.page_access_token)
+        data = Array(insights['data'])
+        updates[:impressions] = insight_value(data, 'post_impressions')
+        updates[:reach]       = insight_value(data, 'post_reach')
+        updates[:link_clicks] = insight_value(data, 'post_clicks')
+      rescue MetaGraphApi::Error => e
+        Rails.logger.warn "[SyncSocialPostMetricsJob] post=#{post.id} insights skipped: #{e.message}"
+      end
     end
 
     post.update!(updates.compact)

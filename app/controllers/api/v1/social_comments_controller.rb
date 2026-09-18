@@ -45,7 +45,9 @@ class Api::V1::SocialCommentsController < ApplicationController
         per_page:     per_page,
         total_pages:  (total.to_f / per_page).ceil,
         unread_count: @company.social_comments.active.unread.count
-      }
+      },
+      # Which moderation controls to draw. See MetaAppReview (temporary gate).
+      capabilities: MetaAppReview.capabilities(@company)
     }
   end
 
@@ -68,6 +70,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   # POST /api/v1/social-comments/:id/reply
   def reply
     return unless authorize_action!('social_posts', 'update')
+    return unless engagement_approved!
 
     message = params[:message].to_s
     return render json: { error: 'Message is required' }, status: :bad_request if message.blank?
@@ -123,6 +126,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   # there is nothing anywhere that says the dealer acted on it.
   def destroy
     return unless authorize_action!('social_posts', 'delete')
+    return unless engagement_approved!
 
     remote = @comment.is_from_page? ? :delete : :hide
     result = moderate_on_facebook(@comment, remote)
@@ -147,6 +151,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   # look like nothing happened.
   def hide
     return unless authorize_action!('social_posts', 'update')
+    return unless engagement_approved!
 
     result = moderate_on_facebook(@comment, :hide)
     return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
@@ -162,6 +167,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   # hiding one was irreversible from inside the app.
   def unhide
     return unless authorize_action!('social_posts', 'update')
+    return unless engagement_approved!
 
     result = moderate_on_facebook(@comment, :unhide)
     return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
@@ -207,6 +213,16 @@ class Api::V1::SocialCommentsController < ApplicationController
   end
 
   private
+
+  # Temporary, see MetaAppReview. Refuses before calling Graph, so the dealer
+  # gets a plain explanation instead of Meta's "(#200) ..." permission error.
+  def engagement_approved!
+    return true if MetaAppReview.engagement?(@company)
+
+    render json: { error: MetaAppReview::ENGAGEMENT_PENDING_MESSAGE, code: 'meta_permission_pending' },
+           status: :unprocessable_entity
+    false
+  end
 
   def set_comment
     @comment = @company.social_comments.find_by(id: params[:id])

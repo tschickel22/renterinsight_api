@@ -44,7 +44,10 @@ class BrandHealthService
         return nil
       end
 
-      insights_resp = fetch_insights(company, page_id, token)
+      # Temporary, see MetaAppReview: without read_insights the call can only
+      # fail, and zeros would read as a page nobody sees.
+      insights_ok   = MetaAppReview.insights?(company)
+      insights_resp = insights_ok ? fetch_insights(company, page_id, token) : nil
 
       # 25 rather than 10 so the 30-day count below is right for an active page;
       # the dashboard still only renders the first handful.
@@ -60,10 +63,13 @@ class BrandHealthService
       posts = Array(posts_resp['data'])
       owned = owned_post_ids(company, posts)
 
+      insights = insights_ok ? extract_insights(insights_resp) : {}
+
       {
         page:         page_payload(page_data),
-        insights:     extract_insights(insights_resp).merge('posts_30d' => count_last_30_days(posts)),
-        recent_posts: posts.map { |p| post_payload(p, owned) }
+        insights:     insights.merge('posts_30d' => count_last_30_days(posts)),
+        recent_posts: posts.map { |p| post_payload(p, owned) },
+        capabilities: MetaAppReview.capabilities(company)
       }
     end
 
