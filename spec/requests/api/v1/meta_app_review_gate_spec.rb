@@ -10,9 +10,10 @@ require 'rails_helper'
 # Graph is called and tells the frontend which controls to draw.
 RSpec.describe 'Meta App Review gate', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
+  # A dealer's own admin: the gate applies to them. Platform admins are exempt.
   let(:user) do
     User.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: 'T', last_name: 'U',
-                 password: 'Pass1234!', company_id: company.id, role: 'platform_admin')
+                 password: 'Pass1234!', company_id: company.id, role: 'company_admin')
   end
   let(:token)   { JsonWebToken.encode(user_id: user.id, company_id: company.id) }
   let(:headers) { { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' } }
@@ -126,6 +127,25 @@ RSpec.describe 'Meta App Review gate', type: :request do
 
       expect(MetaAppReview.engagement?(company)).to be true
       expect(MetaAppReview.engagement?(other)).to be false
+    end
+
+    # So the resubmission can be recorded from any tenant without an ENV change.
+    it 'is lifted for a platform admin' do
+      admin = User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'P', last_name: 'A',
+                           password: 'Pass1234!', company_id: company.id, role: 'platform_admin')
+      admin_headers = headers.merge('Authorization' => "Bearer #{JsonWebToken.encode(user_id: admin.id, company_id: company.id)}")
+      expect(MetaGraphApi).to receive(:reply_to_comment).and_return({ 'id' => 'c_2' })
+
+      get '/api/v1/social-comments', headers: admin_headers
+      expect(JSON.parse(response.body)['capabilities']).to eq('engagement' => true, 'insights' => true)
+
+      post "/api/v1/social-comments/#{comment.id}/reply", params: { message: 'Yes!' }.to_json, headers: admin_headers
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'is lifted for a super admin but not for a company admin' do
+      expect(MetaAppReview.engagement?(company, user: User.new(role: 'super_admin'))).to be true
+      expect(MetaAppReview.engagement?(company, user: User.new(role: 'company_admin'))).to be false
     end
 
     it 'lets a review tenant reply' do

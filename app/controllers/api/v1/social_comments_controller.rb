@@ -47,7 +47,7 @@ class Api::V1::SocialCommentsController < ApplicationController
         unread_count: @company.social_comments.active.unread.count
       },
       # Which moderation controls to draw. See MetaAppReview (temporary gate).
-      capabilities: MetaAppReview.capabilities(@company)
+      capabilities: MetaAppReview.capabilities(@company, user: original_user)
     }
   end
 
@@ -217,7 +217,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   # Temporary, see MetaAppReview. Refuses before calling Graph, so the dealer
   # gets a plain explanation instead of Meta's "(#200) ..." permission error.
   def engagement_approved!
-    return true if MetaAppReview.engagement?(@company)
+    return true if MetaAppReview.engagement?(@company, user: original_user)
 
     render json: { error: MetaAppReview::ENGAGEMENT_PENDING_MESSAGE, code: 'meta_permission_pending' },
            status: :unprocessable_entity

@@ -28,7 +28,8 @@ class BrandHealthService
   PERIOD = 'days_28'
 
   class << self
-    def fetch_for_company(company)
+    # user lifts the temporary MetaAppReview gate for platform admins.
+    def fetch_for_company(company, user: nil)
       integration = FacebookIntegration.current_for(company)
       return nil unless integration
 
@@ -45,7 +46,7 @@ class BrandHealthService
 
       # Temporary, see MetaAppReview: without read_insights the call can only
       # fail, and zeros would read as a page nobody sees.
-      insights_ok = MetaAppReview.insights?(company)
+      insights_ok = MetaAppReview.insights?(company, user: user)
       insights    = insights_ok ? fetch_insights(company, page_id, token) : {}
 
       # 25 rather than 10 so the 30-day count below is right for an active page;
@@ -66,7 +67,7 @@ class BrandHealthService
         page:         page_payload(page_data),
         insights:     insights.merge('posts_30d' => count_last_30_days(posts)),
         recent_posts: posts.map { |p| post_payload(p, owned) },
-        capabilities: MetaAppReview.capabilities(company)
+        capabilities: MetaAppReview.capabilities(company, user: user)
       }
     end
 

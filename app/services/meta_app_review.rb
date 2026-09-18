@@ -20,10 +20,11 @@
 # permissions still waiting (comma separated), or to an empty string once both
 # are approved. Unset, the list below applies.
 #
-# META_REVIEW_COMPANY_IDS (comma separated, per environment) lifts the gate for
-# named tenants, so the flows can still be shown to Meta's reviewers and
-# recorded for the resubmission. App admins and testers are granted unapproved
-# permissions, so the features genuinely work for them.
+# The gate is also lifted for platform and super admins (so the resubmission
+# can be recorded from any tenant), and META_REVIEW_COMPANY_IDS (comma
+# separated, per environment) lifts it for named tenants, for a reviewer's test
+# login. Meta grants unapproved permissions to people with a role on the app,
+# so a connection made by one of them genuinely works.
 #
 # Removal checklist lives in the backlog under "Meta App Review gate".
 module MetaAppReview
@@ -45,23 +46,31 @@ module MetaAppReview
     raw.split(',').map(&:strip).reject(&:blank?)
   end
 
-  def approved?(permission, company: nil)
-    return true if review_company?(company)
+  def approved?(permission, company: nil, user: nil)
+    return true if review_user?(user) || review_company?(company)
 
     !awaiting.include?(permission.to_s)
   end
 
-  def engagement?(company)
-    approved?(ENGAGEMENT, company: company)
+  def engagement?(company, user: nil)
+    approved?(ENGAGEMENT, company: company, user: user)
   end
 
-  def insights?(company)
-    approved?(INSIGHTS, company: company)
+  def insights?(company, user: nil)
+    approved?(INSIGHTS, company: company, user: user)
   end
 
   # What the frontend needs to decide which controls to draw.
-  def capabilities(company)
-    { engagement: engagement?(company), insights: insights?(company) }
+  def capabilities(company, user: nil)
+    { engagement: engagement?(company, user: user), insights: insights?(company, user: user) }
+  end
+
+  # Pass the real person behind the request (original_user), so an admin who is
+  # impersonating a dealer still sees the features.
+  def review_user?(user)
+    return false if user.nil?
+
+    user.platform_admin? || user.super_admin?
   end
 
   def review_company?(company)

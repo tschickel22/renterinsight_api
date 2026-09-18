@@ -8,7 +8,7 @@ class Api::V1::BrandHealthController < ApplicationController
     return unless authorize_action!('social_posts', 'read')
 
     begin
-      data = BrandHealthService.fetch_for_company(@company)
+      data = BrandHealthService.fetch_for_company(@company, user: original_user)
     rescue MetaGraphApi::ExpiredTokenError
       return render json: { error: 'Facebook token expired. Please reconnect.' }, status: :unprocessable_entity
     rescue MetaGraphApi::Error => e
@@ -42,7 +42,7 @@ class Api::V1::BrandHealthController < ApplicationController
     return unless authorize_action!('social_posts', 'update')
 
     # Temporary, see MetaAppReview.
-    unless MetaAppReview.engagement?(@company)
+    unless MetaAppReview.engagement?(@company, user: original_user)
       return render json: { error: MetaAppReview::ENGAGEMENT_PENDING_MESSAGE, code: 'meta_permission_pending' },
                     status: :unprocessable_entity
     end
