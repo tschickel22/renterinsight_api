@@ -165,11 +165,21 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     end
 
     integration = @company.facebook_integrations.find_or_initialize_by(page_id: page_id)
+
+    # Connecting never recorded when the new token expires, so whatever was on
+    # the row survived. A connection carrying a stale expiry therefore still
+    # read "Expired" straight after a disconnect and reconnect, which is the
+    # one action a user takes to fix exactly that. Asked of Graph rather than
+    # taken from the caller: the browser is not the authority on this, and nil
+    # is the right answer for a token that does not expire.
+    fresh_expiry = Meta::TokenRefresh.expires_at_of(user_access_token.presence || page_access_token)
+
     integration.assign_attributes(
       location_id:        location_id,
       page_name:          page_name.presence || integration.page_name,
       page_access_token:  page_access_token,
       user_access_token:  user_access_token.presence || integration.user_access_token,
+      token_expires_at:   fresh_expiry,
       status:             'active',
       subscribed_fields:  ['leadgen'],
       default_source_id:  integration.default_source_id || default_source.id,
