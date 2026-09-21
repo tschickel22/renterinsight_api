@@ -833,6 +833,12 @@ class Api::V1::SocialPostsController < ApplicationController
       utm_campaign:       p.utm_campaign,
       utm_content:        p.utm_content,
       tagged_url:         p.tagged_url,
+      # Synced daily from Facebook. Null until the first sync, which the post
+      # cards show as nothing rather than 0. Reach and impressions are not here:
+      # Meta retired every per-post reach metric.
+      engagement_count:   p.engagement_count,
+      link_clicks:        p.link_clicks,
+      metrics_synced_at:  p.metrics_synced_at,
       created_at:         p.created_at,
       updated_at:         p.updated_at
     }
@@ -848,11 +854,6 @@ class Api::V1::SocialPostsController < ApplicationController
     if detailed
       base.merge!(
         description:         p.description,
-        reach:               p.reach,
-        impressions:         p.impressions,
-        engagement_count:    p.engagement_count,
-        link_clicks:         p.link_clicks,
-        metrics_synced_at:   p.metrics_synced_at,
         nurture_approved:    p.nurture_approved,
         nurture_sequence_id: p.nurture_sequence_id,
         generation_context:  p.generation_context,

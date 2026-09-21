@@ -24,7 +24,7 @@ class FacebookTokenRefreshJob < ApplicationJob
       end
 
       begin
-        resp = MetaGraphApi.exchange_token(source_token)
+        renewed = Meta::TokenRefresh.call(source_token)
       rescue MetaGraphApi::ExpiredTokenError => e
         Rails.logger.warn "[FacebookTokenRefreshJob] integration=#{integration.id} token already expired: #{e.message}"
         integration.update(status: 'expired')
@@ -37,8 +37,8 @@ class FacebookTokenRefreshJob < ApplicationJob
       end
 
       integration.update!(
-        user_access_token: resp['access_token'],
-        token_expires_at:  Time.current + resp['expires_in'].to_i.seconds,
+        user_access_token: renewed.access_token,
+        token_expires_at:  renewed.expires_at,
         status:            'active'
       )
       refreshed += 1

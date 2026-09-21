@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "name": "page_views_total",
+      "period": "days_28",
+      "values": [
+        { "value": 98, "end_time": "2026-09-16T07:00:00+0000" },
+        { "value": 107, "end_time": "2026-09-17T07:00:00+0000" }
+      ],
+      "title": "28 Days Total Views",
+      "description": "28 Days: The number of times a Page's profile has been viewed by logged in and logged out people.",
+      "id": "1280160285171602/insights/page_views_total/days_28"
+    }
+  ],
+  "paging": {
+    "previous": "https://graph.facebook.com/v25.0/1280160285171602/insights?metric=page_views_total&period=days_28&since=1757833200&until=1758006000",
+    "next": "https://graph.facebook.com/v25.0/1280160285171602/insights?metric=page_views_total&period=days_28&since=1758178800&until=1758351600"
+  }
+}

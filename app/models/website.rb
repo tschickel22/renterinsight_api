@@ -92,6 +92,29 @@ class Website < ApplicationRecord
     kind == 'marketing'
   end
 
+  # The chat assistant on this site's pages. Two things a dealer could not
+  # touch before: whether it shows at all, and what it calls itself. It used to
+  # caption itself with `name`, which for the landing page container is an
+  # internal label nobody chose ("Acme Homes Landing Pages").
+  #
+  # Absent means on, because the module was the only switch before this and a
+  # dealer who bought it already has the widget. Turning it off is a decision;
+  # never having opened the setting is not.
+  def concierge_on?
+    concierge_config.to_h['enabled'] != false
+  end
+
+  # What the widget calls itself, most specific first.
+  def concierge_display_name(company_name: nil)
+    configured = concierge_config.to_h['name'].to_s.strip
+    return configured if configured.present?
+
+    brand_name = brand.to_h['company_name'].to_s.strip
+    return brand_name if brand_name.present?
+
+    (company_name.presence || company&.name).to_s.strip.presence || name
+  end
+
   # Validations
   validates :name, presence: true
   validates :kind, inclusion: { in: KINDS }

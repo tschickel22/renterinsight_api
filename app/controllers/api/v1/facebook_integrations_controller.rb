@@ -51,14 +51,22 @@ class Api::V1::FacebookIntegrationsController < ApplicationController
     return render json: { error: 'No stored token to refresh' }, status: :unprocessable_entity if source_token.blank?
 
     begin
-      resp = MetaGraphApi.exchange_token(source_token)
+      refreshed = Meta::TokenRefresh.call(source_token)
+    rescue MetaGraphApi::ExpiredTokenError => e
+      # Nothing to refresh from: Facebook will only take a token that is still
+      # alive. Say so plainly, because "refresh failed" reads as try again.
+      @integration.update(status: 'expired')
+      return render json: {
+        error: 'Facebook will not renew this connection any more. Reconnect the page to continue.',
+        code: 'reconnect_required', detail: e.message
+      }, status: :unprocessable_entity
     rescue MetaGraphApi::Error => e
       return render json: { error: e.message }, status: :unprocessable_entity
     end
 
     @integration.update!(
-      user_access_token: resp['access_token'],
-      token_expires_at:  Time.current + resp['expires_in'].to_i.seconds,
+      user_access_token: refreshed.access_token,
+      token_expires_at:  refreshed.expires_at,
       status:            'active'
     )
 

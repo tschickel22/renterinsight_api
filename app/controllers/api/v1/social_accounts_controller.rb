@@ -59,14 +59,14 @@ class Api::V1::SocialAccountsController < ApplicationController
     return render json: { error: 'No stored token to refresh' }, status: :unprocessable_entity if source.blank?
 
     begin
-      resp = MetaGraphApi.exchange_token(source)
+      refreshed = Meta::TokenRefresh.call(source)
     rescue MetaGraphApi::Error => e
       return render json: { error: e.message }, status: :unprocessable_entity
     end
 
     @account.update!(
-      access_token_encrypted: resp['access_token'],
-      token_expires_at:       Time.current + resp['expires_in'].to_i.seconds,
+      access_token_encrypted: refreshed.access_token,
+      token_expires_at:       refreshed.expires_at,
       status:                 'active'
     )
     render json: serialize(@account, detailed: true)

@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # Daily job. For each published SocialPost with an external_post_id, pulls
-# reach/impressions/engagement/link_clicks from Meta and refreshes lead_count
+# engagement and link_clicks from Meta (reach and impressions no longer exist
+# per post; Meta retired them) and refreshes lead_count
 # and deal_count from our own database (leads + converted accounts' deals).
 class SyncSocialPostMetricsJob < ApplicationJob
   queue_as :low
@@ -47,16 +48,17 @@ class SyncSocialPostMetricsJob < ApplicationJob
       engagement_count: likes + comments + shares
     }
 
-    # Insights (reach/impressions/clicks) may require additional permissions;
-    # fail-soft so a permission error never breaks a whole sync run.
-    begin
-      insights = MetaGraphApi.get_post_insights(post.external_post_id, integration.page_access_token)
-      data = Array(insights['data'])
-      updates[:impressions] = insight_value(data, 'post_impressions')
-      updates[:reach]       = insight_value(data, 'post_reach')
-      updates[:link_clicks] = insight_value(data, 'post_clicks')
-    rescue MetaGraphApi::Error => e
-      Rails.logger.warn "[SyncSocialPostMetricsJob] post=#{post.id} insights skipped: #{e.message}"
+    # Clicks need read_insights; fail-soft so a permission error never breaks
+    # a whole sync run. Skipped outright while read_insights awaits review
+    # (temporary, see MetaAppReview).
+    if MetaAppReview.insights?(post.company)
+      begin
+        insights = MetaGraphApi.get_post_insights(post.external_post_id, integration.page_access_token)
+        updates[:link_clicks] = insight_value(Array(insights['data']), 'post_clicks')
+      rescue MetaGraphApi::Error => e
+        Rails.logger.warn "[SyncSocialPostMetricsJob] post=#{post.id} metric=post_clicks unavailable: " \
+                          "code=#{e.code.inspect} fbtrace_id=#{e.fbtrace_id.inspect} message=#{e.message}"
+      end
     end
 
     post.update!(updates.compact)

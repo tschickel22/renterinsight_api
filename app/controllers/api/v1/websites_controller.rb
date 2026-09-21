@@ -443,10 +443,11 @@ class Api::V1::WebsitesController < ApplicationController
     # pay for.
     website_json['concierge_enabled'] =
       begin
-        ModuleAccessService.new(@website.company).module_enabled?('marketing.ai_concierge')
+        @website.concierge_on? && ModuleAccessService.new(@website.company).module_enabled?('marketing.ai_concierge')
       rescue StandardError
         false
       end
+    website_json['concierge_name'] = @website.concierge_display_name
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound
@@ -538,10 +539,11 @@ class Api::V1::WebsitesController < ApplicationController
     # renders differently from the published site is worse than no preview.
     website_json['concierge_enabled'] =
       begin
-        ModuleAccessService.new(company).module_enabled?('marketing.ai_concierge')
+        @website.concierge_on? && ModuleAccessService.new(company).module_enabled?('marketing.ai_concierge')
       rescue StandardError
         false
       end
+    website_json['concierge_name'] = @website.concierge_display_name
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound
@@ -866,6 +868,7 @@ class Api::V1::WebsitesController < ApplicationController
 
   def website_params
     permitted = params.require(:website).permit(
+      { concierge_config: %i[enabled name] },
       :name,
       :slug,
       :domain,

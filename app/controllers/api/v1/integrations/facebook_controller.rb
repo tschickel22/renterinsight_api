@@ -85,9 +85,12 @@ class Api::V1::Integrations::FacebookController < ApplicationController
       token_resp = MetaGraphApi.exchange_code_for_token(params[:code], callback_redirect_uri)
       short_lived = token_resp['access_token']
 
-      long_lived_resp = MetaGraphApi.exchange_token(short_lived)
-      user_access_token = long_lived_resp['access_token']
-      expires_in        = long_lived_resp['expires_in']
+      # Meta::TokenRefresh rather than the raw exchange: a response with no
+      # expires_in means the token does not expire, and reading that as zero
+      # stamped a brand new connection as already expired.
+      long_lived        = Meta::TokenRefresh.call(short_lived)
+      user_access_token = long_lived.access_token
+      token_expires_at  = long_lived.expires_at
 
       pages_response = MetaGraphApi.list_user_pages(user_access_token)
       Rails.logger.info "[FacebookOAuth] Raw pages response: #{pages_response.inspect[0..500]}"
@@ -121,7 +124,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
       return_url:        state_data['return_url'],
       location_id:       state_data['location_id'],
       user_access_token: user_access_token,
-      token_expires_at:  (Time.current + expires_in.to_i.seconds).iso8601,
+      token_expires_at:  token_expires_at&.iso8601,
       pages: pages.map { |p| { id: p['id'], name: p['name'], access_token: p['access_token'], category: p['category'], tasks: p['tasks'] } }
     }
   end
