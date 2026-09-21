@@ -41,6 +41,7 @@ module Websites
       payload['blog_categories'] = blog_categories
       payload['inventory_embed_config'] = inventory_embed_config
       payload['concierge_enabled'] = concierge_enabled
+      payload['concierge_name'] = @website.concierge_display_name
       payload['platform_brand'] = platform_brand
       # Was missing here while WebsitesController#by_slug_public included it, so
       # every calculator block rendered in the in-app preview and then silently
@@ -115,12 +116,14 @@ module Websites
       {}
     end
 
-    # Whether this dealer bought the concierge. Sent so the widget can render
-    # itself without a second request on first paint, and so a dealer who has
-    # not bought it gets no widget rather than one that 403s on first message.
+    # Whether this dealer bought the concierge AND wants it on this site. Sent
+    # so the widget can render itself without a second request on first paint,
+    # and so a dealer who has not bought it gets no widget rather than one that
+    # 403s on first message.
     def concierge_enabled
       company = @website.company
       return false if company.nil?
+      return false unless @website.concierge_on?
 
       ModuleAccessService.new(company).module_enabled?('marketing.ai_concierge')
     rescue StandardError

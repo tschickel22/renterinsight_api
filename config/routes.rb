@@ -833,6 +833,10 @@ Rails.application.routes.draw do
         collection do
           post :ai_generate
           post :import_html
+          # Settings shared by every landing page, held on the marketing
+          # container they all live in: today, the chat assistant.
+          get  :settings
+          patch :settings
           # Every page's headline numbers in one table. Declared on the
           # collection, so it does not collide with the member :analytics that
           # reports on one.

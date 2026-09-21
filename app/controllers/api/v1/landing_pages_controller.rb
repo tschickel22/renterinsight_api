@@ -51,6 +51,33 @@ class Api::V1::LandingPagesController < ApplicationController
     render json: detail(@page)
   end
 
+  # GET /api/v1/landing-pages/settings
+  # PATCH /api/v1/landing-pages/settings
+  #
+  # What every landing page shares, which lives on the marketing container they
+  # are all pages of. The chat assistant was the first thing a dealer could see
+  # on their landing pages and could not switch off or name: it appeared for
+  # anyone with the module, captioned with the container's internal name.
+  def settings
+    if request.patch?
+      return unless authorize_action!('websites', 'update')
+
+      site = Marketing::MarketingSiteProvisioner.call(company: @company, location: target_location)
+      config = site.concierge_config.to_h
+      config['enabled'] = ActiveModel::Type::Boolean.new.cast(params[:concierge][:enabled]) unless params[:concierge][:enabled].nil?
+      config['name'] = params[:concierge][:name].to_s.strip if params[:concierge].key?(:name)
+      site.update!(concierge_config: config.deep_stringify_keys)
+    else
+      return unless authorize_action!('websites', 'read')
+
+      site = Website.active.marketing_containers.find_by(company_id: @company.id)
+    end
+
+    render json: landing_settings(site)
+  rescue Marketing::MarketingSiteProvisioner::ProvisioningError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # Creates the marketing container on first use, so a dealer who has never
   # built a website can still publish a landing page.
   def create
@@ -568,6 +595,24 @@ class Api::V1::LandingPagesController < ApplicationController
         enabled: @company.public_inventory_enabled || false
       }
     )
+  end
+
+  # Nil site means no landing page has been made yet, so the defaults answer.
+  def landing_settings(site)
+    concierge_module = ModuleAccessService.new(@company).module_enabled?('marketing.ai_concierge')
+
+    {
+      concierge: {
+        # Whether the dealer bought it at all. The switch below is theirs; this
+        # is not, so the UI can say why the switch does nothing.
+        available: concierge_module,
+        enabled: site.nil? || site.concierge_on?,
+        name: site&.concierge_config.to_h['name'].to_s,
+        # What the widget calls itself today, so the field can show the
+        # fallback rather than an empty box that looks unset.
+        resolved_name: site ? site.concierge_display_name : @company.name
+      }
+    }
   end
 
   def public_url_for(page)

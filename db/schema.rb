@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_17_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_21_095743) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7627,6 +7627,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_17_170000) do
     t.jsonb "site_header", default: {}
     t.jsonb "site_footer", default: {}
     t.string "kind", default: "site", null: false
+    t.jsonb "concierge_config", default: {}, null: false
     t.index ["company_id", "slug"], name: "index_websites_on_company_id_and_slug", unique: true
     t.index ["company_id"], name: "index_websites_on_company_id"
     t.index ["domain"], name: "index_websites_on_domain", unique: true, where: "(domain IS NOT NULL)"
