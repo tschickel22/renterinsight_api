@@ -51,6 +51,14 @@ class MetaGraphApi
           fb_exchange_token: short_lived_token)
     end
 
+    # What Graph itself says about a token: whether it is still valid, the
+    # scopes it carries, and when it expires (`expires_at: 0` means never).
+    # Asked with an app access token, so it works even for a token that is on
+    # its way out.
+    def debug_token(input_token)
+      get('/debug_token', nil, input_token: input_token, access_token: "#{app_id}|#{app_secret}")
+    end
+
     # Subscribe a page to webhook events (leadgen by default).
     def subscribe_page_to_webhooks(page_id, access_token, subscribed_fields: ['leadgen'])
       post("/#{page_id}/subscribed_apps", access_token,

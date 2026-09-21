@@ -119,6 +119,14 @@ default: &default
     class: RefreshSesDomainStatusJob
     queue: default
     schedule: every 15 minutes
+  facebook_token_refresh:
+    # FacebookTokenRefreshJob existed since the integration was built and was
+    # never scheduled, so nothing renewed a Facebook connection and every one
+    # of them eventually expired and had to be reconnected by hand. Daily,
+    # because it renews anything inside 7 days of expiry.
+    class: FacebookTokenRefreshJob
+    queue: default
+    schedule: every day at 9am
   refresh_website_domain_status:
     # Polls Cloudflare for custom hostname and certificate status. Issuance happens on
     # Cloudflare's schedule after DNS is correct, and nothing else notices, so without this
