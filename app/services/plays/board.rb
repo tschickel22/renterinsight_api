@@ -65,6 +65,7 @@ module Plays
         columns: COLUMNS.map do |column|
           column.merge(label: format(column[:label], lead: lead_word), count: list.count { |card| card[:column] == column[:key] })
         end,
+        totals: totals(list),
         cards: list,
         demo_clock: { available: DemoClock.available?(@company), enabled: DemoClock.enabled?(@company) },
         updated_at: Time.current.iso8601
@@ -75,6 +76,40 @@ module Plays
 
     def lead_word
       @lead_word ||= (@company.resolved_labels['lead'].presence || 'lead').downcase
+    end
+
+    # What the loop view puts under the steps: how many people a play is
+    # carrying, and what the far end of it is worth. Money comes from the deals
+    # themselves rather than a count of cards, so it says the same thing as the
+    # pipeline does.
+    def totals(list)
+      deals = deals_for(list)
+      won, open_deals = deals.partition { |deal| @company.won_stage_keys.include?(deal.stage.to_s) }
+
+      {
+        people: list.size,
+        replied: list.count { |card| card[:column] == 'talking' },
+        deals: list.count { |card| card[:column] == 'deal' },
+        sold: list.count { |card| card[:column] == 'sold' },
+        pipeline_value: open_deals.sum { |deal| deal.calculated_value.to_f }.round(2),
+        revenue: won.sum { |deal| deal.calculated_value.to_f }.round(2)
+      }
+    end
+
+    # A card is either a deal already (the after-sale play) or a lead that
+    # became one, which reaches its deals through the account it converted to.
+    # Keyed by deal id so a person who is on the board twice is counted once.
+    def deals_for(list)
+      far = list.select { |card| %w[deal sold].include?(card[:column]) }
+      return [] if far.empty?
+
+      deal_ids = far.select { |card| card[:record_noun] == 'deal' }.map { |card| card[:record_id] }
+      lead_ids = far.select { |card| card[:record_noun] == 'lead' }.map { |card| card[:record_id] }
+      account_ids = lead_ids.any? ? Lead.where(company_id: @company.id, id: lead_ids).pluck(:converted_account_id).compact : []
+
+      scope = Deal.where(company_id: @company.id)
+      scope = scope.where(location_id: @location_ids) if @location_ids
+      scope.where(id: deal_ids).or(scope.where(account_id: account_ids)).distinct.to_a
     end
 
     def card_for(play, row, column)
