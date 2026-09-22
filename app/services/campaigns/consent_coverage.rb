@@ -53,6 +53,18 @@ module Campaigns
       )
     end
 
+    # The recipients with no preference row at all. Deliberately NOT the opted
+    # out ones: those people answered, and a bulk confirmation must never
+    # overturn an answer somebody gave.
+    def uncovered_recipients
+      channel = @campaign.sms_channel? ? 'sms' : 'email'
+      audience_recipients.reject do |r|
+        CommunicationPreference.exists?(
+          recipient: r, channel: channel, category: 'marketing'
+        )
+      end
+    end
+
     private
 
     # A tenant that has opted out of the gate is not blocked by any of this, and

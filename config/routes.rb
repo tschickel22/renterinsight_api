@@ -2080,6 +2080,9 @@ Rails.application.routes.draw do
           # How much of the audience holds consent, asked before start so the
           # skip is on screen rather than discovered in the send numbers.
           get  :consent_coverage
+          # The dealer asserting that this audience opted in with them. Writes
+          # consent, so it sits behind campaigns:update, not :read.
+          post :confirm_audience_consent
           post :refine_with_ai
           post :resume
           post :reopen

@@ -14,7 +14,7 @@ class Api::V1::CampaignsController < ApplicationController
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
   require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage confirm_audience_consent]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -449,6 +449,35 @@ class Api::V1::CampaignsController < ApplicationController
       # Only a blocking warning when the gate is actually on for this tenant.
       willBeSkipped: c.gate_enabled ? c.blocked : 0
     }, status: :ok
+  end
+
+  # POST /api/v1/campaigns/:id/confirm_audience_consent
+  #
+  # The dealer confirming that the people in this audience opted in with them
+  # somewhere we did not record. Only touches recipients with no record at all,
+  # never one who opted out: they answered, and no bulk action overturns an
+  # answer. Gated on update rather than read, because it writes consent.
+  def confirm_audience_consent
+    return unless authorize_action!('campaigns', 'update')
+
+    result = Campaigns::BulkConsentConfirmation.call(
+      campaign: @campaign, user: current_user, basis: params[:basis]
+    )
+
+    if result.ok?
+      c = Campaigns::ConsentCoverage.for_campaign(@campaign)
+      render json: {
+        success: true,
+        confirmed: result.confirmed,
+        coverage: {
+          total: c.total, consented: c.consented, missing: c.missing,
+          optedOut: c.opted_out, blocked: c.blocked, gateEnabled: c.gate_enabled,
+          willBeSkipped: c.gate_enabled ? c.blocked : 0
+        }
+      }, status: :ok
+    else
+      render json: { success: false, error: result.error }, status: :unprocessable_entity
+    end
   end
 
   def preview
