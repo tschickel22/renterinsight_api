@@ -2584,6 +2584,11 @@ Rails.application.routes.draw do
           get  :duplicates
           post :merge_preview
           post :merge
+          # Marketing consent entered by staff, for contacts a dealer already
+          # holds consent for (an old CRM, a signed form, a conversation).
+          # Stored with its own source so it never masquerades as a consent the
+          # person gave us on a form.
+          patch :marketing_consent, path: 'marketing-consent'
         end
 
         collection do

@@ -7,7 +7,7 @@ module Api
       include PersonNameSearch
 
       before_action :set_company_scope
-      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone]
+      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent]
 
       # ==== Lead cloning ====
       #
@@ -617,6 +617,29 @@ module Api
             { name: 'Profile Completeness', value: 20 }
           ]
         }
+      end
+
+      # PATCH /api/crm/leads/:id/marketing-consent
+      #
+      # Staff entering consent they already hold for this person. Gated on
+      # leads:update, because it is an edit to the record rather than a
+      # marketing setting, and the rep who owns the lead is the person who knows
+      # where the consent came from.
+      def marketing_consent
+        return unless authorize_action!('leads', 'update')
+
+        result = MarketingConsentRecorder.call(
+          recipient: @lead,
+          opted_in: params[:opted_in],
+          user: current_user,
+          basis: params[:basis]
+        )
+
+        if result.ok?
+          render json: { success: true, marketingConsent: marketing_consent_json(@lead.reload) }, status: :ok
+        else
+          render json: { success: false, error: result.error }, status: :unprocessable_entity
+        end
       end
 
       def convert
@@ -1384,7 +1407,14 @@ module Api
           consentText: meta['consent_text'],
           version:     meta['consent_version'],
           pageUrl:     meta['page_url'],
-          formId:      meta['intake_form_id']
+          formId:      meta['intake_form_id'],
+          # Staff-entered consent carries who said so and on what basis, instead
+          # of the wording, IP and page a form capture carries. The UI keeps the
+          # two apart so an assertion never reads as evidence.
+          recordedByName: meta['recorded_by_name'],
+          recordedAt:     meta['recorded_at'],
+          basis:          meta['basis'],
+          carriedFrom:    meta['carried_from']
         }
       end
 

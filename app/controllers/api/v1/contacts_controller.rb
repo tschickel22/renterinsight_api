@@ -1104,6 +1104,9 @@ module Api
           version:     meta['consent_version'],
           pageUrl:     meta['page_url'],
           formId:      meta['intake_form_id'],
+          recordedByName: meta['recorded_by_name'],
+          recordedAt:     meta['recorded_at'],
+          basis:          meta['basis'],
           carriedFrom: meta['carried_from']
         }
       end
