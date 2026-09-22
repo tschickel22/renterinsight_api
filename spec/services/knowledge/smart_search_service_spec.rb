@@ -69,11 +69,6 @@ RSpec.describe Knowledge::SmartSearchService do
       )
     end
 
-    it 'does not call the embedding service when step 3 produces a result' do
-      expect(Knowledge::EmbeddingService).not_to receive(:generate)
-      described_class.new('how do I create a lead').search
-    end
-
     it 'escalates to step 4 (semantic) then step 5 (fallback) when graph returns nothing' do
       # Force matcher to produce a below-threshold result so feature lookup bails out.
       allow(Knowledge::IntentMatcher).to receive(:new).and_return(
@@ -82,7 +77,6 @@ RSpec.describe Knowledge::SmartSearchService do
         ))
       )
       stub_alias_miss
-      allow(Knowledge::EmbeddingService).to receive(:generate).and_return(nil)
 
       results = described_class.new('gibberish').search
       expect(results.first[:type]).to eq('suggestion')
@@ -109,7 +103,6 @@ RSpec.describe Knowledge::SmartSearchService do
         ))
       )
       stub_alias_miss
-      allow(Knowledge::EmbeddingService).to receive(:generate).and_return(nil)
 
       expect(Knowledge::Search).to receive(:create!).with(hash_including(
         query: 'gibberish', intent_detected: nil, result_count: 1

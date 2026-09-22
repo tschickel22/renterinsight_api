@@ -873,6 +873,15 @@ module Api
             )
             Rails.logger.info "🔄 [ConvertLead] Custom field migration: copied=#{cf_result[:copied]}, gaps=#{cf_result[:gaps].size}"
 
+            # 5b. CARRY MARKETING CONSENT FORWARD
+            # Consent belongs to the person, not to the row that held them.
+            # Without this the converted contact holds no consent record, and
+            # Campaigns::CampaignSender gates on exactly that: converting a
+            # consenting lead would quietly make them unmailable.
+            carried = MarketingConsentTransfer.call(from: @lead, to: contact) +
+                      MarketingConsentTransfer.call(from: @lead, to: account)
+            Rails.logger.info "🔄 [ConvertLead] Marketing consent carried forward: #{carried} preference(s)"
+
             # 6. MARK LEAD AS CONVERTED
             @lead.update!(
               is_converted: true,

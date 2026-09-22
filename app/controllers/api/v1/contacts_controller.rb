@@ -1085,6 +1085,29 @@ module Api
         end
       end
 
+      # Nil when nobody ever asked, which is not the same as a recorded refusal.
+      def marketing_consent_json(contact)
+        pref = CommunicationPreference
+               .where(recipient: contact, channel: 'email', category: 'marketing')
+               .order(updated_at: :desc).first
+        return nil if pref.nil?
+
+        meta = pref.compliance_metadata || {}
+        {
+          optedIn:     pref.opted_in,
+          optedInAt:   pref.opted_in_at,
+          optedOutAt:  pref.opted_out_at,
+          ipAddress:   pref.ip_address,
+          userAgent:   pref.user_agent,
+          source:      meta['source'],
+          consentText: meta['consent_text'],
+          version:     meta['consent_version'],
+          pageUrl:     meta['page_url'],
+          formId:      meta['intake_form_id'],
+          carriedFrom: meta['carried_from']
+        }
+      end
+
       def contact_json(contact, detailed: false)
         json = {
           id: contact.id,
@@ -1104,6 +1127,11 @@ module Api
           notes: contact.notes,
           ownerId: contact.owner_id,
           owner: contact.owner ? { id: contact.owner.id, name: contact.owner.name, email: contact.owner.email } : nil,
+          # Marketing consent as recorded, distinct from the opt-out flags above:
+          # those say "stop", this says whether they ever said "start". Carried
+          # forward from the lead on conversion (MarketingConsentTransfer), so a
+          # converted contact still shows the evidence behind their consent.
+          marketingConsent: marketing_consent_json(contact),
           optOutEmail: contact.opt_out_email,
           optOutEmailAt: contact.opt_out_email_at,
           optOutSms: contact.opt_out_sms,
