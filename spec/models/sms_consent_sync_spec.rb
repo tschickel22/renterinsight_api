@@ -105,4 +105,52 @@ RSpec.describe 'SMS marketing consent and opt_in_sms' do
       expect(CommunicationPreference.marketing_consent?(recipient: created, channel: 'sms')).to be(true)
     end
   end
+
+  # A form carrying both the general consent box and its own SMS checkbox is
+  # asking two questions. The specific answer has to win, or ticking "email and
+  # text me" silently overwrites a cleared SMS box into a yes.
+  describe 'a form asking about SMS separately' do
+    let(:company2) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
+    let(:both_form) do
+      IntakeForm.create!(
+        company_id: company2.id, name: 'Quote', is_active: true, auto_create_lead: true,
+        marketing_consent_enabled: true,
+        schema: [
+          { 'name' => 'email', 'type' => 'email', 'label' => 'Email', 'leadField' => 'email' },
+          { 'name' => 'first_name', 'type' => 'text', 'label' => 'First', 'leadField' => 'first_name' },
+          { 'name' => 'opt_in_sms', 'type' => 'checkbox', 'label' => 'Text me',
+            'leadField' => 'opt_in_sms' }
+        ]
+      )
+    end
+
+    before { Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' } }
+
+    def submit(sms:)
+      sub = both_form.intake_submissions.create!(
+        data: { 'first_name' => 'Sam', 'email' => "s-#{SecureRandom.hex(3)}@example.com",
+                'opt_in_sms' => sms },
+        ip_address: '203.0.113.5', user_agent: 'RSpec', submitted_at: Time.current,
+        marketing_consent: true, marketing_consent_text: 'Email and text me.',
+        marketing_consent_at: Time.current
+      )
+      sub.create_lead_from_submission unless sub.lead_id
+      Lead.find(sub.reload.lead_id)
+    end
+
+    it 'does not turn a cleared SMS box into a yes' do
+      lead = submit(sms: false)
+
+      expect(CommunicationPreference.marketing_consent?(recipient: lead, channel: 'email')).to be(true)
+      expect(CommunicationPreference.marketing_consent?(recipient: lead, channel: 'sms')).to be(false)
+      expect(lead.opt_in_sms).to be(false)
+    end
+
+    it 'honours a ticked SMS box' do
+      lead = submit(sms: true)
+
+      expect(CommunicationPreference.marketing_consent?(recipient: lead, channel: 'sms')).to be(true)
+      expect(lead.opt_in_sms).to be(true)
+    end
+  end
 end

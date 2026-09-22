@@ -840,7 +840,15 @@ class IntakeSubmission < ApplicationRecord
     # promised to create, which reads as a bug to the dealer and as a missing
     # consent to a reviewer. The sms preference also sets opt_in_sms on the
     # record, which is what the audience filter selects on.
-    %w[email sms].each do |channel|
+    #
+    # Unless the form asked about texting separately. A form carrying both the
+    # general consent box and its own SMS checkbox is asking two questions, and
+    # the specific answer wins: somebody who ticked "email and text me" but left
+    # the SMS box clear has said something about texting, and a general consent
+    # must not overwrite it into a yes.
+    channels = asks_about_sms_separately? && !contact.try(:opt_in_sms) ? %w[email] : %w[email sms]
+
+    channels.each do |channel|
       preference = CommunicationPreferenceService.opt_in(
         recipient: contact,
         channel: channel,
@@ -866,5 +874,15 @@ class IntakeSubmission < ApplicationRecord
     end
   rescue StandardError => e
     Rails.logger.error("[IntakeSubmission##{id}] could not record marketing consent: #{e.class}: #{e.message}")
+  end
+
+  # True when this form has its own SMS opt-in field, i.e. it asked about
+  # texting as a separate question rather than folding it into the consent text.
+  def asks_about_sms_separately?
+    Array(intake_form&.fields).any? do |field|
+      (field['leadField'] || field[:leadField]).to_s == 'opt_in_sms'
+    end
+  rescue StandardError
+    false
   end
 end
