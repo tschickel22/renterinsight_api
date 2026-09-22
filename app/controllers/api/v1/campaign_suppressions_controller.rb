@@ -60,9 +60,22 @@ class Api::V1::CampaignSuppressionsController < ApplicationController
     end
   end
 
+  # A dealer may remove a suppression they added by hand, and nothing else.
+  #
+  # This endpoint used to delete any row, including one a recipient created by
+  # clicking unsubscribe or texting STOP. Delete it and the next campaign mails
+  # them again, which makes the opt-out a suggestion rather than a rule.
   def destroy
     return unless authorize_action!('campaigns', 'update')
     s = CampaignSuppression.where(company_id: @company.id).find(params[:id])
+
+    unless s.dealer_removable?
+      return render json: {
+        error: 'This opt-out was recorded by the recipient and cannot be removed.',
+        reason: s.reason
+      }, status: :forbidden
+    end
+
     s.destroy
     head :no_content
   rescue ActiveRecord::RecordNotFound

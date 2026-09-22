@@ -50,6 +50,7 @@ module Campaigns
 
       return mark_failed('contact_value_missing') if contact_value.blank?
       return mark_unsubscribed if suppressed?
+      return mark_skipped('no_marketing_consent') unless marketing_consent_ok?(step)
 
       # The send window protects the recipients of an automated campaign from being mailed at
       # 3am. A test send goes to the admin who just pressed the button, so there is nothing
@@ -275,6 +276,11 @@ module Campaigns
         attachments: inline_uploads.presence,
         metadata: metadata_hash.deep_stringify_keys,
         skip_preference_check: true,
+        # RFC 8058 one-click unsubscribe. Gmail has required this of bulk senders
+        # since 2024, and it puts their own unsubscribe control next to the
+        # sender name instead of making the recipient hunt for the footer link.
+        # Same URL the footer uses, so both routes hit the same signed token.
+        extra_headers: unsubscribe_headers(rendered[:unsubscribe_url]),
         # A waterfall send still belongs to the recipient's rep, so replies reach them.
         sender_user_id: conn.try(:user_id) || (waterfall ? recipient.try(:owner_id) : nil),
         user: conn.try(:user)
@@ -360,6 +366,50 @@ module Campaigns
     rescue => e
       Rails.logger.error "[CampaignSender#deliver_sms] #{e.class}: #{e.message}"
       { success: false, error: e.message.to_s[0, 200] }
+    end
+
+    # Marketing goes only to people who agreed to receive it.
+    #
+    # Suppression above answers "did they opt out"; this answers "did they ever
+    # opt in", which is the question Google actually asked and the one an
+    # opt-out-only system cannot answer. Consent is written by the public lead
+    # forms (see IntakeSubmission#record_marketing_consent!) and carries the
+    # timestamp, IP, user agent and the exact wording shown.
+    #
+    # A test send is exempt: it goes to the admin who just pressed the button.
+    #
+    # The gate is per tenant because turning it on retires every contact
+    # captured before consent was recorded. A dealer mid-migration can run
+    # without it while they gather consent; the setting is what makes that an
+    # explicit, auditable choice rather than a silent default.
+    def marketing_consent_ok?(step)
+      return true if test_send?
+      return true unless marketing_consent_required?
+
+      CommunicationPreference.marketing_consent?(
+        recipient: recipient,
+        channel: step.effective_channel == 'sms' ? 'sms' : 'email'
+      )
+    end
+
+    def marketing_consent_required?
+      return @marketing_consent_required if defined?(@marketing_consent_required)
+
+      setting = Setting.get('Company', @company.id, 'require_marketing_consent')
+      # Absent means required. A tenant opts OUT of the gate deliberately; they
+      # never fall out of it by having no row.
+      @marketing_consent_required = setting.nil? ? true : ActiveModel::Type::Boolean.new.cast(setting) != false
+    end
+
+    # List-Unsubscribe needs an actionable URL. A preview render has no signed
+    # token, so it gets no header rather than one pointing at /u/preview.
+    def unsubscribe_headers(url)
+      return {} if url.blank? || url.to_s.end_with?('/u/preview')
+
+      {
+        'List-Unsubscribe' => "<#{url}>",
+        'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click'
+      }
     end
 
     # Rate limits are counted per sending mailbox. A waterfall send goes out

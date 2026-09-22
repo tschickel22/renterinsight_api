@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_21_095743) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_22_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3172,6 +3172,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_21_095743) do
     t.boolean "auto_create_activity", default: true
     t.bigint "location_id"
     t.boolean "captcha_required", default: false, null: false
+    t.boolean "marketing_consent_enabled", default: true, null: false
+    t.text "marketing_consent_text"
+    t.string "marketing_consent_version", default: "v1", null: false
     t.index ["company_id"], name: "index_intake_forms_on_company_id"
     t.index ["location_id"], name: "index_intake_forms_on_location_id"
     t.index ["notified_user_id"], name: "index_intake_forms_on_notified_user_id"
@@ -3191,6 +3194,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_21_095743) do
     t.datetime "submitted_at"
     t.boolean "lead_created", default: false
     t.bigint "lead_id"
+    t.boolean "marketing_consent", default: false, null: false
+    t.text "marketing_consent_text"
+    t.datetime "marketing_consent_at"
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 

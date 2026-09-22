@@ -54,6 +54,21 @@ class CommunicationPreference < ApplicationRecord
     )
   end
   
+# Marketing consent is the one category where silence is NOT permission.
+#
+# can_send_to? below treats a missing preference as opted in, which is right for
+# transactional mail: somebody who asked a salesperson for a quote should get the
+# quote. Applying that default to marketing turns the whole system into
+# opt-out-by-default, which is the model this gate exists to prevent. Here an
+# absent record means nobody ever asked, so the answer is no.
+def self.marketing_consent?(recipient:, channel: 'email')
+  return false if recipient.nil?
+
+  where(recipient: recipient, channel: channel, category: 'marketing')
+    .where(opted_in: true)
+    .exists?
+end
+
 def self.can_send_to?(recipient:, channel:, category: nil)
   preference = where(
     recipient: recipient,

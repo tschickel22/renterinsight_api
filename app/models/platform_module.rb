@@ -61,15 +61,16 @@ class PlatformModule
     # tenant (TenantModuleOverride). Config keys live on those rows — see
     # PLAN_CONFIG_DEFAULTS for the marketing.website precedent.
     'marketing.text_us' => { name: 'Text Us Widget', category: 'Marketing', icon: 'MessageSquare', description: 'Web-to-text widget for any dealer site — visitors send a text, replies route to a rep or round-robin queue through the existing SMS pipeline' },
-    # Paid add-on, same shape as the two above: absent from every PLAN_TEMPLATE on purpose.
-    # Gates VERIFYING a domain, not sending. A tenant who downgrades keeps their existing
-    # verified domain and keeps sending; they just cannot add another. Revoking mid-campaign
-    # would silently reroute live sends back through personal mailboxes, which is exactly
-    # the failure this feature exists to prevent.
     # Paid add-on, same shape as text_us and automation: absent from every
     # PLAN_TEMPLATE on purpose, so no tier grants it free and it can be sold to a
     # dealer who is on neither our website builder nor Text Us.
     'marketing.ai_concierge' => { name: 'AI Concierge', category: 'Marketing', icon: 'MessageCircle', description: 'A chat assistant on the dealer site that answers from their own inventory and content, qualifies the visitor, and books the appointment' },
+    # Not sold separately: implied by campaigns, landing pages and the website
+    # builder (see IMPLIED_MODULES). Gates VERIFYING a domain, not sending. A
+    # tenant who loses the granting module keeps any domain they already
+    # verified and keeps sending; they just cannot add another. Revoking
+    # mid-campaign would silently reroute live sends back through personal
+    # mailboxes, which is exactly the failure this feature exists to prevent.
     'marketing.sending_domain' => { name: 'Sending Domain', category: 'Marketing', icon: 'ShieldCheck', description: 'Send campaigns from your own domain with your own DKIM, so deliverability and sender reputation stay yours instead of riding on a personal mailbox' },
 
     # Finance & Agreements
@@ -121,8 +122,18 @@ class PlatformModule
   # revoking Campaign Desk cannot orphan an entitlement nobody remembers
   # creating. An explicit grant still wins — see ModuleAccessService#has_module?,
   # where an override is checked before implication.
+  #
+  # Sending Domain comes with anything that sends: it is infrastructure for the
+  # modules above it, not a product anyone wants on its own. Sold separately it
+  # became a toll gate on deliverability, and the only tenant who ever passed it
+  # was our own. Worse, it made a compliance fix look like an upsell: campaign
+  # email may not leave through a connected Google mailbox, so without a domain
+  # of their own a Gmail dealer could not run a campaign at all.
   IMPLIED_MODULES = {
-    'marketing.automation' => %w[marketing.landing_pages]
+    'marketing.automation'    => %w[marketing.landing_pages marketing.sending_domain],
+    'marketing.campaigns'     => %w[marketing.sending_domain],
+    'marketing.landing_pages' => %w[marketing.sending_domain],
+    'marketing.website'       => %w[marketing.sending_domain]
   }.freeze
 
   # Category definitions with icons

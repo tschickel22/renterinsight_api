@@ -4,6 +4,13 @@ require 'rails_helper'
 
 # A campaign with email_waterfall never skips a recipient for want of a mailbox.
 RSpec.describe Campaigns::CampaignSender, 'email waterfall' do
+  # A real campaign recipient ticked the consent box on a lead form, so these
+  # fixtures carry the consent that Campaigns::CampaignSender now requires.
+  before do
+    CommunicationPreferenceService.opt_in(recipient: lead, channel: 'email', category: 'marketing',
+                                          ip_address: '203.0.113.10', user_agent: 'RSpec')
+  end
+
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
   let(:rep) do
     User.create!(email: "rep-#{SecureRandom.hex(3)}@example.com", first_name: 'Rita', last_name: 'Rep',
@@ -45,11 +52,11 @@ RSpec.describe Campaigns::CampaignSender, 'email waterfall' do
   end
 
   it "uses the rep's own mailbox when there is one" do
-    UserEmailConnection.create!(user_id: rep.id, company_id: company.id, provider: 'oauth_gmail', is_active: true,
+    UserEmailConnection.create!(user_id: rep.id, company_id: company.id, provider: 'oauth_outlook', is_active: true,
                                 email_address: rep.email, display_name: 'Rita Rep')
 
     expect(described_class.new(enrollment: enrollment).deliver_current_step).to be true
-    expect(CommunicationService).to have_received(:send_email).with(hash_including(from: rep.email, provider: :oauth_google))
+    expect(CommunicationService).to have_received(:send_email).with(hash_including(from: rep.email, provider: :oauth_microsoft))
   end
 
   it 'still fails a recipient with no mailbox when the campaign has no waterfall' do

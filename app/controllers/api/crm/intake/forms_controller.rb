@@ -123,6 +123,16 @@ module Api
             end
           end
 
+          # Marketing consent checkbox. EmbeddedIntakeForm draws dealer-site forms
+          # from THIS endpoint rather than the public one, so the config has to be
+          # here too: without it an embedded form renders no checkbox and captures
+          # no consent, which is the gap this whole change exists to close.
+          response[:marketing_consent] = {
+            enabled: @form.marketing_consent?,
+            text: @form.resolved_marketing_consent_text,
+            version: @form.marketing_consent_version
+          }
+
           render json: response
         end
 
@@ -289,6 +299,12 @@ module Api
             :notified_user_id, :location_id, :locationId,
             :auto_create_lead, :auto_create_activity,
             :captcha_required, :captchaRequired,
+            # Marketing consent checkbox. Wording is editable so a dealer can
+            # match their own terms; the version string is what a consent record
+            # points at when the text later changes.
+            :marketing_consent_enabled, :marketingConsentEnabled,
+            :marketing_consent_text, :marketingConsentText,
+            :marketing_consent_version, :marketingConsentVersion,
             field_mappings: {},
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
@@ -331,6 +347,22 @@ module Api
             end
             if p.key?(:captcha_required)
               p[:captcha_required] = ActiveModel::Type::Boolean.new.cast(p[:captcha_required])
+            end
+
+            # Same snake_case-wins rule for the consent fields.
+            {
+              marketingConsentEnabled: :marketing_consent_enabled,
+              marketingConsentText:    :marketing_consent_text,
+              marketingConsentVersion: :marketing_consent_version
+            }.each do |camel, snake|
+              if p.key?(snake)
+                p.delete(camel)
+              elsif p.key?(camel)
+                p[snake] = p.delete(camel)
+              end
+            end
+            if p.key?(:marketing_consent_enabled)
+              p[:marketing_consent_enabled] = ActiveModel::Type::Boolean.new.cast(p[:marketing_consent_enabled])
             end
 
             # Ensure fields is set (will be saved to schema column via model)

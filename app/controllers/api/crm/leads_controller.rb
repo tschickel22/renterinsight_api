@@ -1356,6 +1356,29 @@ module Api
         change >= 0 ? "+#{change}%" : "#{change}%"
       end
 
+      # Nil when nobody ever asked. Absence is the honest answer here: it is not
+      # the same as a recorded refusal, and the UI says so.
+      def marketing_consent_json(l)
+        pref = CommunicationPreference
+               .where(recipient: l, channel: 'email', category: 'marketing')
+               .order(updated_at: :desc).first
+        return nil if pref.nil?
+
+        meta = pref.compliance_metadata || {}
+        {
+          optedIn:     pref.opted_in,
+          optedInAt:   pref.opted_in_at,
+          optedOutAt:  pref.opted_out_at,
+          ipAddress:   pref.ip_address,
+          userAgent:   pref.user_agent,
+          source:      meta['source'],
+          consentText: meta['consent_text'],
+          version:     meta['consent_version'],
+          pageUrl:     meta['page_url'],
+          formId:      meta['intake_form_id']
+        }
+      end
+
       def lead_json(l)
         owner_data = if l.owner
           {
@@ -1376,6 +1399,12 @@ module Api
           # marks the address so a rep can see why their email never arrived, instead of
           # retyping the same dead address into a follow-up.
           emailInvalid: l.email_invalid,
+          # Marketing consent, shown on the record so a rep and an auditor can
+          # both see whether this person ever agreed to be marketed to, and on
+          # the strength of what wording. Campaigns are gated on the same record
+          # (Campaigns::CampaignSender#marketing_consent_ok?), so what the page
+          # shows is what the sender enforces.
+          marketingConsent: marketing_consent_json(l),
           phone:     l.phone,
           notes:     l.notes,
           status:    l.status,

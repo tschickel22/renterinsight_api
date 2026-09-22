@@ -97,7 +97,12 @@ module Campaigns
 
     def self.handle_start(company_id, phone, _twilio_acct)
       ActiveRecord::Base.transaction do
-        CampaignSuppression.where(company_id: company_id, phone_number: phone, reason: 'sms_stop').destroy_all
+        # The recipient is lifting their own STOP, so this is allowed past the
+        # guard that stops a dealer deleting an opt-out.
+        CampaignSuppression.where(company_id: company_id, phone_number: phone, reason: 'sms_stop').each do |s|
+          s.removed_by_recipient = true
+          s.destroy
+        end
         # We do NOT auto-resume past enrollments. User starts fresh on next campaign.
       end
 

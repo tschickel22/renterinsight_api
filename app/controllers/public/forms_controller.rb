@@ -30,6 +30,15 @@ module Public
       tracking = @form.company.resolved_tracking(@form.location)
       response['tracking'] = tracking if tracking.present?
 
+      # Marketing consent checkbox. The wording is resolved here so the box the
+      # visitor sees and the text stored on their consent record are produced by
+      # the same method and cannot drift apart.
+      response['marketing_consent'] = {
+        'enabled' => @form.marketing_consent?,
+        'text' => @form.resolved_marketing_consent_text,
+        'version' => @form.marketing_consent_version
+      }
+
       render json: response
     end
     
@@ -51,12 +60,29 @@ module Public
         end
       end
 
+      # Marketing consent, pulled out of the submission data the same way the
+      # CAPTCHA token is, so it never lands in the stored lead record as if it
+      # were an answer to a question the dealer asked.
+      #
+      # Absence is refusal. An unchecked box sends nothing at all, and a forged
+      # or replayed payload that omits the key is treated as no consent rather
+      # than as consent, which is the only safe direction for this default.
+      consent_raw = data.delete('marketing_consent')
+      data.delete('marketingConsent').tap { |v| consent_raw = v if consent_raw.nil? }
+      consented = @form.marketing_consent? &&
+                  ActiveModel::Type::Boolean.new.cast(consent_raw) == true
+
       submission = @form.intake_submissions.build(
         data: data,
         ip_address: request.remote_ip,
         user_agent: request.user_agent,
         referrer: request.referrer,
-        submitted_at: Time.current
+        submitted_at: Time.current,
+        marketing_consent: consented,
+        # The wording copied as shown, not referenced, so editing the form later
+        # cannot rewrite what this person agreed to.
+        marketing_consent_text: (@form.resolved_marketing_consent_text if consented),
+        marketing_consent_at: (Time.current if consented)
       )
       
       if submission.save

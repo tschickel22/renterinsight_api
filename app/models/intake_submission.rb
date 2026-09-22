@@ -272,6 +272,7 @@ class IntakeSubmission < ApplicationRecord
 
     self.resolved_entity = new_lead
     update_columns(lead_id: new_lead.id, lead_created: true)
+    record_marketing_consent!(new_lead)
     
     Rails.logger.info "Created lead #{new_lead.id} from intake submission #{id}"
     
@@ -340,6 +341,7 @@ class IntakeSubmission < ApplicationRecord
     # Point this submission at the existing lead. lead_created stays semantically
     # true (a lead exists for this submission), but we did not create a new one.
     update_columns(lead_id: existing_lead.id, lead_created: true)
+    record_marketing_consent!(existing_lead)
 
     # Build the note: standard submission detail + any fill-empty conflicts.
     begin
@@ -803,5 +805,52 @@ class IntakeSubmission < ApplicationRecord
   
   def increment_form_count
     intake_form&.increment_submission_count!
+  end
+
+  # Write the consent this submitter gave onto the contact, where campaign
+  # audience building can see it.
+  #
+  # Only ever writes a consent, never revokes one. A returning visitor who
+  # leaves the box unchecked on their second enquiry has not withdrawn the
+  # consent they gave on their first: withdrawing is what unsubscribe is for,
+  # and treating silence as withdrawal would quietly empty every audience.
+  #
+  # Never let this fail the submission. A lead that reaches the dealer without
+  # a consent row is recoverable; a form that 500s because of bookkeeping loses
+  # the enquiry outright.
+  def record_marketing_consent!(contact)
+    return unless marketing_consent?
+    return if contact.nil?
+
+    # Both channels, because the consent text says "email and text me". Writing
+    # only email would leave SMS campaigns gated on a record that the wording
+    # promised to create, which reads as a bug to the dealer and as a missing
+    # consent to a reviewer.
+    %w[email sms].each do |channel|
+      preference = CommunicationPreferenceService.opt_in(
+        recipient: contact,
+        channel: channel,
+        category: 'marketing',
+        ip_address: ip_address,
+        user_agent: user_agent
+      )
+
+      # Provenance: what they were shown, where, and when. This is the record a
+      # reviewer asks to see, so it is stored beside the opt-in rather than
+      # inferred later by joining back through the submission.
+      preference.update!(
+        compliance_metadata: (preference.compliance_metadata || {}).merge(
+          'source' => 'intake_form',
+          'intake_form_id' => intake_form_id,
+          'intake_submission_id' => id,
+          'consent_text' => marketing_consent_text,
+          'consent_version' => intake_form&.marketing_consent_version,
+          'page_url' => referrer,
+          'consented_at' => marketing_consent_at&.iso8601
+        )
+      )
+    end
+  rescue StandardError => e
+    Rails.logger.error("[IntakeSubmission##{id}] could not record marketing consent: #{e.class}: #{e.message}")
   end
 end

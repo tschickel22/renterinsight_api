@@ -87,7 +87,7 @@ RSpec.describe Campaign, type: :model do
       conn = UserEmailConnection.create!(
         user_id: user.id,
         company_id: company.id,
-        provider: "oauth_gmail",
+        provider: "oauth_outlook",
         email_address: "u@example.com",
         is_active: true,
         oauth_token_encrypted: "tok",
@@ -122,7 +122,7 @@ RSpec.describe Campaign, type: :model do
     end
 
     it "is true with all preconditions met" do
-      UserEmailConnection.create!(user_id: user.id, company_id: company.id, provider: "oauth_gmail", email_address: "u@e.com", is_active: true, oauth_token_encrypted: "x", oauth_refresh_token_encrypted: "y")
+      UserEmailConnection.create!(user_id: user.id, company_id: company.id, provider: "oauth_outlook", email_address: "u@e.com", is_active: true, oauth_token_encrypted: "x", oauth_refresh_token_encrypted: "y")
       campaign.campaign_steps.create!(position: 0, is_active: true, body_blocks: [{ "type" => "text", "html" => "hi" }])
       campaign.create_campaign_audience!(source_type: "Lead")
       expect(campaign.can_start?).to be(true)
@@ -290,7 +290,7 @@ RSpec.describe Campaign, type: :model do
       conn = UserEmailConnection.create!(
         user_id: user.id,
         company_id: company.id,
-        provider: "oauth_gmail",
+        provider: "oauth_outlook",
         email_address: "rep@example.com",
         is_active: true,
         oauth_token_encrypted: "tok",
