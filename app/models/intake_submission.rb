@@ -819,13 +819,27 @@ class IntakeSubmission < ApplicationRecord
   # a consent row is recoverable; a form that 500s because of bookkeeping loses
   # the enquiry outright.
   def record_marketing_consent!(contact)
-    return unless marketing_consent?
     return if contact.nil?
+
+    # A form can carry consent two ways: the marketing consent checkbox, or a
+    # field the dealer mapped to opt_in_sms in the form builder. The second one
+    # predates the first and plenty of live forms use it. Without this, such a
+    # form sets the column, passes the audience filter, and is then skipped at
+    # send time for having no preference — a smaller send with no reason given.
+    if !marketing_consent? && contact.respond_to?(:opt_in_sms) && contact.opt_in_sms
+      CommunicationPreferenceService.opt_in(
+        recipient: contact, channel: 'sms', category: 'marketing',
+        ip_address: ip_address, user_agent: user_agent
+      )
+    end
+
+    return unless marketing_consent?
 
     # Both channels, because the consent text says "email and text me". Writing
     # only email would leave SMS campaigns gated on a record that the wording
     # promised to create, which reads as a bug to the dealer and as a missing
-    # consent to a reviewer.
+    # consent to a reviewer. The sms preference also sets opt_in_sms on the
+    # record, which is what the audience filter selects on.
     %w[email sms].each do |channel|
       preference = CommunicationPreferenceService.opt_in(
         recipient: contact,

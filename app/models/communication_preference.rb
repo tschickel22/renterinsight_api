@@ -36,6 +36,7 @@ class CommunicationPreference < ApplicationRecord
   # Callbacks
   before_create :generate_unsubscribe_token
   before_save :track_opt_change
+  after_save :mirror_sms_marketing_consent
   
   # Scopes
   scope :opted_in, -> { where(opted_in: true) }
@@ -180,5 +181,38 @@ end
     elsif opted_in_changed? && !opted_in?
       self.opted_out_at = Time.current
     end
+  end
+
+  private
+
+  # Keep opt_in_sms in step with marketing consent for the SMS channel.
+  #
+  # These were two disconnected permissions gating the same send. The audience
+  # filter (CampaignAudience#scope_for_sms_compliance, AudienceEnroller) selects
+  # on the opt_in_sms COLUMN, while CampaignSender gates on this PREFERENCE, so
+  # an SMS campaign recipient had to satisfy both. Someone who ticked the
+  # consent box on a lead form got the preference and not the column, and was
+  # filtered out of the audience before the gate ever saw them. Someone whose
+  # form mapped a field to opt_in_sms got the column and not the preference, and
+  # was skipped at send time instead. Either way the dealer saw a smaller send
+  # than they built and no reason for it.
+  #
+  # The column is the one the audience filter reads, so it follows the
+  # preference. Only marketing/sms writes here: a transactional preference says
+  # nothing about marketing permission.
+  def mirror_sms_marketing_consent
+    return unless channel == 'sms' && category == 'marketing'
+    return unless recipient.respond_to?(:opt_in_sms) && recipient.class.column_names.include?('opt_in_sms')
+    return if recipient.opt_in_sms == opted_in
+
+    recipient.update_column(:opt_in_sms, opted_in)
+  rescue StandardError => e
+    # A preference that saved is the record of consent; the column is a
+    # denormalised copy for the audience filter. Losing the copy must not lose
+    # the consent.
+    Rails.logger.warn(
+      "[CommunicationPreference##{id}] could not mirror opt_in_sms to " \
+      "#{recipient_type}##{recipient_id}: #{e.message}"
+    )
   end
 end
