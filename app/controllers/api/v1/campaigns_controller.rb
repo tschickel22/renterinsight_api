@@ -14,7 +14,7 @@ class Api::V1::CampaignsController < ApplicationController
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
   require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage confirm_audience_consent]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage confirm_audience_consent sender_coverage]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -448,6 +448,27 @@ class Api::V1::CampaignsController < ApplicationController
       gateEnabled: c.gate_enabled,
       # Only a blocking warning when the gate is actually on for this tenant.
       willBeSkipped: c.gate_enabled ? c.blocked : 0
+    }, status: :ok
+  end
+
+  # GET /api/v1/campaigns/:id/sender_coverage
+  #
+  # Whether this campaign has somebody to send as, per recipient. Owner mode
+  # resolves a different mailbox for each one, so a campaign can start and then
+  # send nothing: reps with no mailbox, and reps on Gmail, which campaign mail
+  # may not use. Refusing to start would be wrong, so we say so instead.
+  def sender_coverage
+    return unless authorize_action!('campaigns', 'read')
+
+    c = Campaigns::SenderCoverage.for_campaign(@campaign)
+    render json: {
+      total: c.total,
+      usable: c.usable,
+      google: c.google,
+      missing: c.missing,
+      blocked: c.blocked,
+      fixedSender: c.fixed_sender,
+      owners: c.owners.map { |o| { name: o[:name], count: o[:count], reason: o[:reason] } }
     }, status: :ok
   end
 

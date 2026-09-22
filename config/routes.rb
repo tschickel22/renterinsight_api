@@ -2080,6 +2080,9 @@ Rails.application.routes.draw do
           # How much of the audience holds consent, asked before start so the
           # skip is on screen rather than discovered in the send numbers.
           get  :consent_coverage
+          # Whether there is anyone to send as. Owner mode resolves per
+          # recipient, so this cannot be answered by looking at the campaign.
+          get  :sender_coverage
           # The dealer asserting that this audience opted in with them. Writes
           # consent, so it sits behind campaigns:update, not :read.
           post :confirm_audience_consent
