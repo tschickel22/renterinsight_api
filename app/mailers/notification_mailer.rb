@@ -14,11 +14,21 @@ class NotificationMailer < ApplicationMailer
     @frontend_url = Brand.app_url
     
     Rails.logger.info "[NotificationMailer] Frontend URL: #{@frontend_url}"
-    Rails.logger.info "[NotificationMailer] Action URL: #{notification.action_url}"
-    
-    # Build action button if action_url present
-    @action_url = notification.action_url
-    @action_text = notification.action_text || 'View Details'
+
+    # computed_action_url, not the raw column. Most notifications never set
+    # action_url: it is derived from the record they point at
+    # (Notification#computed_action_url), which is why the in-app bell has
+    # always linked through while the email did not. A rep told by email that a
+    # lead was assigned to them had no way to reach it but to open the CRM and
+    # search for the name.
+    #
+    # The frontend captures the requested path into ?redirect= when it bounces a
+    # signed out visitor to /login and returns them afterwards, so this link
+    # lands on the record whether or not they have a session.
+    @action_url = notification.computed_action_url
+    @action_text = notification.computed_action_text.presence || 'View Details'
+
+    Rails.logger.info "[NotificationMailer] Action URL: #{@action_url}"
     
     # Determine category icon/color
     @category_config = {
