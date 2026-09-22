@@ -123,16 +123,6 @@ module Api
             end
           end
 
-          # Marketing consent checkbox. EmbeddedIntakeForm draws dealer-site forms
-          # from THIS endpoint rather than the public one, so the config has to be
-          # here too: without it an embedded form renders no checkbox and captures
-          # no consent, which is the gap this whole change exists to close.
-          response[:marketing_consent] = {
-            enabled: @form.marketing_consent?,
-            text: @form.resolved_marketing_consent_text,
-            version: @form.marketing_consent_version
-          }
-
           render json: response
         end
 

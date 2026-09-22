@@ -73,6 +73,21 @@ class IntakeForm < ApplicationRecord
     # binds them to allowlisted domains at their edge).
     json['captchaSiteKey'] = TurnstileVerifier.site_key if json['captcha_required']
 
+    # The consent checkbox, resolved here rather than in a controller so every
+    # endpoint that hands out a form carries it: the public page, the dealer
+    # site embed, the builder's list, and the builder's preview. It was added to
+    # #show alone at first, which meant the builder loaded forms from #index and
+    # its preview drew no consent question at all — an admin checking their form
+    # saw something their visitors would not.
+    json['marketing_consent'] = {
+      'enabled' => marketing_consent?,
+      'text' => resolved_marketing_consent_text,
+      'version' => marketing_consent_version
+    }
+    json['marketingConsentEnabled'] = json['marketing_consent_enabled']
+    json['marketingConsentText'] = json['marketing_consent_text']
+    json['marketingConsentVersion'] = json['marketing_consent_version']
+
     json
   end
   

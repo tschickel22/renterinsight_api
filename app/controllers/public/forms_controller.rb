@@ -30,15 +30,6 @@ module Public
       tracking = @form.company.resolved_tracking(@form.location)
       response['tracking'] = tracking if tracking.present?
 
-      # Marketing consent checkbox. The wording is resolved here so the box the
-      # visitor sees and the text stored on their consent record are produced by
-      # the same method and cannot drift apart.
-      response['marketing_consent'] = {
-        'enabled' => @form.marketing_consent?,
-        'text' => @form.resolved_marketing_consent_text,
-        'version' => @form.marketing_consent_version
-      }
-
       render json: response
     end
     
