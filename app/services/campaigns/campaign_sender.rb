@@ -175,8 +175,31 @@ module Campaigns
         "[CampaignSender] enrollment #{@enrollment.id} skipping step " \
         "#{@enrollment.current_step_index} — #{reason}"
       )
+      record_skip_event(reason)
       advance_unless_test
       false
+    end
+
+    # A skip used to leave nothing behind but a log line, so a campaign that
+    # quietly reached half its audience looked exactly like one that reached all
+    # of it. Anyone asking "why did this person not get it" had no answer short
+    # of grepping production logs.
+    #
+    # Written for every skip reason, not just consent: the same blindness
+    # applied to all of them.
+    def record_skip_event(reason)
+      CampaignEvent.create!(
+        company_id: @company.id,
+        campaign_id: @campaign.id,
+        campaign_enrollment_id: @enrollment.id,
+        event_type: 'step_skipped',
+        occurred_at: Time.current,
+        payload: { reason: reason, step_index: @enrollment.current_step_index }
+      )
+    rescue StandardError => e
+      # Never turn a skip into a failure. The send was not going to happen
+      # either way; losing the breadcrumb is the smaller loss.
+      Rails.logger.warn("[CampaignSender] could not record skip event: #{e.message}")
     end
 
     # True when the controller flagged this enrollment as an Owner-mode

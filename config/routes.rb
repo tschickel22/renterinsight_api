@@ -2077,6 +2077,9 @@ Rails.application.routes.draw do
           post :duplicate
           post :start
           post :pause
+          # How much of the audience holds consent, asked before start so the
+          # skip is on screen rather than discovered in the send numbers.
+          get  :consent_coverage
           post :refine_with_ai
           post :resume
           post :reopen

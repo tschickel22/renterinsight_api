@@ -311,6 +311,7 @@ module Api
 
         if l.save(validate: false)  # Skip model validations, we validated above
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
+          record_consent_for_manual_lead(l)
           render json: lead_json(l), status: :created
         else
           Rails.logger.error "[LeadsController#create] Validation failed: #{l.errors.full_messages.join(', ')}"
@@ -617,6 +618,35 @@ module Api
             { name: 'Profile Completeness', value: 20 }
           ]
         }
+      end
+
+      # A lead typed in by a rep is somebody the dealership already has a
+      # relationship with: a walk-in, a phone call, a contact from the CRM they
+      # came from. That is the dealer's own business relationship, which is
+      # exactly what we tell people their contacts are, so consent defaults to
+      # yes and the rep unticks it if they know otherwise.
+      #
+      # It is still stored as a staff entry, never as a form capture, because
+      # nobody was shown anything. A reviewer can see at a glance which consents
+      # a person gave us and which a dealership asserted, and that distinction
+      # is the only thing that keeps the form-captured ones worth anything.
+      def record_consent_for_manual_lead(lead)
+        # Absent means yes. The form sends the box's state on every submit, so
+        # only an explicit false is a rep saying "not this one".
+        raw = params.dig(:lead, :marketing_consent)
+        raw = params[:marketing_consent] if raw.nil?
+        opted_in = raw.nil? ? true : ActiveModel::Type::Boolean.new.cast(raw)
+
+        MarketingConsentRecorder.call(
+          recipient: lead,
+          opted_in: opted_in,
+          user: current_user,
+          basis: opted_in ? 'Lead entered manually in the CRM' : nil
+        )
+      rescue StandardError => e
+        # A lead that saves without a consent row is recoverable from the panel.
+        # A create that 500s loses whatever the rep just typed.
+        Rails.logger.error("[LeadsController#create] consent default failed for lead #{lead&.id}: #{e.message}")
       end
 
       # PATCH /api/crm/leads/:id/marketing-consent

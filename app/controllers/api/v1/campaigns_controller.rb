@@ -14,7 +14,7 @@ class Api::V1::CampaignsController < ApplicationController
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
   require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -428,6 +428,27 @@ class Api::V1::CampaignsController < ApplicationController
   rescue => e
     Rails.logger.error "[CampaignsController#test_send] #{e.class}: #{e.message}"
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/campaigns/:id/consent_coverage
+  #
+  # How much of this audience holds marketing consent. The campaign builder asks
+  # before start, so a dealer sees "112 of 800 recipients have consent" on
+  # screen rather than watching the send quietly shrink.
+  def consent_coverage
+    return unless authorize_action!('campaigns', 'read')
+
+    c = Campaigns::ConsentCoverage.for_campaign(@campaign)
+    render json: {
+      total: c.total,
+      consented: c.consented,
+      missing: c.missing,
+      optedOut: c.opted_out,
+      blocked: c.blocked,
+      gateEnabled: c.gate_enabled,
+      # Only a blocking warning when the gate is actually on for this tenant.
+      willBeSkipped: c.gate_enabled ? c.blocked : 0
+    }, status: :ok
   end
 
   def preview
