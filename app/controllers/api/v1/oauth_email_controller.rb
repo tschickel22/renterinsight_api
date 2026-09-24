@@ -152,6 +152,14 @@ class Api::V1::OauthEmailController < ApplicationController
         raise StandardError, error_msg
       end
 
+      # Refuse a grant that cannot send before anything is saved. Stored, it
+      # shows as connected and becomes the default sender, and the first anyone
+      # hears of it is Google's "insufficient authentication scopes" on a send.
+      unless UserEmailConnection.grant_can_send?(tokens['scope'])
+        Rails.logger.warn "[OAuthEmail] #{provider} grant without send permission refused: #{tokens['scope'].inspect}"
+        raise StandardError, send_permission_missing_message(provider)
+      end
+
       # Get user email
       email = case provider
               when 'microsoft'
@@ -407,6 +415,17 @@ class Api::V1::OauthEmailController < ApplicationController
     req['Authorization'] = "Bearer #{bearer_token}"
     res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
     JSON.parse(res.body)
+  end
+
+  # Shown on the frontend callback page, so it has to tell the user what to do.
+  def send_permission_missing_message(provider)
+    if provider == 'google'
+      'Google did not give us permission to send email. Connect again and leave the ' \
+        '"Send email on your behalf" box checked on the Google screen.'
+    else
+      'Microsoft did not give us permission to send email. Connect again and approve ' \
+        'the send mail permission.'
+    end
   end
 
   def http_post_form(url, params)
