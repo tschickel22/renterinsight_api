@@ -8,6 +8,14 @@ class IntakeForm < ApplicationRecord
   # does not exist.
   CUSTOM_FIELD_PREFIX = 'custom:'
 
+  # Shown beside the marketing consent checkbox when a dealer has not written
+  # their own. Deliberately plain: it names who is sending, what they will send,
+  # and how to stop, which is what a consent record has to be able to prove was
+  # on screen. {{company}} is the only substitution.
+  DEFAULT_MARKETING_CONSENT_TEXT =
+    'Yes, {{company}} may email and text me about homes, offers and events. ' \
+    'I can unsubscribe at any time.'
+
   belongs_to :company
   belongs_to :source, class_name: 'Source', foreign_key: 'source_id', optional: true
   belongs_to :notified_user, class_name: 'User', foreign_key: 'notified_user_id', optional: true
@@ -65,6 +73,21 @@ class IntakeForm < ApplicationRecord
     # binds them to allowlisted domains at their edge).
     json['captchaSiteKey'] = TurnstileVerifier.site_key if json['captcha_required']
 
+    # The consent checkbox, resolved here rather than in a controller so every
+    # endpoint that hands out a form carries it: the public page, the dealer
+    # site embed, the builder's list, and the builder's preview. It was added to
+    # #show alone at first, which meant the builder loaded forms from #index and
+    # its preview drew no consent question at all — an admin checking their form
+    # saw something their visitors would not.
+    json['marketing_consent'] = {
+      'enabled' => marketing_consent?,
+      'text' => resolved_marketing_consent_text,
+      'version' => marketing_consent_version
+    }
+    json['marketingConsentEnabled'] = json['marketing_consent_enabled']
+    json['marketingConsentText'] = json['marketing_consent_text']
+    json['marketingConsentVersion'] = json['marketing_consent_version']
+
     json
   end
   
@@ -90,6 +113,18 @@ class IntakeForm < ApplicationRecord
     increment!(:submission_count)
   end
   
+  # The exact wording to show this form's submitter. Resolved at render AND at
+  # submit time, and copied onto the submission, so a later edit cannot rewrite
+  # what somebody already agreed to.
+  def resolved_marketing_consent_text
+    text = marketing_consent_text.presence || DEFAULT_MARKETING_CONSENT_TEXT
+    text.gsub('{{company}}', company&.name.to_s.presence || 'this dealership')
+  end
+
+  def marketing_consent?
+    marketing_consent_enabled
+  end
+
   private
   
   def update_submission_count

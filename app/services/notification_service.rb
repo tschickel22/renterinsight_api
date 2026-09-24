@@ -409,10 +409,14 @@ class NotificationService
       # Get frontend URL using helper
       base_url = frontend_url
       
-      if notification.action_url.present?
+      # computed_action_url, not the raw column, for the same reason as the
+      # notification email: most notifications never set action_url, and the
+      # destination is derived from the record the notification points at.
+      action_path = notification.computed_action_url
+      if action_path.present?
         # Use direct link to the entity/action
-        direct_url = "#{base_url}#{notification.action_url}"
-        message_body += "\n\n#{notification.action_text || 'View details'}: #{direct_url}"
+        direct_url = "#{base_url}#{action_path}"
+        message_body += "\n\n#{notification.computed_action_text || 'View details'}: #{direct_url}"
       elsif notification.attachments.attached?
         # Link to notification center if there are attachments
         notification_url = "#{base_url}/notifications"

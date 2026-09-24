@@ -7,7 +7,7 @@ module Api
       include PersonNameSearch
 
       before_action :set_company_scope
-      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone]
+      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent]
 
       # ==== Lead cloning ====
       #
@@ -311,6 +311,7 @@ module Api
 
         if l.save(validate: false)  # Skip model validations, we validated above
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
+          record_consent_for_manual_lead(l)
           render json: lead_json(l), status: :created
         else
           Rails.logger.error "[LeadsController#create] Validation failed: #{l.errors.full_messages.join(', ')}"
@@ -619,6 +620,58 @@ module Api
         }
       end
 
+      # A lead typed in by a rep is somebody the dealership already has a
+      # relationship with: a walk-in, a phone call, a contact from the CRM they
+      # came from. That is the dealer's own business relationship, which is
+      # exactly what we tell people their contacts are, so consent defaults to
+      # yes and the rep unticks it if they know otherwise.
+      #
+      # It is still stored as a staff entry, never as a form capture, because
+      # nobody was shown anything. A reviewer can see at a glance which consents
+      # a person gave us and which a dealership asserted, and that distinction
+      # is the only thing that keeps the form-captured ones worth anything.
+      def record_consent_for_manual_lead(lead)
+        # Absent means yes. The form sends the box's state on every submit, so
+        # only an explicit false is a rep saying "not this one".
+        raw = params.dig(:lead, :marketing_consent)
+        raw = params[:marketing_consent] if raw.nil?
+        opted_in = raw.nil? ? true : ActiveModel::Type::Boolean.new.cast(raw)
+
+        MarketingConsentRecorder.call(
+          recipient: lead,
+          opted_in: opted_in,
+          user: current_user,
+          basis: opted_in ? 'Lead entered manually in the CRM' : nil
+        )
+      rescue StandardError => e
+        # A lead that saves without a consent row is recoverable from the panel.
+        # A create that 500s loses whatever the rep just typed.
+        Rails.logger.error("[LeadsController#create] consent default failed for lead #{lead&.id}: #{e.message}")
+      end
+
+      # PATCH /api/crm/leads/:id/marketing-consent
+      #
+      # Staff entering consent they already hold for this person. Gated on
+      # leads:update, because it is an edit to the record rather than a
+      # marketing setting, and the rep who owns the lead is the person who knows
+      # where the consent came from.
+      def marketing_consent
+        return unless authorize_action!('leads', 'update')
+
+        result = MarketingConsentRecorder.call(
+          recipient: @lead,
+          opted_in: params[:opted_in],
+          user: current_user,
+          basis: params[:basis]
+        )
+
+        if result.ok?
+          render json: { success: true, marketingConsent: marketing_consent_json(@lead.reload) }, status: :ok
+        else
+          render json: { success: false, error: result.error }, status: :unprocessable_entity
+        end
+      end
+
       def convert
         return unless authorize_action!('leads', 'update')
         
@@ -872,6 +925,15 @@ module Api
               @lead, contact: contact, account: account, deal: deal
             )
             Rails.logger.info "🔄 [ConvertLead] Custom field migration: copied=#{cf_result[:copied]}, gaps=#{cf_result[:gaps].size}"
+
+            # 5b. CARRY MARKETING CONSENT FORWARD
+            # Consent belongs to the person, not to the row that held them.
+            # Without this the converted contact holds no consent record, and
+            # Campaigns::CampaignSender gates on exactly that: converting a
+            # consenting lead would quietly make them unmailable.
+            carried = MarketingConsentTransfer.call(from: @lead, to: contact) +
+                      MarketingConsentTransfer.call(from: @lead, to: account)
+            Rails.logger.info "🔄 [ConvertLead] Marketing consent carried forward: #{carried} preference(s)"
 
             # 6. MARK LEAD AS CONVERTED
             @lead.update!(
@@ -1356,6 +1418,36 @@ module Api
         change >= 0 ? "+#{change}%" : "#{change}%"
       end
 
+      # Nil when nobody ever asked. Absence is the honest answer here: it is not
+      # the same as a recorded refusal, and the UI says so.
+      def marketing_consent_json(l)
+        pref = CommunicationPreference
+               .where(recipient: l, channel: 'email', category: 'marketing')
+               .order(updated_at: :desc).first
+        return nil if pref.nil?
+
+        meta = pref.compliance_metadata || {}
+        {
+          optedIn:     pref.opted_in,
+          optedInAt:   pref.opted_in_at,
+          optedOutAt:  pref.opted_out_at,
+          ipAddress:   pref.ip_address,
+          userAgent:   pref.user_agent,
+          source:      meta['source'],
+          consentText: meta['consent_text'],
+          version:     meta['consent_version'],
+          pageUrl:     meta['page_url'],
+          formId:      meta['intake_form_id'],
+          # Staff-entered consent carries who said so and on what basis, instead
+          # of the wording, IP and page a form capture carries. The UI keeps the
+          # two apart so an assertion never reads as evidence.
+          recordedByName: meta['recorded_by_name'],
+          recordedAt:     meta['recorded_at'],
+          basis:          meta['basis'],
+          carriedFrom:    meta['carried_from']
+        }
+      end
+
       def lead_json(l)
         owner_data = if l.owner
           {
@@ -1376,6 +1468,12 @@ module Api
           # marks the address so a rep can see why their email never arrived, instead of
           # retyping the same dead address into a follow-up.
           emailInvalid: l.email_invalid,
+          # Marketing consent, shown on the record so a rep and an auditor can
+          # both see whether this person ever agreed to be marketed to, and on
+          # the strength of what wording. Campaigns are gated on the same record
+          # (Campaigns::CampaignSender#marketing_consent_ok?), so what the page
+          # shows is what the sender enforces.
+          marketingConsent: marketing_consent_json(l),
           phone:     l.phone,
           notes:     l.notes,
           status:    l.status,

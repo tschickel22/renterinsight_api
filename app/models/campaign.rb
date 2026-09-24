@@ -169,7 +169,38 @@ class Campaign < ApplicationRecord
   # on rather than silently downgrading to a company-scoped or platform sender.
   def resolve_email_connection_for_step(recipient: nil)
     mailbox = resolve_mailbox_connection_for_step(recipient: recipient)
-    resolve_ses_sending_identity(mailbox, recipient: recipient) || mailbox
+    identity = resolve_ses_sending_identity(mailbox, recipient: recipient)
+    return identity if identity
+
+    return nil if google_mailbox?(mailbox)
+
+    mailbox
+  end
+
+  # Campaign email never leaves through a connected Google account.
+  #
+  # Google's Gmail API policy does not permit bulk or marketing mail, and the
+  # grant we hold is gmail.send, for the one to one correspondence a rep has
+  # with their own contacts. Campaign traffic is neither, so it routes through
+  # SES on the tenant's verified sending domain or it does not go.
+  #
+  # Scope, deliberately narrow:
+  #   - One to one email from the CRM is untouched. That is what the Gmail
+  #     grant is for and it keeps working exactly as before.
+  #   - Microsoft carries no equivalent restriction, so an Outlook mailbox on
+  #     the dealer's own domain keeps sending campaigns under the usual
+  #     per-mailbox throttle while they get a sending domain verified.
+  #   - A verified sending domain already wins above this line, so a dealer on
+  #     Google Workspace who has verified their domain is unaffected: the send
+  #     goes out as their own address over SES.
+  #
+  # Returning nil here rather than raising lets every existing caller do what it
+  # already does with an unusable sender: SenderHealth pauses the campaign once
+  # with a reason, instead of failing recipients one at a time.
+  def google_mailbox?(connection)
+    return false unless connection.respond_to?(:provider)
+
+    connection.provider.to_s == 'oauth_gmail'
   end
 
   # The OAuth / SMTP mailbox for this campaign's identity. Unchanged behaviour; kept as its

@@ -25,7 +25,8 @@ module Providers
           reply_to: reply_to,
           file_attachments: attachments,
           inline_images: inline_images,
-          content_type: content_type
+          content_type: content_type,
+          extra_headers: options[:extra_headers] || {}
         )
         
         # A send-only Gmail grant cannot authenticate to SMTP at all: the server

@@ -108,8 +108,18 @@ module InboundEmail
       @entity.class.name.downcase
     end
 
+    # Opens the record on its Communication tab with this reply already open in
+    # the message viewer. The record pages live at different roots, and the tab
+    # key is singular; the old "/crm/<type>s/...?tab=communications" matched no
+    # tab on the lead page and no route at all for contacts and accounts.
     def entity_link
-      "/crm/#{entity_type_slug}s/#{@entity.id}?tab=communications"
+      root = case @entity
+             when Lead    then '/crm/leads'
+             when Contact then '/contacts'
+             when Account then '/accounts'
+             else              "/crm/#{entity_type_slug}s"
+             end
+      "#{root}/#{@entity.id}?tab=communication&comm=#{@communication.id}"
     end
 
     def preview
@@ -165,12 +175,22 @@ module InboundEmail
     def send_sms_notification(user)
       return if notification_settings(user)['email_reply_sms'] == false
       return if user.try(:phone).blank?
-      SmsService.new(company: company).send_sms(
-        to: user.phone,
-        body: "📧 Reply from #{entity_name}: #{@communication.subject}"
-      )
+      SmsService.new(company: company).send_sms(to: user.phone, body: sms_body)
     rescue => e
       Rails.logger.error "[ReplyNotifier] SMS notification failed: #{e.message}"
+    end
+
+    # What they wrote and a link straight to it. Plain text on purpose: one
+    # emoji switches the whole message to UCS-2, which cuts a segment from 160
+    # characters to 70 and roughly triples the cost of the same text.
+    def sms_body
+      reply_text = InboundEmail::ReplyBodyCleaner.split(@communication.body.to_s).reply
+      snippet = strip(reply_text.presence || @communication.body)&.truncate(140)
+      [
+        "Email reply from #{entity_name}",
+        (%("#{snippet}") if snippet.present?),
+        "Open: #{Brand.app_url}#{entity_link}"
+      ].compact.join("\n")
     end
 
     def broadcast_toast(user)

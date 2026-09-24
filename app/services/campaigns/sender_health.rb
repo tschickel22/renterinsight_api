@@ -116,6 +116,21 @@ module Campaigns
       end
 
       def missing_sender_problem(campaign)
+        # A Google mailbox resolves to nil for campaigns (see
+        # Campaign#google_mailbox?). Saying "no connected mailbox" there would be
+        # a lie the dealer can see through: they connected one, it works for
+        # their one to one email, and it is sitting right there in settings.
+        mailbox = campaign.resolve_mailbox_connection_for_step
+        if campaign.google_mailbox?(mailbox)
+          return Problem.new(
+            code: 'sender_is_google',
+            message: "Campaigns cannot send through #{mailbox.email_address}. Google does not allow " \
+                     'marketing email through a connected Gmail account. Verify a sending domain and ' \
+                     'this campaign will go out as the same address, or choose a different sender.',
+            reconnect_path: '/settings?tab=domains'
+          )
+        end
+
         if campaign.from_identity_type == 'User' && campaign.identity_user.nil?
           return Problem.new(
             code: 'sender_missing',

@@ -60,6 +60,27 @@ class UserEmailConnection < ApplicationRecord
     /Mail\.Read\z/i,
     /Mail\.ReadWrite\z/i
   ].freeze
+
+  # Grants that let us send. Google's consent screen shows each scope as its own
+  # checkbox, so a user can approve the app while unticking "send email on your
+  # behalf" and we get back a token that only knows who they are.
+  SEND_SCOPE_PATTERNS = [
+    %r{\Ahttps://mail\.google\.com/?\z},
+    /gmail\.send\z/,
+    /gmail\.compose\z/,
+    /gmail\.modify\z/,
+    /Mail\.Send\z/i
+  ].freeze
+
+  # Can a grant, as reported by the provider's token response, send mail? A
+  # blank grant means the provider did not say, which is not evidence of a
+  # narrow one, so it passes.
+  def self.grant_can_send?(scope_string)
+    scopes = scope_string.to_s.split(/\s+/).reject(&:blank?)
+    return true if scopes.empty?
+
+    scopes.any? { |s| SEND_SCOPE_PATTERNS.any? { |re| s =~ re } }
+  end
   
   # Validations
   validates :email_address, presence: true, format: { with: URI::MailTo::EMAIL_REGEXP }

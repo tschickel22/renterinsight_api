@@ -193,10 +193,12 @@ class Notification < ApplicationRecord
       # A staff notification about a message belongs on the record it was sent
       # against, not on the customer portal's message list, which a rep cannot
       # reach. Falls through to nil when the parent is something without a page.
+      # The tab key is singular, and comm= opens this message in the viewer.
+      comm_tab = "tab=communication&comm=#{notifiable_id}"
       case notifiable.try(:communicable_type)
-      when 'Lead'    then "/crm/leads/#{notifiable.communicable_id}?tab=communications"
-      when 'Contact' then "/contacts/#{notifiable.communicable_id}?tab=communications"
-      when 'Account' then "/accounts/#{notifiable.communicable_id}?tab=communications"
+      when 'Lead'    then "/crm/leads/#{notifiable.communicable_id}?#{comm_tab}"
+      when 'Contact' then "/contacts/#{notifiable.communicable_id}?#{comm_tab}"
+      when 'Account' then "/accounts/#{notifiable.communicable_id}?#{comm_tab}"
       when 'Deal'    then "/deals/#{notifiable.communicable_id}"
       end
     when 'ContractorAssignment'

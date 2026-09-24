@@ -5,6 +5,13 @@ require 'rails_helper'
 # A recurring digest used to reach each person once, ever. These cover every
 # piece that had to change for "weekly" to mean weekly.
 RSpec.describe Campaigns::RecurringCycle do
+  # A real campaign recipient ticked the consent box on a lead form, so these
+  # fixtures carry the consent that Campaigns::CampaignSender now requires.
+  before do
+    CommunicationPreferenceService.opt_in(recipient: lead, channel: 'email', category: 'marketing',
+                                          ip_address: '203.0.113.10', user_agent: 'RSpec')
+  end
+
   include ActiveJob::TestHelper
 
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
@@ -77,7 +84,7 @@ RSpec.describe Campaigns::RecurringCycle do
 
   describe 'sending the same step in a new cycle' do
     let!(:connection) do
-      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_gmail', is_active: true,
+      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_outlook', is_active: true,
                                   email_address: user.email, display_name: 'Test User')
     end
 

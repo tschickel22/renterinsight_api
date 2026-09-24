@@ -314,6 +314,42 @@ module Api
         }
       end
 
+      # The company this send bills to. Communication rows on this path are
+      # already written with current_company_id, so usage is attributed the same
+      # way and the two never disagree.
+      def resolve_sms_usage_company
+        company_id = current_company_id
+        return nil if company_id.blank?
+
+        # ::Company, not Company: inside Api::Platform the bare constant
+        # resolves to the Api::Company module and blows up at send time.
+        ::Company.find_by(id: company_id)
+      end
+
+      # Record one outbound message against the tenant's billing period.
+      #
+      # This path used to record nothing at all. CommunicationService and
+      # CampaignSender both log their sends, so a text typed on a lead was the
+      # only outbound SMS the platform sent for free: it never appeared in the
+      # usage dashboard and it never counted toward sms_monthly_limit, which
+      # meant a dealer working leads by text could not reach their own cap.
+      #
+      # Never let a bookkeeping failure surface as a failed send. The message is
+      # already gone by the time this runs and the caller cannot unsend it, so a
+      # miscount is the smaller problem.
+      def record_sms_usage(company, communication_id: nil)
+        return if company.nil?
+
+        SmsUsageLog.log!(
+          company:          company,
+          direction:        'outbound',
+          source:           'manual',
+          communication_id: communication_id
+        )
+      rescue StandardError => e
+        Rails.logger.error("[Platform::CommunicationsController] SMS usage logging failed for company #{company&.id}: #{e.message}")
+      end
+
       def send_sms_unified
         # Get settings
         settings = get_effective_settings
@@ -334,7 +370,21 @@ module Api
 
         # Extract parameters
         sms_params = extract_sms_params
-        
+
+        # Meter against the tenant's monthly SMS threshold before spending a
+        # message. Source is always 'manual' here: this endpoint only ever
+        # serves a person typing a text on a record, never a sequence or a
+        # campaign. A manual send over cap is warned about and allowed through,
+        # but the check still has to run so the 80% and 100% notifications fire.
+        sms_company = resolve_sms_usage_company
+        if sms_company
+          begin
+            SmsCapService.check!(company: sms_company, source: 'manual')
+          rescue SmsCapService::CapExceededError => e
+            return { ok: false, success: false, error: e.message }
+          end
+        end
+
         # Send SMS via helper
         send_result = send_sms_via_provider(sms_params[:to], sms_params[:content], sms_config)
         
@@ -378,6 +428,8 @@ module Api
             # Track send event
             CommunicationEvent.track_send(log, details: { message_sid: send_result[:message_sid] })
 
+            record_sms_usage(sms_company, communication_id: log.id)
+
             return { 
               ok: true, 
               success: true,
@@ -388,7 +440,10 @@ module Api
           end
         end
 
-        # Test SMS without entity
+        # Test SMS without entity. Still a real message on the tenant's bill,
+        # so it is still metered.
+        record_sms_usage(sms_company)
+
         {
           ok: true, 
           success: true,

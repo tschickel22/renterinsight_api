@@ -14,7 +14,7 @@ class Api::V1::CampaignsController < ApplicationController
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
   require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage confirm_audience_consent sender_coverage]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -240,7 +240,17 @@ class Api::V1::CampaignsController < ApplicationController
       needs_sms = step_channels.include?('sms') || (step_channels.empty? && @campaign.sms_channel?)
 
       if needs_email && @campaign.resolve_email_connection_for_step.nil?
-        reasons << 'Selected sender has no valid email connection. Connect an email account first.'
+        # A Google mailbox resolves to nil for campaigns on purpose. Telling a
+        # dealer to "connect an email account" when they are looking at their
+        # connected Gmail account reads as a bug, and sends them to fix the one
+        # thing that is not broken.
+        if @campaign.google_mailbox?(@campaign.resolve_mailbox_connection_for_step)
+          reasons << 'Google does not allow marketing email through a connected Gmail account. ' \
+                     'Verify a sending domain and this campaign will go out as the same address, ' \
+                     'or choose a different sender.'
+        else
+          reasons << 'Selected sender has no valid email connection. Connect an email account first.'
+        end
       end
       if needs_sms && @campaign.resolve_sms_sender_for_step.nil?
         reasons << 'No active SMS number for this company. Provision one in Settings > Communications > SMS.'
@@ -418,6 +428,77 @@ class Api::V1::CampaignsController < ApplicationController
   rescue => e
     Rails.logger.error "[CampaignsController#test_send] #{e.class}: #{e.message}"
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/campaigns/:id/consent_coverage
+  #
+  # How much of this audience holds marketing consent. The campaign builder asks
+  # before start, so a dealer sees "112 of 800 recipients have consent" on
+  # screen rather than watching the send quietly shrink.
+  def consent_coverage
+    return unless authorize_action!('campaigns', 'read')
+
+    c = Campaigns::ConsentCoverage.for_campaign(@campaign)
+    render json: {
+      total: c.total,
+      consented: c.consented,
+      missing: c.missing,
+      optedOut: c.opted_out,
+      blocked: c.blocked,
+      gateEnabled: c.gate_enabled,
+      # Only a blocking warning when the gate is actually on for this tenant.
+      willBeSkipped: c.gate_enabled ? c.blocked : 0
+    }, status: :ok
+  end
+
+  # GET /api/v1/campaigns/:id/sender_coverage
+  #
+  # Whether this campaign has somebody to send as, per recipient. Owner mode
+  # resolves a different mailbox for each one, so a campaign can start and then
+  # send nothing: reps with no mailbox, and reps on Gmail, which campaign mail
+  # may not use. Refusing to start would be wrong, so we say so instead.
+  def sender_coverage
+    return unless authorize_action!('campaigns', 'read')
+
+    c = Campaigns::SenderCoverage.for_campaign(@campaign)
+    render json: {
+      total: c.total,
+      usable: c.usable,
+      google: c.google,
+      missing: c.missing,
+      blocked: c.blocked,
+      fixedSender: c.fixed_sender,
+      owners: c.owners.map { |o| { name: o[:name], count: o[:count], reason: o[:reason] } }
+    }, status: :ok
+  end
+
+  # POST /api/v1/campaigns/:id/confirm_audience_consent
+  #
+  # The dealer confirming that the people in this audience opted in with them
+  # somewhere we did not record. Only touches recipients with no record at all,
+  # never one who opted out: they answered, and no bulk action overturns an
+  # answer. Gated on update rather than read, because it writes consent.
+  def confirm_audience_consent
+    return unless authorize_action!('campaigns', 'update')
+
+    result = Campaigns::BulkConsentConfirmation.call(
+      campaign: @campaign, user: current_user, basis: params[:basis]
+    )
+
+    if result.ok?
+      c = Campaigns::ConsentCoverage.for_campaign(@campaign)
+      render json: {
+        success: true,
+        confirmed: result.confirmed,
+        coverage: {
+          total: c.total, consented: c.consented, missing: c.missing,
+          optedOut: c.opted_out, blocked: c.blocked, gateEnabled: c.gate_enabled,
+          willBeSkipped: c.gate_enabled ? c.blocked : 0
+        }
+      }, status: :ok
+    else
+      render json: { success: false, error: result.error }, status: :unprocessable_entity
+    end
   end
 
   def preview

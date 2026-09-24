@@ -105,6 +105,40 @@ RSpec.describe UserEmailConnection, 'granted capabilities', type: :model do
     end
   end
 
+  # The OAuth callback refuses a grant that fails this, so a connection that
+  # can only identify the user never gets saved as a working sender.
+  describe '.grant_can_send?' do
+    it 'rejects a Google grant where the send box was unticked' do
+      expect(described_class.grant_can_send?('https://www.googleapis.com/auth/userinfo.email openid')).to be false
+    end
+
+    it 'accepts gmail.send' do
+      expect(described_class.grant_can_send?('https://www.googleapis.com/auth/gmail.send openid')).to be true
+    end
+
+    it 'accepts the full Gmail grant' do
+      expect(described_class.grant_can_send?('https://mail.google.com/')).to be true
+    end
+
+    it 'rejects a Microsoft grant without Mail.Send' do
+      expect(described_class.grant_can_send?('offline_access https://graph.microsoft.com/User.Read')).to be false
+    end
+
+    it 'accepts Microsoft Mail.Send' do
+      expect(described_class.grant_can_send?('offline_access https://graph.microsoft.com/Mail.Send')).to be true
+    end
+
+    it 'passes when the provider did not report scopes' do
+      expect(described_class.grant_can_send?(nil)).to be true
+      expect(described_class.grant_can_send?('')).to be true
+    end
+
+    it 'passes both scope sets we request' do
+      expect(described_class.grant_can_send?(Api::V1::OauthEmailController::GOOGLE_OAUTH_SCOPES)).to be true
+      expect(described_class.grant_can_send?(Api::V1::OauthEmailController::MICROSOFT_OAUTH_SCOPES)).to be true
+    end
+  end
+
   describe '#granted_scopes' do
     it 'splits on whitespace and drops blanks' do
       c = connection(provider: 'oauth_gmail', scopes: "  https://mail.google.com/   https://www.googleapis.com/auth/userinfo.email ")

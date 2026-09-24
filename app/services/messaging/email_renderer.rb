@@ -118,6 +118,9 @@ module Messaging
         inline_attachments: inline_uploads,
         tracked_link_records: tracked_link_records,
         attachment_metadata: attachment_metadata,
+        # Same URL the footer link uses, handed back so the sender can put it in
+        # the List-Unsubscribe header as well as in the body.
+        unsubscribe_url: urls[:unsubscribe_url],
         error: nil
       }
     end
@@ -166,6 +169,9 @@ module Messaging
         inline_attachments: inline_uploads,
         tracked_link_records: tracked_link_records,
         attachment_metadata: attachment_metadata,
+        # Same URL the footer link uses, handed back so the sender can put it in
+        # the List-Unsubscribe header as well as in the body.
+        unsubscribe_url: urls[:unsubscribe_url],
         error: nil
       }
     end

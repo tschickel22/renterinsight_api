@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class CommunicationMailer < ApplicationMailer
-  def send_communication(to:, subject:, body:, from_email:, from_name:, cc: nil, bcc: nil, reply_to: nil, file_attachments: [], inline_images: [], content_type: 'text/html')
+  def send_communication(to:, subject:, body:, from_email:, from_name:, cc: nil, bcc: nil, reply_to: nil, file_attachments: [], inline_images: [], content_type: 'text/html', extra_headers: {})
     # Add file attachments if present (BEFORE calling mail)
     # Renamed parameter from 'attachments' to 'file_attachments' to avoid shadowing the mail attachments method
 
@@ -74,6 +74,16 @@ class CommunicationMailer < ApplicationMailer
 
     # Add reply_to if provided
     mail_options[:reply_to] = reply_to if reply_to.present?
+
+    # Arbitrary RFC headers from the caller. Campaign sends use this for
+    # List-Unsubscribe and List-Unsubscribe-Post, which put Gmail's own
+    # unsubscribe control next to the sender name and are required of bulk
+    # senders by RFC 8058.
+    extra_headers.to_h.each do |name, value|
+      next if value.blank?
+
+      headers[name.to_s] = value.to_s
+    end
 
     # Decide whether to send as HTML or plain text.
     # Default behavior is HTML — nurture/marketing/transactional bodies routinely

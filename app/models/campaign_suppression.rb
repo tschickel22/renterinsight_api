@@ -13,6 +13,14 @@ class CampaignSuppression < ApplicationRecord
   # the quote they asked a salesperson for.
   UNMAILABLE_REASONS = %w[bounce_hard complaint].freeze
 
+  # The only suppression a dealer may remove is one they created themselves.
+  #
+  # Everything else was recorded by the recipient (unsubscribe, STOP) or by the
+  # receiving mail system (hard bounce, spam complaint). Deleting one of those
+  # and mailing the person again is precisely what an opt-out exists to prevent,
+  # and we tell Google it cannot happen, so it has to actually not happen.
+  DEALER_REMOVABLE_REASONS = %w[manual].freeze
+
   belongs_to :company
   belongs_to :source_campaign, class_name: 'Campaign', optional: true
 
@@ -20,6 +28,13 @@ class CampaignSuppression < ApplicationRecord
   validates :email_address, uniqueness: { scope: :company_id, case_sensitive: false }, if: -> { email_address.present? }
   validates :phone_number, uniqueness: { scope: :company_id }, if: -> { phone_number.present? }
   validate :exactly_one_contact_value
+
+  # Set by the recipient-initiated paths only: texting START to opt back in is
+  # the recipient overturning their own STOP, which is theirs to do. Nothing
+  # dealer-facing may set this.
+  attr_accessor :removed_by_recipient
+
+  before_destroy :block_dealer_removal
 
   before_validation :downcase_email
   before_validation :normalize_phone
@@ -71,6 +86,11 @@ class CampaignSuppression < ApplicationRecord
   def email_suppression? = email_address.present?
   def phone_suppression? = phone_number.present?
 
+  # A suppression the dealer put there themselves, and may therefore take away.
+  def dealer_removable?
+    DEALER_REMOVABLE_REASONS.include?(reason.to_s)
+  end
+
   private
 
   def exactly_one_contact_value
@@ -94,5 +114,15 @@ class CampaignSuppression < ApplicationRecord
 
   def stamp_suppressed_at
     self.suppressed_at ||= Time.current
+  end
+
+  private
+
+  def block_dealer_removal
+    return true if removed_by_recipient
+    return true if dealer_removable?
+
+    errors.add(:base, "A #{reason} opt-out was recorded by the recipient and cannot be removed.")
+    throw(:abort)
   end
 end

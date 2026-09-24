@@ -290,7 +290,9 @@ module Webhooks
               notifiable:        inbound_comm,
               message:           "SMS reply from #{contact_label}: #{body&.truncate(120)}",
               company_id:        company&.id,
-              action_url:        communicable ? "/contacts/#{communicable.id}?tab=communications" : nil,
+              # No action_url: Notification#computed_action_url derives it from
+              # the inbound message's record. The literal here sent lead replies
+              # to /contacts/<lead id>, which is someone else or nobody.
               action_text:       'View Conversation'
             )
           end

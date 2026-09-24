@@ -12,6 +12,10 @@
 #   )
 
 class CommunicationService
+  # Providers that put mail through a user's Google account. Campaign traffic is
+  # refused on these; see the guard in #send.
+  GOOGLE_EMAIL_PROVIDERS = %w[oauth_google oauth_gmail].freeze
+
   class Error < StandardError; end
   class OptOutError < Error; end
   class ProviderError < Error; end
@@ -210,6 +214,24 @@ class CommunicationService
     # Set default provider if not specified
     # User email connection takes highest priority in waterfall
     provider ||= default_provider_for(channel, communicable, user: @sending_user)
+
+    # Campaign email never leaves through a connected Google account.
+    #
+    # Google's Gmail API policy does not permit bulk or marketing mail, and the
+    # grant we hold is gmail.send, for the one to one correspondence a rep has
+    # with their own contacts. Campaign::resolve_email_connection_for_step
+    # already refuses a Google mailbox, so this is the backstop that catches
+    # every other way a campaign could reach one: the location/company/platform
+    # waterfall, a tenant who sets their company email provider to Google, and
+    # whatever route gets added next. Enforced centrally on purpose, because
+    # "campaigns never send through Gmail" has to be a property of the system
+    # rather than of one call site.
+    #
+    # One to one email is untouched; the check is scoped to campaign category.
+    if channel == 'email' && category.to_s == 'campaign' && GOOGLE_EMAIL_PROVIDERS.include?(provider.to_s)
+      raise Error, 'Campaign email cannot be sent through a connected Google account. ' \
+                   'Verify a sending domain, or send this campaign from a non-Google mailbox.'
+    end
     
     # Get default from address if not provided
     # User email connection takes highest priority in waterfall

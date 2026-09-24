@@ -3,6 +3,15 @@
 require 'rails_helper'
 
 RSpec.describe Campaigns::CampaignSender do
+  # A real campaign recipient ticked the consent box on a lead form, so these
+  # fixtures carry the consent that Campaigns::CampaignSender now requires.
+  before do
+    %w[email sms].each do |channel|
+      CommunicationPreferenceService.opt_in(recipient: lead, channel: channel, category: 'marketing',
+                                            ip_address: '203.0.113.10', user_agent: 'RSpec')
+    end
+  end
+
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
   let(:user)    { User.create!(email: "u-#{SecureRandom.hex(3)}@example.com", first_name: 'T', last_name: 'U', password: 'Pass1234!', company_id: company.id) }
   let(:source)  { Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' } }
@@ -43,7 +52,7 @@ RSpec.describe Campaigns::CampaignSender do
 
   describe '#deliver_current_step (email)' do
     let!(:user_email_conn) do
-      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_gmail', is_active: true,
+      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_outlook', is_active: true,
                                    email_address: user.email, display_name: 'Test User')
     end
 
@@ -220,7 +229,7 @@ RSpec.describe Campaigns::CampaignSender do
   # because a CampaignSend was created fresh on every call.
   describe 'duplicate dispatch' do
     let!(:user_email_conn) do
-      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_gmail', is_active: true,
+      UserEmailConnection.create!(user_id: user.id, provider: 'oauth_outlook', is_active: true,
                                   email_address: user.email, display_name: 'Test User')
     end
 

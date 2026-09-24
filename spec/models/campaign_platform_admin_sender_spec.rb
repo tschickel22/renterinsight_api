@@ -33,7 +33,7 @@ RSpec.describe Campaign, 'sending as a platform admin' do
   it 'prefers a mailbox the admin connected in this company' do
     UserEmailConnection.create!(user_id: admin.id, company_id: home.id, provider: 'oauth_outlook',
                                 email_address: admin.email, is_active: true)
-    here = UserEmailConnection.create!(user_id: admin.id, company_id: tenant.id, provider: 'oauth_gmail',
+    here = UserEmailConnection.create!(user_id: admin.id, company_id: tenant.id, provider: 'oauth_outlook',
                                        email_address: admin.email, is_active: true)
 
     expect(campaign_as(admin).resolve_email_connection_for_step).to eq(here)

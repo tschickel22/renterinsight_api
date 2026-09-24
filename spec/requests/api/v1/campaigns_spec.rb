@@ -162,7 +162,7 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
 
     it "starts when preconditions are met" do
       UserEmailConnection.create!(user_id: user.id, company_id: company.id,
-        provider: "oauth_gmail", email_address: "u@e.com",
+        provider: "oauth_outlook", email_address: "u@e.com",
         oauth_token_encrypted: "x", oauth_refresh_token_encrypted: "y", is_active: true)
       campaign.campaign_steps.create!(position: 0, is_active: true, body_blocks: [{ "type" => "text", "html" => "x" }])
       campaign.create_campaign_audience!(source_type: "Lead")
@@ -172,7 +172,7 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
     end
 
     it "pauses a running campaign and resumes it" do
-      UserEmailConnection.create!(user_id: user.id, company_id: company.id, provider: "oauth_gmail",
+      UserEmailConnection.create!(user_id: user.id, company_id: company.id, provider: "oauth_outlook",
         email_address: "u@e.com", oauth_token_encrypted: "x", oauth_refresh_token_encrypted: "y", is_active: true)
       campaign.campaign_steps.create!(position: 0, is_active: true, body_blocks: [{ "type" => "text", "html" => "x" }])
       campaign.create_campaign_audience!(source_type: "Lead")

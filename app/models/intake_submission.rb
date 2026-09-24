@@ -272,6 +272,7 @@ class IntakeSubmission < ApplicationRecord
 
     self.resolved_entity = new_lead
     update_columns(lead_id: new_lead.id, lead_created: true)
+    record_marketing_consent!(new_lead)
     
     Rails.logger.info "Created lead #{new_lead.id} from intake submission #{id}"
     
@@ -340,6 +341,7 @@ class IntakeSubmission < ApplicationRecord
     # Point this submission at the existing lead. lead_created stays semantically
     # true (a lead exists for this submission), but we did not create a new one.
     update_columns(lead_id: existing_lead.id, lead_created: true)
+    record_marketing_consent!(existing_lead)
 
     # Build the note: standard submission detail + any fill-empty conflicts.
     begin
@@ -803,5 +805,84 @@ class IntakeSubmission < ApplicationRecord
   
   def increment_form_count
     intake_form&.increment_submission_count!
+  end
+
+  # Write the consent this submitter gave onto the contact, where campaign
+  # audience building can see it.
+  #
+  # Only ever writes a consent, never revokes one. A returning visitor who
+  # leaves the box unchecked on their second enquiry has not withdrawn the
+  # consent they gave on their first: withdrawing is what unsubscribe is for,
+  # and treating silence as withdrawal would quietly empty every audience.
+  #
+  # Never let this fail the submission. A lead that reaches the dealer without
+  # a consent row is recoverable; a form that 500s because of bookkeeping loses
+  # the enquiry outright.
+  def record_marketing_consent!(contact)
+    return if contact.nil?
+
+    # A form can carry consent two ways: the marketing consent checkbox, or a
+    # field the dealer mapped to opt_in_sms in the form builder. The second one
+    # predates the first and plenty of live forms use it. Without this, such a
+    # form sets the column, passes the audience filter, and is then skipped at
+    # send time for having no preference — a smaller send with no reason given.
+    if !marketing_consent? && contact.respond_to?(:opt_in_sms) && contact.opt_in_sms
+      CommunicationPreferenceService.opt_in(
+        recipient: contact, channel: 'sms', category: 'marketing',
+        ip_address: ip_address, user_agent: user_agent
+      )
+    end
+
+    return unless marketing_consent?
+
+    # Both channels, because the consent text says "email and text me". Writing
+    # only email would leave SMS campaigns gated on a record that the wording
+    # promised to create, which reads as a bug to the dealer and as a missing
+    # consent to a reviewer. The sms preference also sets opt_in_sms on the
+    # record, which is what the audience filter selects on.
+    #
+    # Unless the form asked about texting separately. A form carrying both the
+    # general consent box and its own SMS checkbox is asking two questions, and
+    # the specific answer wins: somebody who ticked "email and text me" but left
+    # the SMS box clear has said something about texting, and a general consent
+    # must not overwrite it into a yes.
+    channels = asks_about_sms_separately? && !contact.try(:opt_in_sms) ? %w[email] : %w[email sms]
+
+    channels.each do |channel|
+      preference = CommunicationPreferenceService.opt_in(
+        recipient: contact,
+        channel: channel,
+        category: 'marketing',
+        ip_address: ip_address,
+        user_agent: user_agent
+      )
+
+      # Provenance: what they were shown, where, and when. This is the record a
+      # reviewer asks to see, so it is stored beside the opt-in rather than
+      # inferred later by joining back through the submission.
+      preference.update!(
+        compliance_metadata: (preference.compliance_metadata || {}).merge(
+          'source' => 'intake_form',
+          'intake_form_id' => intake_form_id,
+          'intake_submission_id' => id,
+          'consent_text' => marketing_consent_text,
+          'consent_version' => intake_form&.marketing_consent_version,
+          'page_url' => referrer,
+          'consented_at' => marketing_consent_at&.iso8601
+        )
+      )
+    end
+  rescue StandardError => e
+    Rails.logger.error("[IntakeSubmission##{id}] could not record marketing consent: #{e.class}: #{e.message}")
+  end
+
+  # True when this form has its own SMS opt-in field, i.e. it asked about
+  # texting as a separate question rather than folding it into the consent text.
+  def asks_about_sms_separately?
+    Array(intake_form&.fields).any? do |field|
+      (field['leadField'] || field[:leadField]).to_s == 'opt_in_sms'
+    end
+  rescue StandardError
+    false
   end
 end

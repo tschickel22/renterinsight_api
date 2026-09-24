@@ -2077,6 +2077,15 @@ Rails.application.routes.draw do
           post :duplicate
           post :start
           post :pause
+          # How much of the audience holds consent, asked before start so the
+          # skip is on screen rather than discovered in the send numbers.
+          get  :consent_coverage
+          # Whether there is anyone to send as. Owner mode resolves per
+          # recipient, so this cannot be answered by looking at the campaign.
+          get  :sender_coverage
+          # The dealer asserting that this audience opted in with them. Writes
+          # consent, so it sits behind campaigns:update, not :read.
+          post :confirm_audience_consent
           post :refine_with_ai
           post :resume
           post :reopen
@@ -2584,6 +2593,11 @@ Rails.application.routes.draw do
           get  :duplicates
           post :merge_preview
           post :merge
+          # Marketing consent entered by staff, for contacts a dealer already
+          # holds consent for (an old CRM, a signed form, a conversation).
+          # Stored with its own source so it never masquerades as a consent the
+          # person gave us on a form.
+          patch :marketing_consent, path: 'marketing-consent'
         end
 
         collection do
