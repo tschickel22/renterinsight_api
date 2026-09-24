@@ -91,6 +91,36 @@ class IntakeForm < ApplicationRecord
     json
   end
   
+  # What a visitor's browser needs to draw and submit the form, and nothing
+  # else. #as_json is the builder's view and carries internal configuration:
+  # who is notified, the lead source, field mappings, the bound location,
+  # submission counts. Public endpoints used to hand that to anyone holding the
+  # form link. Both key styles are kept because the public pages read both.
+  def public_as_json
+    captcha = captcha_required?
+    {
+      'name' => name,
+      'description' => description,
+      'fields' => fields,
+      'public_id' => public_id,
+      'publicId' => public_id,
+      'submit_button_text' => submit_button_text,
+      'submitButtonText' => submit_button_text,
+      'thank_you_message' => thank_you_message,
+      'thankYouMessage' => thank_you_message,
+      'redirect_url' => redirect_url,
+      'redirectUrl' => redirect_url,
+      'captcha_required' => captcha,
+      'captchaRequired' => captcha,
+      'captchaSiteKey' => (TurnstileVerifier.site_key if captcha),
+      'marketing_consent' => {
+        'enabled' => marketing_consent?,
+        'text' => resolved_marketing_consent_text,
+        'version' => marketing_consent_version
+      }
+    }.compact
+  end
+
   def generate_public_id
     self.public_id ||= loop do
       token = SecureRandom.urlsafe_base64(8)

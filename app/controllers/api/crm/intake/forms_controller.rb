@@ -13,14 +13,16 @@ module Api
         before_action :set_form, only: [:show, :update, :destroy]
 
         def index
-          # For public requests (via token), only show active forms
-          # For admin requests (authenticated), show all forms
-          if params[:token].present? && params[:company_id].present?
-            @forms = @company.intake_forms.where(is_active: true).order(updated_at: :desc)
-          else
-            @forms = @company.intake_forms.order(updated_at: :desc)
+          # The list is staff only. The public inventory token rides in every
+          # shared listing URL, and answering it here handed anyone with the
+          # link every active form with its full configuration (who is
+          # notified, field mappings, test forms). A public page that needs a
+          # form asks for that one form by id through #show.
+          if public_token_request?
+            return render json: { error: 'Authentication required' }, status: :unauthorized
           end
-          
+
+          @forms = @company.intake_forms.order(updated_at: :desc)
           render json: @forms.map(&:as_json)
         end
         
@@ -110,16 +112,18 @@ module Api
         end
 
         def show
-          response = @form.as_json
+          # Staff get the builder's full view; a public token gets only what the
+          # embedded form needs to draw itself.
+          response = public_token_request? ? @form.public_as_json : @form.as_json
 
           # For public requests, include company locations so the form can show
           # a location picker — but only when the form isn't already bound to
           # a specific location (admin's choice wins; no need to ask the
           # visitor) and the company has more than one active location.
-          if params[:token].present? && params[:company_id].present? && @form.location_id.blank?
+          if public_token_request? && @form.location_id.blank?
             locations = @company.locations.active.order(:name)
             if locations.count > 1
-              response[:company_locations] = locations.map { |l| { id: l.id, name: l.name, city: l.city, state: l.state } }
+              response['company_locations'] = locations.map { |l| { id: l.id, name: l.name, city: l.city, state: l.state } }
             end
           end
 
@@ -185,9 +189,13 @@ module Api
 
         private
 
+        def public_token_request?
+          params[:token].present? && params[:company_id].present?
+        end
+
         def set_company_scope
           # Public access via token (for public inventory pages)
-          if params[:token].present? && params[:company_id].present?
+          if public_token_request?
             Rails.logger.info "🌐 [Intake::FormsController] Public access via token"
             
             company = ::Company.find_by(id: params[:company_id])

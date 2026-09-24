@@ -7,7 +7,9 @@ module Public
     before_action :set_form
     
     def show
-      response = @form.as_json
+      # Anyone with the form link reaches this, so it gets the visitor's view
+      # of the form, not the builder's configuration.
+      response = @form.public_as_json
 
       # Include the company's active locations so the public form can offer
       # a "which location is closest to you?" picker when the admin left the
