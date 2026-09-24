@@ -66,4 +66,44 @@ RSpec.describe InboundEmail::ReplyNotifier do
       .and_return(double(deliver_later: true))
     described_class.notify(entity: lead, communication: inbound_comm)
   end
+
+  # The text is often read on a phone with nothing else to hand, so it has to
+  # say what they wrote and link straight to the reply itself.
+  describe 'the SMS' do
+    before { owner.update_columns(phone: '+17205550100') }
+
+    def sent_sms_body
+      body = nil
+      sms = instance_double(SmsService)
+      allow(SmsService).to receive(:new).and_return(sms)
+      allow(sms).to receive(:send_sms) { |**kw| body = kw[:body] }
+      yield
+      body
+    end
+
+    it 'carries the reply text and a link that opens that reply' do
+      comm = inbound_comm
+      body = sent_sms_body { described_class.notify(entity: lead, communication: comm) }
+
+      expect(body).to include('Email reply from Re Plier')
+      expect(body).to include('Thanks, interested!')
+      expect(body).to include("#{Brand.app_url}/crm/leads/#{lead.id}?tab=communication&comm=#{comm.id}")
+    end
+
+    it 'stays plain text so it is billed as GSM, not UCS-2' do
+      body = sent_sms_body { described_class.notify(entity: lead, communication: inbound_comm) }
+      expect(body).to match(/\A[\x00-\x7F]*\z/)
+    end
+  end
+
+  describe 'the link' do
+    it 'uses the contact page root for a contact' do
+      contact = Contact.create!(company: company, first_name: 'Con', last_name: 'Tact', email: "c-#{SecureRandom.hex(3)}@example.com")
+      comm = Communication.create!(company_id: company.id, communicable: contact, channel: 'email', direction: 'inbound',
+                                   subject: 'Re: Hi', body: 'Yes', from_address: contact.email,
+                                   to_address: 'rep@example.com', status: 'delivered')
+      link = described_class.new(entity: contact, communication: comm).send(:entity_link)
+      expect(link).to eq("/contacts/#{contact.id}?tab=communication&comm=#{comm.id}")
+    end
+  end
 end
