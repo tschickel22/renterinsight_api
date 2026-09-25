@@ -60,9 +60,19 @@ module SocialBlog
     end
 
     # The line that goes in the post text, between the caption and hashtags.
+    # Nothing when the author already put the address in the post, from the
+    # compose screen's Copy link, so the link does not appear twice.
     def line_for(post)
       link = link_for(post)
-      link && "Read the full post: #{link}"
+      return nil if link.nil?
+      return nil if post.caption.to_s.include?(bare(link))
+
+      "Read the full post: #{link}"
+    end
+
+    # The address without tracking or a trailing slash, for spotting it in text.
+    def bare(url)
+      url.to_s.sub(/\?.*\z/, '').chomp('/')
     end
 
     # Tagged so a visit from the post is attributed to it, the same way the

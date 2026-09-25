@@ -53,6 +53,7 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
         'MARKETING_BLOG_DEALERTIDE_SUPABASE_SERVICE_KEY' => 'k',
         'MARKETING_BLOG_DEALERTIDE_COMPANY_UUID' => '1111'
       ))
+      allow(SocialBlog::SupabaseRest).to receive(:request).and_return([])
       put '/api/v1/social-blog/settings',
           params: { destination: 'marketing_site', marketing_site_key: 'dealertide' }.to_json, headers: headers
       expect(JSON.parse(response.body)['marketing_sites'].map { |m| m['key'] }).to eq(['dealertide'])
@@ -83,7 +84,20 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
           headers: headers
 
       blog = JSON.parse(response.body)['blog']
-      expect(blog).to include('status' => 'pending', 'title' => 'T', 'content' => '<p>ok</p>x')
+      expect(blog).to include('status' => 'pending', 'title' => 'T', 'content' => '<p>ok</p>')
+    end
+
+    it 'keeps the layout of pasted HTML but nothing that runs' do
+      html = '<div class="tip" style="color: teal"><img src="https://img.example.com/a.jpg" alt="Lot">' \
+             '<table><tr><td>A</td></tr></table></div><p onclick="x()">Hi</p><script>bad()</script>' \
+             '<a href="javascript:bad()">x</a>'
+      put "/api/v1/social-posts/#{post_record.id}/blog",
+          params: { blog: { status: 'pending', title: 'T', content: html } }.to_json, headers: headers
+
+      content = JSON.parse(response.body)['blog']['content']
+      expect(content).to include('<div class="tip" style="color:teal;">', '<img src="https://img.example.com/a.jpg" alt="Lot">',
+                                 '<table>', '<p>Hi</p>')
+      expect(content).not_to include('onclick', '<script', 'javascript:', 'bad()')
     end
 
     it 'will not change one that is already published' do
@@ -142,6 +156,45 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body)['error']).to match(/No website/)
+    end
+  end
+
+  describe 'blog address before publishing' do
+    before do
+      website.website_pages.create!(title: 'Blog', path: '/blog', blocks: [{ 'type' => 'blogList' }])
+      allow_any_instance_of(Website).to receive(:public_url).and_return('https://summit.example.com')
+    end
+
+    it 'gives the address a title will publish at, avoiding taken slugs' do
+      website.blog_posts.create!(author: user, title: 'Taken', slug: 'spring-homes', content: 'x')
+
+      post '/api/v1/social-blog/address', params: { title: 'Spring Homes' }.to_json, headers: headers
+
+      expect(JSON.parse(response.body)).to eq('slug' => 'spring-homes-2',
+                                              'url' => 'https://summit.example.com/blog/post/spring-homes-2')
+    end
+
+    it 'reserves the slug on save and publishes at that address' do
+      put "/api/v1/social-posts/#{post_record.id}/blog",
+          params: { blog: { status: 'pending', title: 'Spring Homes', content: '<p>b</p>', category: 'Buying Guides' } }.to_json,
+          headers: headers
+      blog = JSON.parse(response.body)['blog']
+      expect(blog['planned_url']).to eq('https://summit.example.com/blog/post/spring-homes')
+
+      post "/api/v1/social-posts/#{post_record.id}/blog/publish", headers: headers
+      published = BlogPost.last
+      expect(published.slug).to eq('spring-homes')
+      expect(published.blog_categories.map(&:name)).to eq(['Buying Guides'])
+    end
+
+    it 'leaves out the automatic link when the post already has it' do
+      put "/api/v1/social-posts/#{post_record.id}/blog",
+          params: { blog: { status: 'pending', title: 'Spring Homes', content: '<p>b</p>' } }.to_json, headers: headers
+      post_record.update!(caption: 'Read it here: https://summit.example.com/blog/post/spring-homes')
+
+      SocialBlog::SocialLink.prepare(post_record.reload, allow_write: false)
+      caption = PublishSocialPostJob.new.send(:build_caption, post_record.reload)
+      expect(caption.scan('summit.example.com/blog/post/spring-homes').size).to eq(1)
     end
   end
 

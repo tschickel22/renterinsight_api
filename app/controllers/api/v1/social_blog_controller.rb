@@ -46,7 +46,9 @@ class Api::V1::SocialBlogController < ApplicationController
     return unless authorize_action!('social_posts', 'create')
 
     vehicle = params[:vehicle_id].present? ? @company.vehicles.find_by(id: params[:vehicle_id]) : nil
+    destination = SocialBlog::Destination.for(company: @company, location_id: current_location_id)
     result = SocialBlog::Generator.generate(
+      categories:      destination&.categories || [],
       company:         @company,
       caption:         params[:caption],
       headline:        params[:headline],
@@ -57,6 +59,31 @@ class Api::V1::SocialBlogController < ApplicationController
     )
     render json: result
   rescue SocialBlog::Generator::Error => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/social-blog/address  { slug: , title: , social_post_id: }
+  #
+  # The address a blog version will have, before anything is published, so the
+  # Facebook post can link to it. The slug is checked against the site, so the
+  # address is the one it will actually get.
+  def address
+    return unless authorize_action!('social_posts', 'read')
+
+    cross_post = if params[:social_post_id].present?
+                   @company.social_posts.active.find_by(id: params[:social_post_id])&.blog_cross_post
+                 end
+    destination = SocialBlog::Destination.for(company: @company, cross_post: cross_post,
+                                              location_id: current_location_id)
+    return render json: { error: 'No website to publish to' }, status: :unprocessable_entity unless destination
+
+    base = (params[:slug].presence || params[:title]).to_s.parameterize.first(80)
+    return render json: { slug: nil, url: nil } if base.blank?
+
+    # Its own reservation is not a clash.
+    slug = cross_post&.slug == base ? base : destination.unique_slug(base, title: params[:title])
+    render json: { slug: slug, url: destination.url_for(slug) }
+  rescue SocialBlog::SupabaseRest::Error => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
@@ -80,7 +107,7 @@ class Api::V1::SocialBlogController < ApplicationController
     end
 
     attrs = blog_params.to_h
-    attrs['content'] = SocialBlog::Generator.sanitize_html(attrs['content']) if attrs.key?('content')
+    attrs['content'] = SocialBlog::Generator.sanitize_html(attrs['content'], authored: true) if attrs.key?('content')
     if attrs.key?('website_id') && attrs['website_id'].present? &&
        !blog_settings.candidate_sites.exists?(id: attrs['website_id'])
       return render json: { error: 'That website does not belong to this company' }, status: :unprocessable_entity
@@ -89,6 +116,7 @@ class Api::V1::SocialBlogController < ApplicationController
     cross_post.assign_attributes(attrs)
     cross_post.company_id = @company.id
     aim(cross_post) unless cross_post.status == 'skipped'
+    reserve_slug(cross_post) unless cross_post.status == 'skipped'
     # A failed attempt goes back in line when the author saves it again.
     cross_post.status = 'pending' if cross_post.status == 'failed' && !attrs.key?('status')
     cross_post.error  = nil if cross_post.status == 'pending'
@@ -146,13 +174,38 @@ class Api::V1::SocialBlogController < ApplicationController
     end
   end
 
+  # Settles the slug when the version is saved, so the address shown on the
+  # compose screen (and pasted into the Facebook post) is the one it publishes
+  # at. Rechecked only when it changes.
+  def reserve_slug(cross_post)
+    base = (cross_post.slug.presence || cross_post.title).to_s.parameterize.first(80)
+    return if base.blank?
+    return if cross_post.persisted? && !cross_post.slug_changed? && !cross_post.destination_changed? &&
+              !cross_post.website_id_changed? && cross_post.slug == base
+
+    destination = SocialBlog::Destination.for(company: @company, cross_post: cross_post)
+    cross_post.slug = destination ? destination.unique_slug(base, title: cross_post.title) : base
+  rescue SocialBlog::SupabaseRest::Error => e
+    Rails.logger.warn "[SocialBlog] slug check failed: #{e.message}"
+    cross_post.slug = base
+  end
+
+  def planned_url(cross_post)
+    return cross_post.public_url if cross_post.published?
+    return nil if cross_post.slug.blank?
+
+    SocialBlog::Destination.for(company: @company, cross_post: cross_post)&.url_for(cross_post.slug)
+  rescue StandardError
+    nil
+  end
+
   def blog_settings
     @blog_settings ||= SocialBlog::Settings.new(@company)
   end
 
   def blog_params
     params.require(:blog).permit(
-      :status, :title, :slug, :excerpt, :content, :seo_title, :seo_description, :author_name,
+      :status, :title, :slug, :excerpt, :content, :seo_title, :seo_description, :author_name, :category,
       :featured_image_url, :website_id, :generated_at, :ai_generation_version, tags: []
     ).tap do |p|
       p.delete(:status) unless %w[pending skipped].include?(p[:status])
@@ -173,6 +226,8 @@ class Api::V1::SocialBlogController < ApplicationController
       },
       # Only listed for platform admins, who alone can choose one. No secrets.
       marketing_sites: current_user&.platform_admin? ? SocialBlog::MarketingSites.all.map { |m| { key: m.key, name: m.name, site_url: m.site_url } } : [],
+      # The categories the destination already uses, for the category picker.
+      categories: (SocialBlog::Destination.for(company: @company, location_id: current_location_id)&.categories || []),
       websites: sites.map do |w|
         {
           id:            w.id,
@@ -191,7 +246,7 @@ class Api::V1::SocialBlogController < ApplicationController
 
     cross_post.as_json(only: %i[
       id status destination website_id marketing_site_key title slug excerpt content seo_title author_name
-      seo_description tags featured_image_url generated_at external_id public_url published_at error
-    ])
+      seo_description tags featured_image_url generated_at external_id public_url published_at error category
+    ]).merge('planned_url' => planned_url(cross_post))
   end
 end

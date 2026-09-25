@@ -46,7 +46,8 @@ module SocialBlog
       result = Generator.generate(
         company: post.company, caption: post.caption, headline: post.headline,
         description: post.description, hashtags: hashtags,
-        intent_category: post.intent_category, vehicle: post.vehicle
+        intent_category: post.intent_category, vehicle: post.vehicle,
+        categories: (Destination.for(company: post.company, cross_post: cross_post)&.categories rescue [])
       )
       cross_post.update!(result.merge(generated_at: Time.current))
     end

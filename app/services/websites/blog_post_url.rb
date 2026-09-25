@@ -24,9 +24,14 @@ module Websites
     end
 
     def path_for(website, blog_post, base: blog_page_path(website))
-      return nil if base.blank? || blog_post&.slug.blank?
+      path_for_slug(website, blog_post&.slug, base: base)
+    end
 
-      "#{base == '/' ? '' : base}/#{SEGMENT}/#{blog_post.slug}"
+    # Before the post exists: the address it will have.
+    def path_for_slug(website, slug, base: blog_page_path(website))
+      return nil if base.blank? || slug.blank?
+
+      "#{base == '/' ? '' : base}/#{SEGMENT}/#{slug}"
     end
 
     # The slug a request path names, or nil when the path is not a post under

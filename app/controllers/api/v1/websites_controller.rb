@@ -704,11 +704,14 @@ class Api::V1::WebsitesController < ApplicationController
   # Helper to create pages from template data
   def create_pages_from_template(website, template_data)
     pages = template_data[:pages] || template_data['pages'] || []
+    # The template's fake phone, email, address and name become the dealer's.
+    placeholders = Websites::TemplatePlaceholders.new(company: website.company, location: website.location)
     
     Rails.logger.info "[Website] Creating #{pages.length} pages from template for website #{website.id}"
     
     pages.each_with_index do |page_data, index|
-      page_data = page_data.with_indifferent_access if page_data.is_a?(Hash)
+      page_data = page_data.to_unsafe_h if page_data.respond_to?(:to_unsafe_h)
+      page_data = placeholders.scrub(page_data.to_h).with_indifferent_access if page_data.is_a?(Hash)
       
       visible = page_data[:is_visible].nil? ? true : page_data[:is_visible]
 
@@ -733,6 +736,7 @@ class Api::V1::WebsitesController < ApplicationController
     end
     
     ensure_sign_in_page(website)
+    scrub_site_placeholders(website, placeholders)
 
     Rails.logger.info "[Website] Successfully created #{pages.length} pages for website #{website.id}"
   rescue => e
@@ -741,6 +745,19 @@ class Api::V1::WebsitesController < ApplicationController
     # Don't fail the website creation, just log the error
   end
   
+  # The site-level copies of the template's identity: SEO defaults ("Homes |
+  # Your Dealership Name"), brand, header and footer.
+  def scrub_site_placeholders(website, placeholders)
+    attrs = %i[seo_config brand site_header site_footer].each_with_object({}) do |attr, acc|
+      next unless website.respond_to?(attr)
+
+      current = website.public_send(attr)
+      scrubbed = placeholders.scrub(current)
+      acc[attr] = scrubbed if scrubbed != current
+    end
+    website.update_columns(attrs) if attrs.any?
+  end
+
   # Somewhere for the header's Sign In link to land.
   #
   # Every design offers Sign In, and without this page that link is the one

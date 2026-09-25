@@ -1778,6 +1778,7 @@ Rails.application.routes.draw do
       get  'social-blog/settings', to: 'social_blog#settings'
       put  'social-blog/settings', to: 'social_blog#update_settings'
       post 'social-blog/generate', to: 'social_blog#generate'
+      post 'social-blog/address', to: 'social_blog#address'
       get  'social-posts/:social_post_id/blog', to: 'social_blog#show'
       put  'social-posts/:social_post_id/blog', to: 'social_blog#upsert'
       post 'social-posts/:social_post_id/blog/publish', to: 'social_blog#publish'

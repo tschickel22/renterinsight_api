@@ -135,7 +135,17 @@ RSpec.describe 'Social post blog version', type: :model do
   describe SocialBlog::Generator do
     it 'strips tags that are not allowed from the body' do
       html = '<h1>Big</h1><p onclick="x()">Hi <script>alert(1)</script><a href="/x" style="c">l</a></p>'
-      expect(described_class.sanitize_html(html)).to eq('Big<p>Hi alert(1)<a href="/x">l</a></p>')
+      expect(described_class.sanitize_html(html)).to eq('Big<p>Hi <a href="/x">l</a></p>')
+    end
+
+    it 'keeps an existing category spelling' do
+      reply = { 'content' => [{ 'text' => { title: 'T', content_html: '<p>B</p>', category: 'buying guides' }.to_json }] }
+      allow(Rails.application.credentials).to receive(:dig).and_call_original
+      allow(Rails.application.credentials).to receive(:dig).with(:anthropic, :api_key).and_return('key')
+      allow_any_instance_of(described_class).to receive(:call_claude).and_return(reply)
+
+      result = described_class.generate(company: company, caption: 'x', categories: ['Buying Guides', 'News'])
+      expect(result[:category]).to eq('Buying Guides')
     end
 
     it 'turns the model reply into blog fields' do
