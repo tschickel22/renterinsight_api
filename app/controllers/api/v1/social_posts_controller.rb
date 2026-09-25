@@ -69,6 +69,7 @@ class Api::V1::SocialPostsController < ApplicationController
       ctx['hashtags'] = Array(params[:social_post][:hashtags])
       post.generation_context = ctx
     end
+    store_ad_settings(post)
 
     post.status ||= auto_approve_on_create?(post) ? 'approved' : 'draft'
 
@@ -83,7 +84,7 @@ class Api::V1::SocialPostsController < ApplicationController
         utm_content: post.utm_content.presence || post.id.to_s,
         tagged_url:  build_tagged_url(post)
       )
-      render json: serialize(post, detailed: true), status: :created
+      render json: with_approval_request(post), status: :created
     else
       render json: { errors: post.errors.full_messages }, status: :unprocessable_entity
     end
@@ -111,6 +112,7 @@ class Api::V1::SocialPostsController < ApplicationController
       ctx['hashtags'] = Array(params[:social_post][:hashtags])
       @post.generation_context = ctx
     end
+    store_ad_settings(@post)
 
     if live_on_platform?(@post)
       frozen = frozen_attachment_changes(@post)
@@ -131,7 +133,7 @@ class Api::V1::SocialPostsController < ApplicationController
     end
 
     if @post.save
-      render json: serialize(@post, detailed: true)
+      render json: with_approval_request(@post)
     else
       render json: { errors: @post.errors.full_messages }, status: :unprocessable_entity
     end
@@ -552,6 +554,58 @@ class Api::V1::SocialPostsController < ApplicationController
     )
   end
 
+  # ad_settings has no column. The scheduled generator already keeps it in
+  # generation_context, so a hand-built post goes to the same place. It was
+  # being dropped because it is not in permitted_params.
+  def store_ad_settings(post)
+    return unless params[:social_post].key?(:ad_settings)
+
+    settings = params.require(:social_post).permit(
+      ad_settings: [
+        :budget_min_per_day, :budget_max_per_day, :objective, :recommended_objective,
+        :primary_text, :headline, :description,
+        { setup_steps: [],
+          audience: [:age_min, :age_max, :radius_miles, { interests: [], locations: [], genders: [] }] }
+      ]
+    )[:ad_settings]
+
+    ctx = (post.generation_context || {}).deep_stringify_keys
+    ctx['ad_settings'] = settings&.to_h
+    post.generation_context = ctx
+  end
+
+  # "Submit for Approval" on the compose screen sends submitted_for_approval.
+  # It has no column; it asks us to email the people who can approve. Until
+  # now it was dropped, so the post sat as a draft and nobody was told.
+  # The count goes back to the UI so it can say who was asked, or that no one was.
+  def with_approval_request(post)
+    body = serialize(post, detailed: true)
+    return body unless truthy_param?(params.dig(:social_post, :submitted_for_approval))
+    return body unless post.status == 'draft'
+
+    approvers = approvers_for(post)
+    approvers.each { |u| SocialPostMailer.approval_needed(post, u).deliver_later }
+    body.merge(approval_requested_count: approvers.size)
+  rescue => e
+    Rails.logger.error "[SocialPosts#with_approval_request] post=#{post.id} #{e.message}"
+    body.merge(approval_requested_count: 0)
+  end
+
+  # Everyone in the company who could approve it, minus the person asking.
+  # Without RBAC every user passes has_permission?, so use the admins instead
+  # of emailing the whole company. The admins are also the fallback when no
+  # RBAC role grants approval, the same as the scheduled generator does.
+  def approvers_for(post)
+    company = post.company
+    users = User.active.where(company_id: company.id, deleted_at: nil)
+    users = users.where.not(id: current_user.id) if current_user
+    admins = -> { users.where(role: %w[admin company_admin]).to_a }
+
+    return admins.call unless company.use_rbac_system
+
+    users.to_a.select { |u| u.has_permission?('social_posts', 'update', 'all', company.id) }.presence || admins.call
+  end
+
   def parse_time(value)
     return nil if value.blank?
     Time.zone.parse(value.to_s)
@@ -833,6 +887,10 @@ class Api::V1::SocialPostsController < ApplicationController
       utm_campaign:       p.utm_campaign,
       utm_content:        p.utm_content,
       tagged_url:         p.tagged_url,
+      # No column; kept in generation_context. The compose screen reads it
+      # here, and without it reopening a post showed no hashtags and the next
+      # save wiped them.
+      hashtags:           extract_hashtags(p),
       # Synced daily from Facebook. Null until the first sync, which the post
       # cards show as nothing rather than 0. Reach and impressions are not here:
       # Meta retired every per-post reach metric.
@@ -857,6 +915,7 @@ class Api::V1::SocialPostsController < ApplicationController
         nurture_approved:    p.nurture_approved,
         nurture_sequence_id: p.nurture_sequence_id,
         generation_context:  p.generation_context,
+        ad_settings:         (p.generation_context.is_a?(Hash) ? p.generation_context.deep_stringify_keys['ad_settings'] : nil),
         ai_generation_version: p.ai_generation_version,
         vehicle:             serialize_vehicle(p.vehicle),
         created_by_user:     serialize_user(p.created_by_user),
