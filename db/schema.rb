@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_25_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_25_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6263,6 +6263,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_25_150000) do
     t.integer "draft_retention_days", default: 7, null: false
     t.datetime "run_at"
     t.bigint "vehicle_id"
+    t.boolean "blog_version"
     t.index ["company_id", "active"], name: "index_social_post_schedules_on_company_id_and_active"
     t.index ["vehicle_id"], name: "index_social_post_schedules_on_vehicle_id"
   end

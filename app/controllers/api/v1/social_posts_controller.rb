@@ -197,6 +197,8 @@ class Api::V1::SocialPostsController < ApplicationController
       return render json: { error: 'No Facebook page connected. Go to Settings > Integrations to connect.' }, status: :unprocessable_entity
     end
 
+    SocialBlog::SocialLink.prepare(@post, allow_write: false)
+
     begin
       result =
         if @post.platform.to_s == 'instagram'
@@ -645,6 +647,9 @@ class Api::V1::SocialPostsController < ApplicationController
   def build_post_caption(post)
     parts = []
     parts << post.caption if post.caption.present?
+    # The blog version's address, when it went out first. See SocialBlog::SocialLink.
+    link_line = SocialBlog::SocialLink.line_for(post)
+    parts << link_line if link_line
 
     tags = extract_hashtags(post)
     parts << tags.map { |h| "##{h.to_s.delete('#').strip}" }.reject(&:empty?).join(' ') if tags.any?

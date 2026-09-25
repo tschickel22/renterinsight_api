@@ -32,7 +32,8 @@ class Api::V1::SocialBlogController < ApplicationController
       website_id:         params[:website_id],
       default_on:         params[:default_on],
       destination:        params[:destination],
-      marketing_site_key: params[:marketing_site_key]
+      marketing_site_key: params[:marketing_site_key],
+      link_from_social:   params.key?(:link_from_social) ? params[:link_from_social] : nil
     )
     render json: settings_payload
   rescue ArgumentError => e

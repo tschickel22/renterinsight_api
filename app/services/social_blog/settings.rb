@@ -34,11 +34,13 @@ module SocialBlog
         'destination'        => raw['destination'] == 'marketing_site' ? 'marketing_site' : 'website_builder',
         'website_id'         => raw['website_id'].presence&.to_i,
         'marketing_site_key' => raw['marketing_site_key'].presence,
-        'default_on'         => raw.key?('default_on') ? ActiveModel::Type::Boolean.new.cast(raw['default_on']) : true
+        'default_on'         => raw.key?('default_on') ? ActiveModel::Type::Boolean.new.cast(raw['default_on']) : true,
+        # Put "Read the full post: <link>" in the Facebook post.
+        'link_from_social'   => raw.key?('link_from_social') ? ActiveModel::Type::Boolean.new.cast(raw['link_from_social']) : true
       }
     end
 
-    def update(website_id:, default_on:, destination: nil, marketing_site_key: nil)
+    def update(website_id:, default_on:, destination: nil, marketing_site_key: nil, link_from_social: nil)
       destination = destination.to_s == 'marketing_site' ? 'marketing_site' : 'website_builder'
 
       if destination == 'marketing_site'
@@ -51,7 +53,8 @@ module SocialBlog
         'destination'        => destination,
         'website_id'         => destination == 'website_builder' ? website_id.presence&.to_i : nil,
         'marketing_site_key' => destination == 'marketing_site' ? marketing_site_key : nil,
-        'default_on'         => ActiveModel::Type::Boolean.new.cast(default_on) != false
+        'default_on'         => ActiveModel::Type::Boolean.new.cast(default_on) != false,
+        'link_from_social'   => link_from_social.nil? ? to_h['link_from_social'] : ActiveModel::Type::Boolean.new.cast(link_from_social) != false
       })
       to_h
     end
@@ -94,10 +97,7 @@ module SocialBlog
     # The path of the page that lists the site's blog posts, or nil when the
     # site has none. A post is shown at <this path>/post/<slug>.
     def self.blog_page_path(website)
-      page = website.website_pages.where(is_deleted: [false, nil]).order(:order).detect do |p|
-        Array(p.blocks).any? { |b| b.is_a?(Hash) && b['type'] == 'blogList' }
-      end
-      page&.path
+      Websites::BlogPostUrl.blog_page_path(website)
     end
   end
 end

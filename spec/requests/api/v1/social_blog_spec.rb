@@ -25,7 +25,8 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
       body = JSON.parse(response.body)
 
       expect(body['settings']).to eq('destination' => 'website_builder', 'website_id' => nil,
-                                     'marketing_site_key' => nil, 'default_on' => true)
+                                     'marketing_site_key' => nil, 'default_on' => true,
+                                     'link_from_social' => true)
       expect(body['resolved_website_id']).to eq(website.id)
       expect(body['websites'].map { |w| w['id'] }).to eq([website.id])
     end

@@ -92,10 +92,10 @@ module SocialBlog
 
     def public_url(website, blog_post)
       root = website.public_url
-      path = Settings.blog_page_path(website)
+      path = Websites::BlogPostUrl.path_for(website, blog_post)
       return nil if root.blank? || path.blank?
 
-      "#{root.chomp("/")}/#{path.delete_prefix("/").chomp("/")}/post/#{blog_post.slug}"
+      "#{root.chomp('/')}#{path}"
     end
   end
 end

@@ -75,6 +75,8 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       tagged_url:  build_tagged_url(intake_form, post, result)
     )
 
+    SocialBlog::AutoAttach.call(post, wanted: schedule.blog_version)
+
     # One-time schedules approve like any other. The post is AI-generated at run
     # time, so the user has not seen it — scheduling it is not approving it.
     if schedule.auto_approve

@@ -125,6 +125,15 @@ module Public
         xml << "    <lastmod>#{(home.updated_at || @website.updated_at).to_date.iso8601}</lastmod>\n"
         xml << "  </url>\n"
       end
+      # Blog posts, which are client routes with no page row and so were in
+      # no sitemap at all.
+      blog_base = Websites::BlogPostUrl.blog_page_path(@website)
+      sitemap_blog_posts(blog_base).each do |post|
+        xml << "  <url>\n"
+        xml << "    <loc>#{ERB::Util.html_escape("https://#{@canonical_host}#{Websites::BlogPostUrl.path_for(@website, post, base: blog_base)}")}</loc>\n"
+        xml << "    <lastmod>#{(post.updated_at || post.published_at).to_date.iso8601}</lastmod>\n"
+        xml << "  </url>\n"
+      end
       xml << "</urlset>\n"
 
       render xml: xml, content_type: 'application/xml'
@@ -135,6 +144,16 @@ module Public
     # Capped: a sitemap is allowed 50,000 URLs, but a dealer with a huge feed
     # should not turn one crawler request into an unbounded query.
     SITEMAP_HOME_LIMIT = 5_000
+    SITEMAP_BLOG_LIMIT = 1_000
+
+    def sitemap_blog_posts(blog_base)
+      return [] if blog_base.blank?
+
+      @website.blog_posts.active.published_posts.order(published_at: :desc).limit(SITEMAP_BLOG_LIMIT)
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Sites] sitemap blog posts failed for #{@website&.id}: #{e.message}")
+      []
+    end
 
     def servable_homes
       return [] if @website.company.nil?
@@ -170,7 +189,7 @@ module Public
     # identical ETag and the stale copy stayed served. Rails builds a record's cache key at
     # microsecond precision.
     def cache_subject
-      [@website, @page, pages_version, Websites::SpaShell.version].compact
+      [@website, @page, @blog_post, pages_version, Websites::SpaShell.version].compact
     end
 
     # Every page's timestamp, not just the one being served.
@@ -231,9 +250,15 @@ module Public
       # dealer page. Saying so beats rendering the site shell under a URL that
       # will never have content.
       return render_not_found if @vehicle.nil? && Websites::HomeUrl.matches?(normalized_path)
+      # Same for a blog post: a /blog/post/<slug> that names no published post.
+      if @page.nil? && (slug = Websites::BlogPostUrl.slug_from(@website, normalized_path))
+        @blog_post = @website.blog_posts.active.published_posts.find_by(slug: slug)
+        return render_not_found if @blog_post.nil?
+      end
 
       @metadata = Websites::PageMetadata.new(
-        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle,
+        blog_post: @blog_post, blog_post_path: @blog_post && normalized_path
       ).to_h
     end
 

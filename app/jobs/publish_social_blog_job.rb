@@ -14,7 +14,7 @@ class PublishSocialBlogJob < ApplicationJob
     return unless cross_post&.pending?
     return unless post.status == 'published'
 
-    write(cross_post, post) unless cross_post.written?
+    SocialBlog::AutoAttach.write!(cross_post, post) unless cross_post.written?
     publisher_for(cross_post).call(cross_post)
     Rails.logger.info "[PublishSocialBlogJob] post=#{post.id} blog=#{cross_post.external_id} published"
   rescue SocialBlog::Generator::Error, SocialBlog::WebsiteBuilderPublisher::Error,
@@ -27,19 +27,5 @@ class PublishSocialBlogJob < ApplicationJob
 
   def publisher_for(cross_post)
     cross_post.destination == 'marketing_site' ? SocialBlog::MarketingSitePublisher : SocialBlog::WebsiteBuilderPublisher
-  end
-
-  def write(cross_post, post)
-    hashtags = post.generation_context.is_a?(Hash) ? Array(post.generation_context['hashtags']) : []
-    result = SocialBlog::Generator.generate(
-      company:         post.company,
-      caption:         post.caption,
-      headline:        post.headline,
-      description:     post.description,
-      hashtags:        hashtags,
-      intent_category: post.intent_category,
-      vehicle:         post.vehicle
-    )
-    cross_post.update!(result.merge(generated_at: Time.current))
   end
 end
