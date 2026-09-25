@@ -348,6 +348,8 @@ class SocialPostGeneratorService
       Rails.logger.warn "[SocialPostGeneratorService] business_profile failed: #{e.message}"
       {}
     end
+    # The blog generator writes about the same business, so it reads the same profile.
+    public :business_profile
 
     # ------------------------------------------------------------------
     # Prompts

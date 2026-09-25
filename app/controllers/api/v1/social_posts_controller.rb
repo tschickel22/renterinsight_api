@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 class Api::V1::SocialPostsController < ApplicationController
-  skip_before_action :authenticate, only: [:skip, :email_approve, :email_decline]
-  before_action :set_company_scope, except: [:skip, :email_approve, :email_decline]
+  skip_before_action :authenticate, only: [:skip, :email_approve, :email_approve_without_blog, :email_decline]
+  before_action :set_company_scope, except: [:skip, :email_approve, :email_approve_without_blog, :email_decline]
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
-  require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true, except: [:skip, :email_approve, :email_decline]
+  require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true, except: [:skip, :email_approve, :email_approve_without_blog, :email_decline]
   before_action :set_post, only: %i[show update destroy approve publish schedule duplicate]
 
   MAX_PER_PAGE = 200
@@ -418,7 +418,25 @@ class Api::V1::SocialPostsController < ApplicationController
       post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
       PublishSocialPostJob.perform_later(post.id) if defined?(PublishSocialPostJob)
       render_email_action_page(
-        'Post approved and publishing!',
+        post.blog_cross_post&.pending? ? 'Post approved and publishing, with its blog version.' : 'Post approved and publishing!',
+        success: true,
+        note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
+      )
+    end
+  end
+
+  # GET  /api/v1/social-posts/:id/email_approve_without_blog  -> confirmation page
+  # POST /api/v1/social-posts/:id/email_approve_without_blog  -> approves, skips the blog
+  #
+  # The "Facebook only" button, shown when the post has a blog version. The
+  # plain approve link publishes both.
+  def email_approve_without_blog
+    handle_email_action('approve_without_blog') do |post|
+      post.blog_cross_post&.update!(status: 'skipped') if post.blog_cross_post&.pending?
+      post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
+      PublishSocialPostJob.perform_later(post.id)
+      render_email_action_page(
+        'Post approved and publishing. The blog version was skipped.',
         success: true,
         note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
       )
@@ -474,6 +492,7 @@ class Api::V1::SocialPostsController < ApplicationController
 
   ACTION_LABELS = {
     'approve' => { verb: 'Approve and publish', prompt: 'Publish this post?', icon: '📣' },
+    'approve_without_blog' => { verb: 'Publish without the blog post', prompt: 'Publish this post, without its blog version?', icon: '📣' },
     'decline' => { verb: 'Decline',             prompt: 'Decline this post?', icon: '🚫' },
     'skip'    => { verb: 'Skip',                prompt: 'Skip this post?',    icon: '⏭️' }
   }.freeze

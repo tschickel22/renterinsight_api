@@ -2,7 +2,7 @@ Social Post Ready for Review
 
 Hi <%= @recipient.first_name.presence || @recipient.email %>,
 
-A new auto-generated post for <%= @company.name %> is waiting for your approval.
+A new post for <%= @company.name %> is waiting for your approval.
 
 Platform: <%= @post.platform.to_s.titleize %>
 Intent: <%= @post.intent_category.to_s.titleize %>
@@ -12,9 +12,18 @@ Intent: <%= @post.intent_category.to_s.titleize %>
 Caption preview:
 <%= truncate(@post.caption.to_s, length: 500) %>
 
+<% if @blog %>
+Blog post:
+<% if @blog.written? %><%= @blog.title %>
+<%= truncate(@blog.excerpt.presence || strip_tags(@blog.content.to_s), length: 300) %>
+<% else %>A blog version will be written from this post when it publishes.
+<% end %>
+<% end %>
 Actions:
-  Approve & Publish: <%= @approve_url %>
-  Edit Post: <%= @edit_url %>
+<% if @blog %>  Approve Facebook + Blog: <%= @approve_url %>
+  Facebook Only: <%= @approve_without_blog_url %>
+<% else %>  Approve & Publish: <%= @approve_url %>
+<% end %>  Edit Post: <%= @edit_url %>
   Skip This Post: <%= @skip_url %>
 
 Once approved, the post may take up to 5 minutes to appear on <%= @post.platform.to_s.titleize %>.

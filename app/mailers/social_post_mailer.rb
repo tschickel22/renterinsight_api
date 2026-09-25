@@ -22,6 +22,14 @@ class SocialPostMailer < ApplicationMailer
     @decline_url = "#{api_base_url}/api/v1/social-posts/#{post.id}/email_decline?token=#{SocialPostMailer.signed_action_token(post_id: post.id, action: 'decline')}"
     @skip_url    = skip_url_for(post)
 
+    # A blog version waiting to go out with the post. The approver sees it and
+    # can approve both, or Facebook only.
+    @blog = post.blog_cross_post if post.blog_cross_post&.pending?
+    if @blog
+      @approve_without_blog_url = "#{api_base_url}/api/v1/social-posts/#{post.id}/email_approve_without_blog?token=" \
+                                  "#{SocialPostMailer.signed_action_token(post_id: post.id, action: 'approve_without_blog')}"
+    end
+
     delivery = MailerDeliveryConfigurator.resolve(company: @company, location: @location)
 
     mail_opts = {
