@@ -44,6 +44,7 @@ module SocialBlog
         status:             :published,
         published_at:       Time.current
       )
+      attach_category(website, blog_post)
       @cross_post.update!(website_id: website.id)
       finish(blog_post)
     end
@@ -77,6 +78,16 @@ module SocialBlog
       @post.created_by_user || @post.approved_by ||
         User.active.where(company_id: @company.id, role: %w[admin company_admin]).order(:id).first ||
         User.active.where(company_id: @company.id).order(:id).first
+    end
+
+    # The site's own category of that name, made if it does not exist yet.
+    def attach_category(website, blog_post)
+      name = @cross_post.category.to_s.strip
+      return if name.blank?
+
+      category = website.blog_categories.active.where('LOWER(name) = ?', name.downcase).first ||
+                 website.blog_categories.create!(name: name)
+      blog_post.blog_categories << category unless blog_post.blog_categories.include?(category)
     end
 
     # Slugs are unique per website, and a clash made create! fail outright.

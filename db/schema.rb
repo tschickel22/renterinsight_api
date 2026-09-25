@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_25_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_26_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6227,6 +6227,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_25_200000) do
     t.datetime "updated_at", null: false
     t.string "marketing_site_key"
     t.string "author_name"
+    t.string "category"
     t.index ["company_id"], name: "index_social_post_cross_posts_on_company_id"
     t.index ["social_post_id", "destination"], name: "idx_on_social_post_id_destination_e719817f4e", unique: true
     t.index ["social_post_id"], name: "index_social_post_cross_posts_on_social_post_id"

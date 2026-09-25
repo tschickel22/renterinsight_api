@@ -38,7 +38,7 @@ RSpec.describe 'Social post blog version on a marketing site', type: :model do
   describe SocialBlog::MarketingSites do
     it 'offers only sites with everything they need' do
       expect(described_class.all.map(&:key)).to eq(['dealertide'])
-      expect(described_class.find('dealertide').post_url('x')).to eq('https://dealertide.example.com/blog/x')
+      expect(described_class.find('dealertide').post_url('x')).to eq('https://dealertide.example.com/blog/x/')
     end
   end
 
@@ -72,8 +72,15 @@ RSpec.describe 'Social post blog version on a marketing site', type: :model do
       expect(body[:published_at]).to be_present
       expect(cross_post.reload).to have_attributes(
         status: 'published', external_id: 'uuid-1',
-        public_url: 'https://dealertide.example.com/blog/work-queue-is-live', error: nil
+        public_url: 'https://dealertide.example.com/blog/work-queue-is-live/', error: nil
       )
+    end
+
+    it 'files the post under its category' do
+      stub_supabase
+      cross_post.update!(category: 'Product Updates')
+      described_class.call(cross_post)
+      expect(calls.detect { |c| c[0] == :post }[2][:category]).to eq('Product Updates')
     end
 
     it 'uses the chosen byline as the author' do

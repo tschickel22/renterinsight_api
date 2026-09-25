@@ -25,8 +25,10 @@ module SocialBlog
         [supabase_url, service_key, company_uuid].all?(&:present?)
       end
 
+      # With the trailing slash the site serves and canonicalises to, so a
+      # link does not start with a redirect.
       def post_url(slug)
-        site_url.present? ? "#{site_url.chomp('/')}/blog/#{slug}" : nil
+        site_url.present? ? "#{site_url.chomp('/')}/blog/#{slug}/" : nil
       end
     end
 
