@@ -87,6 +87,11 @@ module SiteProfiles
 
       pdf.fill_color INK
       pdf.text "Score #{score.nil? ? 'not available' : "#{score} out of 100"}", size: 14, style: :bold
+      # Its own line: "how do we do in ChatGPT answers" is the question a
+      # prospect asks now, and it deserves an answer they can find.
+      unless @report['ai_score'].nil?
+        pdf.text "AI search #{@report['ai_score']} out of 100", size: 12, style: :bold
+      end
       pdf.fill_color MUTED
       pdf.text "#{gaps} #{gaps == 1 ? 'issue' : 'issues'} found across #{pages} #{pages == 1 ? 'page' : 'pages'}",
                size: 10

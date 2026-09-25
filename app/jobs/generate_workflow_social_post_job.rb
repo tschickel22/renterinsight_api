@@ -67,6 +67,8 @@ class GenerateWorkflowSocialPostJob < ApplicationJob
       ).compact
     )
 
+    SocialBlog::AutoAttach.call(post, wanted: schedule&.blog_version)
+
     if schedule&.auto_approve
       post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
     else

@@ -23,6 +23,7 @@ RSpec.describe GenerateScheduledSocialPostsJob do
     allow(job).to receive(:build_tagged_url).and_return('https://example.com')
     allow(job).to receive(:send_approval_email)
     allow(job).to receive(:reschedule)
+    allow(SocialBlog::AutoAttach).to receive(:call)
     job.send(:generate_for, schedule)
   end
 

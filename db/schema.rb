@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_22_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_25_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1052,6 +1052,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_22_180000) do
     t.string "featured_image_alt"
     t.string "robots"
     t.datetime "deleted_at"
+    t.string "author_name"
     t.index ["author_id"], name: "index_blog_posts_on_author_id"
     t.index ["published_at"], name: "index_blog_posts_on_published_at"
     t.index ["status"], name: "index_blog_posts_on_status"
@@ -6202,6 +6203,36 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_22_180000) do
     t.index ["external_post_id"], name: "index_social_comments_on_external_post_id"
   end
 
+  create_table "social_post_cross_posts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "social_post_id", null: false
+    t.string "destination", default: "website_builder", null: false
+    t.bigint "website_id"
+    t.string "status", default: "pending", null: false
+    t.string "title"
+    t.string "slug"
+    t.text "content"
+    t.text "excerpt"
+    t.string "seo_title"
+    t.text "seo_description"
+    t.jsonb "tags", default: [], null: false
+    t.string "featured_image_url"
+    t.string "ai_generation_version"
+    t.datetime "generated_at"
+    t.string "external_id"
+    t.string "public_url"
+    t.datetime "published_at"
+    t.text "error"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "marketing_site_key"
+    t.string "author_name"
+    t.index ["company_id"], name: "index_social_post_cross_posts_on_company_id"
+    t.index ["social_post_id", "destination"], name: "idx_on_social_post_id_destination_e719817f4e", unique: true
+    t.index ["social_post_id"], name: "index_social_post_cross_posts_on_social_post_id"
+    t.index ["status"], name: "index_social_post_cross_posts_on_status"
+  end
+
   create_table "social_post_schedules", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -6234,6 +6265,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_22_180000) do
     t.integer "draft_retention_days", default: 7, null: false
     t.datetime "run_at"
     t.bigint "vehicle_id"
+    t.boolean "blog_version"
     t.index ["company_id", "active"], name: "index_social_post_schedules_on_company_id_and_active"
     t.index ["vehicle_id"], name: "index_social_post_schedules_on_vehicle_id"
   end
@@ -8370,6 +8402,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_22_180000) do
   add_foreign_key "site_profile_views", "site_content_profiles"
   add_foreign_key "sms_reply_tokens", "companies"
   add_foreign_key "sms_usage_logs", "companies"
+  add_foreign_key "social_post_cross_posts", "companies"
+  add_foreign_key "social_post_cross_posts", "social_posts"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_claimed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_failed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

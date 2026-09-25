@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 class Api::V1::SocialPostsController < ApplicationController
-  skip_before_action :authenticate, only: [:skip, :email_approve, :email_decline]
-  before_action :set_company_scope, except: [:skip, :email_approve, :email_decline]
+  skip_before_action :authenticate, only: [:skip, :email_approve, :email_approve_without_blog, :email_decline]
+  before_action :set_company_scope, except: [:skip, :email_approve, :email_approve_without_blog, :email_decline]
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
-  require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true, except: [:skip, :email_approve, :email_decline]
+  require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true, except: [:skip, :email_approve, :email_approve_without_blog, :email_decline]
   before_action :set_post, only: %i[show update destroy approve publish schedule duplicate]
 
   MAX_PER_PAGE = 200
@@ -36,7 +36,7 @@ class Api::V1::SocialPostsController < ApplicationController
     page     = [(params[:page] || 1).to_i, 1].max
     per_page = [[((params[:per_page] || 50).to_i), MAX_PER_PAGE].min, 1].max
 
-    posts = scope.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
+    posts = scope.includes(:blog_cross_post).order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
 
     render json: {
       social_posts: posts.map { |p| serialize(p) },
@@ -69,6 +69,7 @@ class Api::V1::SocialPostsController < ApplicationController
       ctx['hashtags'] = Array(params[:social_post][:hashtags])
       post.generation_context = ctx
     end
+    store_ad_settings(post)
 
     post.status ||= auto_approve_on_create?(post) ? 'approved' : 'draft'
 
@@ -83,7 +84,7 @@ class Api::V1::SocialPostsController < ApplicationController
         utm_content: post.utm_content.presence || post.id.to_s,
         tagged_url:  build_tagged_url(post)
       )
-      render json: serialize(post, detailed: true), status: :created
+      render json: with_approval_request(post), status: :created
     else
       render json: { errors: post.errors.full_messages }, status: :unprocessable_entity
     end
@@ -111,6 +112,7 @@ class Api::V1::SocialPostsController < ApplicationController
       ctx['hashtags'] = Array(params[:social_post][:hashtags])
       @post.generation_context = ctx
     end
+    store_ad_settings(@post)
 
     if live_on_platform?(@post)
       frozen = frozen_attachment_changes(@post)
@@ -131,7 +133,7 @@ class Api::V1::SocialPostsController < ApplicationController
     end
 
     if @post.save
-      render json: serialize(@post, detailed: true)
+      render json: with_approval_request(@post)
     else
       render json: { errors: @post.errors.full_messages }, status: :unprocessable_entity
     end
@@ -194,6 +196,8 @@ class Api::V1::SocialPostsController < ApplicationController
     unless integration
       return render json: { error: 'No Facebook page connected. Go to Settings > Integrations to connect.' }, status: :unprocessable_entity
     end
+
+    SocialBlog::SocialLink.prepare(@post, allow_write: false)
 
     begin
       result =
@@ -416,7 +420,25 @@ class Api::V1::SocialPostsController < ApplicationController
       post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
       PublishSocialPostJob.perform_later(post.id) if defined?(PublishSocialPostJob)
       render_email_action_page(
-        'Post approved and publishing!',
+        post.blog_cross_post&.pending? ? 'Post approved and publishing, with its blog version.' : 'Post approved and publishing!',
+        success: true,
+        note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
+      )
+    end
+  end
+
+  # GET  /api/v1/social-posts/:id/email_approve_without_blog  -> confirmation page
+  # POST /api/v1/social-posts/:id/email_approve_without_blog  -> approves, skips the blog
+  #
+  # The "Facebook only" button, shown when the post has a blog version. The
+  # plain approve link publishes both.
+  def email_approve_without_blog
+    handle_email_action('approve_without_blog') do |post|
+      post.blog_cross_post&.update!(status: 'skipped') if post.blog_cross_post&.pending?
+      post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
+      PublishSocialPostJob.perform_later(post.id)
+      render_email_action_page(
+        'Post approved and publishing. The blog version was skipped.',
         success: true,
         note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
       )
@@ -472,6 +494,7 @@ class Api::V1::SocialPostsController < ApplicationController
 
   ACTION_LABELS = {
     'approve' => { verb: 'Approve and publish', prompt: 'Publish this post?', icon: '📣' },
+    'approve_without_blog' => { verb: 'Publish without the blog post', prompt: 'Publish this post, without its blog version?', icon: '📣' },
     'decline' => { verb: 'Decline',             prompt: 'Decline this post?', icon: '🚫' },
     'skip'    => { verb: 'Skip',                prompt: 'Skip this post?',    icon: '⏭️' }
   }.freeze
@@ -552,6 +575,58 @@ class Api::V1::SocialPostsController < ApplicationController
     )
   end
 
+  # ad_settings has no column. The scheduled generator already keeps it in
+  # generation_context, so a hand-built post goes to the same place. It was
+  # being dropped because it is not in permitted_params.
+  def store_ad_settings(post)
+    return unless params[:social_post].key?(:ad_settings)
+
+    settings = params.require(:social_post).permit(
+      ad_settings: [
+        :budget_min_per_day, :budget_max_per_day, :objective, :recommended_objective,
+        :primary_text, :headline, :description,
+        { setup_steps: [],
+          audience: [:age_min, :age_max, :radius_miles, { interests: [], locations: [], genders: [] }] }
+      ]
+    )[:ad_settings]
+
+    ctx = (post.generation_context || {}).deep_stringify_keys
+    ctx['ad_settings'] = settings&.to_h
+    post.generation_context = ctx
+  end
+
+  # "Submit for Approval" on the compose screen sends submitted_for_approval.
+  # It has no column; it asks us to email the people who can approve. Until
+  # now it was dropped, so the post sat as a draft and nobody was told.
+  # The count goes back to the UI so it can say who was asked, or that no one was.
+  def with_approval_request(post)
+    body = serialize(post, detailed: true)
+    return body unless truthy_param?(params.dig(:social_post, :submitted_for_approval))
+    return body unless post.status == 'draft'
+
+    approvers = approvers_for(post)
+    approvers.each { |u| SocialPostMailer.approval_needed(post, u).deliver_later }
+    body.merge(approval_requested_count: approvers.size)
+  rescue => e
+    Rails.logger.error "[SocialPosts#with_approval_request] post=#{post.id} #{e.message}"
+    body.merge(approval_requested_count: 0)
+  end
+
+  # Everyone in the company who could approve it, minus the person asking.
+  # Without RBAC every user passes has_permission?, so use the admins instead
+  # of emailing the whole company. The admins are also the fallback when no
+  # RBAC role grants approval, the same as the scheduled generator does.
+  def approvers_for(post)
+    company = post.company
+    users = User.active.where(company_id: company.id, deleted_at: nil)
+    users = users.where.not(id: current_user.id) if current_user
+    admins = -> { users.where(role: %w[admin company_admin]).to_a }
+
+    return admins.call unless company.use_rbac_system
+
+    users.to_a.select { |u| u.has_permission?('social_posts', 'update', 'all', company.id) }.presence || admins.call
+  end
+
   def parse_time(value)
     return nil if value.blank?
     Time.zone.parse(value.to_s)
@@ -572,6 +647,9 @@ class Api::V1::SocialPostsController < ApplicationController
   def build_post_caption(post)
     parts = []
     parts << post.caption if post.caption.present?
+    # The blog version's address, when it went out first. See SocialBlog::SocialLink.
+    link_line = SocialBlog::SocialLink.line_for(post)
+    parts << link_line if link_line
 
     tags = extract_hashtags(post)
     parts << tags.map { |h| "##{h.to_s.delete('#').strip}" }.reject(&:empty?).join(' ') if tags.any?
@@ -833,6 +911,12 @@ class Api::V1::SocialPostsController < ApplicationController
       utm_campaign:       p.utm_campaign,
       utm_content:        p.utm_content,
       tagged_url:         p.tagged_url,
+      # No column; kept in generation_context. The compose screen reads it
+      # here, and without it reopening a post showed no hashtags and the next
+      # save wiped them.
+      hashtags:           extract_hashtags(p),
+      # So the list can say a publish also posts the blog version.
+      blog_status:        p.blog_cross_post&.status,
       # Synced daily from Facebook. Null until the first sync, which the post
       # cards show as nothing rather than 0. Reach and impressions are not here:
       # Meta retired every per-post reach metric.
@@ -857,6 +941,7 @@ class Api::V1::SocialPostsController < ApplicationController
         nurture_approved:    p.nurture_approved,
         nurture_sequence_id: p.nurture_sequence_id,
         generation_context:  p.generation_context,
+        ad_settings:         (p.generation_context.is_a?(Hash) ? p.generation_context.deep_stringify_keys['ad_settings'] : nil),
         ai_generation_version: p.ai_generation_version,
         vehicle:             serialize_vehicle(p.vehicle),
         created_by_user:     serialize_user(p.created_by_user),

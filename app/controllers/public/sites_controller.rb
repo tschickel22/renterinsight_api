@@ -51,6 +51,7 @@ module Public
     def show
       html = prerendered_body || spa_shell
       return render_unavailable if html.nil?
+      return render_page_not_found(html) if unknown_path?
 
       # Conditional GET. Cloudflare and browsers revalidate with the ETag once the cached
       # copy goes stale, so an unchanged page costs a 304 instead of a full render.
@@ -74,6 +75,14 @@ module Public
     # this raises the cost rather than closing the door. Real blocking is a
     # Cloudflare rule on the zone, which is a deliberate decision with its own
     # risk of catching something legitimate.
+    # Welcomed by name in robots.txt. The wildcard already allows them; naming
+    # them states the choice, and is what an audit of the site looks for.
+    AI_CRAWLERS = %w[
+      GPTBot OAI-SearchBot ChatGPT-User ClaudeBot Claude-SearchBot Claude-User
+      PerplexityBot Perplexity-User Google-Extended Applebot-Extended
+      Bingbot CCBot
+    ].freeze
+
     UNWELCOME_CRAWLERS = %w[
       TroveBot Trove
       ManufacturedHomesBot MHVillageBot
@@ -95,6 +104,10 @@ module Public
       body = <<~ROBOTS
         #{UNWELCOME_CRAWLERS.map { |ua| "User-agent: #{ua}\nDisallow: /" }.join("\n\n")}
 
+        # AI assistants and answer engines, named so the welcome is explicit
+        # rather than implied by the wildcard. See /llms.txt for a summary.
+        #{AI_CRAWLERS.map { |ua| "User-agent: #{ua}\nAllow: /" }.join("\n\n")}
+
         User-agent: *
         Allow: /
 
@@ -104,9 +117,21 @@ module Public
       render plain: body, content_type: 'text/plain'
     end
 
+    # A plain-text summary of the site for AI assistants (llmstxt.org): who the
+    # dealer is, where, how to reach them, and links to the pages, homes and
+    # posts worth reading. Built from the same records the pages are, so it
+    # cannot claim anything the site does not.
+    def llms
+      cache_publicly(CRAWLER_FILE_EDGE_MAX_AGE)
+      return head(:not_found) if @metadata[:robots].to_s.start_with?('noindex')
+
+      render plain: Websites::LlmsTxt.new(website: @website, canonical_host: @canonical_host).call,
+             content_type: 'text/plain'
+    end
+
     def sitemap
       cache_publicly(CRAWLER_FILE_EDGE_MAX_AGE)
-      pages = visible_pages
+      pages = visible_pages.reject { |p| p.robots.to_s.include?('noindex') }
 
       xml = +%(<?xml version="1.0" encoding="UTF-8"?>\n)
       xml << %(<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n)
@@ -125,6 +150,15 @@ module Public
         xml << "    <lastmod>#{(home.updated_at || @website.updated_at).to_date.iso8601}</lastmod>\n"
         xml << "  </url>\n"
       end
+      # Blog posts, which are client routes with no page row and so were in
+      # no sitemap at all.
+      blog_base = Websites::BlogPostUrl.blog_page_path(@website)
+      sitemap_blog_posts(blog_base).each do |post|
+        xml << "  <url>\n"
+        xml << "    <loc>#{ERB::Util.html_escape("https://#{@canonical_host}#{Websites::BlogPostUrl.path_for(@website, post, base: blog_base)}")}</loc>\n"
+        xml << "    <lastmod>#{(post.updated_at || post.published_at).to_date.iso8601}</lastmod>\n"
+        xml << "  </url>\n"
+      end
       xml << "</urlset>\n"
 
       render xml: xml, content_type: 'application/xml'
@@ -135,6 +169,16 @@ module Public
     # Capped: a sitemap is allowed 50,000 URLs, but a dealer with a huge feed
     # should not turn one crawler request into an unbounded query.
     SITEMAP_HOME_LIMIT = 5_000
+    SITEMAP_BLOG_LIMIT = 1_000
+
+    def sitemap_blog_posts(blog_base)
+      return [] if blog_base.blank?
+
+      @website.blog_posts.active.published_posts.order(published_at: :desc).limit(SITEMAP_BLOG_LIMIT)
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Sites] sitemap blog posts failed for #{@website&.id}: #{e.message}")
+      []
+    end
 
     def servable_homes
       return [] if @website.company.nil?
@@ -170,7 +214,7 @@ module Public
     # identical ETag and the stale copy stayed served. Rails builds a record's cache key at
     # microsecond precision.
     def cache_subject
-      [@website, @page, pages_version, Websites::SpaShell.version].compact
+      [@website, @page, @blog_post, pages_version, Websites::SpaShell.version].compact
     end
 
     # Every page's timestamp, not just the one being served.
@@ -231,9 +275,15 @@ module Public
       # dealer page. Saying so beats rendering the site shell under a URL that
       # will never have content.
       return render_not_found if @vehicle.nil? && Websites::HomeUrl.matches?(normalized_path)
+      # Same for a blog post: a /blog/post/<slug> that names no published post.
+      if @page.nil? && (slug = Websites::BlogPostUrl.slug_from(@website, normalized_path))
+        @blog_post = @website.blog_posts.active.published_posts.find_by(slug: slug)
+        return render_not_found if @blog_post.nil?
+      end
 
       @metadata = Websites::PageMetadata.new(
-        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle,
+        blog_post: @blog_post, blog_post_path: @blog_post && normalized_path
       ).to_h
     end
 
@@ -404,7 +454,8 @@ module Public
     # keeps it.
     def inject_prerendered_body(doc)
       html = Websites::BodyRenderer.new(
-        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle,
+        blog_post: @blog_post
       ).call
       return doc if html.blank?
 
@@ -541,7 +592,7 @@ module Public
     def structured_data_tag
       Websites::StructuredData.new(
         website: @website, page: @page, canonical_host: @canonical_host,
-        vehicle: @vehicle
+        vehicle: @vehicle, blog_post: @blog_post, blog_post_path: @blog_post && normalized_path
       ).to_tag
     rescue StandardError => e
       Rails.logger.warn("[Public::Sites] structured data failed for #{@website&.id}: #{e.message}")
@@ -594,6 +645,26 @@ module Public
     def render_not_found
       response.headers['Cache-Control'] = 'no-store'
       render plain: 'Site not found', status: :not_found
+    end
+
+    # A path on a real site that names nothing: not a page, a home or a post.
+    # These used to answer 200 with the site shell and a canonical pointing at
+    # the home page, which a search engine reads as a duplicate of the home page
+    # and an assistant reads as a page that exists. /homes itself stays, since
+    # breadcrumbs link to it and the app renders the inventory there.
+    def unknown_path?
+      return false if @page || @vehicle || @blog_post
+
+      path = normalized_path
+      path != '/' && path != Websites::HomeUrl::PREFIX
+    end
+
+    # Still the site, so a visitor who mistyped gets its header and nav rather
+    # than a bare error, but a 404 and noindex to everything else.
+    def render_page_not_found(html)
+      response.headers['Cache-Control'] = 'no-store'
+      @metadata = @metadata.merge(robots: 'noindex, nofollow', canonical_url: nil)
+      render html: inject_head(html).html_safe, status: :not_found, content_type: 'text/html' # rubocop:disable Rails/OutputSafety
     end
 
     def render_unavailable

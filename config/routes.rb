@@ -13,6 +13,7 @@ Rails.application.routes.draw do
   constraints(Constraints::TenantWebsiteHost) do
     get '/robots.txt', to: 'public/sites#robots', format: false
     get '/sitemap.xml', to: 'public/sites#sitemap', format: false
+    get '/llms.txt', to: 'public/sites#llms', format: false
     get '/', to: 'public/sites#show', as: :tenant_website_root
     get '*path', to: 'public/sites#show', format: false, as: :tenant_website_page
   end
@@ -1773,6 +1774,14 @@ Rails.application.routes.draw do
       end
 
       # ==================== SOCIAL POSTS ====================
+      # The blog version of a social post.
+      get  'social-blog/settings', to: 'social_blog#settings'
+      put  'social-blog/settings', to: 'social_blog#update_settings'
+      post 'social-blog/generate', to: 'social_blog#generate'
+      get  'social-posts/:social_post_id/blog', to: 'social_blog#show'
+      put  'social-posts/:social_post_id/blog', to: 'social_blog#upsert'
+      post 'social-posts/:social_post_id/blog/publish', to: 'social_blog#publish'
+
       resources :social_posts, path: 'social-posts' do
         member do
           post :approve
@@ -1787,6 +1796,8 @@ Rails.application.routes.draw do
           post  :skip
           get   :email_approve
           post  :email_approve
+          get   :email_approve_without_blog
+          post  :email_approve_without_blog
           get   :email_decline
           post  :email_decline
         end

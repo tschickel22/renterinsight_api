@@ -26,7 +26,7 @@
       <span class="badge platform-<%= @post.platform %>"><%= @post.platform.to_s.titleize %></span>
       <span class="badge" style="margin-left:6px;"><%= @post.intent_category.to_s.titleize %></span>
       <h1>Social Post Ready for Review</h1>
-      <div style="color:#6b7280;font-size:14px;">Hi <%= @recipient.first_name.presence || @recipient.email %>, a new auto-generated post is waiting for your approval.</div>
+      <div style="color:#6b7280;font-size:14px;">Hi <%= @recipient.first_name.presence || @recipient.email %>, a new post is waiting for your approval.</div>
     </div>
 
     <div class="preview">
@@ -42,11 +42,27 @@
       <div class="caption"><%= truncate(@post.caption.to_s, length: 500) %></div>
     </div>
 
+    <% if @blog %>
+      <div class="preview">
+        <span class="badge">Blog post</span>
+        <% if @blog.written? %>
+          <div style="font-weight:600;font-size:16px;margin-top:10px;"><%= @blog.title %></div>
+          <div class="caption"><%= truncate(@blog.excerpt.presence || strip_tags(@blog.content.to_s), length: 300) %></div>
+          <div style="color:#6b7280;font-size:13px;margin-top:10px;">The full blog post is on the Edit Post page.</div>
+        <% else %>
+          <div class="caption">A blog version will be written from this post when it publishes.</div>
+        <% end %>
+      </div>
+    <% end %>
+
     <%# Inline styles (not classes) so Outlook — which ignores <style>-block rules
         on <a> tags and falls back to its default blue link color — still renders
         white text on the blue primary button instead of blue-on-blue. %>
     <div class="cta">
-      <a href="<%= @approve_url %>" class="btn btn-primary" style="display:inline-block;padding:12px 22px;margin-right:10px;border-radius:6px;text-decoration:none;font-weight:600;background:#2563eb;color:#ffffff !important;">Approve &amp; Publish</a>
+      <a href="<%= @approve_url %>" class="btn btn-primary" style="display:inline-block;padding:12px 22px;margin-right:10px;border-radius:6px;text-decoration:none;font-weight:600;background:#2563eb;color:#ffffff !important;"><%= @blog ? 'Approve Facebook + Blog' : 'Approve &amp; Publish'.html_safe %></a>
+      <% if @blog %>
+        <a href="<%= @approve_without_blog_url %>" class="btn btn-secondary" style="display:inline-block;padding:12px 22px;margin-right:10px;border-radius:6px;text-decoration:none;font-weight:600;background:#dbeafe;color:#1d4ed8 !important;">Facebook Only</a>
+      <% end %>
       <a href="<%= @edit_url %>" class="btn btn-secondary" style="display:inline-block;padding:12px 22px;margin-right:10px;border-radius:6px;text-decoration:none;font-weight:600;background:#e5e7eb;color:#111827 !important;">Edit Post</a>
       <a href="<%= @decline_url %>" class="btn btn-secondary" style="display:inline-block;padding:12px 22px;margin-right:10px;margin-top:8px;border-radius:6px;text-decoration:none;font-weight:600;background:#fee2e2;color:#dc2626 !important;">Decline</a>
       <br/>

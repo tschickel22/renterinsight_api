@@ -63,12 +63,14 @@ RSpec.describe SiteProfiles::SeoAudit do
 
     # Under 40 rather than under 30, because several checks pass by absence: a
     # page with no scripts has nothing render-blocking and a tiny page is not
-    # heavy. Those are genuinely not problems, so they earn their weight, and a
-    # site missing its title, description, schema and sitemap still lands
-    # nowhere near a passing score.
+    # heavy. The AI checks add two more: plain HTML is readable without
+    # JavaScript, and a site with no robots.txt blocks no AI crawler. Those are
+    # genuinely not problems, so they earn their weight, and a site missing its
+    # title, description, schema and sitemap still lands nowhere near a passing
+    # score.
     it 'counts the gaps and scores the site' do
       expect(report['gap_count']).to be > 5
-      expect(report['score']).to be < 40
+      expect(report['score']).to be < 50
     end
 
     # A number with no stated basis invites more trust than it has earned, and

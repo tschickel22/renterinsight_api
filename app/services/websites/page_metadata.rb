@@ -22,11 +22,15 @@ module Websites
     # legal disclaimer.
     DESCRIPTION_BLOCKS = %w[hero text cta features].freeze
 
-    def initialize(website:, page:, canonical_host:, vehicle: nil)
+    def initialize(website:, page:, canonical_host:, vehicle: nil, blog_post: nil, blog_post_path: nil)
       @website = website
       @page = page
       @canonical_host = canonical_host
       @vehicle = vehicle
+      # A blog post is a client route with no page row, so it brings its own
+      # title, description, image and address.
+      @blog_post = blog_post
+      @blog_post_path = blog_post_path
     end
 
     def to_h
@@ -38,7 +42,7 @@ module Websites
         # A listing is a product, not a brochure page, and the distinction is
         # what lets a shared link render as a home with a price rather than as
         # the dealership.
-        og_type: @vehicle ? 'product' : 'website',
+        og_type: @vehicle ? 'product' : (@blog_post ? 'article' : 'website'),
         site_name: site_name,
         favicon_url: @website.favicon_url.presence,
         robots: robots
@@ -71,7 +75,7 @@ module Websites
     # Page title first, then the site default. The site name is appended rather than
     # replacing the page title, so every page is not identically titled in search results.
     def title
-      page_title = home_title.presence || @page&.seo_title.presence || @page&.title.presence
+      page_title = home_title.presence || blog_title.presence || @page&.seo_title.presence || @page&.title.presence
       default = seo_setting('default_title', 'title') || site_name
 
       return default if page_title.blank?
@@ -113,8 +117,21 @@ module Websites
       "#{home_title}, #{specs.join(', ')}. Available now at #{site_name}."
     end
 
+    def blog_title
+      return nil if @blog_post.nil?
+
+      @blog_post.seo_title.presence || @blog_post.title
+    end
+
+    def blog_description
+      return nil if @blog_post.nil?
+
+      @blog_post.seo_description.presence || @blog_post.excerpt.presence || strip_markup(@blog_post.content)
+    end
+
     def description
       text = (home_description.presence ||
+        blog_description.presence ||
         @page&.seo_description.presence ||
         seo_setting('default_description', 'description') ||
         brand['description'].presence ||
@@ -179,6 +196,13 @@ module Websites
       # deduplicate onto one another in search.
       home_path = HomeUrl.path_for(@vehicle) if @vehicle
       return "https://#{@canonical_host}#{home_path}" if home_path.present?
+      return "https://#{@canonical_host}#{@blog_post_path}" if @blog_post && @blog_post_path.present?
+
+      # The page's own canonical when the author set one, e.g. a landing page
+      # that duplicates another. It was stored and never read.
+      own = @page&.try(:canonical_path).to_s.strip
+      return own if own.start_with?('https://', 'http://')
+      return "https://#{@canonical_host}#{own.start_with?('/') ? own : "/#{own}"}" if own.present?
 
       path = @page&.path.presence || '/'
       path = "/#{path}" unless path.start_with?('/')
@@ -191,6 +215,8 @@ module Websites
       # The home itself, so a shared listing previews as that home rather than
       # as the dealer's logo.
       home_image.presence ||
+        @blog_post&.og_image_url.presence ||
+        @blog_post&.featured_image_url.presence ||
         @page&.og_image_url.presence ||
         seo_setting('og_image_url', 'og_image') ||
         brand['logo_url'].presence ||
@@ -234,6 +260,10 @@ module Websites
     def robots
       return 'noindex, nofollow' unless @website.status == 'published'
       return 'noindex, nofollow' if seo_config['noindex'].to_s == 'true'
+      return @blog_post.robots if @blog_post&.robots.present?
+      # A page's own setting, which landing pages default to noindex. It was
+      # stored and ignored, so every campaign page was served "index, follow".
+      return @page.robots if @page&.try(:robots).present?
 
       'index, follow'
     end

@@ -18,6 +18,12 @@ class BlogPost < ApplicationRecord
   scope :active, -> { where(is_deleted: [false, nil]) }
   scope :published_posts, -> { where(status: :published).where('published_at <= ?', Time.current) }
   
+  # What readers see as the author: a typed-in name when there is one,
+  # otherwise the user who wrote it.
+  def byline
+    author_name.presence || [author&.first_name, author&.last_name].compact_blank.join(' ').presence
+  end
+
   # Publishing workflow
   def publish!
     update!(status: :published, published_at: Time.current)

@@ -139,9 +139,11 @@ module Websites
       urls.each { |url| sitemap << "  <url><loc>#{ERB::Util.html_escape(url)}</loc></url>\n" }
       sitemap << '</urlset>'
 
-      robots = "User-agent: *\nAllow: /\n\nSitemap: #{base_url}/sitemap.xml\n"
+      robots = +Public::SitesController::AI_CRAWLERS.map { |ua| "User-agent: #{ua}\nAllow: /\n\n" }.join
+      robots << "User-agent: *\nAllow: /\n\nSitemap: #{base_url}/sitemap.xml\n"
+      llms = LlmsTxt.new(website: @website, canonical_host: @canonical_host).call
 
-      SyntheticFetcher.new(robots: robots, sitemap: sitemap)
+      SyntheticFetcher.new(robots: robots, sitemap: sitemap, llms: llms)
     end
 
     def rendered_page_urls
@@ -172,7 +174,7 @@ module Websites
       %(<link rel="#{rel}" href="#{ERB::Util.html_escape(href)}">)
     end
 
-    # Answers for the two files the audit fetches, and for nothing else. A draft
+    # Answers for the three files the audit fetches, and for nothing else. A draft
     # site has no host to ask.
     class SyntheticFetcher
       Response = Struct.new(:url, :status, :body, :content_type, keyword_init: true) do
@@ -181,14 +183,16 @@ module Websites
         end
       end
 
-      def initialize(robots:, sitemap:)
+      def initialize(robots:, sitemap:, llms: nil)
         @robots = robots
         @sitemap = sitemap
+        @llms = llms
       end
 
       def get(url)
         body = if url.to_s.end_with?('/robots.txt') then @robots
                elsif url.to_s.end_with?('/sitemap.xml') then @sitemap
+               elsif url.to_s.end_with?('/llms.txt') then @llms
                end
         return nil if body.nil?
 

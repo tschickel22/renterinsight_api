@@ -418,7 +418,7 @@ class Api::V1::WebsitesController < ApplicationController
         author: { only: [:id, :first_name, :last_name] },
         blog_categories: { only: [:id, :name, :slug] }
       },
-      methods: [:reading_time]
+      methods: [:reading_time, :byline]
     )
     
     # Include blog categories
@@ -516,7 +516,7 @@ class Api::V1::WebsitesController < ApplicationController
         author: { only: [:id, :first_name, :last_name] },
         blog_categories: { only: [:id, :name, :slug] }
       },
-      methods: [:reading_time]
+      methods: [:reading_time, :byline]
     )
 
     website_json['blog_categories'] = @website.blog_categories
@@ -592,7 +592,7 @@ class Api::V1::WebsitesController < ApplicationController
         author: { only: [:id, :first_name, :last_name] },
         blog_categories: { only: [:id, :name, :slug] }
       },
-      methods: [:reading_time]
+      methods: [:reading_time, :byline]
     )
 
     # Include blog categories

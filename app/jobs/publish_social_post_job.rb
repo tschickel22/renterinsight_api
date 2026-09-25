@@ -21,6 +21,8 @@ class PublishSocialPostJob < ApplicationJob
       return
     end
 
+    SocialBlog::SocialLink.prepare(post, allow_write: true)
+
     begin
       result = publish_via_meta(post, integration)
     rescue MetaGraphApi::ExpiredTokenError => e
@@ -122,6 +124,9 @@ class PublishSocialPostJob < ApplicationJob
   def build_caption(post)
     parts = []
     parts << post.caption if post.caption.present?
+    # The blog version's address, when it went out first. See SocialBlog::SocialLink.
+    link_line = SocialBlog::SocialLink.line_for(post)
+    parts << link_line if link_line
 
     tags = extract_hashtags(post)
     parts << tags.map { |h| "##{h.to_s.delete('#').strip}" }.reject(&:empty?).join(' ') if tags.any?

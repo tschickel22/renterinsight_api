@@ -65,6 +65,14 @@ RSpec.describe Websites::SelfAudit do
     expect(check('robots')['status']).to eq('pass')
   end
 
+  # What we tell dealers their site does for AI search has to be what the
+  # audit of our own output says.
+  it 'passes the AI search checks our sites are built for' do
+    expect(check('ai_crawlers')['status']).to eq('pass')
+    expect(check('ai_readable')['status']).to eq('pass')
+    expect(check('llms_txt')['status']).to eq('pass')
+  end
+
   # A check we did not run must never quietly count as one the site passed.
   it 'says nothing about the parts of the page the app shell provides' do
     described_class::SHELL_DEPENDENT.each do |key|
