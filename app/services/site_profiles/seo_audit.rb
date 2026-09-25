@@ -17,6 +17,8 @@ module SiteProfiles
   #
   # Runs off the HTML the scan already fetched. No second crawl.
   class SeoAudit
+    include AiSearchChecks
+
     SEVERITY_ORDER = { 'fail' => 0, 'warn' => 1, 'pass' => 2 }.freeze
 
     # Said in the report itself, because a number with no stated basis invites
@@ -46,13 +48,16 @@ module SiteProfiles
     DESCRIPTION_MIN = 70
     DESCRIPTION_MAX = 160
 
-    Check = Struct.new(:key, :label, :status, :headline, :detail, :urls, :weight,
+    # category: 'seo', or 'ai' for the AI search checks, which also get a
+    # score of their own so a report can say how a site does for AI answers.
+    Check = Struct.new(:key, :label, :status, :headline, :detail, :urls, :weight, :category,
                        keyword_init: true) do
       def to_h
         {
           'key' => key, 'label' => label, 'status' => status,
           'headline' => headline, 'detail' => detail,
-          'urls' => Array(urls).first(12), 'weight' => weight
+          'urls' => Array(urls).first(12), 'weight' => weight,
+          'category' => category || 'seo'
         }
       end
     end
@@ -65,7 +70,10 @@ module SiteProfiles
     #   Dropped before scoring rather than after, so a check we did not run
     #   never quietly counts as one the site passed. Used when auditing our own
     #   unpublished output, where the app shell is not part of what we render.
-    def initialize(source_url:, pages_html:, fetcher: Fetcher.new, from_archive: false, skip: [])
+    # @param js_only_pages [Integer] pages the scan could only read by running a
+    #   browser, which is what an AI crawler that does not run JavaScript misses
+    def initialize(source_url:, pages_html:, fetcher: Fetcher.new, from_archive: false, skip: [], js_only_pages: 0)
+      @js_only_pages = js_only_pages.to_i
       @source_url = source_url.to_s
       @pages_html = pages_html.to_h.reject { |_, html| html.blank? }
       @fetcher = fetcher
@@ -95,7 +103,8 @@ module SiteProfiles
         language_check,
         robots_check,
         sitemap_check,
-        crawlability_check
+        crawlability_check,
+        *ai_search_checks
       ].compact.reject { |c| @skip.include?(c.key.to_s) }
 
       {
@@ -105,6 +114,7 @@ module SiteProfiles
         'pages_checked' => @pages_html.size,
         'from_archive' => @from_archive,
         'score' => score(checks),
+        'ai_score' => score(checks.select { |c| c.category == 'ai' }),
         'score_explainer' => SCORE_EXPLAINER,
         'gap_count' => checks.count { |c| c.status != 'pass' },
         'checks' => checks.sort_by { |c| [SEVERITY_ORDER.fetch(c.status, 3), -c.weight.to_i] }

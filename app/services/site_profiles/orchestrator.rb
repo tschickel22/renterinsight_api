@@ -406,7 +406,8 @@ module SiteProfiles
         source_url: @record.source_url,
         pages_html: raw_html_cache,
         fetcher: @fetcher,
-        from_archive: root.try(:from_archive?).present?
+        from_archive: root.try(:from_archive?).present?,
+        js_only_pages: @rendered_pages
       ).call
 
       @record.update!(seo_report: report)
