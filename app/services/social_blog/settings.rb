@@ -2,15 +2,26 @@
 
 module SocialBlog
   # Where a company's social posts go as blog posts, and whether the compose
-  # screen ticks "Also publish as a blog post" by default.
+  # screen turns the blog version on by default.
   #
   # Stored as the company setting 'social_blog':
-  #   { "website_id" => 12, "default_on" => true }
+  #   { "destination" => "website_builder", "website_id" => 12, "default_on" => true }
+  #   { "destination" => "marketing_site", "marketing_site_key" => "dealertide", "default_on" => false }
   #
   # website_id is optional. Without it the site is picked from the post's
-  # location, or the company's only published site.
+  # location, or the company's only published site. marketing_site is only
+  # for our own companies and only a platform admin can choose it.
   class Settings
     KEY = 'social_blog'
+
+    Target = Struct.new(:destination, :website, :marketing_site, keyword_init: true) do
+      def name
+        website ? website.name : marketing_site.name
+      end
+
+      def website_id = website&.id
+      def marketing_site_key = marketing_site&.key
+    end
 
     def initialize(company)
       @company = company
@@ -20,19 +31,27 @@ module SocialBlog
       raw = Setting.get('Company', @company.id, KEY)
       raw = {} unless raw.is_a?(Hash)
       {
-        'website_id' => raw['website_id'].presence&.to_i,
-        'default_on' => raw.key?('default_on') ? ActiveModel::Type::Boolean.new.cast(raw['default_on']) : true
+        'destination'        => raw['destination'] == 'marketing_site' ? 'marketing_site' : 'website_builder',
+        'website_id'         => raw['website_id'].presence&.to_i,
+        'marketing_site_key' => raw['marketing_site_key'].presence,
+        'default_on'         => raw.key?('default_on') ? ActiveModel::Type::Boolean.new.cast(raw['default_on']) : true
       }
     end
 
-    def update(website_id:, default_on:)
-      if website_id.present? && !candidate_sites.exists?(id: website_id)
+    def update(website_id:, default_on:, destination: nil, marketing_site_key: nil)
+      destination = destination.to_s == 'marketing_site' ? 'marketing_site' : 'website_builder'
+
+      if destination == 'marketing_site'
+        raise ArgumentError, 'Choose a marketing site' unless MarketingSites.find(marketing_site_key)
+      elsif website_id.present? && !candidate_sites.exists?(id: website_id)
         raise ArgumentError, 'That website does not belong to this company'
       end
 
       Setting.set('Company', @company.id, KEY, {
-        'website_id' => website_id.presence&.to_i,
-        'default_on' => ActiveModel::Type::Boolean.new.cast(default_on) != false
+        'destination'        => destination,
+        'website_id'         => destination == 'website_builder' ? website_id.presence&.to_i : nil,
+        'marketing_site_key' => destination == 'marketing_site' ? marketing_site_key : nil,
+        'default_on'         => ActiveModel::Type::Boolean.new.cast(default_on) != false
       })
       to_h
     end
@@ -42,9 +61,21 @@ module SocialBlog
       @company.websites.sites.active
     end
 
-    # The site a post from this location would go to, or nil when there is no
-    # sensible choice. A saved choice wins, then a published site at the same
-    # location, then the only published site.
+    # Where a post from this location goes, or nil when there is no sensible
+    # choice and one has to be picked in settings.
+    def resolve_target(location_id: nil)
+      cfg = to_h
+      if cfg['destination'] == 'marketing_site'
+        site = MarketingSites.find(cfg['marketing_site_key'])
+        return site && Target.new(destination: 'marketing_site', marketing_site: site)
+      end
+
+      website = resolve_website(location_id: location_id)
+      website && Target.new(destination: 'website_builder', website: website)
+    end
+
+    # A saved choice wins, then a published site at the same location, then
+    # the only published site.
     def resolve_website(location_id: nil)
       saved = to_h['website_id']
       if saved

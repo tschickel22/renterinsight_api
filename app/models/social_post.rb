@@ -13,7 +13,9 @@ class SocialPost < ApplicationRecord
 
   has_many :leads, foreign_key: :social_post_id, dependent: :nullify
   has_many :social_comments, dependent: :destroy
-  has_one  :blog_cross_post, -> { where(destination: 'website_builder') },
+  # One blog version per post, on a website-builder site or one of our own
+  # marketing sites.
+  has_one  :blog_cross_post, -> { where(destination: %w[website_builder marketing_site]) },
            class_name: 'SocialPostCrossPost', dependent: :destroy
 
   # The blog version goes out when the social post does. Publishing happens in

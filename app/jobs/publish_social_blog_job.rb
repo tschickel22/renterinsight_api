@@ -15,14 +15,19 @@ class PublishSocialBlogJob < ApplicationJob
     return unless post.status == 'published'
 
     write(cross_post, post) unless cross_post.written?
-    SocialBlog::WebsiteBuilderPublisher.call(cross_post)
+    publisher_for(cross_post).call(cross_post)
     Rails.logger.info "[PublishSocialBlogJob] post=#{post.id} blog=#{cross_post.external_id} published"
-  rescue SocialBlog::Generator::Error, SocialBlog::WebsiteBuilderPublisher::Error, ActiveRecord::RecordInvalid => e
+  rescue SocialBlog::Generator::Error, SocialBlog::WebsiteBuilderPublisher::Error,
+         SocialBlog::MarketingSitePublisher::Error, ActiveRecord::RecordInvalid => e
     cross_post&.update_columns(status: 'failed', error: e.message, updated_at: Time.current)
     Rails.logger.error "[PublishSocialBlogJob] post=#{social_post_id} failed: #{e.message}"
   end
 
   private
+
+  def publisher_for(cross_post)
+    cross_post.destination == 'marketing_site' ? SocialBlog::MarketingSitePublisher : SocialBlog::WebsiteBuilderPublisher
+  end
 
   def write(cross_post, post)
     hashtags = post.generation_context.is_a?(Hash) ? Array(post.generation_context['hashtags']) : []

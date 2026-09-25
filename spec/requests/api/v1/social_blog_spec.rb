@@ -24,7 +24,8 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
       get '/api/v1/social-blog/settings', headers: headers
       body = JSON.parse(response.body)
 
-      expect(body['settings']).to eq('website_id' => nil, 'default_on' => true)
+      expect(body['settings']).to eq('destination' => 'website_builder', 'website_id' => nil,
+                                     'marketing_site_key' => nil, 'default_on' => true)
       expect(body['resolved_website_id']).to eq(website.id)
       expect(body['websites'].map { |w| w['id'] }).to eq([website.id])
     end
@@ -32,7 +33,35 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
     it 'saves a chosen site and the default' do
       put '/api/v1/social-blog/settings', params: { website_id: website.id, default_on: false }.to_json, headers: headers
 
-      expect(JSON.parse(response.body)['settings']).to eq('website_id' => website.id, 'default_on' => false)
+      expect(JSON.parse(response.body)['settings']).to include('website_id' => website.id, 'default_on' => false)
+    end
+
+    it 'will not let a non-admin point the company at a marketing site' do
+      user.update!(role: 'admin')
+
+      put '/api/v1/social-blog/settings',
+          params: { destination: 'marketing_site', marketing_site_key: 'dealertide' }.to_json, headers: headers
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'aims a saved blog version at the marketing site in the settings' do
+      stub_const('ENV', ENV.to_h.merge(
+        'MARKETING_BLOG_SITES' => 'dealertide',
+        'MARKETING_BLOG_DEALERTIDE_SUPABASE_URL' => 'https://ref.supabase.co',
+        'MARKETING_BLOG_DEALERTIDE_SUPABASE_SERVICE_KEY' => 'k',
+        'MARKETING_BLOG_DEALERTIDE_COMPANY_UUID' => '1111'
+      ))
+      put '/api/v1/social-blog/settings',
+          params: { destination: 'marketing_site', marketing_site_key: 'dealertide' }.to_json, headers: headers
+      expect(JSON.parse(response.body)['marketing_sites'].map { |m| m['key'] }).to eq(['dealertide'])
+      expect(response.body).not_to include('"k"')
+
+      put "/api/v1/social-posts/#{post_record.id}/blog", params: { blog: { status: 'pending', title: 'T' } }.to_json,
+                                                         headers: headers
+
+      expect(JSON.parse(response.body)['blog']).to include('destination' => 'marketing_site',
+                                                           'marketing_site_key' => 'dealertide', 'website_id' => nil)
     end
 
     it 'rejects another company’s site' do
