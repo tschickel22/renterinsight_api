@@ -24,7 +24,9 @@ class Api::V1::SocialMediaSettingsController < ApplicationController
       return render json: { error: 'Location not in this company' }, status: :forbidden
     end
 
-    attrs = params.require(:settings).to_unsafe_h
+    # The settings screen sends social_media_settings; earlier callers sent
+    # settings. Requiring only :settings made every save from the screen a 400.
+    attrs = (params[:settings].presence || params.require(:social_media_settings)).to_unsafe_h
 
     SocialMediaSettingsService.update(scope_type: scope_type, scope_id: scope_id, attrs: attrs)
 
