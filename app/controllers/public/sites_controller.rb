@@ -429,7 +429,8 @@ module Public
     # keeps it.
     def inject_prerendered_body(doc)
       html = Websites::BodyRenderer.new(
-        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle,
+        blog_post: @blog_post
       ).call
       return doc if html.blank?
 
@@ -566,7 +567,7 @@ module Public
     def structured_data_tag
       Websites::StructuredData.new(
         website: @website, page: @page, canonical_host: @canonical_host,
-        vehicle: @vehicle
+        vehicle: @vehicle, blog_post: @blog_post, blog_post_path: @blog_post && normalized_path
       ).to_tag
     rescue StandardError => e
       Rails.logger.warn("[Public::Sites] structured data failed for #{@website&.id}: #{e.message}")

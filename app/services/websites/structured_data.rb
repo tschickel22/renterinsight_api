@@ -45,11 +45,13 @@ module Websites
     # Enough homes to establish the lot without turning one page into a feed.
     MAX_LISTED = 12
 
-    def initialize(website:, page:, canonical_host:, vehicle: nil)
+    def initialize(website:, page:, canonical_host:, vehicle: nil, blog_post: nil, blog_post_path: nil)
       @website = website
       @page = page
       @canonical_host = canonical_host
       @vehicle = vehicle
+      @blog_post = blog_post
+      @blog_post_path = blog_post_path
     end
 
     # @return [String, nil] a JSON-LD script tag, or nil when there is nothing
@@ -67,7 +69,8 @@ module Websites
     end
 
     def graph
-      [website_node, store_node, breadcrumb_node, product_node, item_list_node].compact
+      [website_node, store_node, breadcrumb_node, product_node, item_list_node,
+       blog_posting_node, faq_node].compact
     end
 
     private
@@ -246,6 +249,7 @@ module Websites
     # nothing a search engine does not already have.
     def breadcrumb_node
       return home_breadcrumb_node if @vehicle.present?
+      return blog_breadcrumb_node if @blog_post.present?
 
       path = @page&.path.to_s
       return nil if path.blank? || path == '/' || @page.nil?
@@ -298,6 +302,93 @@ module Websites
       }.compact
     end
 
+    def blog_post_url
+      "#{base_url}#{@blog_post_path}"
+    end
+
+    # The article itself: who wrote it, when, and for whom. Blog URLs used to
+    # carry the homes ItemList and nothing that said "this is an article".
+    def blog_posting_node
+      return nil if @blog_post.nil? || @blog_post_path.blank?
+
+      post = @blog_post
+      {
+        '@type' => 'BlogPosting',
+        '@id' => "#{blog_post_url}#article",
+        'mainEntityOfPage' => blog_post_url,
+        'headline' => post.title.to_s.truncate(110),
+        'description' => (post.seo_description.presence || post.excerpt.presence)&.truncate(300),
+        'image' => (post.og_image_url.presence || post.featured_image_url.presence),
+        'datePublished' => post.published_at&.iso8601,
+        'dateModified' => (post.updated_at || post.published_at)&.iso8601,
+        'author' => post_author(post),
+        'publisher' => (store_node ? { '@id' => store_id } : { '@type' => 'Organization', 'name' => site_name }),
+        'isPartOf' => { '@id' => "#{base_url}/#site" },
+        'wordCount' => ActionView::Base.full_sanitizer.sanitize(post.content.to_s).split.size.nonzero?
+      }.compact
+    end
+
+    # A person's name reads as a person. "Admin" or the business itself reads
+    # as the organization, which is what it is.
+    def post_author(post)
+      name = post.byline.to_s.strip
+      return(store_node ? { '@id' => store_id } : { '@type' => 'Organization', 'name' => site_name }) if
+        name.blank? || name.casecmp?('admin') || name.casecmp?(site_name.to_s)
+
+      { '@type' => 'Person', 'name' => name }
+    end
+
+    def blog_breadcrumb_node
+      return nil if @blog_post_path.blank?
+
+      base = BlogPostUrl.blog_page_path(@website)
+      trail = [{ '@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => base_url }]
+      trail << { '@type' => 'ListItem', 'position' => 2, 'name' => 'Blog', 'item' => "#{base_url}#{base}" } if base.present? && base != '/'
+      trail << { '@type' => 'ListItem', 'position' => trail.size + 1, 'name' => @blog_post.title, 'item' => blog_post_url }
+
+      { '@type' => 'BreadcrumbList', '@id' => "#{blog_post_url}#breadcrumbs", 'itemListElement' => trail }
+    end
+
+    # The questions a page answers, marked as questions. FAQs are the content
+    # assistants lift most often, and the builder's FAQ block carried none of it.
+    # Only questions with an answer, only from blocks on this page.
+    def faq_node
+      pairs = faq_pairs
+      return nil if pairs.empty?
+
+      {
+        '@type' => 'FAQPage',
+        '@id' => "#{faq_page_url}#faq",
+        'mainEntity' => pairs.first(20).map do |q, a|
+          { '@type' => 'Question', 'name' => q,
+            'acceptedAnswer' => { '@type' => 'Answer', 'text' => a } }
+        end
+      }
+    end
+
+    def faq_pairs
+      return FaqExtractor.from_html(@blog_post.content) if @blog_post
+      return [] if @page.nil? || @vehicle
+
+      Array(@page.blocks).select { |b| b.is_a?(Hash) }.flat_map do |block|
+        content = block['content'].is_a?(Hash) ? block['content'] : block
+        Array(content['faqs'] || content['questions']).filter_map do |item|
+          next unless item.is_a?(Hash)
+
+          q = ActionView::Base.full_sanitizer.sanitize(item['question'].to_s).squish
+          a = ActionView::Base.full_sanitizer.sanitize(item['answer'].to_s).squish
+          [q, a] if q.present? && a.present?
+        end
+      end
+    end
+
+    def faq_page_url
+      return blog_post_url if @blog_post
+
+      path = @page&.path.to_s
+      path.blank? || path == '/' ? base_url : "#{base_url}#{normalized_path(path)}"
+    end
+
     def positive_number(value)
       number = value.to_f
       return nil unless number.positive?
@@ -335,6 +426,9 @@ module Websites
     # without crawling every listing, and nothing was emitting it.
     def item_list_node
       return nil if @vehicle.present?
+      # A blog post is not about the lot, and carrying the homes list made its
+      # markup describe something other than the article.
+      return nil if @blog_post.present?
 
       homes = servable_homes
       return nil if homes.empty?

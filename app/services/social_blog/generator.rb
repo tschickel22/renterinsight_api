@@ -14,12 +14,14 @@ module SocialBlog
   class Generator
     class Error < StandardError; end
 
-    MAX_TOKENS = 3000
-    VERSION    = 'sbg-2026-09-25'
+    MAX_TOKENS = 3600
+    # sbg-2026-09-26: written for AI answers (question headings, answer-first
+    # sections, a FAQ section, named entities).
+    VERSION    = 'sbg-2026-09-26'
 
     # Tags the post body may use. Anything else the model returns is stripped
     # before it is shown or saved.
-    ALLOWED_TAGS       = %w[p h2 h3 ul ol li strong em a blockquote br].freeze
+    ALLOWED_TAGS       = %w[p h2 h3 ul ol li strong em a blockquote br table thead tbody tr th td].freeze
     ALLOWED_ATTRIBUTES = %w[href].freeze
 
     # Also used on text a person edited, which reaches the public site as-is.
@@ -80,17 +82,32 @@ module SocialBlog
         You are given a social media post the business has written. Write the blog version of it:
         the same subject and the same facts, expanded into something worth reading on its own.
 
+        It will be read by people and by AI assistants (ChatGPT, Google AI Overviews, Perplexity)
+        that quote the passage that best answers a question. Write so any section can be lifted
+        out and still make sense.
+
         Rules:
-        - 500 to 900 words.
-        - Speak as the business ("we", "our").
+        - 600 to 1000 words, including the FAQ.
+        - Speak as the business ("we", "our"), and name the business and where it is at least
+          once in the opening and once near the end, in natural sentences.
         - Use only facts from the social post and the business profile. Do not invent prices,
-          dates, statistics, names, quotes or offers.
-        - Structure: a short opening paragraph, then two to four sections with <h2> headings,
-          then a closing paragraph with one clear next step.
+          dates, statistics, names, quotes or offers. Specific names that are in the input
+          (models, products, places) are worth using exactly. Do not add claims about brands,
+          manufacturers, competitors or the industry that the input does not make.
+        - Opening: two or three sentences that state plainly what this post is about and the
+          single most useful takeaway. No throat-clearing.
+        - Then two to four sections. Each <h2> is the question a reader would actually ask,
+          phrased as a question. The first paragraph under it answers that question directly
+          in 40 to 60 words; detail, lists or steps follow.
+        - Then a section with the exact heading <h2>Frequently asked questions</h2>, holding
+          three to five questions, each an <h3> followed by a <p> answer of one to three
+          sentences. Only questions this post can answer from the input.
+        - End with a short paragraph giving one clear next step.
         - HTML only, using just these tags: #{ALLOWED_TAGS.join(', ')}. No <h1>, no inline styles,
           no images, no hashtags in the body.
         - Do not use em dashes.
-        - The title is plain text, under 70 characters, and not clickbait.
+        - The title is plain text, under 70 characters, not clickbait, and uses the words a
+          person would search for.
 
         Return JSON only, with exactly these keys:
         {"title": "", "slug": "", "excerpt": "", "content_html": "", "seo_title": "", "seo_description": "", "tags": []}

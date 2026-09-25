@@ -34,7 +34,7 @@ RSpec.describe 'Public::Sites blog posts', type: :request do
   before do
     Rails.cache.clear
     allow(Websites::SpaShell).to receive(:fetch) do
-      Websites::SpaShell.absolutize('<!doctype html><html><head><title>App</title></head><body></body></html>',
+      Websites::SpaShell.absolutize('<!doctype html><html><head><title>App</title></head><body><div id="root"></div></body></html>',
                                     'https://spa.example.com')
     end
   end
@@ -52,6 +52,55 @@ RSpec.describe 'Public::Sites blog posts', type: :request do
     expect(response.body).to include('https://img.example.com/spring.jpg')
     expect(response.body).to include('https://sunshine-rv.test/blog/post/spring-homes')
     expect(response.body).to include('article')
+  end
+
+  def json_ld
+    JSON.parse(response.body[%r{<script type="application/ld\+json">(.*?)</script>}m, 1])['@graph']
+  end
+
+  it 'sends the post itself to crawlers that do not run JavaScript' do
+    post.update!(author_name: 'Tom Schickel', content: '<h2>Why now</h2><p>Three new models.</p>')
+
+    get_site('/blog/post/spring-homes')
+
+    body = response.body[%r{<div id="dt-prerender">(.*)</div>}m, 1]
+    expect(body).to include('<h1>Spring Homes Are Here</h1>', 'By Tom Schickel', '<time datetime=',
+                            '<h2>Why now</h2>', 'Three new models.')
+  end
+
+  it 'marks the post up as an article and drops the homes list' do
+    post.update!(author_name: 'Tom Schickel')
+    get_site('/blog/post/spring-homes')
+
+    types = json_ld.map { |n| n['@type'] }
+    article = json_ld.detect { |n| n['@type'] == 'BlogPosting' }
+    expect(types).to include('BlogPosting', 'BreadcrumbList')
+    expect(types).not_to include('ItemList')
+    expect(article).to include('headline' => 'Spring Homes Are Here',
+                               'mainEntityOfPage' => 'https://sunshine-rv.test/blog/post/spring-homes',
+                               'author' => { '@type' => 'Person', 'name' => 'Tom Schickel' })
+    expect(article['datePublished']).to be_present
+    expect(article['dateModified']).to be_present
+  end
+
+  it 'credits the business when the byline is Admin' do
+    post.update!(author_name: 'Admin')
+    get_site('/blog/post/spring-homes')
+
+    expect(json_ld.detect { |n| n['@type'] == 'BlogPosting' }['author']).not_to include('@type' => 'Person')
+  end
+
+  it 'marks up the post FAQ section' do
+    post.update!(content: '<p>x</p><h2>Frequently asked questions</h2><h3>Do you finance?</h3><p>Yes, several lenders.</p>')
+    get_site('/blog/post/spring-homes')
+
+    faq = json_ld.detect { |n| n['@type'] == 'FAQPage' }
+    expect(faq['mainEntity'].first).to include('name' => 'Do you finance?')
+  end
+
+  it 'lists posts as links on the blog page' do
+    get_site('/blog')
+    expect(response.body).to include('<a href="/blog/post/spring-homes">Spring Homes Are Here</a>')
   end
 
   it 'answers 404 for a post that does not exist' do

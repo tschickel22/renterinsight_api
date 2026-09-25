@@ -26,13 +26,16 @@ module Websites
   # degrades to "renders its title and text" instead of vanishing.
   class BodyRenderer
     # Where a heading lives, in preference order.
-    TITLE_KEYS = %w[title heading headline name].freeze
+    # "question" is last so a FAQ item's question is its heading. Before it was
+    # here only the answers reached a crawler, which is the half an assistant
+    # cannot quote without the other.
+    TITLE_KEYS = %w[title heading headline name question].freeze
     # Where prose lives. The contact keys are here because a dealer's address,
     # phone and hours are the highest value text on the site for local search,
     # and they were being dropped: they live on block types that carry no
     # "description".
     TEXT_KEYS = %w[subtitle description body text caption answer content blurb
-                   address phone email hours].freeze
+                   address phone email hours quote].freeze
     # Rich text authored in the builder's editor. The text block stores its whole
     # body under "html", which no text key matched, so a contact page's hours,
     # phone number and address never reached a crawler at all.
@@ -51,15 +54,21 @@ module Websites
     # embed. The embed is worthless to a crawler and the address is the single
     # most valuable line on a dealer's contact page, so the block stays and only
     # its embed URL is ignored.
-    SKIP_TYPES = %w[inventorySearch inventory_search calculator video
-                    blogList logoShowcase].freeze
+    SKIP_TYPES = %w[calculator video logoShowcase].freeze
+    # The blog page's list of posts. It used to be skipped, so no crawlable
+    # link reached any post; only the sitemap did.
+    BLOG_LIST_TYPES = %w[blogList].freeze
+    MAX_LISTED_POSTS = 20
+    MAX_RELATED_POSTS = 4
     # Rendered as a plain list of the homes actually on the lot. This used to be
     # skipped on the reasoning that the per-home pages in the sitemap were its
     # crawlable form, which left the inventory page itself at 52 words and
     # nothing linking to a home except the sitemap. The list is the same homes a
     # visitor sees, so it stays the opposite of cloaking, and it gives a crawler
     # a path to every listing from the page a buyer actually lands on.
-    INVENTORY_TYPES = %w[inventory].freeze
+    # inventorySearch is the filterable grid. The filters are JavaScript, but
+    # the homes in it are the same homes, so it renders as the plain list too.
+    INVENTORY_TYPES = %w[inventory inventorySearch inventory_search].freeze
 
     MAX_ITEMS = 12
     MAX_IMAGES = 8
@@ -68,11 +77,14 @@ module Websites
     MAX_LISTED_HOMES = 12
     MAX_RELATED_HOMES = 8
 
-    def initialize(website:, page:, canonical_host:, vehicle: nil)
+    def initialize(website:, page:, canonical_host:, vehicle: nil, blog_post: nil)
       @website = website
       @page = page
       @canonical_host = canonical_host
       @vehicle = vehicle
+      # A blog post is a client route with no page row. Without this its URL
+      # served an empty body to every crawler that does not run JavaScript.
+      @blog_post = blog_post
     end
 
     # Takes the crawlable copy out of the visual flow without taking it out of
@@ -95,7 +107,10 @@ module Websites
     # @return [String, nil] HTML for the crawlable container, or nil when there
     #   is nothing to say
     def call
-      sections = @vehicle ? home_sections : page_sections
+      sections = if @vehicle then home_sections
+                 elsif @blog_post then blog_post_sections
+                 else page_sections
+                 end
       return nil if sections.blank?
 
       <<~HTML
@@ -351,6 +366,17 @@ module Websites
         content = block['content'].is_a?(Hash) ? block['content'] : block
         title = first_value(content, TITLE_KEYS)
 
+        if BLOG_LIST_TYPES.include?(type)
+          listing = blog_post_list
+          next if listing.blank?
+
+          parts << (heading_used ? "<h2>#{esc(title.presence || 'Latest posts')}</h2>\n"
+                                 : "<h1>#{esc(title.presence || 'Blog')}</h1>\n")
+          heading_used = true
+          parts << listing
+          next
+        end
+
         if INVENTORY_TYPES.include?(type)
           listing = inventory_list
           next if listing.blank?
@@ -398,7 +424,12 @@ module Websites
         items = content[key]
         next unless items.is_a?(Array)
 
+        return render_testimonials(items) if key == 'testimonials'
+        return render_stats(items) if key == 'stats'
+
         rendered = items.first(MAX_ITEMS).filter_map do |item|
+          # Plain strings, like a comparison card's feature list.
+          next "<li>#{esc(item)}</li>" if item.is_a?(String) && item.strip.present?
           next unless item.is_a?(Hash)
 
           heading = first_value(item, TITLE_KEYS)
@@ -417,15 +448,116 @@ module Websites
       ''
     end
 
+    # What customers said, attributed. Dropped entirely before, because a quote
+    # and an author matched none of the keys.
+    def render_testimonials(items)
+      rendered = items.first(MAX_ITEMS).filter_map do |item|
+        next unless item.is_a?(Hash)
+
+        quote = first_value(item, %w[quote text content body])
+        next if quote.blank?
+
+        who = [first_value(item, %w[author name]), first_value(item, %w[role location title])].compact.join(', ')
+        "<blockquote><p>#{esc(quote)}</p>#{who.present? ? "<footer>#{esc(who)}</footer>" : ''}</blockquote>"
+      end
+      rendered.any? ? "#{rendered.join("\n")}\n" : ''
+    end
+
+    # "25+ years", "1,200 families housed". Numbers an assistant can quote.
+    def render_stats(items)
+      rendered = items.first(MAX_ITEMS).filter_map do |item|
+        next unless item.is_a?(Hash)
+
+        number = first_value(item, %w[number value stat])
+        label = first_value(item, %w[label title description])
+        next if number.blank? && label.blank?
+
+        "<li>#{number.present? ? "<strong>#{esc(number)}</strong> " : ''}#{esc(label)}</li>"
+      end
+      rendered.any? ? "<ul>\n#{rendered.join("\n")}\n</ul>\n" : ''
+    end
+
     # Alt text is the accessibility requirement most likely to appear in a
     # complaint, and the thing image search reads. It falls back to the section
     # heading rather than being left empty.
+    # The image and gallery blocks keep their URL under src or image_url, which
+    # was not read, so their pictures never reached a crawler. Their own alt
+    # text wins over the section heading.
     def render_images(content, title)
-      urls = %w[image imageUrl backgroundImage].filter_map { |k| content[k] if content[k].is_a?(String) }
-      urls += Array(content['backgroundImages']).select { |u| u.is_a?(String) }
-      urls += Array(content['images']).map { |i| i.is_a?(Hash) ? i['url'] : i }.select { |u| u.is_a?(String) }
+      block_alt = first_value(content, %w[alt altText])
+      images = %w[image imageUrl image_url src backgroundImage].filter_map do |k|
+        [content[k], block_alt] if content[k].is_a?(String)
+      end
+      images += Array(content['backgroundImages']).select { |u| u.is_a?(String) }.map { |u| [u, nil] }
+      images += Array(content['images']).filter_map do |i|
+        if i.is_a?(Hash)
+          url = i['url'].presence || i['src'].presence
+          [url, first_value(i, %w[alt altText caption])] if url.is_a?(String)
+        elsif i.is_a?(String)
+          [i, nil]
+        end
+      end
 
-      urls.uniq.first(MAX_IMAGES).map { |url| image_tag(url, title) }.join
+      images.uniq(&:first).first(MAX_IMAGES).map { |url, alt| image_tag(url, alt.presence || title) }.join
+    end
+
+    # One blog post, as the article it is: title, byline and date, the post,
+    # then links to more posts so a crawler can keep walking the blog.
+    def blog_post_sections
+      post = @blog_post
+      parts = +"<article>\n<h1>#{esc(post.title)}</h1>\n"
+      byline = [post.byline.presence && "By #{post.byline}", post_date(post)].compact
+      parts << "<p>#{byline.join(' · ')}</p>\n" if byline.any?
+      parts << image_tag(post.featured_image_url, post.featured_image_alt.presence || post.title) if post.featured_image_url.present?
+      parts << "<p>#{esc(post.excerpt)}</p>\n" if post.excerpt.present? && post.content.blank?
+      body = sanitize_rich_text(post.content.to_s) if post.content.present?
+      parts << "#{body}\n" if body.present?
+      parts << "</article>\n"
+
+      more = related_posts(post)
+      if more.any?
+        parts << "<h2>More from #{esc(site_name)}</h2>\n<ul>\n"
+        more.each { |p| parts << %(<li><a href="#{esc(post_path(p))}">#{esc(p.title)}</a></li>\n) }
+        parts << "</ul>\n"
+      end
+      parts
+    end
+
+    def post_date(post)
+      at = post.published_at || post.created_at
+      return nil if at.blank?
+
+      %(<time datetime="#{at.to_date.iso8601}">#{at.strftime('%B %-d, %Y')}</time>)
+    end
+
+    def published_posts
+      @website.blog_posts.active.published_posts.order(published_at: :desc)
+    end
+
+    def related_posts(post)
+      published_posts.where.not(id: post.id).limit(MAX_RELATED_POSTS).to_a
+    rescue StandardError
+      []
+    end
+
+    # The blog page's posts as real links, newest first.
+    def blog_post_list
+      posts = published_posts.limit(MAX_LISTED_POSTS).to_a
+      return '' if posts.empty?
+
+      items = posts.map do |p|
+        summary = p.excerpt.presence && "<p>#{esc(p.excerpt)}</p>"
+        %(<li><h3><a href="#{esc(post_path(p))}">#{esc(p.title)}</a></h3>#{summary}</li>)
+      end
+      "<ul>\n#{items.join("\n")}\n</ul>\n"
+    rescue StandardError => e
+      Rails.logger.warn("[BodyRenderer] blog list failed for #{@website&.id}: #{e.message}")
+      ''
+    end
+
+    def post_path(post)
+      @blog_base ||= BlogPostUrl.blog_page_path(@website)
+      BlogPostUrl.path_for(@website, post, base: @blog_base) || '#'
     end
 
     def image_tag(url, alt)
