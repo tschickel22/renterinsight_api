@@ -13,6 +13,7 @@ Rails.application.routes.draw do
   constraints(Constraints::TenantWebsiteHost) do
     get '/robots.txt', to: 'public/sites#robots', format: false
     get '/sitemap.xml', to: 'public/sites#sitemap', format: false
+    get '/llms.txt', to: 'public/sites#llms', format: false
     get '/', to: 'public/sites#show', as: :tenant_website_root
     get '*path', to: 'public/sites#show', format: false, as: :tenant_website_page
   end

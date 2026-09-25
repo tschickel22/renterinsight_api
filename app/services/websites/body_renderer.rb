@@ -612,8 +612,12 @@ module Websites
 
     # Real links, so a crawler can reach every page without executing the nav.
     def site_nav
-      pages = @website.website_pages.where(is_deleted: [false, nil]).order(:order).limit(50)
+      # publicly_servable: an unpublished landing page 404s, so linking it sent
+      # a crawler to a dead end. noindex pages are left out for the same reason.
+      pages = @website.website_pages.publicly_servable.order(:order).limit(50)
       links = pages.filter_map do |page|
+        next if page.robots.to_s.include?('noindex')
+
         path = page.path.to_s
         next if path.blank?
 

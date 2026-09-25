@@ -198,6 +198,12 @@ module Websites
       return "https://#{@canonical_host}#{home_path}" if home_path.present?
       return "https://#{@canonical_host}#{@blog_post_path}" if @blog_post && @blog_post_path.present?
 
+      # The page's own canonical when the author set one, e.g. a landing page
+      # that duplicates another. It was stored and never read.
+      own = @page&.try(:canonical_path).to_s.strip
+      return own if own.start_with?('https://', 'http://')
+      return "https://#{@canonical_host}#{own.start_with?('/') ? own : "/#{own}"}" if own.present?
+
       path = @page&.path.presence || '/'
       path = "/#{path}" unless path.start_with?('/')
       path = '' if path == '/'
@@ -255,6 +261,9 @@ module Websites
       return 'noindex, nofollow' unless @website.status == 'published'
       return 'noindex, nofollow' if seo_config['noindex'].to_s == 'true'
       return @blog_post.robots if @blog_post&.robots.present?
+      # A page's own setting, which landing pages default to noindex. It was
+      # stored and ignored, so every campaign page was served "index, follow".
+      return @page.robots if @page&.try(:robots).present?
 
       'index, follow'
     end

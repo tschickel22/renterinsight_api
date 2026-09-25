@@ -24,7 +24,7 @@ module Websites
       payload = @website.as_json(
         include: {
           website_pages: {
-            only: %i[id title slug path is_visible order blocks show_in_nav show_in_footer page_order],
+            only: %i[id title seo_title slug path is_visible order blocks show_in_nav show_in_footer page_order],
             methods: [:full_path]
           }
         },
@@ -65,7 +65,7 @@ module Websites
               .publicly_servable
               .order(:order)
               .as_json(
-                only: %i[id title slug path is_visible order blocks show_in_nav show_in_footer page_order],
+                only: %i[id title seo_title slug path is_visible order blocks show_in_nav show_in_footer page_order],
                 methods: [:full_path]
               )
     end
