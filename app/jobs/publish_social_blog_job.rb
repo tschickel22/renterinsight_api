@@ -17,8 +17,7 @@ class PublishSocialBlogJob < ApplicationJob
     SocialBlog::AutoAttach.write!(cross_post, post) unless cross_post.written?
     publisher_for(cross_post).call(cross_post)
     Rails.logger.info "[PublishSocialBlogJob] post=#{post.id} blog=#{cross_post.external_id} published"
-  rescue SocialBlog::Generator::Error, SocialBlog::WebsiteBuilderPublisher::Error,
-         SocialBlog::MarketingSitePublisher::Error, ActiveRecord::RecordInvalid => e
+  rescue StandardError => e
     cross_post&.update_columns(status: 'failed', error: e.message, updated_at: Time.current)
     Rails.logger.error "[PublishSocialBlogJob] post=#{social_post_id} failed: #{e.message}"
   end

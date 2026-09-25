@@ -104,6 +104,45 @@ RSpec.describe 'Social post blog version on a marketing site', type: :model do
       expect(cross_post.reload.status).to eq('published')
     end
 
+    it 'adopts the row a lost reply left behind instead of inserting a copy' do
+      allow_any_instance_of(described_class).to receive(:request) do |_, method, path, **_opts|
+        raise 'must not insert' if method == :post
+
+        path.include?('slug=like') ? [{ 'id' => 'orphan', 'slug' => 'work-queue-is-live', 'title' => 'Work Queue Is Live' }] : []
+      end
+      allow_any_instance_of(described_class).to receive(:trigger_rebuild).and_return(nil)
+
+      described_class.call(cross_post)
+
+      expect(cross_post.reload).to have_attributes(status: 'published', external_id: 'orphan')
+    end
+
+    it 'records its id before inserting, so a retry can find the row' do
+      ids = []
+      allow_any_instance_of(described_class).to receive(:request) do |_, method, path, **opts|
+        if method == :post
+          ids << [opts[:body][:id], cross_post.reload.external_id]
+          raise described_class::Error, 'reply lost'
+        end
+        []
+      end
+
+      expect { described_class.call(cross_post) }.to raise_error(described_class::Error)
+      expect(ids.first[0]).to be_present
+      expect(ids.first[1]).to eq(ids.first[0])
+    end
+
+    it 'turns an unreadable reply into a publish error' do
+      site = SocialBlog::MarketingSites.find('dealertide')
+      publisher = described_class.new(cross_post)
+      res = Net::HTTPOK.new('1.1', '200', 'OK')
+      allow(res).to receive(:body).and_return("\x1F\x8B garbage")
+      allow_any_instance_of(Net::HTTP).to receive(:request).and_return(res)
+
+      expect(site).to be_present
+      expect { publisher.send(:request, :get, 'blog_posts') }.to raise_error(described_class::Error, /could not be read/)
+    end
+
     it 'refuses a site that is not configured' do
       cross_post.update_columns(marketing_site_key: 'gone')
       expect { described_class.call(cross_post) }.to raise_error(described_class::Error, /not configured/)

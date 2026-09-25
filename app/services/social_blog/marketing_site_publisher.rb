@@ -41,11 +41,22 @@ module SocialBlog
     private
 
     def insert_row
+      base = @cross_post.slug.presence || @cross_post.title.to_s.parameterize
+      slug, adopted = unique_slug(base)
+      return adopted if adopted
+
+      # The id is chosen here and saved before the insert. If the reply is
+      # lost after Supabase has stored the row, a retry finds it by this id
+      # instead of inserting a second copy.
+      id = SecureRandom.uuid
+      @cross_post.update_columns(external_id: id, updated_at: Time.current)
+
       now = Time.current.iso8601
       rows = request(:post, 'blog_posts', body: {
+        id:                 id,
         company_id:         @site.company_uuid,
         title:              @cross_post.title,
-        slug:               unique_slug(@cross_post.slug.presence || @cross_post.title.to_s.parameterize),
+        slug:               slug,
         content:            @cross_post.content,
         excerpt:            @cross_post.excerpt.to_s,
         author:             author_name,
@@ -57,28 +68,30 @@ module SocialBlog
         meta_title:         @cross_post.seo_title,
         meta_description:   @cross_post.seo_description
       }, prefer: 'return=representation')
-      row = Array(rows).first
-      raise Error, 'Supabase did not return the new post' unless row
-
-      # Saved straight away so a crash before the rebuild cannot cause a second insert on retry.
-      @cross_post.update_columns(external_id: row['id'], updated_at: Time.current)
-      row
+      Array(rows).first || { 'id' => id, 'slug' => slug, 'published_at' => now }
     end
 
     def find_row(id)
       Array(request(:get, "blog_posts?id=eq.#{URI.encode_www_form_component(id)}&select=id,slug,published_at")).first
     end
 
-    # Slugs are unique per company_id in blog_posts.
+    # Slugs are unique per company_id in blog_posts. Returns [slug, nil], or
+    # [nil, row] when this very post is already there: same slug and title,
+    # left by an attempt whose reply was lost before its id was recorded.
     def unique_slug(base)
       base  = base.presence || "post-#{@post.id}"
-      query = "blog_posts?company_id=eq.#{@site.company_uuid}&slug=like.#{URI.encode_www_form_component(base)}*&select=slug"
-      taken = Array(request(:get, query)).map { |r| r['slug'] }
-      return base unless taken.include?(base)
+      query = "blog_posts?company_id=eq.#{@site.company_uuid}&slug=like.#{URI.encode_www_form_component(base)}*" \
+              '&select=id,slug,title,published_at'
+      rows  = Array(request(:get, query))
+      mine  = rows.detect { |r| r['slug'] == base && r['title'] == @cross_post.title }
+      return [nil, mine] if mine
+
+      taken = rows.map { |r| r['slug'] }
+      return [base, nil] unless taken.include?(base)
 
       n = 2
       n += 1 while taken.include?("#{base}-#{n}")
-      "#{base}-#{n}"
+      ["#{base}-#{n}", nil]
     end
 
     def author_name
@@ -108,13 +121,18 @@ module SocialBlog
       req['apikey']        = @site.service_key
       req['Authorization'] = "Bearer #{@site.service_key}"
       req['Content-Type']  = 'application/json'
+      # Plain JSON back. The reply arrived compressed on staging and could not be parsed.
+      req['Accept-Encoding'] = 'identity'
       req['Prefer']        = prefer if prefer
       req.body = body.to_json if body
 
       res = http.request(req)
       raise Error, "Supabase error (#{res.code}): #{res.body.to_s.truncate(300)}" unless res.is_a?(Net::HTTPSuccess)
 
-      res.body.present? ? JSON.parse(res.body) : nil
+      # Not .present?: on a body that is not valid UTF-8 that raises before parsing.
+      res.body.to_s.empty? ? nil : JSON.parse(res.body)
+    rescue JSON::ParserError, ArgumentError, Encoding::CompatibilityError => e
+      raise Error, "Supabase sent a reply that could not be read: #{e.message.truncate(120)}"
     rescue Net::OpenTimeout, Net::ReadTimeout => e
       raise Error, "Supabase timeout: #{e.message}"
     end

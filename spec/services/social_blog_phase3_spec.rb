@@ -83,6 +83,11 @@ RSpec.describe 'Social post blog version, phase 3', type: :model do
       expect(described_class.prepare(post, allow_write: false)).to be_nil
     end
 
+    it 'swallows any error, so the Facebook post still goes out' do
+      allow(SocialBlog::WebsiteBuilderPublisher).to receive(:call).and_raise(JSON::ParserError, 'bad')
+      expect(described_class.prepare(post, allow_write: false)).to be_nil
+    end
+
     it 'means the after-publish job has nothing left to do' do
       described_class.prepare(post, allow_write: false)
       expect { post.update!(status: 'published') }.not_to have_enqueued_job(PublishSocialBlogJob)

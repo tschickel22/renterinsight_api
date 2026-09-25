@@ -36,7 +36,7 @@ class Api::V1::SocialPostsController < ApplicationController
     page     = [(params[:page] || 1).to_i, 1].max
     per_page = [[((params[:per_page] || 50).to_i), MAX_PER_PAGE].min, 1].max
 
-    posts = scope.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
+    posts = scope.includes(:blog_cross_post).order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
 
     render json: {
       social_posts: posts.map { |p| serialize(p) },
@@ -915,6 +915,8 @@ class Api::V1::SocialPostsController < ApplicationController
       # here, and without it reopening a post showed no hashtags and the next
       # save wiped them.
       hashtags:           extract_hashtags(p),
+      # So the list can say a publish also posts the blog version.
+      blog_status:        p.blog_cross_post&.status,
       # Synced daily from Facebook. Null until the first sync, which the post
       # cards show as nothing rather than 0. Reach and impressions are not here:
       # Meta retired every per-post reach metric.

@@ -43,9 +43,10 @@ module SocialBlog
       ctx  = (post.generation_context || {}).deep_stringify_keys.merge('blog_link' => link)
       post.update_columns(generation_context: ctx, updated_at: Time.current)
       link
-    rescue Generator::Error, WebsiteBuilderPublisher::Error, MarketingSitePublisher::Error,
-           ActiveRecord::RecordInvalid => e
-      Rails.logger.warn "[SocialBlog::SocialLink] post=#{post.id} no link: #{e.message}"
+    # Anything at all: this runs in the middle of publishing to Facebook, and a
+    # parse error here once turned a Publish click into a 500 with nothing posted.
+    rescue StandardError => e
+      Rails.logger.warn "[SocialBlog::SocialLink] post=#{post.id} no link: #{e.class}: #{e.message}"
       nil
     end
 
