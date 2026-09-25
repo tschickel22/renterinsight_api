@@ -19,4 +19,13 @@ class SocialPostCrossPost < ApplicationRecord
   def written?
     title.present? && content.present?
   end
+
+  # Live on the site with an address to link to.
+  def linkable?
+    published? && public_url.present? && error.blank?
+  end
+
+  def publisher
+    destination == 'marketing_site' ? SocialBlog::MarketingSitePublisher : SocialBlog::WebsiteBuilderPublisher
+  end
 end

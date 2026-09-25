@@ -9,7 +9,7 @@ class Api::V1::SocialBlogController < ApplicationController
   before_action :set_company_scope
   include ModuleAccessRequired
   require_any_module! 'marketing.social_media', 'marketing.automation', log_only: true
-  before_action :set_post, only: %i[show upsert]
+  before_action :set_post, only: %i[show upsert publish]
 
   # GET /api/v1/social-blog/settings
   def settings
@@ -98,6 +98,30 @@ class Api::V1::SocialBlogController < ApplicationController
     else
       render json: { errors: cross_post.errors.full_messages }, status: :unprocessable_entity
     end
+  end
+
+  # POST /api/v1/social-posts/:social_post_id/blog/publish
+  #
+  # "Publish Blog Post Only": the blog version goes out now and the social
+  # post stays as it is. Approval rights, the same as publishing the post.
+  # If the social post goes out later it links to this one.
+  def publish
+    return unless authorize_action!('social_posts', 'update')
+
+    cross_post = @post.blog_cross_post
+    unless cross_post && %w[pending failed].include?(cross_post.status)
+      message = cross_post&.published? ? 'The blog post is already published.' : 'Turn on the blog version first.'
+      return render json: { error: message }, status: :unprocessable_entity
+    end
+
+    cross_post.update!(status: 'pending', error: nil) if cross_post.status == 'failed'
+    SocialBlog::AutoAttach.write!(cross_post, @post) unless cross_post.written?
+    cross_post.publisher.call(cross_post)
+    render json: { blog: serialize(cross_post.reload) }
+  rescue SocialBlog::Generator::Error, SocialBlog::WebsiteBuilderPublisher::Error,
+         SocialBlog::MarketingSitePublisher::Error, ActiveRecord::RecordInvalid => e
+    cross_post&.update_columns(status: 'failed', error: e.message, updated_at: Time.current)
+    render json: { error: e.message, blog: serialize(cross_post&.reload) }, status: :unprocessable_entity
   end
 
   private

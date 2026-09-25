@@ -102,6 +102,49 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
     end
   end
 
+  describe 'POST /social-posts/:id/blog/publish' do
+    before do
+      website.website_pages.create!(title: 'Blog', path: '/blog', blocks: [{ 'type' => 'blogList' }])
+      allow_any_instance_of(Website).to receive(:public_url).and_return('https://summit.example.com')
+    end
+
+    it 'publishes only the blog version and leaves the social post alone' do
+      post_record.create_blog_cross_post!(company: company, status: 'pending', title: 'Only Blog', content: '<p>b</p>')
+
+      post "/api/v1/social-posts/#{post_record.id}/blog/publish", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      blog = JSON.parse(response.body)['blog']
+      expect(blog['status']).to eq('published')
+      expect(blog['public_url']).to include('/blog/post/only-blog')
+      expect(post_record.reload.status).to eq('draft')
+    end
+
+    it 'links to it when the social post goes out later' do
+      post_record.create_blog_cross_post!(company: company, status: 'pending', title: 'Only Blog', content: '<p>b</p>')
+      post "/api/v1/social-posts/#{post_record.id}/blog/publish", headers: headers
+
+      link = SocialBlog::SocialLink.prepare(post_record.reload, allow_write: false)
+      expect(link).to include('/blog/post/only-blog?')
+      expect(BlogPost.count).to eq(1)
+    end
+
+    it 'refuses when there is no blog version' do
+      post "/api/v1/social-posts/#{post_record.id}/blog/publish", headers: headers
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'says why when it cannot publish' do
+      website.update!(status: 'draft')
+      post_record.create_blog_cross_post!(company: company, status: 'pending', title: 'T', content: '<p>b</p>')
+
+      post "/api/v1/social-posts/#{post_record.id}/blog/publish", headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/No website/)
+    end
+  end
+
   describe 'approval email' do
     let!(:cross_post) do
       post_record.create_blog_cross_post!(company: company, status: 'pending', title: 'Blog T', content: '<p>b</p>')

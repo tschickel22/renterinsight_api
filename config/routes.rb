@@ -1779,6 +1779,7 @@ Rails.application.routes.draw do
       post 'social-blog/generate', to: 'social_blog#generate'
       get  'social-posts/:social_post_id/blog', to: 'social_blog#show'
       put  'social-posts/:social_post_id/blog', to: 'social_blog#upsert'
+      post 'social-posts/:social_post_id/blog/publish', to: 'social_blog#publish'
 
       resources :social_posts, path: 'social-posts' do
         member do

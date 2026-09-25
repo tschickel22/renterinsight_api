@@ -26,8 +26,11 @@ module SocialBlog
       return existing if existing
 
       cross_post = post.blog_cross_post
-      return nil unless cross_post&.pending?
+      return nil unless cross_post
       return nil unless Settings.new(post.company).to_h['link_from_social']
+      # Published on its own earlier ("Publish Blog Post Only"): link to it as it is.
+      return remember(post, cross_post) if cross_post.linkable?
+      return nil unless cross_post.pending?
 
       unless cross_post.written?
         return nil unless allow_write
@@ -35,19 +38,20 @@ module SocialBlog
         AutoAttach.write!(cross_post, post)
       end
 
-      publisher = cross_post.destination == 'marketing_site' ? MarketingSitePublisher : WebsiteBuilderPublisher
-      publisher.call(cross_post)
-      return nil unless cross_post.published? && cross_post.public_url.present? && cross_post.error.blank?
-
-      link = tracked(cross_post.public_url, post)
-      ctx  = (post.generation_context || {}).deep_stringify_keys.merge('blog_link' => link)
-      post.update_columns(generation_context: ctx, updated_at: Time.current)
-      link
+      cross_post.publisher.call(cross_post)
+      cross_post.linkable? ? remember(post, cross_post) : nil
     # Anything at all: this runs in the middle of publishing to Facebook, and a
     # parse error here once turned a Publish click into a 500 with nothing posted.
     rescue StandardError => e
       Rails.logger.warn "[SocialBlog::SocialLink] post=#{post.id} no link: #{e.class}: #{e.message}"
       nil
+    end
+
+    def remember(post, cross_post)
+      link = tracked(cross_post.public_url, post)
+      ctx  = (post.generation_context || {}).deep_stringify_keys.merge('blog_link' => link)
+      post.update_columns(generation_context: ctx, updated_at: Time.current)
+      link
     end
 
     def link_for(post)
