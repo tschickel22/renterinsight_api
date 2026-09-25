@@ -135,7 +135,7 @@ RSpec.describe 'Social post blog version', type: :model do
   describe SocialBlog::Generator do
     it 'strips tags that are not allowed from the body' do
       html = '<h1>Big</h1><p onclick="x()">Hi <script>alert(1)</script><a href="/x" style="c">l</a></p>'
-      expect(described_class.sanitize_html(html)).to eq('Big<p>Hi alert(1)<a href="/x">l</a></p>')
+      expect(described_class.sanitize_html(html)).to eq('Big<p>Hi <a href="/x">l</a></p>')
     end
 
     it 'keeps an existing category spelling' do

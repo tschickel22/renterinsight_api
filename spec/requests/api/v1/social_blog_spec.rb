@@ -84,7 +84,20 @@ RSpec.describe 'Api::V1::SocialBlog', type: :request do
           headers: headers
 
       blog = JSON.parse(response.body)['blog']
-      expect(blog).to include('status' => 'pending', 'title' => 'T', 'content' => '<p>ok</p>x')
+      expect(blog).to include('status' => 'pending', 'title' => 'T', 'content' => '<p>ok</p>')
+    end
+
+    it 'keeps the layout of pasted HTML but nothing that runs' do
+      html = '<div class="tip" style="color: teal"><img src="https://img.example.com/a.jpg" alt="Lot">' \
+             '<table><tr><td>A</td></tr></table></div><p onclick="x()">Hi</p><script>bad()</script>' \
+             '<a href="javascript:bad()">x</a>'
+      put "/api/v1/social-posts/#{post_record.id}/blog",
+          params: { blog: { status: 'pending', title: 'T', content: html } }.to_json, headers: headers
+
+      content = JSON.parse(response.body)['blog']['content']
+      expect(content).to include('<div class="tip" style="color:teal;">', '<img src="https://img.example.com/a.jpg" alt="Lot">',
+                                 '<table>', '<p>Hi</p>')
+      expect(content).not_to include('onclick', '<script', 'javascript:', 'bad()')
     end
 
     it 'will not change one that is already published' do

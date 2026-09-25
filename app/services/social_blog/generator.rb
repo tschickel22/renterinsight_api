@@ -24,9 +24,25 @@ module SocialBlog
     ALLOWED_TAGS       = %w[p h2 h3 ul ol li strong em a blockquote br table thead tbody tr th td].freeze
     ALLOWED_ATTRIBUTES = %w[href].freeze
 
+    # What a person may write or paste: layout, images, tables, classes and
+    # inline styles, but nothing that runs. Client sites show a post's HTML as
+    # saved, so this is the line that keeps a pasted script off them.
+    AUTHORED_TAGS = (ALLOWED_TAGS + %w[h4 h5 h6 b i u s hr tfoot caption div span section article aside
+                                       figure figcaption img picture source code pre sup sub small mark
+                                       dl dt dd details summary]).uniq.freeze
+    AUTHORED_ATTRIBUTES = %w[href title target rel src srcset sizes alt width height class style
+                             colspan rowspan id loading].freeze
+
     # Also used on text a person edited, which reaches the public site as-is.
-    def self.sanitize_html(html)
-      Rails::HTML5::SafeListSanitizer.new.sanitize(html.to_s, tags: ALLOWED_TAGS, attributes: ALLOWED_ATTRIBUTES).strip
+    # authored: true for HTML a person wrote or pasted, which keeps its layout.
+    def self.sanitize_html(html, authored: false)
+      tags  = authored ? AUTHORED_TAGS : ALLOWED_TAGS
+      attrs = authored ? AUTHORED_ATTRIBUTES : ALLOWED_ATTRIBUTES
+      # Removed whole: the sanitizer drops a disallowed tag but keeps its text,
+      # which left a pasted script's code sitting in the post as words.
+      doc = Nokogiri::HTML::DocumentFragment.parse(html.to_s)
+      doc.css('script, noscript, template, style').each(&:remove)
+      Rails::HTML5::SafeListSanitizer.new.sanitize(doc.to_html, tags: tags, attributes: attrs).strip
     end
 
     def self.generate(company:, caption:, headline: nil, description: nil, hashtags: [], intent_category: nil,

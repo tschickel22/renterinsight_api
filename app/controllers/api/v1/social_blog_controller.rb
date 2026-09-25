@@ -107,7 +107,7 @@ class Api::V1::SocialBlogController < ApplicationController
     end
 
     attrs = blog_params.to_h
-    attrs['content'] = SocialBlog::Generator.sanitize_html(attrs['content']) if attrs.key?('content')
+    attrs['content'] = SocialBlog::Generator.sanitize_html(attrs['content'], authored: true) if attrs.key?('content')
     if attrs.key?('website_id') && attrs['website_id'].present? &&
        !blog_settings.candidate_sites.exists?(id: attrs['website_id'])
       return render json: { error: 'That website does not belong to this company' }, status: :unprocessable_entity
