@@ -62,6 +62,16 @@ RSpec.describe 'Social post blog version', type: :model do
       expect(cp.external_id).to eq(blog.id.to_s)
     end
 
+    it 'shows the chosen byline instead of the account name' do
+      blog = described_class.call(cross_post(author_name: 'Admin'))
+      expect(blog.byline).to eq('Admin')
+      expect(blog.author).to eq(author)
+    end
+
+    it 'falls back to the account name for the byline' do
+      expect(described_class.call(cross_post).byline).to eq('T U')
+    end
+
     it 'does not fail when the slug is already taken on that site' do
       website.blog_posts.create!(author: author, title: 'Taken', slug: 'new-homes-are-in', content: 'x')
 

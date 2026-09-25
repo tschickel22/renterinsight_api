@@ -33,7 +33,8 @@ class Api::V1::SocialBlogController < ApplicationController
       default_on:         params[:default_on],
       destination:        params[:destination],
       marketing_site_key: params[:marketing_site_key],
-      link_from_social:   params.key?(:link_from_social) ? params[:link_from_social] : nil
+      link_from_social:   params.key?(:link_from_social) ? params[:link_from_social] : nil,
+      default_author_name: params.key?(:default_author_name) ? params[:default_author_name] : nil
     )
     render json: settings_payload
   rescue ArgumentError => e
@@ -127,7 +128,7 @@ class Api::V1::SocialBlogController < ApplicationController
 
   def blog_params
     params.require(:blog).permit(
-      :status, :title, :slug, :excerpt, :content, :seo_title, :seo_description,
+      :status, :title, :slug, :excerpt, :content, :seo_title, :seo_description, :author_name,
       :featured_image_url, :website_id, :generated_at, :ai_generation_version, tags: []
     ).tap do |p|
       p.delete(:status) unless %w[pending skipped].include?(p[:status])
@@ -165,7 +166,7 @@ class Api::V1::SocialBlogController < ApplicationController
     return nil unless cross_post
 
     cross_post.as_json(only: %i[
-      id status destination website_id marketing_site_key title slug excerpt content seo_title
+      id status destination website_id marketing_site_key title slug excerpt content seo_title author_name
       seo_description tags featured_image_url generated_at external_id public_url published_at error
     ])
   end

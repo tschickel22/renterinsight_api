@@ -85,7 +85,7 @@ module Websites
                   author: { only: %i[id first_name last_name] },
                   blog_categories: { only: %i[id name slug] }
                 },
-                methods: [:reading_time]
+                methods: [:reading_time, :byline]
               )
     rescue StandardError => e
       Rails.logger.warn("[Websites::PublicPayload] blog posts failed for #{@website.id}: #{e.message}")

@@ -56,7 +56,7 @@ class Api::V1::BlogPostsController < ApplicationController
           author: { only: [:id, :first_name, :last_name, :email] },
           blog_categories: { only: [:id, :name, :slug] }
         },
-        methods: [:reading_time]
+        methods: [:reading_time, :byline]
       ),
       meta: {
         total: filtered_count,
@@ -77,7 +77,7 @@ class Api::V1::BlogPostsController < ApplicationController
         author: { only: [:id, :first_name, :last_name, :email] },
         blog_categories: { only: [:id, :name, :slug] }
       },
-      methods: [:reading_time]
+      methods: [:reading_time, :byline]
     )
   end
 
@@ -207,7 +207,7 @@ class Api::V1::BlogPostsController < ApplicationController
     # website_id set via @website.blog_posts.build()
     # author_id set explicitly in create/update actions
     params.require(:blog_post).permit(
-      :title,
+      :author_name, :title,
       :slug,
       :excerpt,
       :content,

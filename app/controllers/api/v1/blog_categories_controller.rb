@@ -35,7 +35,7 @@ class Api::V1::BlogCategoriesController < ApplicationController
       include: {
         blog_posts: {
           only: [:id, :title, :slug, :status, :published_at],
-          methods: [:reading_time]
+          methods: [:reading_time, :byline]
         }
       }
     )

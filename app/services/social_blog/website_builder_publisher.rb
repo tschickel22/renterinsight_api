@@ -32,6 +32,7 @@ module SocialBlog
 
       blog_post = website.blog_posts.create!(
         author:             author,
+        author_name:        @cross_post.author_name.presence,
         title:              @cross_post.title,
         slug:               unique_slug(website, @cross_post.slug.presence || @cross_post.title.to_s.parameterize),
         excerpt:            @cross_post.excerpt.presence,

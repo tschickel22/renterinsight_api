@@ -42,7 +42,7 @@ class Api::Public::BlogPostsController < ApplicationController
           author: { only: [:id, :first_name, :last_name] },
           blog_categories: { only: [:id, :name, :slug] }
         },
-        methods: [:reading_time]
+        methods: [:reading_time, :byline]
       ),
       meta: {
         total: total,
@@ -100,7 +100,7 @@ class Api::Public::BlogPostsController < ApplicationController
           author: { only: [:id, :first_name, :last_name] },
           blog_categories: { only: [:id, :name, :slug] }
         },
-        methods: [:reading_time]
+        methods: [:reading_time, :byline]
       ),
       related_posts: related_posts.as_json(
         only: [:id, :title, :slug, :excerpt, :featured_image_url, :featured_image_alt, :published_at],
@@ -108,7 +108,7 @@ class Api::Public::BlogPostsController < ApplicationController
           author: { only: [:id, :first_name, :last_name] },
           blog_categories: { only: [:id, :name, :slug] }
         },
-        methods: [:reading_time]
+        methods: [:reading_time, :byline]
       )
     }
   rescue ActiveRecord::RecordNotFound

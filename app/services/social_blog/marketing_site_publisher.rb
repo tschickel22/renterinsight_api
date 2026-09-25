@@ -95,6 +95,8 @@ module SocialBlog
     end
 
     def author_name
+      return @cross_post.author_name if @cross_post.author_name.present?
+
       user = @post.created_by_user || @post.approved_by
       name = user && [user.try(:first_name), user.try(:last_name)].compact_blank.join(' ')
       name.presence || @post.company.name

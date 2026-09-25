@@ -24,7 +24,8 @@ module SocialBlog
         status:             'pending',
         destination:        target.destination,
         website_id:         target.website_id,
-        marketing_site_key: target.marketing_site_key
+        marketing_site_key: target.marketing_site_key,
+        author_name:        settings.to_h['default_author_name']
       )
       write(cross_post, post)
       cross_post

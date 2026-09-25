@@ -36,11 +36,14 @@ module SocialBlog
         'marketing_site_key' => raw['marketing_site_key'].presence,
         'default_on'         => raw.key?('default_on') ? ActiveModel::Type::Boolean.new.cast(raw['default_on']) : true,
         # Put "Read the full post: <link>" in the Facebook post.
-        'link_from_social'   => raw.key?('link_from_social') ? ActiveModel::Type::Boolean.new.cast(raw['link_from_social']) : true
+        'link_from_social'   => raw.key?('link_from_social') ? ActiveModel::Type::Boolean.new.cast(raw['link_from_social']) : true,
+        # The byline new blog versions start with. Blank means the person who wrote it.
+        'default_author_name' => raw['default_author_name'].presence
       }
     end
 
-    def update(website_id:, default_on:, destination: nil, marketing_site_key: nil, link_from_social: nil)
+    def update(website_id:, default_on:, destination: nil, marketing_site_key: nil, link_from_social: nil,
+               default_author_name: nil)
       destination = destination.to_s == 'marketing_site' ? 'marketing_site' : 'website_builder'
 
       if destination == 'marketing_site'
@@ -54,7 +57,8 @@ module SocialBlog
         'website_id'         => destination == 'website_builder' ? website_id.presence&.to_i : nil,
         'marketing_site_key' => destination == 'marketing_site' ? marketing_site_key : nil,
         'default_on'         => ActiveModel::Type::Boolean.new.cast(default_on) != false,
-        'link_from_social'   => link_from_social.nil? ? to_h['link_from_social'] : ActiveModel::Type::Boolean.new.cast(link_from_social) != false
+        'link_from_social'   => link_from_social.nil? ? to_h['link_from_social'] : ActiveModel::Type::Boolean.new.cast(link_from_social) != false,
+        'default_author_name' => default_author_name.nil? ? to_h['default_author_name'] : default_author_name.to_s.strip.presence
       })
       to_h
     end

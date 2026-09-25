@@ -76,6 +76,15 @@ RSpec.describe 'Social post blog version on a marketing site', type: :model do
       )
     end
 
+    it 'uses the chosen byline as the author' do
+      stub_supabase
+      cross_post.update!(author_name: 'Admin')
+
+      described_class.call(cross_post)
+
+      expect(calls.detect { |c| c[0] == :post }[2][:author]).to eq('Admin')
+    end
+
     it 'picks a free slug when that one is taken' do
       stub_supabase(taken: %w[work-queue-is-live work-queue-is-live-2])
 
