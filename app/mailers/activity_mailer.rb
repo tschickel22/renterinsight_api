@@ -10,6 +10,7 @@ class ActivityMailer < ApplicationMailer
     @user = user
     @lead = activity.lead
     @company = @lead&.company || Company.find_by(id: user.company_id)
+    @app_url = Brand.app_url(company: @company)
     
     mail(
       to: user.email,

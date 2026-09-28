@@ -69,7 +69,7 @@ RSpec.describe 'GET /api/v1/notifications/:id/target', type: :request do
 
     body = JSON.parse(response.body)
     expect(body['location_id']).to eq(location.id)
-    expect(body['path']).to eq("/crm/leads/#{lead.id}?tab=activities")
+    expect(body['path']).to eq("/crm/leads/#{lead.id}")
   end
 
   it 'will not resolve someone else\'s notification' do

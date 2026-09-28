@@ -27,7 +27,7 @@ Phone Number: <%= @activity.phone_number %>
 
 Related to: <%= @lead.first_name %> <%= @lead.last_name %>
 
-View in CRM: http://localhost:3000/crm/leads/<%= @lead.id %>?tab=activities
+View in CRM: <%= @app_url %>/crm/leads/<%= @lead.id %>?tab=activities
 
 ---
 This is an automated notification from your CRM system.
