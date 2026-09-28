@@ -14,6 +14,16 @@ module Campaigns
     GENERATE_MAX_TOKENS = 16_384
     REFINE_MAX_TOKENS = 16_384
 
+    # The plan comes back as this tool's input instead of as free text. Free
+    # text broke on HTML bodies: the model wrote <a href="..."> without
+    # escaping the quotes and the whole plan failed to parse. Tool input is
+    # always a well-formed JSON object.
+    PLAN_TOOL = {
+      name: 'submit_campaign_plan',
+      description: 'Submit the campaign plan, in the JSON shape described in the system prompt.',
+      input_schema: { type: 'object', additionalProperties: true }
+    }.freeze
+
     DEFAULT_MONTHLY_CREDIT = 50
 
     def initialize(company:, user:, location: nil)
@@ -49,7 +59,7 @@ module Campaigns
         model: GENERATE_MODEL, max_tokens: GENERATE_MAX_TOKENS
       )
 
-      plan = parse_plan(response[:text])
+      plan = parse_plan(response)
       log = log_usage(prompt, response, channel, 'ai_campaign_generate', plan_id: nil)
 
       CampaignAiGeneration.create!(
@@ -96,7 +106,7 @@ module Campaigns
         model: REFINE_MODEL, max_tokens: REFINE_MAX_TOKENS
       )
 
-      plan = parse_plan(response[:text])
+      plan = parse_plan(response)
       log = log_usage(feedback, response, channel, 'ai_campaign_refine', plan_id: generation.id)
 
       CampaignAiGeneration.create!(
@@ -361,7 +371,7 @@ module Campaigns
           are fine.
 
         OUTPUT RULES:
-        - You MUST respond with a single JSON object, nothing else. No prose, no markdown, no explanation.
+        - Submit the plan by calling the submit_campaign_plan tool with the plan object as its input. No prose, no markdown, no explanation.
         - The JSON shape:
           {
             "name": "Short campaign name",
@@ -538,7 +548,9 @@ module Campaigns
         model: model,
         max_tokens: max_tokens,
         system: system_prompt,
-        messages: [{ role: 'user', content: user_message }]
+        messages: [{ role: 'user', content: user_message }],
+        tools: [PLAN_TOOL],
+        tool_choice: { type: 'tool', name: PLAN_TOOL[:name] }
       }.to_json
 
       response = http.request(request)
@@ -549,7 +561,9 @@ module Campaigns
       end
 
       result = JSON.parse(response.body)
-      text = result['content']&.find { |c| c['type'] == 'text' }&.fetch('text', '')
+      content = result['content'] || []
+      text = content.find { |c| c['type'] == 'text' }&.fetch('text', '')
+      plan = content.find { |c| c['type'] == 'tool_use' }&.dig('input')
       usage = result['usage'] || {}
 
       # Truncated output is never parseable JSON. Say so plainly instead of
@@ -561,14 +575,19 @@ module Campaigns
       end
 
       {
+        plan: plan,
         text: text,
         input_tokens: usage['input_tokens'],
         output_tokens: usage['output_tokens']
       }
     end
 
-    def parse_plan(text)
-      cleaned = text.to_s.strip
+    # Prefers the tool input; falls back to parsing text in case the model
+    # ever answers in prose.
+    def parse_plan(response)
+      return response[:plan] if response[:plan].is_a?(Hash)
+
+      cleaned = response[:text].to_s.strip
       cleaned = cleaned.gsub(/\A```(?:json)?\s*/, '').gsub(/\s*```\z/, '')
       JSON.parse(cleaned)
     rescue JSON::ParserError => e
