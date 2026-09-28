@@ -7,7 +7,7 @@ class Template < ApplicationRecord
 
   CATEGORIES = %w[
     general cold_outreach warm_followup nurture re_engagement
-    appointment post_sale onboarding service referral_request
+    appointment reminder proposal post_sale onboarding service referral_request
     announcement event_promo seasonal
   ].freeze
 

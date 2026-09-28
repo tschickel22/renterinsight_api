@@ -295,6 +295,8 @@ module Api
             'nurture' => 'Part of an ongoing drip sequence to build relationship over time',
             're_engagement' => 'Reaching out to someone who went quiet/cold after previous interaction',
             'appointment' => 'Scheduling, confirming, or following up on an appointment or tour',
+            'reminder' => 'A reminder about something coming up or still outstanding (appointment, document, payment, next step)',
+            'proposal' => 'Sending or following up on a quote, proposal, or offer the customer is considering',
             'post_sale' => 'After a purchase — thank you, onboarding, review request',
             'onboarding' => 'Welcoming and getting a new customer set up',
             'service' => 'Service-related communication (maintenance, support, follow-up)',
