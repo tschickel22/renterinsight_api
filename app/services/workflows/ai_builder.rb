@@ -473,12 +473,17 @@ module Workflows
       raise GenerationError, 'AI returned an empty plan. Please try again.' unless plan.is_a?(Hash)
 
       steps = plan['steps']
+      # The model occasionally sends a nested value as a JSON string.
+      steps = (JSON.parse(steps) rescue nil) if steps.is_a?(String)
       nodes = steps.is_a?(Hash) && steps['nodes'].is_a?(Array) ? steps['nodes'].select { |n| n.is_a?(Hash) } : []
       edges = steps.is_a?(Hash) && steps['edges'].is_a?(Array) ? steps['edges'].select { |e| e.is_a?(Hash) } : []
       plan['steps'] = nodes.empty? ? nil : { 'nodes' => nodes, 'edges' => edges }
 
       questions = plan['questions']
-      questions = [questions] if questions.is_a?(String)
+      if questions.is_a?(String)
+        parsed = questions.strip.start_with?('[') ? (JSON.parse(questions) rescue nil) : nil
+        questions = parsed.is_a?(Array) ? parsed : [questions]
+      end
       questions = questions.is_a?(Array) ? questions.map(&:to_s).reject(&:blank?) : []
       plan['questions'] = questions.presence
 
