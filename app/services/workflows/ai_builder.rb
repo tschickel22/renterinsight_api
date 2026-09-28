@@ -6,8 +6,20 @@ module Workflows
     CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages'
     GENERATE_MODEL = AiModel.for(:generation)
     REFINE_MODEL = AiModel.for(:refine)
-    GENERATE_MAX_TOKENS = 4096
-    REFINE_MAX_TOKENS = 2048
+    # Plans carry whole HTML email bodies; refine returns the COMPLETE plan too,
+    # so both need room or the output is cut off mid-JSON.
+    GENERATE_MAX_TOKENS = 8192
+    REFINE_MAX_TOKENS = 8192
+
+    # The plan comes back as this tool's input instead of as free text. Free
+    # text broke on HTML bodies: the model wrote <a href="{{...}}"> without
+    # escaping the quotes and the whole plan failed to parse. Tool input is
+    # always a well-formed JSON object.
+    PLAN_TOOL = {
+      name: 'submit_workflow_plan',
+      description: 'Submit the workflow plan, in the JSON shape described in the system prompt.',
+      input_schema: { type: 'object', additionalProperties: true }
+    }.freeze
 
     DEFAULT_MONTHLY_CREDIT = 50
 
@@ -51,7 +63,7 @@ module Workflows
         model: GENERATE_MODEL, max_tokens: GENERATE_MAX_TOKENS
       )
 
-      plan = parse_plan(response[:text])
+      plan = parse_plan(response)
       log = log_usage(prompt, response, 'ai_workflow_generate', plan_id: nil)
 
       WorkflowAiGeneration.create!(
@@ -84,7 +96,7 @@ module Workflows
         model: REFINE_MODEL, max_tokens: REFINE_MAX_TOKENS
       )
 
-      plan = parse_plan(response[:text])
+      plan = parse_plan(response)
       log = log_usage(feedback, response, 'ai_workflow_refine', plan_id: generation.id)
 
       WorkflowAiGeneration.create!(
@@ -227,7 +239,7 @@ module Workflows
         You are an expert workflow automation designer for #{Brand.current.name}, a Dealer Management System (DMS) used by manufactured home and RV dealers. You help dealers build automated workflows that fire when something happens to a Lead, Deal, Contact, Account, Quote, Invoice, Service Ticket, or Vehicle.
 
         OUTPUT RULES:
-        - You MUST respond with a single JSON object, nothing else. No prose, no markdown, no explanation.
+        - Submit the plan by calling the submit_workflow_plan tool with the plan object as its input. No prose, no markdown, no explanation.
         - The JSON shape:
           {
             "name": "Short workflow name",
@@ -407,7 +419,9 @@ module Workflows
         model: model,
         max_tokens: max_tokens,
         system: system_prompt,
-        messages: [{ role: 'user', content: user_message }]
+        messages: [{ role: 'user', content: user_message }],
+        tools: [PLAN_TOOL],
+        tool_choice: { type: 'tool', name: PLAN_TOOL[:name] }
       }.to_json
 
       response = http.request(request)
@@ -418,18 +432,33 @@ module Workflows
       end
 
       result = JSON.parse(response.body)
-      text = result['content']&.find { |c| c['type'] == 'text' }&.fetch('text', '')
+      content = result['content'] || []
+      text = content.find { |c| c['type'] == 'text' }&.fetch('text', '')
+      plan = content.find { |c| c['type'] == 'tool_use' }&.dig('input')
       usage = result['usage'] || {}
 
+      # Truncated output is never a complete plan. Say so plainly instead of
+      # reporting a mystery syntax error.
+      if result['stop_reason'].to_s == 'max_tokens'
+        raise GenerationError,
+              'The workflow plan came back longer than the model was allowed to write, so it was cut off. ' \
+              'Try asking for fewer steps or shorter email bodies.'
+      end
+
       {
+        plan: plan,
         text: text,
         input_tokens: usage['input_tokens'],
         output_tokens: usage['output_tokens']
       }
     end
 
-    def parse_plan(text)
-      cleaned = text.to_s.strip
+    # Prefers the tool input; falls back to parsing text in case the model
+    # ever answers in prose.
+    def parse_plan(response)
+      return response[:plan] if response[:plan].is_a?(Hash)
+
+      cleaned = response[:text].to_s.strip
       cleaned = cleaned.gsub(/\A```(?:json)?\s*/, '').gsub(/\s*```\z/, '')
       JSON.parse(cleaned)
     rescue JSON::ParserError => e

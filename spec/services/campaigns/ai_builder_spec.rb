@@ -11,9 +11,12 @@ RSpec.describe Campaigns::AiBuilder do
   # captured_requests: pass an array to capture every outbound Net::HTTP
   # request the code makes. Lets tests assert on the JSON payload without
   # dropping into WebMock, which the rest of this spec file avoids.
-  def stub_claude_response(plan, input_tokens: 1000, output_tokens: 500, status: '200', captured_requests: nil)
+  # as_tool: answer the way the builder now asks for, with the plan as the
+  # input of a tool_use block instead of JSON text.
+  def stub_claude_response(plan, input_tokens: 1000, output_tokens: 500, status: '200', captured_requests: nil, as_tool: false)
+    block = as_tool ? { 'type' => 'tool_use', 'name' => 'submit_campaign_plan', 'input' => plan } : { 'type' => 'text', 'text' => plan.to_json }
     body = {
-      'content' => [{ 'type' => 'text', 'text' => plan.to_json }],
+      'content' => [block],
       'usage' => { 'input_tokens' => input_tokens, 'output_tokens' => output_tokens }
     }.to_json
     response = instance_double(Net::HTTPResponse, code: status, body: body)
@@ -40,6 +43,17 @@ RSpec.describe Campaigns::AiBuilder do
       expect(gen.generated_plan['name']).to eq('Test Plan')
       expect(gen.input_tokens).to eq(1000)
       expect(gen.output_tokens).to eq(500)
+    end
+
+    it 'reads the plan from the tool call, where HTML quotes cannot break it' do
+      html_plan = plan.merge('steps' => [{ 'wait_days' => 0, 'subject' => 'Hi', 'body_blocks' => [{ 'type' => 'html', 'html' => '<a href="{{entity.owner_booking_url}}">Book</a>' }] }])
+      requests = []
+      stub_claude_response(html_plan, as_tool: true, captured_requests: requests)
+      gen = described_class.new(company: company, user: user).generate(prompt: 'Build me a drip', channel: 'email')
+
+      expect(gen.generated_plan.dig('steps', 0, 'body_blocks', 0, 'html')).to include('href="{{entity.owner_booking_url}}"')
+      body = JSON.parse(requests.first.body)
+      expect(body['tool_choice']).to eq('type' => 'tool', 'name' => 'submit_campaign_plan')
     end
 
     it 'passes uploaded PNG references to Claude as image content blocks' do
