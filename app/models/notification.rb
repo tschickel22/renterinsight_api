@@ -174,11 +174,14 @@ class Notification < ApplicationRecord
     when 'WarrantyClaim'
       "/warranty/claims/#{notifiable_id}"
     when 'Lead'
-      "/crm/leads/#{notifiable_id}?tab=activities"
+      # Lead/Contact/Account land on Overview so the rep sees the contact info
+      # first (a new-lead email opened on a phone used to drop them on
+      # Activities). Reminders that want Activities set their own action_url.
+      "/crm/leads/#{notifiable_id}"
     when 'Contact'
-      "/contacts/#{notifiable_id}?tab=activities"
+      "/contacts/#{notifiable_id}"
     when 'Account'
-      "/accounts/#{notifiable_id}?tab=activities"
+      "/accounts/#{notifiable_id}"
     when 'Deal'
       "/deals/#{notifiable_id}"
     when 'Quote'

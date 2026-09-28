@@ -41,6 +41,36 @@ module Api
             content = response.dig('content', 0, 'text') || ''
             variants = parse_template_variants(content, channel, category)
 
+            # An empty list used to go back as a 200, so the button just
+            # re-enabled with nothing shown. The usual cause is a long HTML
+            # email running past max_tokens and cutting the JSON off mid-string.
+            if variants.empty?
+              truncated = response['stop_reason'] == 'max_tokens'
+              reason = truncated ? 'Response hit the token limit' : 'Could not parse AI response'
+              Rails.logger.error "[AI Template] #{reason}: stop_reason=#{response['stop_reason']} content=#{content.first(500)}"
+              AiQueryLog.create!(
+                company: @company,
+                user: current_user,
+                feature: 'ai_template_generate',
+                module_key: 'nurture',
+                question: "Generate #{channel} template for #{category}",
+                execution_status: 'error',
+                input_tokens: response.dig('usage', 'input_tokens') || 0,
+                output_tokens: response.dig('usage', 'output_tokens') || 0,
+                cost_cents: compute_cost_cents(
+                  response.dig('usage', 'input_tokens') || 0,
+                  response.dig('usage', 'output_tokens') || 0
+                ),
+                generated_params: { channel: channel, category: category, error: reason }
+              )
+              return render json: {
+                error: 'ai_empty_response',
+                message: truncated ?
+                  'The AI response was too long and got cut off. Try shorter instructions and retry.' :
+                  'The AI returned a response we could not read. Please retry.'
+              }, status: :unprocessable_entity
+            end
+
             AiQueryLog.create!(
               company: @company,
               user: current_user,
@@ -286,7 +316,7 @@ module Api
           http = Net::HTTP.new(uri.host, uri.port)
           http.use_ssl = true
           http.open_timeout = 10
-          http.read_timeout = 60
+          http.read_timeout = 120
 
           request = Net::HTTP::Post.new(uri)
           request['Content-Type'] = 'application/json'
@@ -294,7 +324,7 @@ module Api
           request['anthropic-version'] = '2023-06-01'
           request.body = {
             model: AiModel.for(:generation),
-            max_tokens: 2000,
+            max_tokens: 8000,
             system: system_prompt,
             messages: [{ role: 'user', content: user_prompt }]
           }.to_json
