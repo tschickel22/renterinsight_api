@@ -456,13 +456,33 @@ module Workflows
     # Prefers the tool input; falls back to parsing text in case the model
     # ever answers in prose.
     def parse_plan(response)
-      return response[:plan] if response[:plan].is_a?(Hash)
+      return normalize_plan(response[:plan]) if response[:plan].is_a?(Hash)
 
       cleaned = response[:text].to_s.strip
       cleaned = cleaned.gsub(/\A```(?:json)?\s*/, '').gsub(/\s*```\z/, '')
-      JSON.parse(cleaned)
+      normalize_plan(JSON.parse(cleaned))
     rescue JSON::ParserError => e
       raise GenerationError, "AI returned invalid JSON: #{e.message[0, 200]}"
+    end
+
+    # The builder screen reads steps.nodes.length and walks questions as a
+    # list. A plan with `"steps": {}` (the model asking questions instead of
+    # sending null) crashed that screen, so pin the shape down here: steps is
+    # nil or { nodes: [...], edges: [...] }, questions is nil or a list.
+    def normalize_plan(plan)
+      raise GenerationError, 'AI returned an empty plan. Please try again.' unless plan.is_a?(Hash)
+
+      steps = plan['steps']
+      nodes = steps.is_a?(Hash) && steps['nodes'].is_a?(Array) ? steps['nodes'].select { |n| n.is_a?(Hash) } : []
+      edges = steps.is_a?(Hash) && steps['edges'].is_a?(Array) ? steps['edges'].select { |e| e.is_a?(Hash) } : []
+      plan['steps'] = nodes.empty? ? nil : { 'nodes' => nodes, 'edges' => edges }
+
+      questions = plan['questions']
+      questions = [questions] if questions.is_a?(String)
+      questions = questions.is_a?(Array) ? questions.map(&:to_s).reject(&:blank?) : []
+      plan['questions'] = questions.presence
+
+      plan
     end
 
     def log_usage(prompt_text, response, feature, plan_id:)
