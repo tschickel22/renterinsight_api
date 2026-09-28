@@ -38,8 +38,17 @@ module Api
           begin
             response = call_anthropic(api_key, system_prompt, user_prompt)
 
-            content = response.dig('content', 0, 'text') || ''
-            variants = parse_template_variants(content, channel, category)
+            blocks = response['content'] || []
+            content = blocks.find { |b| b['type'] == 'text' }&.dig('text') || ''
+            tool_input = blocks.find { |b| b['type'] == 'tool_use' }&.dig('input')
+            raw_variants = tool_input.is_a?(Hash) ? tool_input['variants'] : nil
+            # The model occasionally sends the list as a JSON string.
+            raw_variants = (JSON.parse(raw_variants) rescue nil) if raw_variants.is_a?(String)
+            variants = if raw_variants.is_a?(Array)
+                         build_variants(raw_variants, channel, category)
+                       else
+                         parse_template_variants(content, channel, category)
+                       end
 
             # An empty list used to go back as a 200, so the button just
             # re-enabled with nothing shown. The usual cause is a long HTML
@@ -270,15 +279,12 @@ module Api
             - Write like a real person, not a template
             - Never use placeholder like "[Your name]" — use the sender signature/name provided above
 
-            RESPOND IN THIS EXACT JSON FORMAT (no markdown, no backticks):
-            [
-              {
-                "name": "Template display name",
-                "subject": "Email subject line (email only, omit for SMS)",
-                "body": "The template body text with {{merge_tags}}",
-                "category": "#{category}"
-              }
-            ]
+            Submit the templates by calling the submit_templates tool. Its
+            "variants" field is a list (not a string) of objects, each with:
+              - name: template display name
+              - subject: email subject line (email only, omit for SMS)
+              - body: the template body text with {{merge_tags}}
+              - category: #{category}
           PROMPT
         end
 
@@ -307,7 +313,7 @@ module Api
             #{custom_instructions.present? ? "Additional instructions: #{custom_instructions}" : ''}
 
             Each variant should take a different angle or tone while staying on-purpose.
-            Return a JSON array with #{variant_count} objects.
+            Submit #{variant_count} variants with the submit_templates tool.
           PROMPT
         end
 
@@ -326,7 +332,9 @@ module Api
             model: AiModel.for(:generation),
             max_tokens: 8000,
             system: system_prompt,
-            messages: [{ role: 'user', content: user_prompt }]
+            messages: [{ role: 'user', content: user_prompt }],
+            tools: [TEMPLATES_TOOL],
+            tool_choice: { type: 'tool', name: TEMPLATES_TOOL[:name] }
           }.to_json
 
           response = http.request(request)
@@ -336,6 +344,47 @@ module Api
           end
 
           JSON.parse(response.body)
+        end
+
+        # Variants come back as this tool's input instead of as JSON text. Text
+        # broke on HTML bodies: the model wrote <a href="..."> without escaping
+        # the quotes, the parse failed, and the user got no templates. Tool
+        # input is always a well-formed object.
+        TEMPLATES_TOOL = {
+          name: 'submit_templates',
+          description: 'Submit the generated template variants.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              variants: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    subject: { type: 'string' },
+                    body: { type: 'string' },
+                    category: { type: 'string' }
+                  },
+                  required: %w[name body]
+                }
+              }
+            },
+            required: ['variants']
+          }
+        }.freeze
+
+        def build_variants(raw, channel, category)
+          raw.select { |v| v.is_a?(Hash) && v['body'].present? }.map do |v|
+            {
+              name: v['name'].presence || 'AI Generated Template',
+              subject: channel == 'email' ? (v['subject'] || '') : nil,
+              body: v['body'],
+              channel: channel,
+              category: v['category'] || category,
+              source: 'ai_generated'
+            }
+          end
         end
 
         def parse_template_variants(content, channel, category)
