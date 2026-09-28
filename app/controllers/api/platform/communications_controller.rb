@@ -703,7 +703,9 @@ module Api
         template_id = params[:template_id] || params[:templateId]
         if template_id.present?
           begin
-            template = Template.find(template_id)
+            # Scoped to this company: an unscoped find let any id pull another
+            # company's template files into the email.
+            template = Template.where(company_id: current_company_id).find(template_id)
             if template.attachments.attached?
               template.attachments.each do |attachment|
                 # Add template attachment as a hash with filename and content
