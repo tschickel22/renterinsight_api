@@ -204,10 +204,16 @@ class ListingSendingService
     "#{listing_title} - Property Listing from #{company_name}"
   end
   
+  # The public listing page loads by listing id and ignores this segment, but
+  # the buyer sees it, so it names this company, never another tenant's 'demo'.
+  def public_company_segment
+    listing.company&.subdomain.presence || listing.company_id
+  end
+
   def build_email_body(custom_message:)
     # Get public URL for the listing
     base_url = ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
-    company_subdomain = listing.company.subdomain || 'demo'
+    company_subdomain = public_company_segment
     listing_url = "#{base_url}/public/#{company_subdomain}/listing/#{listing.id}"
     
     # Listing details
@@ -290,7 +296,7 @@ class ListingSendingService
   
   def build_sms_body(custom_message:)
     base_url = ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
-    company_subdomain = listing.company.subdomain || 'demo'
+    company_subdomain = public_company_segment
     listing_url = "#{base_url}/public/#{company_subdomain}/listing/#{listing.id}"
     
     listing_title = [listing.vehicle&.year, listing.vehicle&.make, listing.vehicle&.model].compact.join(' ')
