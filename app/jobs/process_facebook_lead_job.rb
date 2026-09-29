@@ -3,34 +3,9 @@
 class ProcessFacebookLeadJob < ApplicationJob
   queue_as :default
 
-  DEFAULT_FIELD_MAPPING = {
-    'full_name'    => 'full_name',
-    'first_name'   => 'first_name',
-    'last_name'    => 'last_name',
-    'email'        => 'email',
-    'phone_number' => 'phone',
-    'phone'        => 'phone',
-    'street_address' => 'street',
-    'city'         => 'city',
-    'state'        => 'state',
-    'zip_code'     => 'zip',
-    'country'      => 'country'
-  }.freeze
-
-  # Lead columns a dealer may point a Facebook question at. One list with the
-  # intake form builder, because the FB settings page offers the same menu
-  # (GET /api/crm/intake/forms/lead_fields). full_name is FB's own combined
-  # field, which split_name breaks apart.
-  LEAD_COLUMN_TARGETS = (
-    Api::Crm::Intake::FormsController::STANDARD_LEAD_FIELDS.map { |f| f[:name] } - %w[opt_in_sms notes] +
-    %w[full_name]
-  ).freeze
-
-  # Targets that keep the answer as a question-and-answer pair rather than a
-  # column value. 'notes' and 'survey_answers' are the same thing now: every
-  # such answer lands in both, so a dealer sees it on the lead either way.
-  ANSWER_TARGETS = %w[notes survey_answers].freeze
-  IGNORE_TARGET  = 'ignore'
+  # Kept for callers that read the mapping from here.
+  DEFAULT_FIELD_MAPPING = FacebookLeads::LeadBuilder::DEFAULT_FIELD_MAPPING
+  LEAD_COLUMN_TARGETS   = FacebookLeads::LeadBuilder::LEAD_COLUMN_TARGETS
 
   def perform(page_id:, leadgen_id:, form_id: nil, ad_id: nil, adgroup_id: nil, created_time: nil)
     integration = FacebookIntegration.active.find_by(page_id: page_id.to_s)
@@ -62,53 +37,22 @@ class ProcessFacebookLeadJob < ApplicationJob
       raise
     end
 
-    field_data = raw['field_data'] || []
-    parsed = parse_field_data(field_data)
-
-    attrs, answers, cf_values, cf_consumed = route_fields(company, parsed, integration.field_mapping)
-
-    first_name, last_name = split_name(attrs)
-
-    # Every mapped column, not just the contact ones, so a question pointed at
-    # Budget Range or Purchase Timeframe lands there.
-    column_attrs = attrs.except('full_name', 'first_name', 'last_name')
-                        .transform_values { |v| v.is_a?(Array) ? v.join(', ') : v }
-                        .symbolize_keys
-
-    lead_attrs = column_attrs.merge(
-      company_id:  integration.company_id,
-      # A page with no location of its own still lands the lead somewhere a rep
-      # works. See Company#inbound_lead_location.
-      location_id: integration.location_id || company.inbound_lead_location&.id,
-      facebook_leadgen_id: leadgen_id.to_s,
-      first_name:  first_name,
-      last_name:   last_name,
-      status:      'new',
-      source_id:   resolve_source_id(integration),
-      owner_id:    resolve_owner_id(integration),
-      utm_source:  'facebook',
-      utm_medium:  'paid_ad',
-      utm_campaign: raw['campaign_name'] || raw['campaign_id'],
-      utm_content:  raw['ad_name']       || raw['ad_id'],
-      social_intent: 'paid_ad',
-      survey_answers: answers.presence,
-      custom_field_values: cf_values.presence,
-      origin:      Lead::ORIGIN_FACEBOOK,
-      notes: build_notes(raw, leadgen_id, form_id, answers)
-    ).compact
+    builder = FacebookLeads::LeadBuilder.new(integration, company)
+    built = builder.build(raw, leadgen_id: leadgen_id, form_id: form_id)
+    lead_attrs = built.attrs
 
     # Someone already on file: fold the inquiry into their record and tell a
     # person, exactly as a Zapier lead does, instead of creating a duplicate.
-    if (match = identity_match(company, lead_attrs))
+    if (match = builder.identity_match(lead_attrs))
       # The absorber lists the raw answers itself, so hand it the metadata-only
       # note or every answer would appear twice.
-      repeat_attrs = lead_attrs.merge(notes: build_notes(raw, leadgen_id, form_id, {}))
-      absorb_repeat_inquiry(integration, company, match, repeat_attrs, answers, cf_values, cf_consumed)
+      repeat_attrs = lead_attrs.merge(notes: builder.notes(raw, leadgen_id, form_id, {}))
+      absorb_repeat_inquiry(integration, builder, company, match, repeat_attrs, built)
       return match.record
     end
 
     lead = Lead.create!(lead_attrs)
-    write_answers_note(lead, integration, answers)
+    builder.write_answers_note(lead, built.answers)
 
     integration.with_lock do
       integration.increment!(:lead_count)
@@ -129,116 +73,6 @@ class ProcessFacebookLeadJob < ApplicationJob
   end
 
   private
-
-  def parse_field_data(field_data)
-    field_data.each_with_object({}) do |entry, h|
-      name   = entry['name'].to_s.downcase
-      values = Array(entry['values'])
-      h[name] = values.length == 1 ? values.first : values
-    end
-  end
-
-  # Sort every answer into where it belongs. Returns
-  #   [column_attrs, answers, custom_field_values, custom_consumed_fb_keys]
-  #
-  # A dealer's mapping wins. After it, the built-in contact aliases. Anything
-  # still unplaced is matched against the company's lead custom fields by key
-  # or label, and whatever is left is kept as a question-and-answer pair.
-  # Nothing is dropped unless the dealer chose Ignore.
-  def route_fields(company, parsed, mapping)
-    mapping = (mapping.presence || {}).transform_keys { |k| k.to_s.downcase }
-    lead_cfs = company.custom_fields.active.for_module('leads').to_a
-
-    attrs = {}
-    answers = {}
-    cf_values = {}
-    cf_consumed = []
-
-    parsed.each do |fb_field, value|
-      target = mapping[fb_field].to_s.presence || DEFAULT_FIELD_MAPPING[fb_field]
-
-      next if target == IGNORE_TARGET
-
-      if target && LEAD_COLUMN_TARGETS.include?(target)
-        attrs[target] = value
-        next
-      end
-
-      field =
-        if target&.start_with?(IntakeForm::CUSTOM_FIELD_PREFIX)
-          key = target.delete_prefix(IntakeForm::CUSTOM_FIELD_PREFIX)
-          lead_cfs.find { |cf| cf.field_key.to_s == key }
-        elsif target.blank?
-          auto_match_custom_field(lead_cfs, fb_field)
-        end
-
-      if field && (cf_value = custom_field_value(field, value))
-        cf_values[field.field_key.to_s] = cf_value
-        cf_consumed << fb_field
-      end
-
-      # Custom-field answers are kept here too. The note is where a rep reads
-      # what the person said, and a custom field sits on another tab.
-      answers[fb_field] = value
-    end
-
-    [attrs, answers, cf_values, cf_consumed]
-  end
-
-  # Facebook sends a question's key as the question itself,
-  # "what_are_you_looking_for?", while a dealer's field reads "What are you
-  # looking for". Compared with punctuation stripped, like the Zapier path.
-  def auto_match_custom_field(lead_cfs, fb_field)
-    wanted = normalize_key(fb_field)
-    return nil if wanted.blank?
-
-    lead_cfs.find { |cf| normalize_key(cf.field_key) == wanted } ||
-      lead_cfs.find { |cf| normalize_key(cf.label.presence || cf.name) == wanted }
-  end
-
-  def normalize_key(key)
-    key.to_s.downcase.gsub(/[^a-z0-9]+/, '_').gsub(/\A_+|_+\z/, '')
-  end
-
-  # nil when the answer doesn't fit the field's own rules (a word in a number
-  # field, a choice the picklist lacks). It still reaches the note.
-  def custom_field_value(field, value)
-    value = value.join(', ') if value.is_a?(Array)
-    return nil if value.blank?
-
-    errors = (field.validate_value(value) rescue ['invalid'])
-    errors.present? ? nil : value
-  end
-
-  def split_name(attrs)
-    first = attrs['first_name']
-    last  = attrs['last_name']
-    return [first, last] if first.present? || last.present?
-
-    full = attrs['full_name'].to_s.strip
-    return [nil, nil] if full.blank?
-
-    parts = full.split(/\s+/, 2)
-    [parts[0], parts[1]]
-  end
-
-  def resolve_source_id(integration)
-    return integration.default_source_id if integration.default_source_id.present?
-
-    source = Source.find_or_create_by!(company_id: integration.company_id, name: 'Facebook') do |s|
-      s.source_type = 'paid_ad'
-      s.is_active   = true
-    end
-    integration.update_column(:default_source_id, source.id)
-    source.id
-  end
-
-  def resolve_owner_id(integration)
-    return integration.default_owner_id if integration.default_owner_id.present?
-
-    # Fallback: first company admin
-    User.where(company_id: integration.company_id, role: 'admin').order(:id).limit(1).pick(:id)
-  end
 
   def trigger_default_workflow(integration, lead)
     return unless integration.default_workflow_id.present?
@@ -286,62 +120,14 @@ class ProcessFacebookLeadJob < ApplicationJob
                 .detect { |rule| new_lead_rule?(rule) }
   end
 
-  def identity_match(company, lead_attrs)
-    return nil if lead_attrs[:email].blank? && lead_attrs[:phone].blank?
-
-    IdentityResolver.new(company, email: lead_attrs[:email], phone: lead_attrs[:phone]).resolve
-  end
-
-  def absorb_repeat_inquiry(integration, company, match, lead_attrs, answers, cf_values, cf_consumed)
+  def absorb_repeat_inquiry(integration, builder, company, match, lead_attrs, built)
     InboundInquiryAbsorber.new(
       company: company,
-      source_label: source_label(integration),
-      raw_answers: answers,
+      source_label: builder.source_label,
+      raw_answers: built.answers,
       # With no owner on the matched record, the page's default owner hears it.
       recipient_candidates: ->(_attrs) { [integration.default_owner_id] },
       origin: 'facebook_lead_ads'
-    ).call(match, lead_attrs, cf_values: cf_values, cf_consumed: cf_consumed)
-  end
-
-  def source_label(integration)
-    ['Facebook Lead Ads', integration.page_name.presence].compact.join(': ')
-  end
-
-  def build_notes(raw, leadgen_id, form_id, answers)
-    parts = ["Source: Facebook Lead Ad"]
-    parts << "Form ID: #{form_id}" if form_id.present?
-    parts << "Lead ID: #{leadgen_id}"
-    parts << "Campaign: #{raw['campaign_name']}" if raw['campaign_name'].present?
-    parts << "Ad: #{raw['ad_name']}" if raw['ad_name'].present?
-
-    lines = answer_lines(answers)
-    parts << "\nForm answers:\n#{lines.join("\n")}" if lines.any?
-    parts.join("\n")
-  end
-
-  # "what_are_you_looking_for?" reads as "What are you looking for?".
-  def answer_lines(answers)
-    answers.filter_map do |question, value|
-      value = value.join(', ') if value.is_a?(Array)
-      next if value.blank?
-
-      "#{question.to_s.tr('_', ' ').strip.capitalize}: #{value}"
-    end
-  end
-
-  # The CRM's Notes tab reads the notes table, not the lead's notes column, so
-  # the answers go there as well. Best effort: the lead already exists.
-  def write_answers_note(lead, integration, answers)
-    lines = answer_lines(answers)
-    return if lines.empty?
-
-    Note.create!(
-      entity_type: 'lead',
-      entity_id: lead.id.to_s,
-      content: "Facebook form answers\n\n#{lines.join("\n")}",
-      created_by_name: "System (#{source_label(integration)})"
-    )
-  rescue StandardError => e
-    Rails.logger.error "[ProcessFacebookLeadJob] answers note failed for lead #{lead.id}: #{e.class}: #{e.message}"
+    ).call(match, lead_attrs, cf_values: built.cf_values, cf_consumed: built.cf_consumed)
   end
 end

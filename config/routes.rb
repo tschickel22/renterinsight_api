@@ -1759,6 +1759,8 @@ Rails.application.routes.draw do
         member do
           post :refresh_token
           get  :lead_log
+          post :import_leads
+          get  :import_status
         end
       end
 
