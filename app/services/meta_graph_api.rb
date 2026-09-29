@@ -420,6 +420,35 @@ class MetaGraphApi
           limit:  50)
     end
 
+    LEAD_FIELDS = 'id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,platform'
+
+    # Every lead form on a Page, across pages of results.
+    def each_lead_form(page_id, access_token, &block)
+      each_page("/#{page_id}/leadgen_forms", access_token,
+                fields: 'id,name,status,created_time,leads_count', limit: 50, &block)
+    end
+
+    # A form's leads, optionally only those submitted after `since`. Meta keeps
+    # a lead available for 90 days.
+    def each_form_lead(form_id, access_token, since: nil, &block)
+      params = { fields: LEAD_FIELDS, limit: 100 }
+      if since
+        params[:filtering] = [{ field: 'time_created', operator: 'GREATER_THAN', value: since.to_i }].to_json
+      end
+      each_page("/#{form_id}/leads", access_token, **params, &block)
+    end
+
+    # Follows Graph's `after` cursor until the last page.
+    def each_page(path, access_token, **params)
+      after = nil
+      loop do
+        page = get(path, access_token, **params.merge(after ? { after: after } : {}))
+        Array(page['data']).each { |item| yield item }
+        after = page.dig('paging', 'cursors', 'after')
+        break if after.blank? || page.dig('paging', 'next').blank?
+      end
+    end
+
     # Exchange OAuth code for a user access token.
     def exchange_code_for_token(code, redirect_uri)
       get('/oauth/access_token', nil,

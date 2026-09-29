@@ -2,7 +2,7 @@
 
 class Api::V1::FacebookIntegrationsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_integration, only: %i[show update destroy refresh_token lead_log]
+  before_action :set_integration, only: %i[show update destroy refresh_token lead_log import_leads import_status]
 
   # GET /api/v1/facebook-integrations
   def index
@@ -94,6 +94,31 @@ class Api::V1::FacebookIntegrationsController < ApplicationController
         created_at: l.created_at
       }
     }
+  end
+
+  # POST /api/v1/facebook-integrations/:id/import_leads   { dry_run: true|false }
+  # Pulls the Page's last 90 days of Lead Ads leads. A dry run only counts.
+  def import_leads
+    return unless authorize_action!('integrations', 'update')
+
+    dry_run = params.key?(:dry_run) ? ActiveModel::Type::Boolean.new.cast(params[:dry_run]) : true
+    current = FacebookLeadImportJob.status_for(@integration)
+    if current['state'] == 'running' && Time.zone.parse(current['started_at'].to_s).to_i > 30.minutes.ago.to_i
+      return render json: { error: 'An import is already running for this Page.', status: current }, status: :conflict
+    end
+
+    status = { 'state' => 'queued', 'dry_run' => dry_run, 'requested_by_id' => current_user&.id,
+               'started_at' => Time.current.iso8601 }
+    FacebookLeadImportJob.write_status(@integration, status)
+    FacebookLeadImportJob.perform_later(@integration.id, dry_run: dry_run, requested_by_id: current_user&.id)
+    render json: { status: status }, status: :accepted
+  end
+
+  # GET /api/v1/facebook-integrations/:id/import_status
+  def import_status
+    return unless authorize_action!('integrations', 'read')
+
+    render json: { status: FacebookLeadImportJob.status_for(@integration) }
   end
 
   private
