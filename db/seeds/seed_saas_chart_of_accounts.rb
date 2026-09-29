@@ -108,6 +108,7 @@ class SaasChartOfAccountsSeeder
       { number: '6020', name: 'Advertising & Promotion', type: 'expense', sub: 'operating_expense' },
       { number: '6030', name: 'Sales Commissions', type: 'expense', sub: 'operating_expense' },
       { number: '6040', name: 'Marketing Software & Tools', type: 'expense', sub: 'operating_expense' },
+      { number: '6750', name: 'Merchant Processing Fees', type: 'expense', sub: 'operating_expense' },
 
       { number: '6100', name: 'Research & Development', type: 'expense', header: true },
       { number: '6110', name: 'Salaries – Engineering & Product', type: 'expense', sub: 'payroll_expense' },

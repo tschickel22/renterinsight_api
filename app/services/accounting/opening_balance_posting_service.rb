@@ -21,7 +21,11 @@ module Accounting
     # Returns the new entry, or nil when there is no opening balance. Raises
     # ActiveRecord::RecordInvalid if the entry can't be saved (for example
     # its date falls in a closed period), so callers can surface the reason.
-    def sync!
+    #
+    # legacy_conversion: the balance was already counted in every report
+    # (added at report time), so posting it into a now-closed period changes
+    # no closed figures. Only the conversion script passes this.
+    def sync!(legacy_conversion: false)
       ActiveRecord::Base.transaction do
         existing_entries.each(&:destroy!)
 
@@ -33,7 +37,8 @@ module Accounting
         value = amount.abs
 
         @company.journal_entries.create!(
-          entry_date: @account.opening_balance_date || Date.current,
+          allow_closed_period: legacy_conversion,
+          entry_date: entry_date,
           memo: "#{MEMO_PREFIX} — #{@account.account_number} #{@account.name}",
           source_type: 'auto',
           source_entity: @account,
@@ -45,6 +50,16 @@ module Accounting
           ]
         )
       end
+    end
+
+    # An opening balance with no date used to count on every report date, so
+    # it is dated no later than the company's first ledger entry, keeping it
+    # in reports run for earlier dates too.
+    def entry_date
+      return @account.opening_balance_date if @account.opening_balance_date
+
+      first = @company.journal_entries.in_ledger.where.not(source_entity: @account).minimum(:entry_date)
+      [first, Date.current].compact.min
     end
 
     def existing_entries
