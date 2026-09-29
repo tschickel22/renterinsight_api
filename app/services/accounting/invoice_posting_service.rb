@@ -10,6 +10,12 @@ module Accounting
     def post!
       return unless should_post?
       return if already_posted?
+      # A deal's invoice is booked by the deal's closing entry (GL approval
+      # debits AR and credits revenue for the sale). Approval then creates the
+      # invoice as 'sent', which auto-posted it too, so every approved deal was
+      # in AR and revenue twice. Payments on the invoice still post normally
+      # and reduce the same AR.
+      return if deal_invoice?
 
       settings = AccountingSettings.for_company(@company)
       ar_account = settings.default_ar_account
@@ -98,6 +104,17 @@ module Accounting
     end
 
     private
+
+    # The invoice for the deal's sale itself, which the closing entry books.
+    # DealInvoiceService sets `source: deal` (so source_type reads 'Deal', not
+    # 'deal_close') and the deal's deal_invoice_id. Other invoices merely linked
+    # to a deal (extra work billed later) are not in the closing entry and post.
+    def deal_invoice?
+      return true if @invoice.source_type.to_s.in?(%w[Deal deal_close])
+      return false if @invoice.deal_id.blank?
+
+      Deal.where(id: @invoice.deal_id, deal_invoice_id: @invoice.id).exists?
+    end
 
     def should_post?
       settings = AccountingSettings.for_company(@company)
