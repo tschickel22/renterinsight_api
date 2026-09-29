@@ -413,7 +413,11 @@ class ProcessNurtureStepJob < ApplicationJob
     context[:phone] = entity.phone if entity.respond_to?(:phone)
     context[:company_name] = entity.company&.name if entity.respond_to?(:company)
     context[:location_name] = entity.location&.name if entity.respond_to?(:location)
-    
+    # The owning rep's calendar, the same {{rep_booking_link}} campaigns and
+    # workflows fill. Always set so a rep without one leaves nothing literal.
+    owner = entity.respond_to?(:owner) ? entity.owner : nil
+    context[:rep_booking_link] = owner.try(:booking_url).presence || ''
+
     # Entity-specific fields
     case entity.class.name
     when 'Lead'

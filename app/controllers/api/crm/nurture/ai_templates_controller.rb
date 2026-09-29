@@ -241,10 +241,10 @@ module Api
           end
           if sender[:booking_url].present?
             lines << ''
-            lines << "Sender's booking link: #{sender[:booking_url]}"
-            lines << '  - For EMAIL bodies: render the booking link as an HTML anchor with short link text — `<a href="URL">Book here</a>` or `<a href="URL">View my calendar</a>`. Do NOT expose the raw URL.'
+            lines << 'Booking link: when a step calls for booking, write the merge field {{rep_booking_link}}, spelled exactly that way. When the message sends it becomes the booking link of the rep who owns the record, so each prospect gets their own rep\'s calendar. Never paste a raw calendar URL and never invent another field name (no {{booking_url}}, no {{entity.owner_booking_url}}).'
+            lines << '  - For EMAIL bodies: render it as an HTML anchor with short link text, `<a href="{{rep_booking_link}}">Book here</a>` or `<a href="{{rep_booking_link}}">View my calendar</a>`. Do NOT show the link text as a URL.'
             lines << '  - When emitting an `<a>` tag, the ENTIRE email body MUST be valid HTML — wrap each paragraph in `<p>...</p>` and the sign-off in `<p>` with `<br>` between sign-off lines. Without `<p>` wrappers the mail renderer falls back to plain text and the `<a>` tag shows raw.'
-            lines << '  - For SMS bodies: include the raw URL after framing text like "Book a time:" — SMS can\'t hyperlink.'
+            lines << '  - For SMS bodies: write it bare after framing text, like "Book a time: {{rep_booking_link}}". SMS can\'t hyperlink.'
             lines << "  - Don't shoehorn it into every step — only where booking is the right next action."
           end
           return '' if lines.empty?
