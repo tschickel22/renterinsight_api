@@ -950,7 +950,7 @@ module Api
         raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
         raw.stringify_keys.slice(
           'key', 'label', 'type', 'group', 'page', 'required', 'position',
-          'formula', 'options', 'format_as', 'placeholder', 'filled_by', 'merge_from'
+          'formula', 'options', 'format_as', 'placeholder', 'filled_by', 'merge_from', 'options_from'
         )
       end
 

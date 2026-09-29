@@ -4,7 +4,13 @@
 # It is a pure computation engine — no side effects, no DB writes.
 #
 # Formula syntax: starts with '=', references field keys, supports +, -, *, /
-# Functions: round(value, decimals), if(condition, true_val, false_val), percent_of(base, rate)
+# Functions: round(value, decimals), if(condition, true_val, false_val), percent_of(base, rate),
+#            sum(a, b, ...) where an argument may name a line-item column
+#
+# Besides the template's own fields, a formula may read merge fields
+# (deal.selling_price, vehicle.msrp, ...) passed in as `context`. A line-item
+# column such as deal.line_items_accessory.line_total sums every row
+# (deal.line_items_accessory[0].line_total, [1], ...).
 #
 # Usage:
 #   engine = FormulaEngine.new
@@ -16,9 +22,12 @@ class FormulaEngine
 
   VALID_FIELD_TYPES = %w[text currency percentage number date select checkbox formula].freeze
 
-  def evaluate(field_definitions, field_values)
+  # Merge field prefixes a formula may reference without a matching template field.
+  MERGE_PREFIXES = %w[contact account deal vehicle company date agreement invoice].freeze
+
+  def evaluate(field_definitions, field_values, context = {})
     @definitions = normalize_definitions(field_definitions)
-    @values = normalize_values(field_values)
+    @values = normalize_values(context).merge(normalize_values(field_values))
     @formula_fields = @definitions.select { |d| d['formula'].present? && d['formula'].to_s.start_with?('=') }
     @results = {}
 
@@ -43,6 +52,7 @@ class FormulaEngine
     expr = formula_str[1..]
     refs = extract_references(expr)
     unknown = refs - available_keys.map(&:to_s)
+    unknown.reject! { |ref| self.class.merge_reference?(ref) }
 
     if unknown.any?
       return { valid: false, error: "Unknown field(s): #{unknown.join(', ')}", referenced_fields: refs }
@@ -97,6 +107,10 @@ class FormulaEngine
     end
   end
 
+  def self.merge_reference?(ref)
+    MERGE_PREFIXES.include?(ref.to_s.split('.', 2).first) && ref.to_s.include?('.')
+  end
+
   private
 
   def normalize_definitions(defs)
@@ -113,7 +127,7 @@ class FormulaEngine
     # Remove function names, numbers, operators, and parens to find field key references
     cleaned = expr.dup
     # Remove function calls (keep args)
-    cleaned.gsub!(/\b(round|if|percent_of)\s*\(/, '(')
+    cleaned.gsub!(/\b(round|if|percent_of|sum)\s*\(/, '(')
     # Remove numeric literals (including decimals)
     cleaned.gsub!(/\b\d+(\.\d+)?\b/, '')
     # Remove operators and parens
@@ -286,6 +300,8 @@ class FormulaEngine
     when 'percent_of'
       raise InvalidFormulaError, "percent_of() requires 2 arguments" unless args.length == 2
       (args[0] * args[1]) / BigDecimal('100')
+    when 'sum'
+      args.sum(BigDecimal('0'))
     else
       raise InvalidFormulaError, "Unknown function: #{name}"
     end
@@ -309,11 +325,31 @@ class FormulaEngine
   end
 
   def resolve_value(key)
+    return sum_column(key) if !@values.key?(key) && (column = line_item_column(key)) && column.any?
+
     val = @values[key]
     return BigDecimal('0') if val.nil? || val.to_s.strip.empty?
 
-    BigDecimal(val.to_s)
+    BigDecimal(val.to_s.delete('$,'))
   rescue ArgumentError
     BigDecimal('0')
+  end
+
+  # deal.line_items_accessory.line_total -> values of
+  # deal.line_items_accessory[0].line_total, [1], ...
+  def line_item_column(key)
+    array, _, field = key.rpartition('.')
+    return [] if array.empty?
+
+    pattern = /\A#{Regexp.escape(array)}\[\d+\]\.#{Regexp.escape(field)}\z/
+    @values.select { |k, _| k.match?(pattern) }.values
+  end
+
+  def sum_column(key)
+    line_item_column(key).sum(BigDecimal('0')) do |v|
+      v.to_s.strip.empty? ? BigDecimal('0') : BigDecimal(v.to_s.delete('$,'))
+    rescue ArgumentError
+      BigDecimal('0')
+    end
   end
 end

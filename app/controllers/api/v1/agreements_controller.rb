@@ -676,8 +676,9 @@ module Api
           (params[:custom_field_values] || {}).to_unsafe_h
         )
 
+        merge_values = (@agreement.merge_field_values || {}).merge(formula_merge_values)
         engine = FormulaEngine.new
-        calculated = engine.evaluate(field_defs, input_values)
+        calculated = engine.evaluate(field_defs, input_values, merge_values)
 
         render json: { calculated_values: calculated }
       rescue FormulaEngine::CircularDependencyError, FormulaEngine::InvalidFormulaError => e
@@ -697,7 +698,7 @@ module Api
         input_values = (params[:custom_field_values] || {}).to_unsafe_h
 
         engine = FormulaEngine.new
-        calculated = engine.evaluate(template.custom_field_definitions, input_values)
+        calculated = engine.evaluate(template.custom_field_definitions, input_values, formula_merge_values)
 
         render json: { calculated_values: calculated }
       rescue FormulaEngine::CircularDependencyError, FormulaEngine::InvalidFormulaError => e
@@ -1193,12 +1194,24 @@ module Api
         ]
       end
 
+      # Merge field values the builder resolved (deal.*, vehicle.*, line items),
+      # so formulas can read deal data directly. Plain scalars only.
+      def formula_merge_values
+        raw = params[:merge_values]
+        raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+        return {} unless raw.is_a?(Hash)
+
+        raw.each_with_object({}) do |(k, v), out|
+          out[k.to_s] = v.to_s if FormulaEngine.merge_reference?(k) && (v.is_a?(String) || v.is_a?(Numeric))
+        end
+      end
+
       def agreement_custom_field_params
         raw = params[:custom_field] || params[:custom_field_definition] || {}
         raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
         raw.stringify_keys.slice(
           'key', 'label', 'type', 'group', 'page', 'required', 'position',
-          'formula', 'options', 'format_as', 'placeholder', 'filled_by', 'merge_from'
+          'formula', 'options', 'format_as', 'placeholder', 'filled_by', 'merge_from', 'options_from'
         )
       end
 

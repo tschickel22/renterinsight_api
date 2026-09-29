@@ -59,7 +59,7 @@ end
 
 # A field the rep fills (or that fills itself from the deal) in the builder.
 # The same key may be placed on several pages; it is defined once.
-def field(page, key, label, x, y, w, h = 1.6, type: 'text', group: 'general', merge_from: nil, formula: nil, options: nil)
+def field(page, key, label, x, y, w, h = 1.6, type: 'text', group: 'general', merge_from: nil, formula: nil, options: nil, options_from: nil)
   @definitions[key] ||= {
     'key' => key, 'label' => label, 'type' => type, 'group' => group, 'page' => page,
     'required' => false, 'position' => @definitions.size + 1, 'filled_by' => 'preparer'
@@ -67,6 +67,7 @@ def field(page, key, label, x, y, w, h = 1.6, type: 'text', group: 'general', me
     d['merge_from'] = merge_from if merge_from
     d['formula'] = formula if formula
     d['options'] = options if options
+    d['options_from'] = options_from if options_from
     d['format_as'] = 'currency' if type == 'currency'
   end
   place(page, "custom.#{key}", label, type, x, y, w, h, 'isCustomField' => true, 'isSignerField' => false)
@@ -137,11 +138,11 @@ merge 1, 'vehicle.model', 'Model', 23.6, 16.42, 26.3, 1.82
 merge 1, 'vehicle.year', 'Year', 52.45, 16.42, 8.25, 1.82
 merge 1, 'vehicle.bedrooms', 'Bedrooms', 65.57, 16.42, 5.78, 1.82
 merge 1, 'vehicle.bathrooms', 'Baths', 74.29, 16.42, 7.82, 1.82
-field 1, 'den', 'Den', 84.14, 16.42, 8.39, 1.82, group: 'unit'
+field 1, 'den', 'Den', 84.14, 16.42, 8.39, 1.82, group: 'unit', options: %w[Yes No N/A]
 merge 1, 'vehicle.serial_number', 'Serial Number', 13.78, 18.48, 19.49, 1.82
 merge 1, 'vehicle.condition', 'New / Used', 38.31, 18.48, 11.63, 1.82
 merge 1, 'vehicle.floor_size', 'Floor Size', 54.94, 18.48, 8.08, 1.82
-field 1, 'hitch_size', 'Hitch Size', 69.0, 18.48, 10.0, 1.82, group: 'unit'
+field 1, 'hitch_size', 'Hitch Size', 69.0, 18.48, 10.0, 1.82, group: 'unit', options_from: 'history'
 merge 1, 'vehicle.square_feet', 'Approx. Sq. Ft.', 82.84, 18.48, 9.69, 1.82
 
 # Price schedule. Lines fill from the deal and stay editable; the subtotals,
@@ -163,7 +164,7 @@ end
 price 'retail_price', 'Retail Price', 20.63, merge_from: 'deal.selling_price'
 price 'factory_direct_savings', 'Factory Direct Savings', 22.24, merge_from: 'deal.dealer_discount'
 price 'sub_total_1', 'Sub Total 1', 23.85, formula: '=retail_price - factory_direct_savings'
-price 'addendum_a_upgrades', 'Addendum "A" Upgrades', 27.07, merge_from: 'deal.accessory_total_from_lines'
+price 'addendum_a_upgrades', 'Addendum "A" Upgrades', 27.07, formula: '=sum(deal.line_items_accessory.line_total)'
 price 'sales_event_savings', 'Sales Event Savings', 28.57, merge_from: 'deal.sales_event_discount'
 price 'manager_discount', 'Manager Discount', 30.4, merge_from: 'deal.manager_discount'
 price 'preferred_payment_discount', 'Preferred Payment Discount (3%)', 32.1, merge_from: 'deal.preferred_payment_discount'
@@ -184,9 +185,10 @@ price 'down_payment', 'Down Payment', 59.53, merge_from: 'deal.down_payment'
 price 'additional_payment', 'Additional Payment as Agreed', 61.14, merge_from: 'deal.additional_payment'
 price 'unpaid_balance', 'Unpaid Balance', 62.75, formula: '=total - down_payment - additional_payment'
 
-field 1, 'completion_month', 'Approximate completion month', 19.94, 36.91, 17.48, 1.89, group: 'terms'
+field 1, 'completion_month', 'Approximate completion month', 19.94, 36.91, 17.48, 1.89, group: 'terms', options_from: 'history'
 field 1, 'notations_remarks', 'Notations & Remarks', 7.73, 57.83, 42.1, 6.2, group: 'remarks'
-field 1, 'balance_due_by', 'Unpaid balance due on or before', 49.9, 67.64, 14.55, 1.14, group: 'terms'
+field 1, 'balance_due_by', 'Unpaid balance due on or before', 49.9, 67.64, 14.55, 1.14, group: 'terms',
+      options: ['Per Lender Guidelines', 'At delivery', '7 business days prior to completion'], options_from: 'history'
 field 1, 'additional_terms', 'Additional terms (shaded box)', 7.57, 69.09, 84.88, 3.44, group: 'remarks'
 
 initials_pair 1, 26.35, 23.6, 30.25                  # construction & final payment
@@ -261,8 +263,21 @@ APPLIANCE_FROM_HOME = {
   'appl_range' => 'vehicle.oven', 'appl_water_heater' => 'vehicle.water_heater_type',
   'appl_ac_ready' => 'vehicle.central_air', 'appl_amperage' => 'vehicle.electrical_service'
 }.freeze
+YES_NO = %w[Yes No N/A].freeze
+APPLIANCE_CHOICES = Hash.new(YES_NO).merge(
+  'appl_furnace_type' => ['Electric', 'Gas', 'Propane', 'Heat pump'],
+  'appl_dryer_hookup_type' => %w[Electric Gas], 'appl_range_hookup_type' => %w[Electric Gas],
+  'appl_range_type' => %w[Electric Gas], 'appl_water_heater' => %w[Electric Gas Propane],
+  'appl_water_heater_size' => ['30 gal', '40 gal', '50 gal'],
+  'appl_appliance_color' => %w[Black White Stainless Bisque],
+  'appl_dishwasher_door_option' => %w[Black White Stainless N/A],
+  'appl_refrigerator_size' => ['18 cu ft', '21 cu ft', '25 cu ft', 'Side by side'],
+  'appl_amperage' => ['100 AMP', '200 AMP'],
+  'appl_gas_service_on_home_site_to_be' => ['Natural gas', 'Propane', 'None']
+).freeze
 APPLIANCE_ROWS.each do |key, label, y|
-  field 3, key, label, 52.1, y, 37.88, 1.7, group: 'appliances', merge_from: APPLIANCE_FROM_HOME[key]
+  field 3, key, label, 52.1, y, 37.88, 1.7, group: 'appliances', merge_from: APPLIANCE_FROM_HOME[key],
+                                               options: APPLIANCE_CHOICES[key], options_from: 'history'
 end
 signature_block 3, rep: [8.5, 80.2, 33.0, 2.38], mgr: [8.5, 84.6, 33.0, 2.38],
                    b1: [49.84, 80.2, 29.1, 2.38], b2: [49.84, 84.48, 29.1, 2.38],
@@ -340,8 +355,9 @@ COLOR_FROM_HOME = {
   'color_interior_color' => 'vehicle.interior_color', 'color_exterior_body_color' => 'vehicle.exterior_color',
   'color_exterior_shingles' => 'vehicle.roof_material'
 }.freeze
+# Finishes and colors: suggest what this dealer has chosen before on this form.
 COLOR_ROWS.each do |key, label, x, y, w|
-  field 4, key, label, x, y, w, 1.35, group: 'colors', merge_from: COLOR_FROM_HOME[key]
+  field 4, key, label, x, y, w, 1.35, group: 'colors', merge_from: COLOR_FROM_HOME[key], options_from: 'history'
 end
 field 4, 'color_notes', 'Color notes', 8.62, 69.73, 83.14, 9.01, group: 'colors'
 signature_block 4, rep: REP_BOX, mgr: MGR_BOX,
