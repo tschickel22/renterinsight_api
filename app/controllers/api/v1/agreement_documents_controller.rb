@@ -41,15 +41,14 @@ module Api
         end
 
         begin
-          s3_service = S3UploadService.new
           folder = "agreements/#{@company.id}/documents"
 
           if is_word
             # Convert DOCX/DOC to PDF, upload both
-            upload_word_document(file, s3_service, folder)
+            upload_word_document(file, folder)
           else
             # Upload PDF directly
-            upload_pdf_document(file, s3_service, folder)
+            upload_pdf_document(file, folder)
           end
 
         rescue DocumentConversionService::ConversionError => e
@@ -76,8 +75,10 @@ module Api
         end
 
         begin
-          s3_service = S3UploadService.new
-          s3_service.delete(s3_key)
+          # New uploads live in the private bucket; older ones may still be in the legacy bucket.
+          [PrivateFiles.bucket, PrivateFiles.legacy_bucket].uniq.each do |b|
+            PrivateFiles.delete(PrivateFiles.ref(s3_key, b))
+          end
           render json: { message: 'Document deleted' }
         rescue => e
           Rails.logger.error "Agreement document S3 delete failed: #{e.message}"
@@ -102,47 +103,38 @@ module Api
           return render json: { error: 'Agreement not found' }, status: :not_found
         end
 
+        # Only this company's stored files. The URLs come from the client, and
+        # fetching them as given let anyone make the server request any address.
+        unless pdf_urls.all? { |u| PrivateFiles.owned_by?(u, @company.id) }
+          return render json: { error: 'Access denied' }, status: :forbidden
+        end
+
         begin
           require 'combine_pdf'
-          require 'open-uri'
 
           combined = CombinePDF.new
 
           pdf_urls.each_with_index do |url, idx|
-            Rails.logger.info "[AgreementDocuments] Merging PDF #{idx + 1}/#{pdf_urls.length}: #{url.truncate(80)}"
-            pdf_data = URI.open(url).read
+            Rails.logger.info "[AgreementDocuments] Merging PDF #{idx + 1}/#{pdf_urls.length}"
+            pdf_data = PrivateFiles.read(url, company_id: @company.id)
             combined << CombinePDF.parse(pdf_data)
           end
 
-          # Write merged PDF to temp file
-          tmp = Tempfile.new(['merged', '.pdf'])
-          combined.save(tmp.path)
-          tmp.rewind
+          key = "agreements/#{@company.id}/documents/#{Time.now.to_i}_merged_#{SecureRandom.hex(6)}.pdf"
+          ref = PrivateFiles.put(combined.to_pdf, key: key, content_type: 'application/pdf')
 
-          # Upload merged PDF to S3
-          s3_service = S3UploadService.new
-          folder = "agreements/#{@company.id}/documents"
-
-          upload_file = ActionDispatch::Http::UploadedFile.new(
-            tempfile: tmp,
-            filename: "merged_#{SecureRandom.hex(6)}.pdf",
-            type: 'application/pdf'
-          )
-
-          s3_result = s3_service.upload(upload_file, folder: folder)
-
-          # Update agreement with merged PDF URL and store individual URLs
+          # Update agreement with merged PDF and store the individual files
           agreement.update!(
-            document_url: s3_result[:url],
+            document_url: ref,
             document_urls: pdf_urls,
             content_type: 'pdf_upload'
           )
 
-          Rails.logger.info "[AgreementDocuments] Merged #{pdf_urls.length} PDFs for agreement #{agreement_id} → #{s3_result[:url].truncate(80)}"
+          Rails.logger.info "[AgreementDocuments] Merged #{pdf_urls.length} PDFs for agreement #{agreement_id} → #{key}"
 
           render json: {
-            document_url: s3_result[:url],
-            s3_key: s3_result[:key],
+            document_url: agreement.document_url_link,
+            s3_key: key,
             page_count: combined.pages.length,
             source_count: pdf_urls.length
           }, status: :ok
@@ -153,9 +145,6 @@ module Api
         rescue => e
           Rails.logger.error "[AgreementDocuments] Merge failed: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
           render json: { error: "Merge failed: #{e.message}" }, status: :internal_server_error
-        ensure
-          tmp&.close
-          tmp&.unlink
         end
       end
 
@@ -177,11 +166,11 @@ module Api
       private
 
       # Upload a PDF directly to S3
-      def upload_pdf_document(file, s3_service, folder)
-        s3_result = s3_service.upload(file, folder: folder)
+      def upload_pdf_document(file, folder)
+        s3_result = PrivateFiles.upload(file, folder: folder)
 
         render json: {
-          url: s3_result[:url],
+          url: PrivateFiles.url(s3_result[:ref]),
           s3_key: s3_result[:key],
           filename: file.original_filename,
           size: s3_result[:size],
@@ -191,9 +180,9 @@ module Api
       end
 
       # Convert Word doc to PDF, upload both original + PDF to S3
-      def upload_word_document(file, s3_service, folder)
+      def upload_word_document(file, folder)
         # 1. Upload original Word doc to S3 (for reference/download)
-        original_result = s3_service.upload(file, folder: "#{folder}/originals")
+        original_result = PrivateFiles.upload(file, folder: "#{folder}/originals")
 
         # 2. Convert to PDF
         conversion = DocumentConversionService.to_pdf(file)
@@ -208,16 +197,16 @@ module Api
             type: 'application/pdf'
           )
 
-          pdf_result = s3_service.upload(pdf_upload, folder: folder)
+          pdf_result = PrivateFiles.upload(pdf_upload, folder: folder)
 
           render json: {
-            url: pdf_result[:url],              # PDF URL for preview/signing
+            url: PrivateFiles.url(pdf_result[:ref]),  # PDF link for preview/signing
             s3_key: pdf_result[:key],
             filename: conversion[:pdf_filename],
             size: pdf_result[:size],
             content_type: 'application/pdf',
             converted: true,
-            original_url: original_result[:url],  # Original Word doc URL
+            original_url: PrivateFiles.url(original_result[:ref]),  # Original Word doc link
             original_s3_key: original_result[:key],
             original_filename: file.original_filename,
             original_content_type: file.content_type

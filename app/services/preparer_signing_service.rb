@@ -47,9 +47,9 @@ class PreparerSigningService
     end
 
     @agreement.update!(document_url: upload_url)
-    Rails.logger.info("[PreparerSigningService] Stamped #{preparer_placements.size} preparer fields, new document_url: #{upload_url}")
+    Rails.logger.info("[PreparerSigningService] Stamped #{preparer_placements.size} preparer fields")
 
-    { success: true, document_url: upload_url }
+    { success: true, document_url: PrivateFiles.url(upload_url) }
   rescue => e
     Rails.logger.error("[PreparerSigningService] Error: #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.first(5).join("\n"))
@@ -241,8 +241,9 @@ class PreparerSigningService
     nil
   end
 
+  # PrivateFiles only fetches files we stored, never an arbitrary URL.
   def download_pdf(url)
-    URI.open(url, ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE).read
+    PrivateFiles.read(url)
   rescue => e
     Rails.logger.error("[PreparerSigningService] PDF download error: #{e.message}")
     nil
@@ -252,7 +253,7 @@ class PreparerSigningService
     return nil if url.blank?
     tempfile = Tempfile.new(['sig', '.png'])
     tempfile.binmode
-    data = URI.open(url, ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE).read
+    data = PrivateFiles.read(url)
     tempfile.write(data)
     tempfile.rewind
     tempfile
@@ -261,30 +262,13 @@ class PreparerSigningService
     nil
   end
 
+  # @return [String, nil] the stored reference
   def upload_pdf(pdf_data)
-    tmp = Tempfile.new(['preparer_signed', '.pdf'])
-    tmp.binmode
-    tmp.write(pdf_data)
-    tmp.rewind
-
-    begin
-      s3_service = S3UploadService.new
-      folder = "agreements/#{@company.id}/#{@agreement.id}/preparer_signed"
-
-      upload_file = ActionDispatch::Http::UploadedFile.new(
-        tempfile: tmp,
-        filename: "preparer_signed_#{@agreement.agreement_number}_#{SecureRandom.hex(6)}.pdf",
-        type: 'application/pdf'
-      )
-
-      result = s3_service.upload(upload_file, folder: folder)
-      result[:url]
-    rescue => e
-      Rails.logger.error("[PreparerSigningService] S3 upload failed: #{e.message}")
-      nil
-    ensure
-      tmp.close rescue nil
-      tmp.unlink rescue nil
-    end
+    key = "agreements/#{@company.id}/#{@agreement.id}/preparer_signed/" \
+          "#{Time.now.to_i}_preparer_signed_#{@agreement.agreement_number}_#{SecureRandom.hex(6)}.pdf"
+    PrivateFiles.put(pdf_data, key: key, content_type: 'application/pdf')
+  rescue => e
+    Rails.logger.error("[PreparerSigningService] S3 upload failed: #{e.message}")
+    nil
   end
 end

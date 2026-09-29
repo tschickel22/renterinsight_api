@@ -1,4 +1,8 @@
 class AgreementSigner < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :signature_url, :initials_url
+
   belongs_to :agreement
   belongs_to :signable, polymorphic: true, optional: true
 

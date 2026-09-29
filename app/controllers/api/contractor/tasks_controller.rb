@@ -244,7 +244,7 @@ module Api
           review_status: assignment.review_status,
           submitted_for_review_at: assignment.submitted_for_review_at,
           completion_summary: assignment.completion_summary,
-          completion_photos: assignment.completion_photos || [],
+          completion_photos: assignment.completion_photos_links,
           reviewed_at: assignment.reviewed_at,
           review_notes: assignment.review_notes,
           revision_notes: assignment.revision_notes,
@@ -293,7 +293,7 @@ module Api
           author_name: log.author_name || log.contractor&.name || log.user&.full_name || 'Unknown',
           note: log.note,
           log_type: log.log_type,
-          attachments: log.attachments || [],
+          attachments: log.attachments_links,
           logged_at: log.logged_at,
           created_at: log.created_at
         }

@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class ProjectDocument < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :file_url
+
   CATEGORIES = %w[permit inspection photo contract invoice drawing report checklist other].freeze
 
   belongs_to :company

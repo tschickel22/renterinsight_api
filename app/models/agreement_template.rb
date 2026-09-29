@@ -1,4 +1,9 @@
 class AgreementTemplate < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :document_url, :example_document_url
+  private_file_lists :document_urls
+
   belongs_to :company
   belongs_to :agreement_category, optional: true
   belongs_to :location, optional: true

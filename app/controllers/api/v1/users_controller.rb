@@ -173,8 +173,8 @@ module Api
       # GET /api/v1/users/me/signature
       def my_signature
         render json: {
-          signature_url: current_user.signature_url,
-          initials_url: current_user.initials_url,
+          signature_url: current_user.signature_url_link,
+          initials_url: current_user.initials_url_link,
           typed_signature: current_user.typed_signature,
           typed_initials: current_user.typed_initials,
           signature_font: current_user.signature_font,
@@ -190,6 +190,16 @@ module Api
           :typed_signature, :typed_initials, :signature_font
         )
 
+        # A saved signature must be this company's own file (or a drawn data
+        # URI). It gets read and stamped into PDFs, so another tenant's file or
+        # an outside URL is refused.
+        %i[signature_url initials_url].each do |k|
+          v = sig_params[k]
+          next if v.blank? || v.to_s.start_with?('data:') || PrivateFiles.owned_by?(v, current_user.company_id)
+
+          return render json: { error: 'Invalid signature file' }, status: :unprocessable_entity
+        end
+
         # Handle base64 signature data — upload to S3 if provided
         if params[:signature_data].present? && params[:signature_data].to_s.start_with?('data:')
           sig_params[:signature_url] = upload_signature_image(params[:signature_data], 'signature')
@@ -201,8 +211,8 @@ module Api
         current_user.update!(sig_params.to_h.compact_blank)
 
         render json: {
-          signature_url: current_user.signature_url,
-          initials_url: current_user.initials_url,
+          signature_url: current_user.signature_url_link,
+          initials_url: current_user.initials_url_link,
           typed_signature: current_user.typed_signature,
           typed_initials: current_user.typed_initials,
           signature_font: current_user.signature_font,
@@ -474,27 +484,12 @@ module Api
         )
       end
 
+      # @return [String] the stored reference
       def upload_signature_image(data_uri, type)
         raw_data = data_uri.to_s.sub(/^data:image\/\w+;base64,/, '')
-        decoded = Base64.decode64(raw_data)
-
-        tmp = Tempfile.new(["user_#{type}", '.png'])
-        tmp.binmode
-        tmp.write(decoded)
-        tmp.rewind
-
-        s3_service = S3UploadService.new
-        folder = "users/#{current_user.company_id}/#{current_user.id}/signatures"
-        upload_file = ActionDispatch::Http::UploadedFile.new(
-          tempfile: tmp,
-          filename: "#{type}_#{SecureRandom.hex(6)}.png",
-          type: 'image/png'
-        )
-        result = s3_service.upload(upload_file, folder: folder)
-        result[:url]
-      ensure
-        tmp&.close rescue nil
-        tmp&.unlink rescue nil
+        key = "users/#{current_user.company_id}/#{current_user.id}/signatures/" \
+              "#{Time.now.to_i}_#{type}_#{SecureRandom.hex(6)}.png"
+        PrivateFiles.put(Base64.decode64(raw_data), key: key, content_type: 'image/png')
       end
 
       def user_json(user, include_locations: false)

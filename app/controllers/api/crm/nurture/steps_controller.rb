@@ -91,12 +91,12 @@ module Api
           end
 
           begin
-            s3_service = S3UploadService.new
             folder = "nurture_attachments/#{@company.id}/#{@sequence.id}/#{step.id}"
-            s3_result = s3_service.upload(file, folder: folder)
+            s3_result = PrivateFiles.upload(file, folder: folder)
 
             entry = {
               's3_key'        => s3_result[:key],
+              'file_ref'      => s3_result[:ref],
               'filename'      => file.original_filename,
               'size'          => s3_result[:size],
               'content_type'  => s3_result[:content_type],
@@ -166,7 +166,7 @@ module Api
             when 'tracked_link'
               tracked_link = TrackedLink.create_for_attachment!(
                 company:      @company,
-                s3_key:       att['s3_key'],
+                s3_key:       att['file_ref'].presence || att['s3_key'],
                 filename:     att['filename'],
                 content_type: att['content_type'],
                 file_size:    att['size'],
@@ -280,7 +280,8 @@ module Api
           end
 
           begin
-            S3UploadService.new.delete(s3_key)
+            att = Array(step.attachments).find { |a| a['s3_key'] == s3_key }
+            PrivateFiles.delete(att&.dig('file_ref').presence || s3_key)
             remaining = Array(step.attachments).reject { |a| a['s3_key'] == s3_key }
             step.update!(attachments: remaining)
             render json: { message: 'Attachment removed' }
@@ -385,19 +386,9 @@ module Api
         end
 
         def download_attachment_for_test(att)
-          require 'aws-sdk-s3'
-          s3_client = Aws::S3::Client.new(
-            region:            ENV['AWS_REGION'] || 'us-west-2',
-            access_key_id:     ENV['AWS_ACCESS_KEY_ID'],
-            secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
-          )
-          bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
-
           tempfile = Tempfile.new(['nurture_test_att', File.extname(att['filename'].to_s)])
           tempfile.binmode
-          s3_client.get_object({ bucket: bucket, key: att['s3_key'] }) do |chunk|
-            tempfile.write(chunk)
-          end
+          tempfile.write(PrivateFiles.read(att['file_ref'].presence || att['s3_key']))
           tempfile.rewind
 
           ActionDispatch::Http::UploadedFile.new(

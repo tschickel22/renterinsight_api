@@ -543,10 +543,11 @@ class AgreementPdfService
 
   # ── Download helpers ─────────────────────────────────────────────────
 
-  # Use URI.open — same approach as AgreementDocumentsController#merge which works
+  # Read through PrivateFiles, which only fetches files we stored (private
+  # bucket, or the legacy public bucket for rows not yet migrated).
   def download_pdf(url)
-    Rails.logger.info("[AgreementPdfService] Downloading PDF from: #{url}")
-    data = URI.open(url, ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE).read
+    Rails.logger.info("[AgreementPdfService] Downloading PDF from: #{PrivateFiles.locate(url)&.last || 'data URI'}")
+    data = PrivateFiles.read(url)
     Rails.logger.info("[AgreementPdfService] Downloaded #{data.size} bytes")
     data
   rescue => e
@@ -560,7 +561,7 @@ class AgreementPdfService
     tempfile = Tempfile.new(['sig', '.png'])
     tempfile.binmode
 
-    data = URI.open(url, ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE).read
+    data = PrivateFiles.read(url)
     tempfile.write(data)
     tempfile.rewind
     tempfile
@@ -569,37 +570,18 @@ class AgreementPdfService
     nil
   end
 
-  # ── S3 upload (uses same S3UploadService as rest of app) ─────────────
+  # ── Upload to the private bucket ─────────────────────────────────────
 
+  # @return [String, nil] the stored reference
   def upload_sealed_pdf(pdf_data)
-    # Write to temp file
-    tmp = Tempfile.new(['sealed', '.pdf'])
-    tmp.binmode
-    tmp.write(pdf_data)
-    tmp.rewind
-
-    begin
-      s3_service = S3UploadService.new
-      folder = "agreements/#{@company.id}/sealed"
-
-      # Create an upload-like object that S3UploadService expects
-      upload_file = ActionDispatch::Http::UploadedFile.new(
-        tempfile: tmp,
-        filename: "sealed_#{@agreement.agreement_number}_#{SecureRandom.hex(6)}.pdf",
-        type: 'application/pdf'
-      )
-
-      result = s3_service.upload(upload_file, folder: folder)
-      Rails.logger.info("[AgreementPdfService] S3 upload result: #{result[:url]}")
-      result[:url]
-    rescue => e
-      Rails.logger.error("[AgreementPdfService] S3 upload failed: #{e.class}: #{e.message}")
-      Rails.logger.error(e.backtrace.first(5).join("\n"))
-      nil
-    ensure
-      tmp.close rescue nil
-      tmp.unlink rescue nil
-    end
+    key = "agreements/#{@company.id}/sealed/#{Time.now.to_i}_sealed_#{@agreement.agreement_number}_#{SecureRandom.hex(6)}.pdf"
+    ref = PrivateFiles.put(pdf_data, key: key, content_type: 'application/pdf')
+    Rails.logger.info("[AgreementPdfService] Sealed PDF stored at #{key}")
+    ref
+  rescue => e
+    Rails.logger.error("[AgreementPdfService] S3 upload failed: #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.first(5).join("\n"))
+    nil
   end
 
   # ── qpdf fallback for PDFs that CombinePDF cannot parse ──────────────

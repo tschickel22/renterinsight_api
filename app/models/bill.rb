@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class Bill < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_attachments :attachments, %w[url]
+
   include Reportable
   include GlPostTracking
 

@@ -47,8 +47,8 @@ module Api
           end
 
           begin
-            result = S3UploadService.new.upload(file, folder: "vehicles/#{@company.id}/#{@vehicle.id}/documents")
-            attrs[:file_url] = result[:url]
+            result = PrivateFiles.upload(file, folder: "vehicles/#{@company.id}/#{@vehicle.id}/documents")
+            attrs[:file_url] = result[:ref]
             attrs[:file_content_type] = file.content_type
             attrs[:file_size] = file.size
             attrs[:title] = attrs[:title].presence || file.original_filename
@@ -135,7 +135,7 @@ module Api
           title: doc.title,
           category: doc.category,
           visibility: doc.visibility,
-          file_url: doc.file_url,
+          file_url: doc.file_url_link,
           file_content_type: doc.file_content_type,
           file_size: doc.file_size,
           uploaded_by_user_id: doc.uploaded_by_user_id,

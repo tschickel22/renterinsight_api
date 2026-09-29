@@ -145,10 +145,9 @@ module Api
         render json: { error: 'Not found' }, status: :not_found unless @job
       end
 
+      # Dealer data files are confidential: private bucket, stored as a reference.
       def upload_to_s3(file, folder:)
-        svc = S3UploadService.new
-        result = svc.upload(file, folder: folder)
-        result[:key]
+        PrivateFiles.upload(file, folder: folder)[:ref]
       end
 
       def parse_array(val)

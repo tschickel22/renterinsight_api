@@ -76,6 +76,8 @@ Rails.application.routes.draw do
 
   # Public tokenized tracked-link redirects (nurture/campaign attachments)
   get 't/:token', to: 'public/tracked_links#show', as: :tracked_link_redirect
+  # Durable links to private files (custom field uploads). See PrivateFiles.durable_url.
+  get 'pf/:token', to: 'public/private_files#show', as: :private_file_redirect, constraints: { token: /[^\/]+/ }
 
   # ==================== PUBLIC CHAMPION LEAD ACCEPT/DECLINE (No Auth Required) ====================
   # One-click Accept/Decline links sent in the Champion lead notification email.

@@ -278,12 +278,11 @@ module Api
         end
 
         begin
-          s3_service = S3UploadService.new
           folder = "agreements/#{@company.id}/#{@agreement.id}/signed"
-          result = s3_service.upload(file, folder: folder)
+          result = PrivateFiles.upload(file, folder: folder)
 
           @agreement.update!(
-            sealed_document_url: result[:url],
+            sealed_document_url: result[:ref],
             status: Agreement::STATUS_COMPLETED
           )
 
@@ -295,7 +294,7 @@ module Api
           )
 
           render json: {
-            sealed_document_url: result[:url],
+            sealed_document_url: @agreement.sealed_document_url_link,
             status: 'completed',
             message: 'Signed document uploaded successfully'
           }
@@ -496,7 +495,8 @@ module Api
         end
 
         AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_DOWNLOADED, performed_by: current_user)
-        render json: { url: url, filename: "#{@agreement.agreement_number}.pdf" }
+        filename = "#{@agreement.agreement_number}.pdf"
+        render json: { url: PrivateFiles.url(url, filename: filename, disposition: 'attachment'), filename: filename }
       end
 
       # GET /api/v1/agreements/:id/certificate
@@ -537,6 +537,15 @@ module Api
 
         unless @agreement.can_edit?
           return render json: { error: 'Agreement must be in draft status' }, status: :unprocessable_entity
+        end
+
+        # Signature images are stamped into the PDF, so only a data URI or this
+        # company's own stored file is accepted.
+        [params[:signature_url], params[:initials_url]].each do |v|
+          next if v.blank? || v.to_s.start_with?('data:') || PrivateFiles.owned_by?(v, @company.id)
+          next unless v.to_s.include?('://')
+
+          return render json: { error: 'Invalid signature file' }, status: :unprocessable_entity
         end
 
         # Find or create preparer signer for current user
@@ -1064,13 +1073,12 @@ module Api
           end
 
           begin
-            s3_service = S3UploadService.new
             folder = "agreements/#{@company.id}/#{@agreement.id}/attachments"
-            result = s3_service.upload(file, folder: folder)
+            result = PrivateFiles.upload(file, folder: folder)
 
             attachment = @agreement.agreement_attachments.new(
               filename: file.original_filename,
-              file_url: result[:url],
+              file_url: result[:ref],
               file_content_type: file.content_type,
               byte_size: file.size,
               attached_by: current_user
@@ -1300,10 +1308,10 @@ module Api
           data.merge!(
             content: agreement.content,
             document_url: agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? ?
-              agreement.sealed_document_url : agreement.document_url,
-            sealed_document_url: agreement.sealed_document_url,
-            original_document_url: agreement.document_url,
-            document_urls: agreement.document_urls,
+              agreement.sealed_document_url_link : agreement.document_url_link,
+            sealed_document_url: agreement.sealed_document_url_link,
+            original_document_url: agreement.document_url_link,
+            document_urls: agreement.document_urls_links,
             custom_field_definitions: agreement.custom_field_definitions,
             template_id: agreement.agreement_template_id,
             template_name: agreement.agreement_template&.name,
@@ -1339,7 +1347,7 @@ module Api
               {
                 id: a.id,
                 filename: a.filename,
-                file_url: a.file_url,
+                file_url: a.file_url_link,
                 content_type: a.file_content_type,
                 file_size: a.byte_size,
                 byte_size: a.byte_size,

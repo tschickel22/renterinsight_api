@@ -66,12 +66,12 @@ class Api::V1::CampaignStepsController < ApplicationController
     end
 
     begin
-      s3_service = S3UploadService.new
       folder = "campaign_attachments/#{@company.id}/#{@campaign.id}/#{@step.id}"
-      s3_result = s3_service.upload(file, folder: folder)
+      s3_result = PrivateFiles.upload(file, folder: folder)
 
       entry = {
         's3_key'        => s3_result[:key],
+        'file_ref'      => s3_result[:ref],
         'filename'      => file.original_filename,
         'size'          => s3_result[:size],
         'content_type'  => s3_result[:content_type],
@@ -101,7 +101,8 @@ class Api::V1::CampaignStepsController < ApplicationController
     return render(json: { error: 'Access denied' }, status: :forbidden) unless s3_key.start_with?(expected_prefix)
 
     begin
-      S3UploadService.new.delete(s3_key)
+      att = Array(@step.attachments).map(&:deep_stringify_keys).find { |a| a['s3_key'] == s3_key }
+      PrivateFiles.delete(att&.dig('file_ref').presence || s3_key)
       remaining = Array(@step.attachments).map(&:deep_stringify_keys).reject { |a| a['s3_key'] == s3_key }
       @step.update!(attachments: remaining)
       render json: { attachments: remaining }

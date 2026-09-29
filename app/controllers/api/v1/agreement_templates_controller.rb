@@ -364,7 +364,7 @@ module Api
         # without requiring users to manually clear cache.
         if @template.document_url.present?
           begin
-            pdf_data = Net::HTTP.get(URI(@template.document_url))
+            pdf_data = PrivateFiles.read(@template.document_url)
             reader = PDF::Reader.new(StringIO.new(pdf_data))
             root = reader.objects.deref(reader.objects.trailer[:Root])
             has_acroform = root[:AcroForm].present?
@@ -473,24 +473,17 @@ module Api
         end
 
         begin
-          s3_service = S3UploadService.new
           folder = "agreements/#{@company.id}/example_documents"
-          s3_result = s3_service.upload(file, folder: folder)
+          s3_result = PrivateFiles.upload(file, folder: folder)
 
-          # Optionally delete old example document from S3
-          if @template.example_document_url.present?
-            begin
-              old_key = extract_s3_key(@template.example_document_url)
-              s3_service.delete(old_key) if old_key.present?
-            rescue => e
-              Rails.logger.warn "[ExampleDoc] Failed to delete old example doc: #{e.message}"
-            end
-          end
+          # Delete the old example document, but only one this company owns.
+          old = @template.example_document_url
+          PrivateFiles.delete(old) if old.present? && PrivateFiles.owned_by?(old, @company.id)
 
-          @template.update!(example_document_url: s3_result[:url])
+          @template.update!(example_document_url: s3_result[:ref])
 
           render json: {
-            example_document_url: s3_result[:url],
+            example_document_url: @template.example_document_url_link,
             s3_key: s3_result[:key],
             filename: file.original_filename,
             size: s3_result[:size],
@@ -511,16 +504,9 @@ module Api
           return render json: { error: 'No example document to remove' }, status: :not_found
         end
 
-        begin
-          # Delete from S3
-          s3_key = extract_s3_key(@template.example_document_url)
-          if s3_key.present?
-            s3_service = S3UploadService.new
-            s3_service.delete(s3_key)
-          end
-        rescue => e
-          Rails.logger.warn "[ExampleDoc] Failed to delete from S3: #{e.message}"
-        end
+        # Delete from S3, but only a file this company owns.
+        old = @template.example_document_url
+        PrivateFiles.delete(old) if PrivateFiles.owned_by?(old, @company.id)
 
         @template.update!(example_document_url: nil)
         render json: { message: 'Example document removed' }
@@ -940,9 +926,9 @@ module Api
         if detailed
           data.merge!(
             content: template.content,
-            document_url: template.document_url,
-            document_urls: template.document_urls,
-            example_document_url: template.example_document_url,
+            document_url: template.document_url_link,
+            document_urls: template.document_urls_links,
+            example_document_url: template.example_document_url_link,
             merge_fields: template.merge_fields,
             field_placements: template.field_placements,
             merge_field_placements: template.merge_field_placements,
@@ -1049,21 +1035,6 @@ module Api
           month: Time.current.strftime('%B %Y'),
           unit: 'pages'
         }
-      end
-
-      # Extract S3 key from a full S3 URL
-      def extract_s3_key(url)
-        return nil if url.blank?
-        uri = URI.parse(url)
-        # S3 URLs: https://bucket.s3.region.amazonaws.com/key or https://s3.region.amazonaws.com/bucket/key
-        path = uri.path.sub(/\A\//, '') # Remove leading slash
-        # If using virtual-hosted style, path IS the key
-        # If using path-style, strip the bucket name prefix
-        bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
-        path.sub(/\A#{Regexp.escape(bucket)}\//, '')
-      rescue => e
-        Rails.logger.warn "[ExampleDoc] Failed to extract S3 key from #{url}: #{e.message}"
-        nil
       end
     end
   end

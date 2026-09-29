@@ -71,9 +71,8 @@ module Api
 
         # Upload to S3
         begin
-          s3_service = S3UploadService.new
           folder = "projects/#{@company.id}/#{@project.id}/documents"
-          s3_result = s3_service.upload(file, folder: folder)
+          s3_result = PrivateFiles.upload(file, folder: folder)
 
           @document = @project.project_documents.build(
             company_id: @company.id,
@@ -83,7 +82,7 @@ module Api
             category: params[:category] || 'other',
             documentable_type: params[:documentable_type],
             documentable_id: params[:documentable_id],
-            file_url: s3_result[:url],
+            file_url: s3_result[:ref],
             file_s3_key: s3_result[:key],
             file_name: file.original_filename,
             file_size: s3_result[:size],
@@ -99,7 +98,7 @@ module Api
             ), status: :created
           else
             # Clean up S3 if save fails
-            s3_service.delete(s3_result[:key])
+            PrivateFiles.delete(s3_result[:ref])
             render json: { errors: @document.errors.full_messages }, status: :unprocessable_entity
           end
         rescue => e
@@ -128,10 +127,8 @@ module Api
         return unless authorize_action!('projects', 'delete')
 
         # Delete from S3
-        if @document.file_s3_key.present?
-          s3_service = S3UploadService.new
-          s3_service.delete(@document.file_s3_key)
-        end
+        # file_url is a reference (or a legacy URL); either names the right bucket.
+        PrivateFiles.delete(@document.file_url.presence || @document.file_s3_key)
 
         @document.update!(is_deleted: true)
         render json: { message: 'Document deleted' }

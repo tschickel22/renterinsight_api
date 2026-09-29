@@ -104,22 +104,12 @@ class TrackedLink < ApplicationRecord
     "#{Messaging::TrackingUrl.base}/t/#{token}"
   end
 
+  # s3_key holds a PrivateFiles reference for new attachments, or a bare key
+  # in the legacy bucket for older ones; PrivateFiles.url presigns either.
   def presigned_download_url(expires_in: 1.hour)
-    require 'aws-sdk-s3'
-    s3 = Aws::S3::Resource.new(
-      region: ENV['AWS_REGION'] || 'us-west-2',
-      access_key_id: ENV['AWS_ACCESS_KEY_ID'],
-      secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
-    )
-    bucket = s3.bucket(ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging')
     # Use inline disposition so PDFs/images open in browser; other types download
     disposition = content_type&.start_with?('image/') || content_type == 'application/pdf' ? 'inline' : 'attachment'
-    safe_filename = (filename || 'download').gsub('"', '')
-    bucket.object(s3_key).presigned_url(
-      :get,
-      expires_in: expires_in.to_i,
-      response_content_disposition: "#{disposition}; filename=\"#{safe_filename}\""
-    )
+    PrivateFiles.url(s3_key, expires_in: expires_in, filename: filename || 'download', disposition: disposition)
   end
 
   def record_click!(ip_address: nil, user_agent: nil)

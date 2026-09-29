@@ -284,7 +284,7 @@ module Messaging
       attachments.each do |att|
         att = att.is_a?(Hash) ? att.deep_stringify_keys : {}
         filename      = att['filename']
-        s3_key        = att['s3_key']
+        s3_key        = att['file_ref'].presence || att['s3_key']
         content_type  = att['content_type']
         file_size     = att['size']
         delivery_mode = att['delivery_mode'].presence || 'tracked_link'
@@ -343,19 +343,10 @@ module Messaging
     end
 
     def download_s3_object_as_upload(s3_key:, filename:, content_type:)
-      require 'aws-sdk-s3'
-      s3 = Aws::S3::Client.new(
-        region: ENV['AWS_REGION'] || 'us-west-2',
-        access_key_id: ENV['AWS_ACCESS_KEY_ID'],
-        secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
-      )
-      bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
-
+      # A reference to the private bucket, or a bare key from before the move.
       tempfile = Tempfile.new(['campaign_att', File.extname(filename)])
       tempfile.binmode
-      s3.get_object({ bucket: bucket, key: s3_key }) do |chunk|
-        tempfile.write(chunk)
-      end
+      tempfile.write(PrivateFiles.read(s3_key))
       tempfile.rewind
 
       ActionDispatch::Http::UploadedFile.new(

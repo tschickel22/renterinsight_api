@@ -2374,13 +2374,11 @@ class AgreementVisionScanService
     end
   end
 
+  # Only files we stored; a scan never fetches an arbitrary URL.
   def download_pdf(url)
-    uri = URI(url)
-    response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https') do |http|
-      http.request(Net::HTTP::Get.new(uri))
-    end
-    raise ScanError, "Failed to download PDF: HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
-    response.body
+    PrivateFiles.read(url)
+  rescue PrivateFiles::Forbidden, Aws::S3::Errors::ServiceError => e
+    raise ScanError, "Failed to download PDF: #{e.message}"
   end
 
   # ─── OCR Fallback for Garbled Font Encoding ─────────────────────────────────
