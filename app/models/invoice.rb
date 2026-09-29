@@ -1,5 +1,6 @@
 class Invoice < ApplicationRecord
   include ActivityTrackable
+  include GlPostTracking
   include Addressable
   include Buyable
   include WebhookNotifiable
@@ -71,7 +72,7 @@ class Invoice < ApplicationRecord
   def auto_post_to_accounting
     Accounting::InvoicePostingService.new(self).post!
   rescue => e
-    Rails.logger.error("[AutoPost] Invoice #{id} failed: #{e.message}")
+    record_gl_post_failure!("#{e.class}: #{e.message}")
   end
   
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
@@ -322,6 +323,16 @@ class Invoice < ApplicationRecord
                        .where(credit_memos: { status: %w[issued partial applied], is_deleted: [false, nil] })
                        .sum('credit_memo_applications.amount')
 
+      # Cash receipts applied to this invoice count as paid too. They used to
+      # be tracked only by CashReceipt's own balance writer, which ignored
+      # credit memos while this one ignored receipts, so whichever ran last
+      # decided the invoice's balance.
+      total_paid += CashReceiptApplication
+                    .joins(:cash_receipt)
+                    .where(invoice_id: id)
+                    .where(cash_receipts: { status: CashReceipt::STATUS_POSTED, is_deleted: [false, nil] })
+                    .sum(:amount_applied)
+
       reduction = total_paid + total_credited
       calculated_amount_due = total - reduction
 
@@ -331,6 +342,9 @@ class Invoice < ApplicationRecord
         'partial'
       elsif overdue?
         'overdue'
+      elsif %w[paid partial].include?(status)
+        # Everything applied was voided or removed: it's owed again.
+        'sent'
       else
         status
       end
@@ -417,7 +431,15 @@ class Invoice < ApplicationRecord
   # so existing invoices keep balancing.
   def finalize_line_taxes_if_needed
     return unless company&.tax_codes&.active&.exists?
+    # Once posted, the snapshots are the record of what was charged. Rebuilding
+    # them on every later save (a payment flips the status and re-saves) at
+    # current rates let total and amount_due drift from the posted entry.
+    return if posted_to_ledger?
     finalize_line_taxes!
+  end
+
+  def posted_to_ledger?
+    persisted? && company.journal_entries.where(source_entity_type: 'Invoice', source_entity_id: id, is_void: false).exists?
   end
 
   def calculate_totals

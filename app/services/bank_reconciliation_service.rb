@@ -156,6 +156,7 @@ class BankReconciliationService
 
     uncleared_lines = JournalEntryLine
       .joins(:journal_entry)
+      .merge(JournalEntry.excluding_void_pairs)
       .where(
         chart_of_account_id: bank_gl_account_id,
         journal_entries: { company_id: @company.id, is_void: false }

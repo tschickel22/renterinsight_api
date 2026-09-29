@@ -16,7 +16,7 @@ module Reports
         basis: basis
       )
 
-      accounts = @company.chart_of_accounts.active.postable.ordered
+      accounts = @company.chart_of_accounts.reportable.ordered
 
       revenue_rows = []
       cogs_rows = []

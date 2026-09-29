@@ -44,40 +44,11 @@ class CashReceipt < ApplicationRecord
     )
   end
 
+  # Invoice#update_status_based_on_payments is the one place an invoice's
+  # paid/due/status is worked out (payments, credit memos and receipts).
   def update_invoice_balances!
     cash_receipt_applications.includes(:invoice).each do |app|
-      invoice = app.invoice
-      next unless invoice
-
-      # Sum applied amounts (not payment totals) so a payment split across
-      # multiple invoices only credits each invoice with its own share.
-      total_paid_from_payments = invoice.payment_applications
-        .joins(:payment)
-        .where.not(payments: { status: 'voided' })
-        .sum(:amount) rescue 0
-      total_paid_from_receipts = CashReceiptApplication
-        .joins(:cash_receipt)
-        .where(invoice_id: invoice.id)
-        .where(cash_receipts: { status: STATUS_POSTED, is_deleted: [false, nil] })
-        .sum(:amount_applied)
-
-      total_paid = total_paid_from_payments.to_d + total_paid_from_receipts.to_d
-      balance = [invoice.total.to_d - total_paid, 0].max
-
-      new_status = if balance <= 0
-        'paid'
-      elsif total_paid > 0
-        'partial'
-      else
-        invoice.status == 'paid' || invoice.status == 'partial' ? 'sent' : invoice.status
-      end
-
-      invoice.update_columns(
-        amount_paid: total_paid,
-        amount_due: balance,
-        status: new_status,
-        paid_at: balance <= 0 ? (invoice.paid_at || Time.current) : invoice.paid_at
-      )
+      app.invoice&.update_status_based_on_payments
     end
   end
 

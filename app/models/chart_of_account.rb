@@ -26,9 +26,15 @@ class ChartOfAccount < ApplicationRecord
   validates :account_type, presence: true, inclusion: { in: TYPES }
   validates :sub_type, inclusion: { in: SUB_TYPES }, allow_blank: true
   validates :normal_balance, presence: true, inclusion: { in: NORMAL_BALANCES }
+  validate :cannot_hide_a_balance, on: :update
+  after_save :post_opening_balance, if: -> { saved_change_to_opening_balance? || saved_change_to_opening_balance_date? }
 
   scope :active, -> { where(is_active: true) }
   scope :postable, -> { where(is_header: false, is_active: true) }
+  # What the financial reports walk: inactive accounts included. Reports used
+  # `active.postable`, so an account deactivated with a balance dropped out of
+  # every report and took its balance with it.
+  scope :reportable, -> { where(is_header: false) }
   scope :roots, -> { where(parent_id: nil) }
   scope :by_type, ->(type) { where(account_type: type) }
   scope :ordered, -> { order(:account_number) }
@@ -73,7 +79,45 @@ class ChartOfAccount < ApplicationRecord
     journal_entry_lines.exists?
   end
 
+  def opening_balance_unposted?
+    opening_balance.to_d.nonzero? &&
+      !JournalEntry.in_ledger.where(company_id: company_id, source_entity: self).exists?
+  end
+
+  # Net debits - credits across every entry that counts toward balances.
+  def ledger_balance
+    journal_entry_lines.joins(:journal_entry).merge(JournalEntry.in_ledger)
+                       .sum('journal_entry_lines.debit_amount - journal_entry_lines.credit_amount')
+  end
+
   def destroyable?
     !is_system && !has_transactions?
+  end
+
+  private
+
+  # The opening balance is a real entry against Opening Balance Equity; see
+  # Accounting::OpeningBalancePostingService. A failure (say, the date is in a
+  # closed period) fails the save with the reason instead of leaving the
+  # account's balance out of the ledger.
+  def post_opening_balance
+    Accounting::OpeningBalancePostingService.new(self).sync!
+  rescue ActiveRecord::RecordInvalid => e
+    errors.add(:opening_balance, "could not be posted: #{e.record.errors.full_messages.join(', ')}")
+    raise ActiveRecord::RecordInvalid, self
+  end
+
+  # Deactivating an account or turning it into a header with money still in
+  # it hid that balance from the reports (and from Year-End Close).
+  def cannot_hide_a_balance
+    hiding = (will_save_change_to_is_active? && !is_active) || (will_save_change_to_is_header? && is_header)
+    return unless hiding
+
+    balance = ledger_balance
+    balance += (normal_balance == 'debit' ? 1 : -1) * opening_balance.to_d if opening_balance_unposted?
+    return if balance.zero?
+
+    errors.add(:base, "#{account_number} #{name} has a balance of #{format('%.2f', balance)}. " \
+                      'Move it to another account before deactivating it or making it a header.')
   end
 end

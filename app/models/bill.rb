@@ -2,6 +2,7 @@
 
 class Bill < ApplicationRecord
   include Reportable
+  include GlPostTracking
 
   belongs_to :company
   belongs_to :vendor, optional: true
@@ -26,6 +27,9 @@ class Bill < ApplicationRecord
   before_validation :compute_totals
   before_create :assign_bill_number
   after_create :auto_post_bill_je, if: -> { status != 'draft' && status != 'void' }
+  # A bill saved as a draft and approved later never posted, since posting
+  # only ran on create.
+  after_update :auto_post_bill_je, if: -> { saved_change_to_status? && status_before_last_save == 'draft' && !%w[draft void].include?(status) }
 
   scope :active, -> { where(is_deleted: false) }
   scope :unpaid, -> { where(status: %w[pending partially_paid]) }
@@ -169,7 +173,7 @@ class Bill < ApplicationRecord
   def auto_post_bill_je
     return if journal_entry_id.present?
     ap = resolve_ap_account
-    return unless ap
+    return record_gl_post_failure!('No Accounts Payable account is set on the bill or in Accounting Settings') unless ap
     return if bill_line_items.empty?
     return if total_amount.to_d <= 0
 
@@ -184,11 +188,15 @@ class Bill < ApplicationRecord
       location_id: location_id
     }
 
-    # Debit each expense line item
+    # Debit each expense line item, with the bill's tax spread across them.
+    # AP is credited the full total including tax, but the debits used to be
+    # the line amounts alone, so a bill with tax never balanced and never
+    # posted. Purchase tax is part of what the items cost.
+    tax_shares = allocate_tax_to_lines
     bill_line_items.each do |line|
       lines_attrs << {
         chart_of_account_id: line.chart_of_account_id,
-        debit_amount: line.amount,
+        debit_amount: line.amount.to_d + tax_shares.fetch(line.id, 0),
         credit_amount: 0,
         memo: line.description.presence || "Bill #{bill_number}",
         location_id: line.location_id || location_id,
@@ -206,9 +214,25 @@ class Bill < ApplicationRecord
     )
 
     update_column(:journal_entry_id, je.id)
+    clear_gl_post_failure!
+    je
   rescue => e
-    Rails.logger.error("[Accounting] Bill #{id} auto-post failed: #{e.message}")
+    record_gl_post_failure!(e.is_a?(ActiveRecord::RecordInvalid) ? e.record.errors.full_messages.join(', ') : e.message)
     nil
+  end
+
+  # { line_id => share of tax_amount }, proportional to line amounts, rounded
+  # to cents with the remainder on the largest line so the shares sum exactly.
+  def allocate_tax_to_lines
+    tax = tax_amount.to_d.round(2)
+    lines = bill_line_items.to_a
+    base = lines.sum { |l| l.amount.to_d }
+    return {} if tax.zero? || lines.empty? || base.zero?
+
+    shares = lines.to_h { |l| [l.id, (tax * l.amount.to_d / base).round(2)] }
+    largest = lines.max_by { |l| l.amount.to_d }
+    shares[largest.id] += tax - shares.values.sum
+    shares
   end
 
   def resolve_ap_account

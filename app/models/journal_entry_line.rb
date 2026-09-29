@@ -13,6 +13,7 @@ class JournalEntryLine < ApplicationRecord
   validates :chart_of_account_id, presence: true
   validates :department, inclusion: { in: DEPARTMENTS }, allow_blank: true
   validate :has_amount
+  validate :account_is_postable, if: -> { new_record? || will_save_change_to_chart_of_account_id? }
 
   before_validation :set_default_location
 
@@ -22,6 +23,18 @@ class JournalEntryLine < ApplicationRecord
     end
     if debit_amount.present? && debit_amount > 0 && credit_amount.present? && credit_amount > 0
       errors.add(:base, "Line cannot have both debit and credit amounts")
+    end
+  end
+
+  # A line on another company's account was summed by account id but never
+  # shown, since reports only walk the company's own chart; a line on a header
+  # account likewise sat outside every report.
+  def account_is_postable
+    return unless chart_of_account && journal_entry
+    if chart_of_account.company_id != journal_entry.company_id
+      errors.add(:chart_of_account_id, 'belongs to a different company')
+    elsif chart_of_account.is_header?
+      errors.add(:chart_of_account_id, "#{chart_of_account.account_number} is a header account and can't be posted to")
     end
   end
 

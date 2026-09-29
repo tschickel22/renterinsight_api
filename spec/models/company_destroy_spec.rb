@@ -12,8 +12,9 @@ RSpec.describe Company, '#destroy with accounting data' do
   it 'destroys a tenant that has a fully wired accounting subsystem' do
     company = create(:company, industry: 'manufactured_housing') # auto-seeds chart of accounts
     location = company.default_location || company.locations.first
-    coa  = company.chart_of_accounts.first
-    coa2 = company.chart_of_accounts.offset(1).first
+    # Postable accounts: journal lines can't be posted to header accounts.
+    coa  = company.chart_of_accounts.postable.first
+    coa2 = company.chart_of_accounts.postable.offset(1).first
 
     bank = company.bank_accounts.create!(
       bank_name: 'Operating', account_type: 'checking', account_purpose: 'operating',

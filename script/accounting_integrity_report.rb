@@ -34,7 +34,7 @@ ActiveRecord::Base.transaction do
   lines = JournalEntryLine.joins(:journal_entry)
                           .where(journal_entries: { company_id: company.id })
                           .where('journal_entries.entry_date <= ?', as_of)
-  live_lines = lines.where(journal_entries: { is_void: false })
+  live_lines = lines.merge(JournalEntry.in_ledger)
   coa = company.chart_of_accounts
 
   # 1. The ledger itself. Every entry is validated debits == credits, so this
@@ -43,16 +43,18 @@ ActiveRecord::Base.transaction do
     d = live_lines.sum(:debit_amount)
     c = live_lines.sum(:credit_amount)
     puts "  debits #{money(d)}  credits #{money(c)}  difference #{money(d - c)}"
-    bad = company.journal_entries.where(is_void: false).where('entry_date <= ?', as_of)
+    bad = company.journal_entries.in_ledger.where('entry_date <= ?', as_of)
                  .joins(:journal_entry_lines).group('journal_entries.id')
                  .having('SUM(journal_entry_lines.debit_amount) <> SUM(journal_entry_lines.credit_amount)')
                  .count
     puts "  entries whose own lines don't balance: #{bad.size}#{bad.any? ? " (ids #{bad.keys.first(20).join(', ')})" : ''}"
   end
 
-  # 2. Opening balances typed on accounts are added on one side only.
-  check('2. Opening balances typed on accounts (one-sided, no offsetting entry)') do
-    rows = coa.where.not(opening_balance: [nil, 0])
+  # 2. Opening balances not yet posted as an entry against Opening Balance
+  #    Equity. Reports count them and show a calculated offset; re-saving the
+  #    account (or Accounting::OpeningBalancePostingService#sync!) posts them.
+  check('2. Opening balances not yet posted as entries') do
+    rows = AccountBalanceService.new(company).legacy_opening_balances(as_of)
     if rows.none?
       puts '  none'
     else
@@ -63,12 +65,12 @@ ActiveRecord::Base.transaction do
              "#{a.try(:opening_balance_date) ? " dated #{a.opening_balance_date}" : ''}"
       end
       puts "  debit-side total #{money(debit_side)}  credit-side total #{money(credit_side)}  " \
-           "=> unbalances the books by #{money(debit_side - credit_side)}"
+           "=> shown as calculated Opening Balance Equity of #{money(debit_side - credit_side)}"
     end
   end
 
   # 3. Activity on accounts the reports skip (inactive or header).
-  check('3. Balances on inactive or header accounts (dropped from every report)') do
+  check('3. Balances on inactive or header accounts') do
     hidden = live_lines.joins(:chart_of_account)
                        .where('chart_of_accounts.is_active = FALSE OR chart_of_accounts.is_header = TRUE')
                        .group('chart_of_accounts.account_number', 'chart_of_accounts.name',
@@ -134,12 +136,12 @@ ActiveRecord::Base.transaction do
     puts "  trial balance: debits #{money(td)}  credits #{money(tc)}  out by #{money(td.to_d - tc.to_d)}"
   end
 
-  # 7. Voided entries. Reports drop the original but keep its reversal, so each
-  #    one shows as the negative of itself instead of zero.
-  check('7. Voided entries (original excluded, reversal still counted)') do
+  # 7. Voided entries count together with their reversal and net to zero. One
+  #    marked void with no reversal is dropped entirely.
+  check('7. Voided entries') do
     voided = company.journal_entries.where(is_void: true).where('entry_date <= ?', as_of)
-    amt = JournalEntryLine.where(journal_entry_id: voided.select(:id)).sum(:debit_amount)
-    puts "  #{voided.count} voided entries, #{money(amt)} of debits each counted as its negative"
+    orphan = voided.where(reversed_by_id: nil)
+    puts "  #{voided.count} voided (netted against their reversals), #{orphan.count} with no reversal (excluded)"
   end
 
   # 8. Entries whose lines carry different locations (half-counted on a

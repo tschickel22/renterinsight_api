@@ -518,6 +518,9 @@ class Api::V1::InvoicesController < ApplicationController
       total: invoice.total,
       amount_due: invoice.amount_due,
       amount_paid: invoice.amount_paid,
+      # Why the invoice isn't in the ledger, when auto-posting failed.
+      gl_post_error: invoice.gl_post_error,
+      gl_post_failed_at: invoice.gl_post_failed_at,
       notes: invoice.notes,
       terms: invoice.terms,
       footer_text: invoice.footer_text,

@@ -83,7 +83,9 @@ module Accounting
 
       return unless ar_account && bank_gl_account
 
-      refund_amount = @payment.amount || BigDecimal('0')
+      # A partial refund reverses only what was refunded; this used to reverse
+      # the whole payment, so the bank and AR were off by the part kept.
+      refund_amount = @payment.try(:refund_amount).presence || @payment.amount || BigDecimal('0')
       return if refund_amount <= 0
 
       location_id = resolve_location_id

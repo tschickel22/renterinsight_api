@@ -53,6 +53,7 @@ class BankTransactionMatchingService
 
     je_lines = JournalEntryLine
       .joins(:journal_entry)
+      .merge(JournalEntry.excluding_void_pairs)
       .where(
         chart_of_account_id: bank_gl_account_id,
         journal_entries: { company_id: @company.id, is_void: false }
@@ -131,7 +132,8 @@ class BankTransactionMatchingService
 
   def find_by_check_number(bank_transaction)
     JournalEntry
-      .where(company_id: @company.id, is_void: false)
+      .excluding_void_pairs
+      .where(company_id: @company.id)
       .where("memo ILIKE ?", "%check%#{bank_transaction.reference_number}%")
       .first
   end
@@ -142,6 +144,7 @@ class BankTransactionMatchingService
 
     JournalEntryLine
       .joins(:journal_entry)
+      .merge(JournalEntry.excluding_void_pairs)
       .where(
         chart_of_account_id: bank_gl_account_id,
         journal_entries: { company_id: @company.id, is_void: false, entry_date: bank_transaction.transaction_date }
@@ -158,6 +161,7 @@ class BankTransactionMatchingService
 
     JournalEntryLine
       .joins(:journal_entry)
+      .merge(JournalEntry.excluding_void_pairs)
       .where(
         chart_of_account_id: bank_gl_account_id,
         journal_entries: { company_id: @company.id, is_void: false, entry_date: date_range }
@@ -166,12 +170,15 @@ class BankTransactionMatchingService
       .where.not(journal_entry_id: matched_je_ids(bank_transaction.bank_account_id))
   end
 
+  # Money into the bank is a debit on the bank's GL line, money out a credit.
+  # This had the sides swapped, so a deposit only ever matched a withdrawal
+  # of the same size.
   def matching_amount_condition(bank_transaction)
     abs_amount = bank_transaction.amount.abs
     if bank_transaction.deposit?
-      ['credit_amount = ?', abs_amount]
-    else
       ['debit_amount = ?', abs_amount]
+    else
+      ['credit_amount = ?', abs_amount]
     end
   end
 
@@ -186,15 +193,14 @@ class BankTransactionMatchingService
     score = 0.0
 
     txn_amount = bank_transaction.amount
-    compared = bank_transaction.deposit? ? je_line.credit_amount : je_line.debit_amount
+    compared = bank_transaction.deposit? ? je_line.debit_amount : je_line.credit_amount
 
-    if compared == txn_amount.abs
-      score += 0.5
-    elsif (compared - txn_amount.abs).abs < 1.00
-      score += 0.2
-    else
-      return 0.0
-    end
+    # Exact amounts only. A near-miss (up to 99 cents) used to score as a
+    # suggestion, and accepting it marked the bank line matched to an entry
+    # for a different amount, so the reconciliation could never tie.
+    return 0.0 unless compared == txn_amount.abs
+
+    score += 0.5
 
     day_diff = (bank_transaction.transaction_date - je_line.journal_entry.entry_date).to_i.abs
     score += case day_diff

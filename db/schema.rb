@@ -981,6 +981,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_26_090000) do
     t.boolean "is_deleted", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.text "gl_post_error"
+    t.datetime "gl_post_failed_at"
     t.index ["ap_account_id"], name: "index_bills_on_ap_account_id"
     t.index ["company_id", "bill_number"], name: "index_bills_on_company_id_and_bill_number", unique: true, where: "(bill_number IS NOT NULL)"
     t.index ["company_id", "due_date"], name: "index_bills_on_company_id_and_due_date"
@@ -3366,7 +3368,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_26_090000) do
     t.string "category"
     t.decimal "cost", precision: 10, scale: 2, default: "0.0"
     t.boolean "taxable", default: false
-    t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
+    t.decimal "tax_rate", precision: 8, scale: 5, default: "0.0"
     t.text "notes"
     t.boolean "skip_tax", default: false, null: false
     t.index ["invoice_id", "position"], name: "index_invoice_items_on_invoice_id_and_position"
@@ -3409,7 +3411,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_26_090000) do
     t.date "invoice_date", null: false
     t.date "due_date"
     t.decimal "subtotal", precision: 10, scale: 2, default: "0.0"
-    t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
+    t.decimal "tax_rate", precision: 8, scale: 5, default: "0.0"
     t.decimal "tax_amount", precision: 10, scale: 2, default: "0.0"
     t.decimal "total", precision: 10, scale: 2, default: "0.0"
     t.decimal "amount_paid", precision: 10, scale: 2, default: "0.0"
@@ -3449,6 +3451,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_26_090000) do
     t.string "delivery_country"
     t.jsonb "custom_field_values", default: {}, null: false
     t.decimal "amount_credited", precision: 10, scale: 2, default: "0.0"
+    t.text "gl_post_error"
+    t.datetime "gl_post_failed_at"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -5665,7 +5669,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_26_090000) do
     t.string "public_token"
     t.integer "deal_id"
     t.text "terms"
-    t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
+    t.decimal "tax_rate", precision: 8, scale: 5, default: "0.0"
     t.integer "sales_rep_id"
     t.string "pricing_display", default: "detailed"
     t.jsonb "draw_schedule", default: {}
