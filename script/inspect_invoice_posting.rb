@@ -27,16 +27,21 @@ ActiveRecord::Base.transaction do
        "sales revenue: #{settings&.default_sales_revenue_account&.then { |a| "#{a.account_number} #{a.name}" } || 'NOT SET'}"
 
   ledger = company.journal_entries.in_ledger
-  invoice_entries = ledger.where(source_entity_type: 'Invoice')
+  # Live entries only: a voided invoice entry and its reversal (which also
+  # carries the invoice as its source) mean the invoice is no longer posted.
+  invoice_entries = company.journal_entries.excluding_void_pairs.where(source_entity_type: 'Invoice')
   posted_ids = invoice_entries.pluck(:source_entity_id).to_set
 
   deal_booked = lambda do |deal_id|
     return BigDecimal('0') if deal_id.blank?
 
-    # AR the deal's own entries debited (closing entry books selling price and F&I to AR)
+    # Receivables the deal's own entries debited (the closing entry books the
+    # sale, F&I and tax to AR). Any receivable account counts: a deal can post
+    # to one other than the company's default AR account.
+    ar_ids = company.chart_of_accounts.where(sub_type: 'accounts_receivable').pluck(:id) | [settings&.default_ar_account_id].compact
     JournalEntryLine.joins(:journal_entry).merge(JournalEntry.in_ledger)
                     .where(journal_entries: { company_id: company.id, source_entity_type: 'Deal', source_entity_id: deal_id })
-                    .where(chart_of_account_id: settings&.default_ar_account_id)
+                    .where(chart_of_account_id: ar_ids)
                     .sum(:debit_amount)
   end
 

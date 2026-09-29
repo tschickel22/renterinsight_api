@@ -65,6 +65,41 @@ RSpec.describe 'Ledger integrity guards' do
     end
   end
 
+  describe "a deal's sale invoice" do
+    before do
+      skip 'seed has no AR account' unless settings&.default_ar_account
+      settings.update!(auto_post_invoices: true)
+    end
+
+    def sent_invoice(**attrs)
+      inv = company.invoices.create!({ location: location, contact: contact, invoice_date: Date.current, status: 'draft' }.merge(attrs))
+      inv.invoice_items.create!(description: 'Home', quantity: 1, rate: 1000)
+      inv.save!
+      inv.update!(status: 'sent')
+      inv.reload
+    end
+
+    # GL approval books the sale through the deal's closing entry; posting the
+    # invoice it then creates put the sale in AR and revenue twice.
+    it 'does not post on its own' do
+      deal = Deal.new(company: company, name: 'Sale')
+      deal.save!(validate: false)
+      inv = sent_invoice(deal_id: deal.id, source_type: 'Deal', source_id: deal.id)
+
+      expect(Accounting::InvoicePostingService.new(inv).post!).to be_nil
+      expect(company.journal_entries.where(source_entity: inv)).to be_empty
+      expect(inv.gl_post_error).to be_nil
+    end
+
+    it 'still posts another invoice that is only linked to the deal' do
+      deal = Deal.new(company: company, name: 'Sale')
+      deal.save!(validate: false)
+      inv = sent_invoice(deal_id: deal.id)
+
+      expect(Accounting::InvoicePostingService.new(inv).post!).to be_present
+    end
+  end
+
   describe 'bills with tax' do
     it 'spreads the tax across the expense lines so the entry balances and posts' do
       skip 'seed has no AP account' unless settings&.try(:default_ap_account)
