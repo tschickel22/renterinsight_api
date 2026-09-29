@@ -32,6 +32,14 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     expect(ids).not_to include(own.id)
   end
 
+  it "lists a manufacturer's plants with how many books each has" do
+    topeka = mfr.factories.create!(name: 'Topeka (Dutch Housing)', code: 'TOPEKA', city: 'Topeka', state: 'IN')
+    CatalogPriceBook.create!(manufacturer: mfr, factory: topeka, name: '2025')
+    get '/api/admin/catalog_price_books/factories', headers: headers, params: { manufacturer_id: mfr.id }
+    expect(JSON.parse(response.body)['items']).to eq([{ 'id' => topeka.id, 'name' => 'Topeka (Dutch Housing)', 'city' => 'Topeka',
+                                                        'state' => 'IN', 'price_books' => 1 }])
+  end
+
   it 'refuses a dealer-owned manufacturer, since price books are platform data' do
     own = Manufacturer.create!(name: 'Dealer brand', industry_type: 'manufactured_housing', company_id: company.id)
     post '/api/admin/catalog_price_books', headers: headers, params: { manufacturer_id: own.id }

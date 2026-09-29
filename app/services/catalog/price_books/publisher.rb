@@ -165,12 +165,14 @@ module Catalog
 
       def words(s) = s.to_s.downcase.gsub(/[^a-z0-9 ]/, ' ').split.reject { |t| t.size < 2 }.to_set
 
-      # Inventory rows whose factory model the catalog knows: set when a link
-      # to an outside catalog (Champion's site) recorded their ids.
+      # Inventory rows whose factory model the catalog knows: by Champion model
+      # id (reaches any dealer's feed, including later ones) and by the exact
+      # homes a loaded-catalog match named.
       def link_inventory
-        CatalogPlanVariant.where(manufacturer_id: @mfr).where("external_ids ? 'champion_model_id'").find_each do |v|
-          Vehicle.where(champion_model_id: v.external_ids['champion_model_id'], catalog_plan_variant_id: nil)
-                 .update_all(catalog_plan_variant_id: v.id)
+        CatalogPlanVariant.where(manufacturer_id: @mfr).where("external_ids ?| array['champion_model_id','vehicle_ids']").find_each do |v|
+          ids = v.external_ids
+          Vehicle.where(champion_model_id: ids['champion_model_id']).where(catalog_plan_variant_id: nil).update_all(catalog_plan_variant_id: v.id) if ids['champion_model_id'].present?
+          Vehicle.where(id: Array(ids['vehicle_ids']), catalog_plan_variant_id: nil).update_all(catalog_plan_variant_id: v.id) if Array(ids['vehicle_ids']).any?
         end
       end
     end

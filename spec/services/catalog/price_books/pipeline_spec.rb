@@ -246,23 +246,44 @@ RSpec.describe 'TrueBuild price book pipeline' do
     end
   end
 
-  describe Catalog::PriceBooks::ChampionLink do
-    it 'links rows by the model number in image filenames only when the names agree' do
+  describe Catalog::PriceBooks::CatalogLink do
+    it 'links rows by the model number in image names only when the names agree' do
       belvidere = book.import_items.create!(item_type: 'variant_price', payload: { 'model_number' => '2856H32392', 'plan_name' => 'Belvidere' })
       easton = book.import_items.create!(item_type: 'variant_price', payload: { 'model_number' => '2856H32301', 'plan_name' => 'Easton' })
-      site = [
-        { 'id' => 'g-belv', 'slug' => 'aspire-belvidere', 'name' => 'Aspire Belvidere',
-          'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Paramount 2856M32392 Kitchen 3' }] },
+      models = [
+        { 'id' => 'g-belv', 'champion_model_id' => 'g-belv', 'slug' => 'aspire-belvidere', 'name' => 'Aspire Belvidere',
+          'text' => 'https://s7d9.scene7.com/is/image/championhomes/Paramount 2856M32392 Kitchen 3' },
         # Champion filed Easton's photos under Belvidere's number.
-        { 'id' => 'g-east', 'slug' => 'aspire-easton', 'name' => 'Aspire Easton',
-          'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Paramount 2856H32392 Kitchen 3' }] }
+        { 'id' => 'g-east', 'champion_model_id' => 'g-east', 'slug' => 'aspire-easton', 'name' => 'Aspire Easton',
+          'text' => 'https://s7d9.scene7.com/is/image/championhomes/Paramount 2856H32392 Kitchen 3' }
       ]
-      result = described_class.new(book, brand_slug: 'dutch-housing', location: 'Topeka, IN', fetcher: -> { site }).call
+      result = described_class.new(book, models: models, label: 'Champion catalog: dutch-housing').call
 
       expect(belvidere.reload.payload['external']).to include('champion_model_id' => 'g-belv')
       expect(easton.reload.payload['external']).to be_nil
-      expect(result).to include('linked' => 1)
-      expect(result['site_models_without_row'].map { |m| m['slug'] }).to eq(['aspire-easton'])
+      expect(result).to include('linked' => 1, 'source' => 'Champion catalog: dutch-housing')
+      expect(result['models_without_row'].map { |m| m['slug'] }).to eq(['aspire-easton'])
+      expect(book.reload.metadata['catalog_links'].size).to eq(1)
+    end
+
+    it 'links the loaded homes themselves when the book is published' do
+      dealer = Company.create!(name: "Dealer #{SecureRandom.hex(3)}")
+      home = dealer.vehicles.create!(make: 'Champion', model: 'Aspire Belvidere', year: 2026, source: 'champion_ims',
+                                     serial_number: "S#{SecureRandom.hex(4)}", vin: "V#{SecureRandom.hex(6)}",
+                                     champion_model_id: 'g-belv',
+                                     champion_raw_payload: { 'images' => [{ 'path' => '.../Aspire 2856H32392 Kitchen 1' }] })
+      book.import_items.create!(item_type: 'variant_price', review_status: 'approved', payload: {
+        'model_number' => '2856H32392', 'plan_name' => 'Belvidere', 'plan_series' => 'Aspire', 'building_code' => 'HUD', 'net_base_price' => 57_995
+      })
+
+      row = Catalog::PriceBooks::LinkSources.loaded.find { |r| r[:key] == "ims:#{dealer.id}" }
+      expect(row).to include(homes: 1)
+      described_class.new(book, models: Catalog::PriceBooks::LinkSources.loaded_models(row[:key]), label: row[:label]).call
+      Catalog::PriceBooks::Publisher.new(book, by: admin).call
+
+      variant = CatalogPlanVariant.find_by!(manufacturer: mfr, model_number: '2856H32392')
+      expect(variant.external_ids).to include('champion_model_id' => 'g-belv', 'vehicle_ids' => [home.id])
+      expect(home.reload.catalog_plan_variant_id).to eq(variant.id)
     end
   end
 end

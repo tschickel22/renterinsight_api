@@ -2984,13 +2984,17 @@ Rails.application.routes.draw do
       # ==================== TRUEBUILD PRICE BOOKS (Platform Admin Only) ====================
       # Factory price packages imported once for every dealer. See CatalogPriceBooksController.
       resources :catalog_price_books do
+        collection do
+          get :factories
+        end
         member do
           post :upload
           post :extract
           get  :items
           patch 'items/:item_id', action: :update_item, as: :update_item
           post :bulk_review
-          post :link_champion
+          get  :link_sources
+          post :link_catalog
           post :publish
           get  'documents/:document_id/download', action: :download_document, as: :download_document
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document

@@ -8,8 +8,8 @@
 # or a ZIP), extract, review the items (flags and changes first), publish.
 class Api::Admin::CatalogPriceBooksController < ApplicationController
   before_action :require_platform_admin!
-  before_action :set_book, except: %i[index create]
-  before_action :require_editable, only: %i[upload extract update_item bulk_review link_champion retry_document]
+  before_action :set_book, except: %i[index create factories]
+  before_action :require_editable, only: %i[upload extract update_item bulk_review link_catalog retry_document]
 
   ITEM_SORT = "CASE change_type WHEN 'removed' THEN 0 WHEN 'changed' THEN 1 WHEN 'new' THEN 2 ELSE 3 END, " \
               'jsonb_array_length(flags) DESC, id'
@@ -186,18 +186,51 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     render json: { updated: updated, counts: review_counts }
   end
 
-  # POST /api/admin/catalog_price_books/:id/link_champion   { brand_slug:, location: }
-  def link_champion
-    brand = params[:brand_slug].presence
-    location = params[:location].presence || [@book.factory&.city, @book.factory&.state].compact.join(', ').presence
-    unless brand && location
-      return render json: { error: 'brand_slug and location (e.g. "Topeka, IN") are required' }, status: :unprocessable_entity
-    end
+  # GET /api/admin/catalog_price_books/factories?manufacturer_id=
+  # The manufacturer's plants, so a new package lands on the plant it replaces.
+  def factories
+    manufacturer = Manufacturer.where(company_id: nil).find_by(id: params[:manufacturer_id])
+    return render json: { items: [] } unless manufacturer
 
-    result = Catalog::PriceBooks::ChampionLink.new(@book, brand_slug: brand, location: location).call
-    render json: result
+    counts = CatalogPriceBook.where(manufacturer: manufacturer).group(:factory_id).count
+    items = manufacturer.factories.order(:name).map do |f|
+      { id: f.id, name: f.name, city: f.city, state: f.state, price_books: counts[f.id].to_i }
+    end
+    render json: { items: items }
+  end
+
+  # GET /api/admin/catalog_price_books/:id/link_sources
+  def link_sources
+    render json: { loaded: Catalog::PriceBooks::LinkSources.loaded,
+                   champion_brands: Catalog::PriceBooks::LinkSources.champion_brands,
+                   links: @book.metadata['catalog_links'] || [] }
+  end
+
+  # POST /api/admin/catalog_price_books/:id/link_catalog
+  #   { source: 'loaded', key: 'ims:5' }  or  { source: 'champion_site', brand_slug:, location: }
+  def link_catalog
+    models, label =
+      case params[:source]
+      when 'loaded'
+        row = Catalog::PriceBooks::LinkSources.loaded.find { |r| r[:key] == params[:key] }
+        return render json: { error: 'Choose one of the loaded catalogs' }, status: :unprocessable_entity unless row
+
+        [Catalog::PriceBooks::LinkSources.loaded_models(row[:key]), row[:label]]
+      when 'champion_site'
+        brand = params[:brand_slug].presence
+        location = params[:location].presence || [@book.factory&.city, @book.factory&.state].compact.join(', ').presence
+        unless brand && location
+          return render json: { error: 'Choose a brand, and a place to search near (e.g. "Topeka, IN")' }, status: :unprocessable_entity
+        end
+
+        [Catalog::PriceBooks::LinkSources.champion_models(brand_slug: brand, location: location), "Champion catalog: #{brand}"]
+      else
+        return render json: { error: 'source must be loaded or champion_site' }, status: :unprocessable_entity
+      end
+
+    render json: Catalog::PriceBooks::CatalogLink.new(@book, models: models, label: label).call
   rescue Catalog::PriceBooks::ExtractionError, Net::OpenTimeout, Net::ReadTimeout, SocketError => e
-    render json: { error: "Could not read Champion's catalog: #{e.message}" }, status: :bad_gateway
+    render json: { error: "Could not read that catalog: #{e.message}" }, status: :bad_gateway
   end
 
   # POST /api/admin/catalog_price_books/:id/publish
@@ -264,7 +297,7 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
 
     data.merge(
       notes: book.notes, supersedes_id: book.supersedes_id, compared_with: book.metadata['compared_with'],
-      champion_link: book.metadata['champion_link'],
+      catalog_links: book.metadata['catalog_links'] || [],
       documents: book.documents.order(:created_at).map { |d| document_json(d) },
       review: review_counts(book)
     )
