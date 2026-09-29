@@ -48,6 +48,26 @@ module Catalog
         nil
       end
 
+      # Rows with any value across every tab, for the cost estimate.
+      def filled_rows(name, bytes)
+        ext = File.extname(name).downcase
+        return nil unless %w[.xlsx .xlsm .csv].include?(ext)
+
+        Tempfile.create(['estimate', ext], binmode: true) do |tmp|
+          tmp.write(bytes)
+          tmp.flush
+          book = ext == '.csv' ? Roo::CSV.new(tmp.path) : Roo::Excelx.new(tmp.path)
+          book.sheets.sum do |s|
+            sheet = book.sheet(s)
+            next 0 unless sheet.first_row
+
+            (sheet.first_row..sheet.last_row).count { |r| sheet.row(r).any? { |v| v.present? } }
+          end
+        end
+      rescue StandardError
+        nil
+      end
+
       def content_type(name)
         Marcel::MimeType.for(name: name) || 'application/octet-stream'
       end

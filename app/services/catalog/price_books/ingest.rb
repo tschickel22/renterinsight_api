@@ -96,7 +96,7 @@ module Catalog
           storage_key: key,
           kind: kind,
           page_count: Classifier.page_count(name, bytes),
-          metadata: { 'archive_path' => archive_path }.compact
+          metadata: { 'archive_path' => archive_path, 'filled_rows' => Classifier.filled_rows(name, bytes) }.compact
         )
       end
 

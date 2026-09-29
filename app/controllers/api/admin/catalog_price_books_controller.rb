@@ -9,7 +9,7 @@
 class Api::Admin::CatalogPriceBooksController < ApplicationController
   before_action :require_platform_admin!
   before_action :set_book, except: %i[index create factories]
-  before_action :require_editable, only: %i[upload extract update_item bulk_review link_catalog retry_document]
+  before_action :require_editable, only: %i[upload extract update_item bulk_review link_catalog retry_document auto_resolve]
 
   ITEM_SORT = "CASE change_type WHEN 'removed' THEN 0 WHEN 'changed' THEN 1 WHEN 'new' THEN 2 ELSE 3 END, " \
               'jsonb_array_length(flags) DESC, id'
@@ -186,6 +186,17 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     render json: { updated: updated, counts: review_counts }
   end
 
+  # POST /api/admin/catalog_price_books/:id/auto_resolve
+  # Approves what needs no decision, fixes known patterns (with the reason on
+  # the item), reads uncertain rows a second time, and leaves only real
+  # decisions pending.
+  def auto_resolve
+    verifier = Catalog::PriceBooks::SecondReader.new(@book)
+    result = Catalog::PriceBooks::AutoResolver.new(@book, by: original_user, verifier: verifier).call
+    render json: { approved: result.approved, corrected: result.corrected, needs_you: result.needs_you,
+                   reasons: result.reasons, counts: review_counts }
+  end
+
   # GET /api/admin/catalog_price_books/factories?manufacturer_id=
   # The manufacturer's plants, so a new package lands on the plant it replaces.
   def factories
@@ -298,6 +309,14 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     data.merge(
       notes: book.notes, supersedes_id: book.supersedes_id, compared_with: book.metadata['compared_with'],
       catalog_links: book.metadata['catalog_links'] || [],
+      auto_resolve: book.metadata['auto_resolve'],
+      cost: {
+        spent_usd: Catalog::PriceBooks::Recorder.spent_usd(book).round(2),
+        budget_usd: Catalog::PriceBooks::Recorder.budget_usd,
+        estimate_waiting_usd: Catalog::PriceBooks::CostEstimate.for_documents(
+          book.documents.select { |d| %w[pending failed].include?(d.extraction_status) && d.kind != 'image' }
+        )
+      },
       documents: book.documents.order(:created_at).map { |d| document_json(d) },
       review: review_counts(book)
     )
@@ -311,6 +330,7 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
       extracted_at: doc.extracted_at, archive_path: doc.metadata['archive_path'],
       scanned: doc.metadata['scanned'], missing_model_numbers: doc.metadata['missing_model_numbers'],
       tabs: doc.metadata['tabs'], usage: usage.presence,
+      estimate_usd: Catalog::PriceBooks::CostEstimate.for_document(doc).round(2),
       item_count: doc.import_items.size
     }
   end

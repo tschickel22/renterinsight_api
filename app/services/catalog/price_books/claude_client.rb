@@ -8,6 +8,13 @@ module Catalog
       class Error < StandardError; end
 
       API_URL = 'https://api.anthropic.com/v1/messages'
+      # Dollars per million tokens for the extraction model (Sonnet 4.6).
+      INPUT_USD_PER_MTOK = 3.0
+      OUTPUT_USD_PER_MTOK = 15.0
+
+      def self.cost_usd(input_tokens, output_tokens)
+        ((input_tokens.to_i * INPUT_USD_PER_MTOK) + (output_tokens.to_i * OUTPUT_USD_PER_MTOK)) / 1_000_000.0
+      end
       RETRYABLE = [429, 500, 502, 503, 529].freeze
 
       # @return [Hash] { input:, stop_reason:, input_tokens:, output_tokens: }
