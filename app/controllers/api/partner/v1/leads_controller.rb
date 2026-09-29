@@ -124,7 +124,7 @@ module Api
           note_content = inbound_note_content(mapped_keys)
           attrs = merge_inbound_note(attrs, mapped_keys)
 
-          lead = company_scope(Lead).new(attrs)
+          lead = company_scope(Lead).new(attrs.merge(origin: Lead::ORIGIN_API))
 
           if lead.save
             write_inbound_note!('lead', lead.id, note_content)

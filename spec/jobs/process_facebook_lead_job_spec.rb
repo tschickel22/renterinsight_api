@@ -92,4 +92,57 @@ RSpec.describe ProcessFacebookLeadJob do
     DispatchWorkflowEventsJob.new.perform
     expect(WorkflowRun.where(workflow_rule_id: rule.id).count).to eq(1)
   end
+  describe 'form answers' do
+    it 'writes every custom question to the notes column and the Notes tab' do
+      lead = deliver
+
+      expect(lead.notes).to include('Form answers:')
+      expect(lead.notes).to include('What are you looking for?: Three bedroom')
+      tab = Note.where(entity_type: 'lead', entity_id: lead.id.to_s).last
+      expect(tab.content).to include('What are you looking for?: Three bedroom')
+      expect(lead.survey_answers).to eq('what_are_you_looking_for?' => 'Three bedroom')
+    end
+
+    it 'keeps an answer the dealer mapped to Notes instead of dropping it' do
+      integration.update!(field_mapping: { 'what_are_you_looking_for?' => 'notes' })
+
+      expect(deliver.notes).to include('Three bedroom')
+    end
+
+    it 'drops an answer the dealer chose to ignore' do
+      integration.update!(field_mapping: { 'what_are_you_looking_for?' => 'ignore' })
+
+      lead = deliver
+      expect(lead.notes).not_to include('Three bedroom')
+      expect(lead.survey_answers).to be_blank
+    end
+
+    it 'fills a lead column the dealer mapped a question to' do
+      integration.update!(field_mapping: { 'what_are_you_looking_for?' => 'preferred_home_type' })
+
+      expect(deliver.preferred_home_type).to eq('Three bedroom')
+    end
+  end
+
+  describe 'custom fields' do
+    let!(:custom_field) do
+      CustomField.create!(company_id: company.id, module: 'leads', field_key: 'home_wanted',
+                          name: 'home_wanted', label: 'What are you looking for',
+                          field_type: 'text', is_active: true, display_order: 0)
+    end
+
+    it 'fills a custom field the dealer mapped a question to' do
+      integration.update!(field_mapping: { 'what_are_you_looking_for?' => 'custom:home_wanted' })
+
+      expect(deliver.custom_field_values).to eq('home_wanted' => 'Three bedroom')
+    end
+
+    it 'matches an unmapped question to a custom field by its label' do
+      expect(deliver.custom_field_values).to eq('home_wanted' => 'Three bedroom')
+    end
+  end
+
+  it 'marks the lead as arriving through Facebook Lead Ads' do
+    expect(deliver.origin).to eq(Lead::ORIGIN_FACEBOOK)
+  end
 end

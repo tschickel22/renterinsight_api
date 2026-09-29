@@ -9,6 +9,13 @@ class Lead < ApplicationRecord
   include Reportable
   include WorkflowRunCancellable
 
+  # How the lead arrived (see AddOriginToLeads). Blank for leads a rep keyed
+  # in and for anything created before the column existed.
+  ORIGIN_INTAKE_FORM = 'intake_form'
+  ORIGIN_API         = 'api'
+  ORIGIN_FACEBOOK    = 'facebook_lead_ads'
+  INBOUND_ORIGINS    = [ORIGIN_INTAKE_FORM, ORIGIN_API, ORIGIN_FACEBOOK].freeze
+
   def self.reportable_config
     {
       label: "Leads",
