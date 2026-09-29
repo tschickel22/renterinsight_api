@@ -175,6 +175,10 @@ module Api
               { key: 'deal.probability', label: 'Probability', type: 'text', value: @deal.respond_to?(:probability) ? @deal.probability : nil },
               { key: 'deal.owner_name', label: 'Sales Person', type: 'text', value: @deal ? (@deal.respond_to?(:owner) ? [@deal.owner&.first_name, @deal.owner&.last_name].compact.join(' ').presence : @deal.try(:assigned_to_name)) : nil },
               { key: 'deal.customer_name', label: 'Customer Name', type: 'text', value: @deal&.customer_name },
+              # Buyer 2 on two-buyer forms: the deal's co-applicant contact.
+              { key: 'deal.co_buyer_name', label: 'Co-Buyer Name', type: 'text', value: co_buyer&.full_name.presence },
+              { key: 'deal.co_buyer_email', label: 'Co-Buyer Email', type: 'text', value: co_buyer&.email },
+              { key: 'deal.co_buyer_phone', label: 'Co-Buyer Phone', type: 'text', value: (co_buyer&.phone.presence || co_buyer&.try(:mobile_phone)) },
               { key: 'deal.delivery_street', label: 'Delivery Address', type: 'text', value: @deal&.delivery_street },
               { key: 'deal.delivery_city', label: 'Delivery City', type: 'text', value: @deal&.delivery_city },
               { key: 'deal.delivery_state', label: 'Delivery State', type: 'text', value: @deal&.delivery_state },
@@ -400,6 +404,12 @@ module Api
       def line_items_subtotal
         return nil unless @deal
         deal_line_items_data.select { |li| yield(li) }.sum { |li| li[:line_total].to_f }.round(2)
+      end
+
+      def co_buyer
+        return @co_buyer if defined?(@co_buyer)
+
+        @co_buyer = @deal&.co_applicant_contact_id && @company.contacts.find_by(id: @deal.co_applicant_contact_id)
       end
 
       # Selling price minus every discount column the deal exposes.

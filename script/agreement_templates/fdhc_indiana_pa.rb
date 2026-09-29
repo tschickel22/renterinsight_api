@@ -72,6 +72,12 @@ def field(page, key, label, x, y, w, h = 1.6, type: 'text', group: 'general', me
   place(page, "custom.#{key}", label, type, x, y, w, h, 'isCustomField' => true, 'isSignerField' => false)
 end
 
+# A field we already hold data for: placed as the merge field itself, so the
+# template editor shows where it comes from and it resolves on its own.
+def merge(page, key, label, x, y, w, h = 1.6, type: 'text')
+  place(page, key, label, type, x, y, w, h, 'isCustomField' => false, 'isSignerField' => false)
+end
+
 def signer(page, who, type, x, y, w, h, label)
   place(page, "signer.#{type}", label, type, x, y, w, h, 'isCustomField' => false, 'isSignerField' => true, 'signerIndex' => who)
 end
@@ -109,34 +115,34 @@ def standard_block(page, b1_y, b2_y, h)
 end
 
 # ── Page 1: Purchase Agreement ────────────────────────────────────────────
-field 1, 'buyer_1_name', 'Buyer 1', 10.78, 8.38, 24.24, 1.73, group: 'buyer', merge_from: 'contact.full_name'
-field 1, 'buyer_2_name', 'Buyer 2', 38.76, 8.38, 24.25, 1.73, group: 'buyer'
-field 1, 'agreement_date', 'Date', 65.47, 8.38, 10.27, 1.73, group: 'buyer', merge_from: 'date.today'
-field 1, 'deal_number', 'Deal #', 80.49, 8.38, 12.04, 1.73, group: 'buyer', merge_from: 'deal.deal_number'
-field 1, 'mailing_address', 'Mailing Address', 11.2, 10.35, 28.22, 1.82, group: 'buyer', merge_from: 'contact.street'
-field 1, 'mailing_city', 'Mailing City', 41.61, 10.35, 15.27, 1.82, group: 'buyer', merge_from: 'contact.city'
-field 1, 'mailing_state', 'Mailing State', 59.73, 10.35, 3.29, 1.82, group: 'buyer', merge_from: 'contact.state'
-field 1, 'mailing_zip', 'Mailing ZIP', 64.67, 10.35, 11.08, 1.82, group: 'buyer', merge_from: 'contact.zip'
-field 1, 'phone', 'Phone', 78.9, 10.35, 13.63, 1.82, group: 'buyer', merge_from: 'contact.phone'
-field 1, 'delivery_address', 'Delivery Address', 11.27, 12.41, 28.14, 1.82, group: 'delivery', merge_from: 'deal.delivery_street'
-field 1, 'delivery_city', 'Delivery City', 41.61, 12.41, 15.27, 1.82, group: 'delivery', merge_from: 'deal.delivery_city'
-field 1, 'delivery_state', 'Delivery State', 59.73, 12.41, 3.29, 1.82, group: 'delivery', merge_from: 'deal.delivery_state'
-field 1, 'delivery_zip', 'Delivery ZIP', 64.67, 12.41, 11.08, 1.82, group: 'delivery', merge_from: 'deal.delivery_zip'
-field 1, 'cell', 'Cell', 78.08, 12.41, 14.45, 1.82, group: 'buyer', merge_from: 'contact.mobile_phone'
-field 1, 'salesperson', 'Salesperson', 13.22, 14.45, 21.8, 1.73, group: 'buyer', merge_from: 'deal.owner_name'
-field 1, 'email_1', 'Email Address 1', 41.73, 14.45, 22.22, 1.73, group: 'buyer', merge_from: 'contact.email'
-field 1, 'email_2', 'Email Address 2', 70.61, 14.45, 21.92, 1.73, group: 'buyer'
-field 1, 'home_make', 'Make', 13.35, 16.42, 10.0, 1.82, group: 'unit', merge_from: 'vehicle.make'
-field 1, 'home_model', 'Model', 23.6, 16.42, 26.3, 1.82, group: 'unit', merge_from: 'vehicle.model'
-field 1, 'home_year', 'Year', 52.45, 16.42, 8.25, 1.82, group: 'unit', merge_from: 'vehicle.year'
-field 1, 'bedrooms', 'Bedrooms', 65.57, 16.42, 5.78, 1.82, group: 'unit', merge_from: 'vehicle.bedrooms'
-field 1, 'baths', 'Baths', 74.29, 16.42, 7.82, 1.82, group: 'unit', merge_from: 'vehicle.bathrooms'
+merge 1, 'contact.full_name', 'Buyer 1', 10.78, 8.38, 24.24, 1.73
+merge 1, 'deal.co_buyer_name', 'Buyer 2', 38.76, 8.38, 24.25, 1.73
+merge 1, 'date.today', 'Date', 65.47, 8.38, 10.27, 1.73
+merge 1, 'deal.deal_number', 'Deal #', 80.49, 8.38, 12.04, 1.73
+merge 1, 'contact.street', 'Mailing Address', 11.2, 10.35, 28.22, 1.82
+merge 1, 'contact.city', 'Mailing City', 41.61, 10.35, 15.27, 1.82
+merge 1, 'contact.state', 'Mailing State', 59.73, 10.35, 3.29, 1.82
+merge 1, 'contact.zip', 'Mailing ZIP', 64.67, 10.35, 11.08, 1.82
+merge 1, 'contact.phone', 'Phone', 78.9, 10.35, 13.63, 1.82
+merge 1, 'deal.delivery_street', 'Delivery Address', 11.27, 12.41, 28.14, 1.82
+merge 1, 'deal.delivery_city', 'Delivery City', 41.61, 12.41, 15.27, 1.82
+merge 1, 'deal.delivery_state', 'Delivery State', 59.73, 12.41, 3.29, 1.82
+merge 1, 'deal.delivery_zip', 'Delivery ZIP', 64.67, 12.41, 11.08, 1.82
+merge 1, 'contact.mobile_phone', 'Cell', 78.08, 12.41, 14.45, 1.82
+merge 1, 'deal.owner_name', 'Salesperson', 13.22, 14.45, 21.8, 1.73
+merge 1, 'contact.email', 'Email Address 1', 41.73, 14.45, 22.22, 1.73
+merge 1, 'deal.co_buyer_email', 'Email Address 2', 70.61, 14.45, 21.92, 1.73
+merge 1, 'vehicle.make', 'Make', 13.35, 16.42, 10.0, 1.82
+merge 1, 'vehicle.model', 'Model', 23.6, 16.42, 26.3, 1.82
+merge 1, 'vehicle.year', 'Year', 52.45, 16.42, 8.25, 1.82
+merge 1, 'vehicle.bedrooms', 'Bedrooms', 65.57, 16.42, 5.78, 1.82
+merge 1, 'vehicle.bathrooms', 'Baths', 74.29, 16.42, 7.82, 1.82
 field 1, 'den', 'Den', 84.14, 16.42, 8.39, 1.82, group: 'unit'
-field 1, 'serial_number', 'Serial Number', 13.78, 18.48, 19.49, 1.82, group: 'unit', merge_from: 'vehicle.serial_number'
-field 1, 'new_used', 'New / Used', 38.31, 18.48, 11.63, 1.82, group: 'unit', merge_from: 'vehicle.condition'
-field 1, 'floor_size', 'Floor Size', 54.94, 18.48, 8.08, 1.82, group: 'unit', merge_from: 'vehicle.floor_size'
+merge 1, 'vehicle.serial_number', 'Serial Number', 13.78, 18.48, 19.49, 1.82
+merge 1, 'vehicle.condition', 'New / Used', 38.31, 18.48, 11.63, 1.82
+merge 1, 'vehicle.floor_size', 'Floor Size', 54.94, 18.48, 8.08, 1.82
 field 1, 'hitch_size', 'Hitch Size', 69.0, 18.48, 10.0, 1.82, group: 'unit'
-field 1, 'approx_sq_ft', 'Approx. Sq. Ft.', 82.84, 18.48, 9.69, 1.82, group: 'unit', merge_from: 'vehicle.square_feet'
+merge 1, 'vehicle.square_feet', 'Approx. Sq. Ft.', 82.84, 18.48, 9.69, 1.82
 
 # Price schedule. Lines fill from the deal and stay editable; the subtotals,
 # total and unpaid balance are formulas, so the column always adds up.
@@ -195,8 +201,8 @@ signature_block 1, rep: [8.18, 83.89, 33.63, 0.91], mgr: [8.18, 88.29, 33.63, 0.
                    d1: [81.31, 83.82, 11.18, 0.98], d2: [81.31, 88.12, 11.18, 0.98]
 
 # ── Page 2: Addendum "A" (upgrades), 39 rows from the deal's accessory lines ─
-field 2, 'buyer_1_name', 'Buyer 1', 20.2, 6.0, 42.5, 1.8
-field 2, 'home_model', 'Model', 71.2, 6.0, 20.3, 1.8
+merge 2, 'contact.full_name', 'Buyer 1', 20.2, 6.0, 42.5, 1.8
+merge 2, 'vehicle.model', 'Model', 71.2, 6.0, 20.3, 1.8
 ADDENDUM_ROW_TOPS = [8.32, 10.18, 12.09, 13.95, 15.82, 17.64, 19.5, 21.36, 23.27, 25.14, 26.91, 28.82, 30.68,
                      32.55, 34.36, 36.23, 38.09, 39.98, 41.86, 43.64, 45.52, 47.41, 49.27, 51.07, 52.95, 54.82,
                      56.68, 58.59, 60.36, 62.23, 64.14, 66.0, 67.77, 69.68, 71.55, 73.41, 75.32, 77.09, 78.95, 80.91].freeze
@@ -245,8 +251,19 @@ APPLIANCE_ROWS = [
   ['appl_gas_service_on_home_site_to_be', "Gas service on home site to be", 66.58],
   ['appl_amperage', "Amperage", 68.28]
 ].freeze
-field 3, 'buyer_1_name', 'Buyer 1', 28.94, 12.2, 61.24, 2.38
-APPLIANCE_ROWS.each { |key, label, y| field 3, key, label, 52.1, y, 37.88, 1.7, group: 'appliances' }
+merge 3, 'contact.full_name', 'Buyer 1', 28.94, 12.2, 61.24, 2.38
+# Buyer's selections, prefilled from the home's specs where we track them.
+APPLIANCE_FROM_HOME = {
+  'appl_fireplace' => 'vehicle.fireplace', 'appl_furnace_type' => 'vehicle.heating_type',
+  'appl_dryer' => 'vehicle.clothes_dryer', 'appl_washer' => 'vehicle.clothes_washer',
+  'appl_garbage_disposal' => 'vehicle.garbage_disposal', 'appl_dishwasher' => 'vehicle.dishwasher',
+  'appl_microwave_above_stove' => 'vehicle.microwave', 'appl_refrigerator' => 'vehicle.refrigerator',
+  'appl_range' => 'vehicle.oven', 'appl_water_heater' => 'vehicle.water_heater_type',
+  'appl_ac_ready' => 'vehicle.central_air', 'appl_amperage' => 'vehicle.electrical_service'
+}.freeze
+APPLIANCE_ROWS.each do |key, label, y|
+  field 3, key, label, 52.1, y, 37.88, 1.7, group: 'appliances', merge_from: APPLIANCE_FROM_HOME[key]
+end
 signature_block 3, rep: [8.5, 80.2, 33.0, 2.38], mgr: [8.5, 84.6, 33.0, 2.38],
                    b1: [49.84, 80.2, 29.1, 2.38], b2: [49.84, 84.48, 29.1, 2.38],
                    d1: [80.35, 80.2, 11.18, 2.38], d2: [80.35, 84.48, 11.18, 2.38]
@@ -318,8 +335,14 @@ COLOR_ROWS = [
   ['color_kitchen_sink', "Kitchen Sink", 64.52, 26.51, 27.48],
   ['color_decor', "Decor", 15.95, 64.06, 33.55]
 ].freeze
-field 4, 'buyer_1_name', 'Buyer 1', 29.04, 11.15, 61.22, 2.23
-COLOR_ROWS.each { |key, label, x, y, w| field 4, key, label, x, y, w, 1.35, group: 'colors' }
+merge 4, 'contact.full_name', 'Buyer 1', 29.04, 11.15, 61.22, 2.23
+COLOR_FROM_HOME = {
+  'color_interior_color' => 'vehicle.interior_color', 'color_exterior_body_color' => 'vehicle.exterior_color',
+  'color_exterior_shingles' => 'vehicle.roof_material'
+}.freeze
+COLOR_ROWS.each do |key, label, x, y, w|
+  field 4, key, label, x, y, w, 1.35, group: 'colors', merge_from: COLOR_FROM_HOME[key]
+end
 field 4, 'color_notes', 'Color notes', 8.62, 69.73, 83.14, 9.01, group: 'colors'
 signature_block 4, rep: REP_BOX, mgr: MGR_BOX,
                    b1: [50.8, 82.57, 29.12, 2.23], b2: [51.02, 87.12, 29.12, 2.07],
@@ -357,22 +380,28 @@ standard_block 11, 83.32, 87.62, 1.48   # Licensed Contractors
 standard_block 12, 82.24, 86.55, 2.56   # Arbitration
 
 # ── Page 13: Tires and Axles ──────────────────────────────────────────────
-field 13, 'serial_number', 'Serial Number', 9.29, 16.91, 16.78, 1.48
-field 13, 'tires_daytime_phone', 'Tires & axles: daytime phone', 27.78, 25.76, 30.57, 1.86, group: 'shipping', merge_from: 'contact.phone'
+merge 13, 'vehicle.serial_number', 'Serial Number', 9.29, 16.91, 16.78, 1.48
+merge 13, 'contact.phone', 'Tires & axles: daytime phone', 27.78, 25.76, 30.57, 1.86
 field 13, 'tires_evening_phone', 'Tires & axles: evening phone', 27.67, 27.82, 30.69, 1.86, group: 'shipping'
-field 13, 'cell', 'Cell', 24.41, 29.97, 34.18, 1.86
-field 13, 'email_1', 'Email Address 1', 20.61, 32.11, 38.1, 1.86
+merge 13, 'contact.mobile_phone', 'Cell', 24.41, 29.97, 34.18, 1.86
+merge 13, 'contact.email', 'Email Address 1', 20.61, 32.11, 38.1, 1.86
 standard_block 13, 82.94, 87.24, 1.86
 
 # ── Page 14: Shipping Directions & Map ────────────────────────────────────
 [20.03, 22.36, 24.77, 27.11].each_with_index do |y, i|
-  field 14, "shipping_address_#{i + 1}", "Shipping address line #{i + 1}", 16.2, y, 28.49, 1.95, group: 'shipping',
-        merge_from: (i.zero? ? 'deal.delivery_street' : nil)
+  case i
+  when 0 then merge 14, 'deal.delivery_street', 'Shipping address', 16.2, y, 28.49, 1.95
+  when 1
+    merge 14, 'deal.delivery_city', 'Shipping city', 16.2, y, 15.0, 1.95
+    merge 14, 'deal.delivery_state', 'Shipping state', 31.6, y, 4.5, 1.95
+    merge 14, 'deal.delivery_zip', 'Shipping ZIP', 36.5, y, 8.2, 1.95
+  else field 14, "shipping_address_#{i + 1}", "Shipping address line #{i + 1}", 16.2, y, 28.49, 1.95, group: 'shipping'
+  end
 end
-field 14, 'shipping_contact_name', 'Shipping contact name', 54.51, 20.03, 32.78, 1.95, group: 'shipping', merge_from: 'contact.full_name'
-field 14, 'shipping_daytime_phone', 'Shipping contact daytime phone', 60.88, 22.36, 26.29, 1.95, group: 'shipping', merge_from: 'contact.phone'
+merge 14, 'contact.full_name', 'Shipping contact name', 54.51, 20.03, 32.78, 1.95
+merge 14, 'contact.phone', 'Shipping contact daytime phone', 60.88, 22.36, 26.29, 1.95
 field 14, 'shipping_evening_phone', 'Shipping contact evening phone', 60.76, 24.77, 26.29, 1.95, group: 'shipping'
-field 14, 'shipping_mobile_phone', 'Shipping contact mobile phone', 59.84, 27.11, 27.1, 1.95, group: 'shipping', merge_from: 'contact.mobile_phone'
+merge 14, 'contact.mobile_phone', 'Shipping contact mobile phone', 59.84, 27.11, 27.1, 1.95
 [67.8, 69.94, 72.09, 74.15].each_with_index do |y, i|
   field 14, "shipping_directions_#{i + 1}", "Directions line #{i + 1}", 15.75, y, 72.24, 1.95, group: 'shipping'
 end
@@ -382,7 +411,11 @@ standard_block 14, 82.85, 87.15, 1.95
 field 15, 'title_dl_copy_attached', 'Copy of drivers license attached', 19.22, 17.73, 4.41, 2.3, type: 'checkbox', group: 'title'
 [[21.12, 23.62, 26.12, 29.44], [32.83, 35.33, 37.83, 41.15], [44.55, 47.06, 49.56, nil]].each_with_index do |(name_y, dl_y, dob_y, join_y), i|
   n = i + 1
-  field 15, "title_#{n}_name", "Title owner #{n}: name", 25.35, name_y, 55.92, 2.3, group: 'title', merge_from: (n == 1 ? 'contact.full_name' : nil)
+  if n <= 2
+    merge 15, (n == 1 ? 'contact.full_name' : 'deal.co_buyer_name'), "Title owner #{n}: name", 25.35, name_y, 55.92, 2.3
+  else
+    field 15, "title_#{n}_name", "Title owner #{n}: name", 25.35, name_y, 55.92, 2.3, group: 'title'
+  end
   field 15, "title_#{n}_dl_number", "Title owner #{n}: drivers license #", 34.25, dl_y, 21.9, 2.3, group: 'title'
   field 15, "title_#{n}_dl_state", "Title owner #{n}: license state", 63.76, dl_y, 17.51, 2.3, group: 'title'
   field 15, "title_#{n}_dob", "Title owner #{n}: date of birth", 30.43, dob_y, 25.37, 2.23, group: 'title'
@@ -397,10 +430,10 @@ field 15, 'lien_holder', 'Lien holder', 35.08, 54.89, 39.47, 2.24, group: 'title
 field 15, 'lien_holder_address', 'Lien holder address', 32.53, 57.33, 42.02, 1.59, group: 'title'
 field 15, 'lien_amount', 'Amount of lien', 37.96, 59.12, 36.37, 1.59, type: 'currency', group: 'title'
 field 15, 'lien_date', 'Date of lien', 35.65, 60.91, 38.9, 1.59, group: 'title'
-field 15, 'mso_mail_to', 'Mail MSO/Title to', 34.61, 65.58, 46.78, 2.3, group: 'title'
-field 15, 'mso_city', 'MSO city', 23.61, 68.08, 19.71, 2.3, group: 'title'
-field 15, 'mso_state', 'MSO state', 50.12, 68.08, 13.1, 2.3, group: 'title'
-field 15, 'mso_zip', 'MSO ZIP', 68.29, 68.08, 13.1, 2.3, group: 'title'
+field 15, 'mso_mail_to', 'Mail MSO/Title to', 34.61, 65.58, 46.78, 2.3, group: 'title', merge_from: 'contact.street'
+field 15, 'mso_city', 'MSO city', 23.61, 68.08, 19.71, 2.3, group: 'title', merge_from: 'contact.city'
+field 15, 'mso_state', 'MSO state', 50.12, 68.08, 13.1, 2.3, group: 'title', merge_from: 'contact.state'
+field 15, 'mso_zip', 'MSO ZIP', 68.29, 68.08, 13.1, 2.3, group: 'title', merge_from: 'contact.zip'
 standard_block 15, 82.5, 86.8, 2.3
 
 # ── Page 16: Verification of Manufactured (HUD) Home Purchase ─────────────

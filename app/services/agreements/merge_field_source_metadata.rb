@@ -77,6 +77,9 @@ module Agreements
       'deal.probability'                => { section: 'deal_basics', field_id: 'probability', path: ['Deal', 'Basics', 'Probability'] },
       'deal.owner_name'                 => { section: 'deal_owner', field_id: 'assigned_to', path: ['Deal', 'Sales Person'] },
       'deal.customer_name'              => { section: 'deal_customer', field_id: 'customer', path: ['Deal', 'Customer'] },
+      'deal.co_buyer_name'              => { section: 'deal_customer', field_id: 'co_applicant', path: ['Deal', 'Customer', 'Co-Buyer'] },
+      'deal.co_buyer_email'             => { section: 'deal_customer', field_id: 'co_applicant', path: ['Deal', 'Customer', 'Co-Buyer Email'] },
+      'deal.co_buyer_phone'             => { section: 'deal_customer', field_id: 'co_applicant', path: ['Deal', 'Customer', 'Co-Buyer Phone'] },
 
       # ── Deal → Economics ───────────────────────────────────────────────────
       'deal.amount'                     => { section: 'deal_economics', field_id: 'amount', path: ['Deal', 'Economics', 'Deal Amount'] },
