@@ -267,7 +267,7 @@ class IntakeSubmission < ApplicationRecord
     end
     
     Rails.logger.info "[IntakeSubmission] Creating lead with data: #{lead_data.inspect}"
-    new_lead = Lead.create!(lead_data)
+    new_lead = Lead.create!(lead_data.merge(origin: Lead::ORIGIN_INTAKE_FORM))
     Rails.logger.info "[IntakeSubmission] Lead created successfully: #{new_lead.id}"
 
     self.resolved_entity = new_lead

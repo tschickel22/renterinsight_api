@@ -29,6 +29,7 @@ class WorkqueueService
     'activity_meetings_upcoming'  => :activity_meetings_upcoming,
     'activity_calls_due'          => :activity_calls_due,
     'activity_reminders_upcoming' => :activity_reminders_upcoming,
+    'leads_inbound_new'           => :leads_inbound_new,
     'leads_replied'               => :leads_replied,
     'contacts_replied'            => :contacts_replied,
     'leads_mine'                  => :leads_mine,
@@ -51,7 +52,7 @@ class WorkqueueService
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
-      queue_ids: %w[leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
+      queue_ids: %w[leads_inbound_new leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
     { id: 'my_deals', label: 'My Deals',
       queue_ids: %w[deals_mine deals_closing_month deals_closing_week deals_stale_30d] },
     { id: 'my_service', label: 'My Service Work',
@@ -63,6 +64,7 @@ class WorkqueueService
   # Default user preferences. Any key a user hasn't overridden falls back to these.
   DEFAULT_PREFERENCES = {
     new_leads_days:         1,
+    inbound_leads_days:     14,
     stale_leads_days:       2,
     stale_deals_days:       30,
     reminders_window_days:  1,
@@ -428,6 +430,7 @@ class WorkqueueService
     when 'activity_meetings_upcoming'  then "Meetings — Next #{prefs[:meetings_window_days]}d"
     when 'activity_calls_due'          then 'Calls — Due'
     when 'activity_reminders_upcoming' then "Reminders — Next #{prefs[:reminders_window_days]}d"
+    when 'leads_inbound_new'           then 'New Inbound: Not Yet Contacted'
     when 'leads_replied'               then 'Replied — Needs Response'
     when 'contacts_replied'            then 'Contact Replies'
     when 'leads_mine'                  then 'My Leads'
@@ -619,6 +622,53 @@ class WorkqueueService
   def leads_mine
     @company.leads.where(owner_id: @user.id)
                   .where.not(status: excluded_lead_status_keys)
+  end
+
+  # Leads that arrived on their own (intake form, partner API, Facebook Lead
+  # Ads) and that nobody has reached out to yet. Every other lead queue is
+  # owner-only, so an intake form with no notified user, or an API key left on
+  # "unassigned", produced leads no rep's queue ever showed.
+  #
+  # Mine, plus unassigned ones at a location I can work. A lead leaves when a
+  # rep makes first contact, when its status moves off 'new', when it ages past
+  # the window, or when the rep dismisses it.
+  #
+  # First contact is an email or text a person sent from the CRM (those carry
+  # metadata.sender_user_id; communications.user_id is never written) or a
+  # completed call. Workflow, nurture and campaign sends don't count: an
+  # auto-reply is not a rep reaching out. Erring this way only means a lead
+  # stays listed until its status changes.
+  def leads_inbound_new
+    cutoff = prefs[:inbound_leads_days].to_i.days.ago
+
+    scope = @company.leads
+                    .where(origin: Lead::INBOUND_ORIGINS, status: 'new')
+                    .where(is_converted: [false, nil])
+                    .where('leads.created_at >= ?', cutoff)
+                    .where(<<~SQL.squish)
+                      NOT EXISTS (
+                        SELECT 1 FROM communications c
+                        WHERE c.communicable_type = 'Lead'
+                          AND c.communicable_id = leads.id
+                          AND c.direction = 'outbound'
+                          AND c.workflow_run_id IS NULL
+                          AND c.campaign_send_id IS NULL
+                          AND (c.user_id IS NOT NULL OR c.metadata->>'sender_user_id' IS NOT NULL)
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1 FROM lead_activities la
+                        WHERE la.lead_id = leads.id
+                          AND la.activity_type = 'call'
+                          AND la.status = 'completed'
+                      )
+                    SQL
+
+    unassigned = @company.leads.where(owner_id: nil)
+    unless @user.effective_admin?
+      unassigned = unassigned.where(location_id: @user.accessible_locations.select(:id))
+    end
+
+    scope.where(owner_id: @user.id).or(scope.merge(unassigned))
   end
 
   def leads_new_24h
