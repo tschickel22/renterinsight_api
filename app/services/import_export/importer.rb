@@ -12,7 +12,17 @@ module ImportExport
       @company = import_job.company
     end
 
+    # Imported rows are records, not new inquiries: no workflow may start from
+    # them. skip_workflows on each record covers its own events; this covers
+    # the other records an import saves along the way (tag assignments, the
+    # parents and children LinkResolver relinks).
     def process!
+      Current.set(suppress_workflow_events: true) { run! }
+    end
+
+    private
+
+    def run!
       # Modules with bespoke layouts (e.g. budget_lines, which has a
       # monthly column structure that doesn't map 1:1 to CSV uploads)
       # delegate to their own specialized importer.
