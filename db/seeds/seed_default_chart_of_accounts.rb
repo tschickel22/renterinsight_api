@@ -139,6 +139,7 @@ class DefaultChartOfAccountsSeeder
       { number: '6500', name: 'Office & Admin', type: 'expense', sub: 'operating_expense' },
       { number: '6600', name: 'Vehicle Expense', type: 'expense', sub: 'operating_expense' },
       { number: '6700', name: 'Professional Fees', type: 'expense', sub: 'operating_expense' },
+      { number: '6750', name: 'Merchant Processing Fees', type: 'expense', sub: 'operating_expense' },
       { number: '6800', name: 'Depreciation', type: 'expense', sub: 'operating_expense' },
       { number: '6900', name: 'Interest Expense (Non-Floor Plan)', type: 'expense', sub: 'other_expense' },
       { number: '7000', name: 'Other Operating Expenses', type: 'expense', sub: 'other_expense' },

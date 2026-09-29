@@ -17,7 +17,12 @@ class JournalEntry < ApplicationRecord
   validate :at_least_two_lines
   validate :no_edits_if_locked
   validate :no_edits_if_voided
-  validate :period_is_open, if: -> { new_record? || will_save_change_to_entry_date? }
+  validate :period_is_open, if: -> { (new_record? || will_save_change_to_entry_date?) && !allow_closed_period }
+
+  # Set only when recording something the closed period already reported,
+  # e.g. converting an opening balance that reports were adding at report
+  # time (script/post_opening_balances.rb). Never for new activity.
+  attr_accessor :allow_closed_period
 
   before_create :assign_entry_number
   before_save :set_fiscal_period

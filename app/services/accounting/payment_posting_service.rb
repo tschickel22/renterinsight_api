@@ -2,6 +2,8 @@
 
 module Accounting
   class PaymentPostingService
+    MERCHANT_FEE_ACCOUNT_NAME = 'Merchant Processing Fees'
+
     def initialize(payment)
       @payment = payment
       @company = payment.company
@@ -38,14 +40,34 @@ module Accounting
           posted_by_id: @payment.try(:received_by_id) || @payment.try(:created_by_id)
         )
 
+        # When the company absorbs the card fee, the processor keeps it out of
+        # the deposit, so the bank receives the payment less the fee. Posting
+        # the full payment to the bank overstated it by every fee and the bank
+        # reconciliation could never tie. The fee is an expense instead. When
+        # the customer pays the fee, the processor keeps that surcharge and the
+        # dealer receives the full payment, so nothing changes.
+        fee = absorbed_processing_fee(payment_amount)
+        fee_account = fee.positive? ? merchant_fee_account : nil
+        fee = BigDecimal('0') unless fee_account
+
         je.journal_entry_lines.build(
           chart_of_account: bank_gl_account,
-          debit_amount: payment_amount,
+          debit_amount: payment_amount - fee,
           credit_amount: 0,
-          memo: "Payment received",
+          memo: fee.positive? ? "Payment received, less processing fee" : "Payment received",
           location_id: location_id,
           contact_id: resolve_contact_id
         )
+
+        if fee.positive?
+          je.journal_entry_lines.build(
+            chart_of_account: fee_account,
+            debit_amount: fee,
+            credit_amount: 0,
+            memo: "Card processing fee — Payment #{@payment.try(:payment_number) || @payment.id}",
+            location_id: location_id
+          )
+        end
 
         je.journal_entry_lines.build(
           chart_of_account: ar_account,
@@ -178,6 +200,32 @@ module Accounting
       # predate the FK on bank_accounts.
       bank.chart_of_account ||
         @company.chart_of_accounts.find_by(bank_account_id: bank.id)
+    end
+
+    # The fee the company pays on this payment (0 when the customer pays it
+    # or there is none). Never more than the payment itself.
+    def absorbed_processing_fee(payment_amount)
+      return BigDecimal('0') unless @payment.try(:company_pays_fee?)
+
+      fee = (@payment.try(:processing_fee) || 0).to_d.round(2)
+      fee.positive? ? [fee, payment_amount].min : BigDecimal('0')
+    end
+
+    def merchant_fee_account
+      @company.chart_of_accounts.find_by(name: MERCHANT_FEE_ACCOUNT_NAME) ||
+        @company.chart_of_accounts.create!(
+          account_number: free_account_number(6750..6799),
+          name: MERCHANT_FEE_ACCOUNT_NAME,
+          account_type: 'expense',
+          sub_type: 'operating_expense',
+          normal_balance: 'debit',
+          description: 'Card and ACH processing fees the dealership pays.'
+        )
+    end
+
+    def free_account_number(range)
+      taken = @company.chart_of_accounts.pluck(:account_number).to_set
+      range.map(&:to_s).find { |n| !taken.include?(n) } || "#{range.first}-#{SecureRandom.hex(2)}"
     end
 
     def resolve_contact_id
