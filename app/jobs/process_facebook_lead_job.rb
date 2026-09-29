@@ -245,13 +245,45 @@ class ProcessFacebookLeadJob < ApplicationJob
 
     rule = WorkflowRule.active.find_by(id: integration.default_workflow_id, company_id: integration.company_id)
     return unless rule
-    # A rule that already listens for new leads is started by the lead.created
-    # event this lead just emitted. Starting it here as well ran it twice.
-    return if rule.trigger.is_a?(Hash) && rule.trigger['event_type'] == 'lead.created'
+
+    # Picking any of a play's rules means "run this play". Its tag rule must
+    # never start here: the play's new-lead rule would start as well, and the
+    # lead got two first texts, two first emails and two call tasks.
+    installation = play_installation_for(rule)
+    if installation
+      rule = play_new_lead_rule(installation)
+      return unless rule
+    end
+
+    # A new-lead rule whose conditions this lead meets is started by the
+    # lead.created event the lead just emitted. Starting it here as well ran it
+    # twice. One whose conditions it misses (a play for other sources, a rule
+    # filtered to another source) would never run, so it starts here.
+    if new_lead_rule?(rule)
+      return if WorkflowEngine::ConditionEvaluator.evaluate(rule.conditions, lead, trigger: { 'id' => lead.id })
+    end
 
     WorkflowEngine.start_run(rule: rule, entity: lead)
   rescue => e
     Rails.logger.error "[ProcessFacebookLeadJob] trigger_default_workflow: #{e.message}"
+  end
+
+  def new_lead_rule?(rule)
+    rule.trigger.is_a?(Hash) && rule.trigger['event_type'] == 'lead.created'
+  end
+
+  def play_installation_for(rule)
+    PlayInstallation.active.where(company_id: rule.company_id).detect do |installation|
+      Array((installation.assets || {})['workflow_rule_ids']).map(&:to_i).include?(rule.id)
+    end
+  end
+
+  # nil when the play has no active new-lead rule (turned off, or a kind of
+  # play that doesn't start from new leads). Then nothing starts here.
+  def play_new_lead_rule(installation)
+    WorkflowRule.active
+                .where(company_id: installation.company_id, id: Array(installation.assets['workflow_rule_ids']))
+                .detect { |rule| new_lead_rule?(rule) }
   end
 
   def identity_match(company, lead_attrs)

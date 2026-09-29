@@ -92,6 +92,63 @@ RSpec.describe ProcessFacebookLeadJob do
     DispatchWorkflowEventsJob.new.perform
     expect(WorkflowRun.where(workflow_rule_id: rule.id).count).to eq(1)
   end
+  describe 'a play picked as the default workflow' do
+    def lead_rule(name, event, conditions)
+      WorkflowRule.create!(
+        company_id: company.id, name: name, entity_type: 'Lead', status: 'active',
+        trigger: { 'event_type' => event, 'entity_type_filter' => 'Lead' }, conditions: conditions,
+        steps: { 'nodes' => [{ 'id' => 'n1', 'type' => 'wait', 'config' => { 'duration' => 1 } }] }
+      )
+    end
+
+    def install_play(sources)
+      new_lead = lead_rule('Play: new lead', 'lead.created',
+                           [{ 'field' => 'source.name', 'operator' => 'in', 'value' => sources }])
+      tagged = lead_rule('Play: tagged', 'lead.tagged',
+                         [{ 'field' => 'trigger.tag_name', 'operator' => 'equals', 'value' => 'facebook-lead' }])
+      PlayInstallation.create!(company_id: company.id, play_key: 'new_facebook_lead', status: 'active',
+                               answers: { 'sources' => sources },
+                               assets: { 'workflow_rule_ids' => [new_lead.id, tagged.id] })
+      [new_lead, tagged]
+    end
+
+    def runs_of(rule)
+      WorkflowRun.where(workflow_rule_id: rule.id).count
+    end
+
+    it "runs the play once when its tag rule is picked, never the tag rule" do
+      new_lead, tagged = install_play(['Facebook'])
+      integration.update!(default_workflow_id: tagged.id)
+
+      deliver
+      DispatchWorkflowEventsJob.new.perform
+
+      expect(runs_of(new_lead)).to eq(1)
+      expect(runs_of(tagged)).to eq(0)
+    end
+
+    it "starts the play for a Facebook lead even when the play is set to other sources" do
+      new_lead, = install_play(['Website'])
+      integration.update!(default_workflow_id: new_lead.id)
+
+      deliver
+      DispatchWorkflowEventsJob.new.perform
+
+      expect(runs_of(new_lead)).to eq(1)
+    end
+
+    it 'starts nothing when the play has been turned off' do
+      new_lead, tagged = install_play(['Website'])
+      new_lead.update!(status: 'archived')
+      integration.update!(default_workflow_id: tagged.id)
+
+      deliver
+      DispatchWorkflowEventsJob.new.perform
+
+      expect(runs_of(tagged)).to eq(0)
+    end
+  end
+
   describe 'form answers' do
     it 'writes every custom question to the notes column and the Notes tab' do
       lead = deliver
