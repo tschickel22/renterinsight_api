@@ -84,10 +84,10 @@ class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
       )
       create_line_items_from_qb(memo, qb_memo)
 
-      total_amt = qb_memo['TotalAmt'].to_f
-      tax_amt   = qb_memo.dig('TxnTaxDetail', 'TotalTax').to_f
+      total_amt = qb_money(qb_memo['TotalAmt'])
+      tax_amt   = qb_money(qb_memo.dig('TxnTaxDetail', 'TotalTax'))
       subtotal  = total_amt - tax_amt
-      remaining = qb_memo['RemainingCredit'].to_f
+      remaining = qb_money(qb_memo['RemainingCredit'])
       applied   = total_amt - remaining
 
       memo.update_columns(
@@ -102,14 +102,21 @@ class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
     end
   end
 
+  # QuickBooks amounts as exact cents (see QuickbooksInvoiceSyncHandler).
+  def qb_money(value)
+    value.present? ? BigDecimal(value.to_s).round(2) : BigDecimal('0')
+  rescue ArgumentError
+    BigDecimal('0')
+  end
+
   def update_from_quickbooks(memo, qb_memo, config)
     memo.credit_memo_items.destroy_all
     create_line_items_from_qb(memo, qb_memo)
 
-    total_amt = qb_memo['TotalAmt'].to_f
-    tax_amt   = qb_memo.dig('TxnTaxDetail', 'TotalTax').to_f
+    total_amt = qb_money(qb_memo['TotalAmt'])
+    tax_amt   = qb_money(qb_memo.dig('TxnTaxDetail', 'TotalTax'))
     subtotal  = total_amt - tax_amt
-    remaining = qb_memo['RemainingCredit'].to_f
+    remaining = qb_money(qb_memo['RemainingCredit'])
     applied   = total_amt - remaining
 
     memo.update_columns(

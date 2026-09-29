@@ -132,16 +132,16 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       inv = company.invoices.create!(invoice_data)
       create_line_items_from_qb(inv, qb_invoice)
 
-      total_amt    = qb_invoice['TotalAmt'].to_f
-      tax_amt      = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
+      total_amt    = qb_money(qb_invoice['TotalAmt'])
+      tax_amt      = qb_money(qb_invoice['TxnTaxDetail']&.dig('TotalTax'))
       subtotal_amt = total_amt - tax_amt
-      balance_amt  = qb_invoice['Balance'].to_f
+      balance_amt  = qb_money(qb_invoice['Balance'])
       paid_amt     = total_amt - balance_amt
 
       inv.update_columns(
         subtotal: subtotal_amt,
         tax_amount: tax_amt,
-        tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
+        tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(5) : 0,
         total: total_amt,
         amount_paid: paid_amt,
         amount_due: balance_amt,
@@ -153,6 +153,14 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     invoice
   end
   
+  # QuickBooks amounts as exact cents. Float math here could store a total
+  # a fraction of a cent off, which then never matched its payments.
+  def qb_money(value)
+    value.present? ? BigDecimal(value.to_s).round(2) : BigDecimal('0')
+  rescue ArgumentError
+    BigDecimal('0')
+  end
+
   def update_from_quickbooks(invoice, qb_invoice, config)
     # Update contact if changed
     customer_id = qb_invoice.dig('CustomerRef', 'value')
@@ -166,10 +174,10 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     create_line_items_from_qb(invoice, qb_invoice)
     
     # Calculate financial totals
-    total_amt = qb_invoice['TotalAmt'].to_f
-    tax_amt = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
+    total_amt = qb_money(qb_invoice['TotalAmt'])
+    tax_amt = qb_money(qb_invoice['TxnTaxDetail']&.dig('TotalTax'))
     subtotal_amt = total_amt - tax_amt
-    balance_amt = qb_invoice['Balance'].to_f
+    balance_amt = qb_money(qb_invoice['Balance'])
     paid_amt = total_amt - balance_amt
     
     # Update invoice fields without triggering callbacks
@@ -179,7 +187,7 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       due_date: qb_invoice['DueDate'] ? Date.parse(qb_invoice['DueDate']) : invoice.due_date,
       subtotal: subtotal_amt,
       tax_amount: tax_amt,
-      tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
+      tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(5) : 0,
       total: total_amt,
       amount_paid: paid_amt,
       amount_due: balance_amt,
@@ -451,8 +459,8 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   
   def map_qb_status(qb_invoice)
     # Map QuickBooks invoice status to our status
-    total = qb_invoice['TotalAmt'].to_f
-    balance = qb_invoice['Balance'].to_f
+    total = qb_money(qb_invoice['TotalAmt'])
+    balance = qb_money(qb_invoice['Balance'])
     due_date = qb_invoice['DueDate'] ? Date.parse(qb_invoice['DueDate']) : nil
     
     # If fully paid
