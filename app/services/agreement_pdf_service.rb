@@ -376,6 +376,8 @@ class AgreementPdfService
         stamp_signer_email(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
       when 'checkbox', 'custom_checkbox'
         stamp_checkbox(pdf, x_pt, y_pt, w_pt, h_pt, value)
+      when 'currency'
+        stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, format_currency(value)) if value.present?
       else
         # All other types: text, currency, number, date, text_input, custom_text, select, etc.
         stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value) if value.present?
@@ -459,6 +461,17 @@ class AgreementPdfService
       min_font_size: 5,
       valign: :center
     true
+  end
+
+  # Values arrive as whatever was typed or computed ("87489", "79064.0",
+  # "$1,240"). Forms print their own "$", so this returns 87,489.00. Anything
+  # that is not a plain amount is stamped as given.
+  def format_currency(value)
+    raw = value.to_s.strip
+    amount = BigDecimal(raw.delete('$,').strip, exception: false)
+    return raw unless amount
+
+    ActiveSupport::NumberHelper.number_to_currency(amount, unit: '', precision: 2)
   end
 
   def stamp_typed_signature(pdf, x, y, w, h, text)
