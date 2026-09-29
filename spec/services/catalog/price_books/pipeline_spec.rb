@@ -113,6 +113,24 @@ RSpec.describe 'TrueBuild price book pipeline' do
     end
   end
 
+  describe Catalog::PriceBooks::TabInventory do
+    it 'pre-unticks disregard tabs and the older year of a repeated form, taking the year from the header' do
+      pkg = Axlsx::Package.new
+      pkg.workbook.add_worksheet(name: 'DGAE - HUD') { |ws| ws.add_row(['2022 DGAE HUD']); ws.add_row(['Drywall', 100, 155]) }
+      pkg.workbook.add_worksheet(name: '2023 DGAE HUD') { |ws| ws.add_row(['CHAMPION TOPEKA OPTIONS - DGAE']); ws.add_row(['Drywall', 110, 170]) }
+      pkg.workbook.add_worksheet(name: 'Gold Star II - HUD') { |ws| ws.add_row(['DISREGAURD FOR NOW 10.2.2020']); ws.add_row(['Axle', 952, 1475]) }
+      pkg.workbook.add_worksheet(name: '2025 Aspire DW') { |ws| ws.add_row(['%', 1.55]); ws.add_row(['Drywall', 4815, 7463]) }
+      tabs = described_class.for_bytes('Factory Options.xlsx', pkg.to_stream.read).index_by { |t| t['name'] }
+
+      expect(tabs['DGAE - HUD']).to include('year' => 2022, 'suggest_skip' => true)
+      expect(tabs['DGAE - HUD']['reason']).to include('2023 DGAE HUD')
+      expect(tabs['2023 DGAE HUD']).to include('year' => 2023, 'suggest_skip' => false)
+      expect(tabs['Gold Star II - HUD']).to include('suggest_skip' => true, 'reason' => 'marked to disregard')
+      expect(tabs['2025 Aspire DW']['suggest_skip']).to be(false)
+      expect(described_class.default_selection(tabs.values)).to contain_exactly('2023 DGAE HUD', '2025 Aspire DW')
+    end
+  end
+
   describe Catalog::PriceBooks::PdfExtractor do
     it 'asks again for model numbers on the page it missed, and flags a sheet that contradicts its codes' do
       doc = Catalog::PriceBooks::Ingest.new(book).call([upload('Aspire Net.pdf', price_list_pdf, 'application/pdf')]).added.first
@@ -143,14 +161,19 @@ RSpec.describe 'TrueBuild price book pipeline' do
   describe Catalog::PriceBooks::WorkbookExtractor do
     let(:doc) { Catalog::PriceBooks::Ingest.new(book).call([upload('Factory Options.xlsx', workbook)]).added.first }
 
-    it 'skips a tab repeated under an older year' do
-      extractor = described_class.new(doc, workbook, Catalog::PriceBooks::Recorder.new(book, client: FakeClaude.new({})))
-      expect(extractor.send(:outdated_tabs, ['2023 DGAE HUD', 'DGAE - HUD', '2025 Aspire DW', 'Master Option List']))
-        .to eq('2023 DGAE HUD' => 'DGAE - HUD')
-      expect(extractor.send(:outdated_tabs, ['2024 Aspire SW', '2025 Aspire SW'])).to eq('2024 Aspire SW' => '2025 Aspire SW')
+    it 'reads only the tabs left ticked' do
+      doc.update!(metadata: doc.metadata.merge('selected_tabs' => ['Master Option List']))
+      claude = FakeClaude.new({})
+      described_class.new(doc, workbook, Catalog::PriceBooks::Recorder.new(book, client: claude)).call
+
+      expect(claude.calls).to be_empty
+      expect(doc.reload.metadata.dig('tabs', '2025 Aspire DW')).to eq('kind' => 'skipped', 'reason' => 'not selected')
+      expect(book.import_items.pluck(:item_type).uniq).to eq(['option'])
     end
 
     it 'grounds every price in its cell, fixes swapped columns, repairs missed cells, skips stale tabs, reads the master list directly' do
+      # Every tab ticked, so the model's own stale check is exercised too.
+      doc.update!(metadata: doc.metadata.merge('selected_tabs' => doc.metadata['tab_list'].map { |t| t['name'] }))
       claude = FakeClaude.new(
         'record_options' => [
           # Aspire DW, first pass: one option read with cost and retail swapped,

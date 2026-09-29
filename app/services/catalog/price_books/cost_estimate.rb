@@ -16,7 +16,13 @@ module Catalog
       def for_document(doc)
         return 0.0 if doc.kind == 'image'
 
-        rows = doc.metadata['filled_rows']
+        tabs = doc.metadata['tab_list']
+        selected = doc.metadata['selected_tabs']
+        rows = if tabs && selected
+                 tabs.select { |t| selected.include?(t['name']) }.sum { |t| t['rows'].to_i }
+               else
+                 doc.metadata['filled_rows']
+               end
         if rows
           rows.to_i * SPREADSHEET_ROW_USD
         elsif doc.page_count

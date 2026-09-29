@@ -105,6 +105,30 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     expect(response).to have_http_status(:unprocessable_content)
   end
 
+  it "lets an admin choose a workbook's tabs, and reject everything read from one tab" do
+    book = CatalogPriceBook.create!(manufacturer: mfr, name: 'Topeka 2026', status: 'in_review')
+    doc = book.documents.create!(filename: 'Factory Options.xlsx', checksum_sha256: 'wb', kind: 'order_form', metadata: {
+      'tab_list' => [{ 'name' => 'DGAE - HUD', 'rows' => 392, 'suggest_skip' => true }, { 'name' => '2023 DGAE HUD', 'rows' => 415 }],
+      'selected_tabs' => ['2023 DGAE HUD']
+    })
+    patch "/api/admin/catalog_price_books/#{book.id}/documents/#{doc.id}/tabs", headers: headers,
+                                                                               params: { selected_tabs: ['2023 DGAE HUD', 'DGAE - HUD'] }
+    body = JSON.parse(response.body)
+    expect(body['tabs'].map { |t| t['selected'] }).to eq([true, true])
+    expect(body['estimate_usd']).to be > 1
+
+    patch "/api/admin/catalog_price_books/#{book.id}/documents/#{doc.id}/tabs", headers: headers, params: { selected_tabs: ['Nope'] }
+    expect(response).to have_http_status(:unprocessable_content)
+
+    old = 2.times.map { book.import_items.create!(document: doc, item_type: 'option_price', source_ref: { 'sheet' => 'DGAE - HUD' }, payload: {}) }
+    keep = book.import_items.create!(document: doc, item_type: 'option_price', source_ref: { 'sheet' => '2023 DGAE HUD' }, payload: {})
+    post "/api/admin/catalog_price_books/#{book.id}/bulk_review", headers: headers,
+                                                                 params: { review_status: 'rejected', sheet: 'DGAE - HUD', document_id: doc.id }
+    expect(JSON.parse(response.body)['updated']).to eq(2)
+    expect(old.map { |i| i.reload.review_status }).to all(eq('rejected'))
+    expect(keep.reload.review_status).to eq('pending')
+  end
+
   it 'hands out an expiring link to a source file' do
     book = CatalogPriceBook.create!(manufacturer: mfr, name: 'Topeka 2026')
     doc = book.documents.create!(filename: 'Aspire Net.pdf', checksum_sha256: 'abc', storage_bucket: 'dt-private-test',

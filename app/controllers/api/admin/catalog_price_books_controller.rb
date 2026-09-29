@@ -9,7 +9,8 @@
 class Api::Admin::CatalogPriceBooksController < ApplicationController
   before_action :require_platform_admin!
   before_action :set_book, except: %i[index create factories]
-  before_action :require_editable, only: %i[upload extract update_item bulk_review link_catalog retry_document auto_resolve]
+  before_action :require_editable, only: %i[upload extract update_item bulk_review link_catalog retry_document auto_resolve
+                                            update_tabs]
 
   ITEM_SORT = "CASE change_type WHEN 'removed' THEN 0 WHEN 'changed' THEN 1 WHEN 'new' THEN 2 ELSE 3 END, " \
               'jsonb_array_length(flags) DESC, id'
@@ -129,6 +130,34 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     render json: { url: url, filename: doc.filename }
   end
 
+  # GET /api/admin/catalog_price_books/:id/documents/:document_id/tabs
+  # A workbook's tabs with rows, year and estimated cost, and which are ticked.
+  def tabs
+    doc = @book.documents.find(params[:document_id])
+    unless doc.metadata['tab_list']
+      return render json: { error: 'Only workbooks have tabs' }, status: :unprocessable_entity unless doc.kind == 'order_form'
+
+      bytes = PrivateFiles.read(PrivateFiles.ref(doc.storage_key, doc.storage_bucket))
+      list = Catalog::PriceBooks::TabInventory.for_bytes(doc.filename, bytes)
+      doc.update!(metadata: doc.metadata.merge('tab_list' => list,
+                                               'selected_tabs' => doc.metadata['selected_tabs'] ||
+                                                                  Catalog::PriceBooks::TabInventory.default_selection(list)))
+    end
+    render json: tabs_json(doc)
+  end
+
+  # PATCH /api/admin/catalog_price_books/:id/documents/:document_id/tabs   { selected_tabs: [...] }
+  def update_tabs
+    doc = @book.documents.find(params[:document_id])
+    names = Array(doc.metadata['tab_list']).map { |t| t['name'] }
+    chosen = Array(params[:selected_tabs]).map(&:to_s)
+    unknown = chosen - names
+    return render json: { error: "Unknown tabs: #{unknown.join(', ')}" }, status: :unprocessable_entity if unknown.any?
+
+    doc.update!(metadata: doc.metadata.merge('selected_tabs' => chosen))
+    render json: tabs_json(doc)
+  end
+
   # GET /api/admin/catalog_price_books/:id/items
   def items
     scope = @book.import_items.includes(:document)
@@ -136,6 +165,7 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     scope = scope.where(review_status: params[:review_status]) if params[:review_status].present?
     scope = scope.where(change_type: params[:change_type]) if params[:change_type].present?
     scope = scope.where(catalog_price_book_document_id: params[:document_id]) if params[:document_id].present?
+    scope = scope.where("source_ref->>'sheet' = ?", params[:sheet]) if params[:sheet].present?
     scope = scope.flagged if params[:flagged].to_s == 'true'
     scope = scope.where("jsonb_array_length(flags) = 0") if params[:flagged].to_s == 'false'
     scope = scope.where('flags ? :f', f: params[:flag]) if params[:flag].present?
@@ -188,12 +218,16 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     scope = @book.import_items
     if params[:ids].present?
       scope = scope.where(id: Array(params[:ids]))
+    elsif params[:sheet].present?
+      # Everything read from one workbook tab, e.g. rejecting a 2022 copy.
+      scope = scope.where("source_ref->>'sheet' = ?", params[:sheet])
+      scope = scope.where(catalog_price_book_document_id: params[:document_id]) if params[:document_id].present?
     elsif params[:unflagged].to_s == 'true'
       # The common case: approve everything no check objected to, then read the rest.
       scope = scope.pending.where('jsonb_array_length(flags) = 0')
       scope = scope.where(item_type: params[:item_type]) if params[:item_type].present?
     else
-      return render json: { error: 'Pass ids, or unflagged: true' }, status: :unprocessable_entity
+      return render json: { error: 'Pass ids, sheet, or unflagged: true' }, status: :unprocessable_entity
     end
 
     reviewer = status == 'pending' ? { reviewed_by_id: nil, reviewed_at: nil } : { reviewed_by_id: original_user.id, reviewed_at: Time.current }
@@ -341,6 +375,14 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
       documents: book.documents.order(:created_at).map { |d| document_json(d) },
       review: review_counts(book)
     )
+  end
+
+  def tabs_json(doc)
+    selected = Array(doc.metadata['selected_tabs'])
+    items = @book.import_items.where(document: doc).group(Arel.sql("source_ref->>'sheet'")).count
+    tabs = Array(doc.metadata['tab_list']).map { |t| t.merge('selected' => selected.include?(t['name']), 'items' => items[t['name']].to_i) }
+    { document_id: doc.id, tabs: tabs, selected_tabs: selected,
+      estimate_usd: Catalog::PriceBooks::CostEstimate.for_document(doc).round(2) }
   end
 
   def document_json(doc)

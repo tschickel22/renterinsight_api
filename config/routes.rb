@@ -2999,6 +2999,8 @@ Rails.application.routes.draw do
           post :publish
           get  'documents/:document_id/download', action: :download_document, as: :download_document
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
+          get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs
+          patch 'documents/:document_id/tabs', action: :update_tabs, as: :update_document_tabs
         end
       end
 

@@ -84,6 +84,7 @@ module Catalog
         end
 
         kind = Classifier.guess(name, bytes)
+        tabs = kind == 'order_form' ? (TabInventory.for_bytes(name, bytes) rescue nil) : nil
         key = "catalog/price-books/#{@book.id}/#{checksum[0, 12]}_#{safe(name)}"
         PrivateFiles.put(bytes, key: key, content_type: content_type.presence || Classifier.content_type(name))
 
@@ -96,7 +97,8 @@ module Catalog
           storage_key: key,
           kind: kind,
           page_count: Classifier.page_count(name, bytes),
-          metadata: { 'archive_path' => archive_path, 'filled_rows' => Classifier.filled_rows(name, bytes) }.compact
+          metadata: { 'archive_path' => archive_path, 'filled_rows' => Classifier.filled_rows(name, bytes),
+                      'tab_list' => tabs, 'selected_tabs' => tabs && TabInventory.default_selection(tabs) }.compact
         )
       end
 
