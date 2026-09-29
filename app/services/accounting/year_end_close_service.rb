@@ -35,19 +35,21 @@ module Accounting
 
         next if net.zero?
 
+        debit, credit = closing_sides(account, net)
         lines << {
           accountId: account.id,
           accountNumber: account.account_number,
           accountName: account.name,
           accountType: account.account_type,
-          debitAmount: account.account_type == 'expense' ? 0 : net,
-          creditAmount: account.account_type == 'expense' ? net : 0,
+          debitAmount: debit,
+          creditAmount: credit,
         }
       end
 
       return { error: 'No revenue or expense activity to close for this fiscal year' } if lines.empty?
 
-      net_income = lines.sum { |l| (l[:creditAmount] || 0) - (l[:debitAmount] || 0) }
+      # Closing debits revenue and credits expenses, so profit is debits - credits.
+      net_income = lines.sum { |l| (l[:debitAmount] || 0) - (l[:creditAmount] || 0) }
 
       {
         fiscalYear: fiscal_year,
@@ -93,18 +95,18 @@ module Accounting
 
         next if net.zero?
 
-        if account.account_type == 'revenue'
-          lines << { chart_of_account_id: account.id, debit_amount: net, credit_amount: 0,
-                     memo: "Year-end close FY#{fiscal_year}" }
-        else
-          lines << { chart_of_account_id: account.id, debit_amount: 0, credit_amount: net,
-                     memo: "Year-end close FY#{fiscal_year}" }
-        end
+        debit, credit = closing_sides(account, net)
+        lines << { chart_of_account_id: account.id, debit_amount: debit, credit_amount: credit,
+                   memo: "Year-end close FY#{fiscal_year}" }
       end
 
       return { error: 'No revenue or expense activity to close' } if lines.empty?
 
-      net_income = lines.sum { |l| (l[:credit_amount] || 0) - (l[:debit_amount] || 0) }
+      # Closing debits revenue and credits expenses, so profit is debits -
+      # credits. This was credits - debits, which sent a profit to the debit
+      # side of Retained Earnings; the entry then failed to balance and every
+      # profitable year failed to close with "Failed to create closing entries".
+      net_income = lines.sum { |l| (l[:debit_amount] || 0) - (l[:credit_amount] || 0) }
 
       if net_income > 0
         lines << { chart_of_account_id: re_account.id, debit_amount: 0, credit_amount: net_income,
@@ -129,6 +131,18 @@ module Accounting
       else
         { error: 'Failed to create closing entries' }
       end
+    end
+
+    private
+
+    # [debit, credit] for the line that zeroes an account's balance for the
+    # year: a debit balance is cleared with a credit and a credit balance with
+    # a debit. Keyed off the balance, not the account type, so contra accounts
+    # (Sales Returns under revenue) and balances on the unusual side close
+    # correctly without ever producing a negative line.
+    def closing_sides(account, net)
+      debit_balance = account.normal_balance == 'debit' ? net : -net
+      debit_balance.positive? ? [0, debit_balance] : [debit_balance.abs, 0]
     end
   end
 end
