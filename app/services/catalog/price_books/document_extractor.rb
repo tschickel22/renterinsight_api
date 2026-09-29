@@ -17,7 +17,7 @@ module Catalog
         # Earlier attempts still cost money; keep them in the book's total.
         prior = @doc.metadata['cost_usd_prior_runs'].to_f + @doc.metadata.dig('usage', 'cost_usd').to_f
         @doc.update!(extraction_status: 'running', extraction_error: nil,
-                     metadata: @doc.metadata.except('usage').merge('cost_usd_prior_runs' => prior.round(4)))
+                     metadata: @doc.metadata.except('usage', 'queued_at').merge('cost_usd_prior_runs' => prior.round(4)))
         @book.import_items.where(document: @doc).delete_all
         recorder = Recorder.new(@book, client: @client, document: @doc)
         bytes = PrivateFiles.read(PrivateFiles.ref(@doc.storage_key, @doc.storage_bucket))

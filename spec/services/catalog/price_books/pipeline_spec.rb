@@ -143,6 +143,13 @@ RSpec.describe 'TrueBuild price book pipeline' do
   describe Catalog::PriceBooks::WorkbookExtractor do
     let(:doc) { Catalog::PriceBooks::Ingest.new(book).call([upload('Factory Options.xlsx', workbook)]).added.first }
 
+    it 'skips a tab repeated under an older year' do
+      extractor = described_class.new(doc, workbook, Catalog::PriceBooks::Recorder.new(book, client: FakeClaude.new({})))
+      expect(extractor.send(:outdated_tabs, ['2023 DGAE HUD', 'DGAE - HUD', '2025 Aspire DW', 'Master Option List']))
+        .to eq('2023 DGAE HUD' => 'DGAE - HUD')
+      expect(extractor.send(:outdated_tabs, ['2024 Aspire SW', '2025 Aspire SW'])).to eq('2024 Aspire SW' => '2025 Aspire SW')
+    end
+
     it 'grounds every price in its cell, fixes swapped columns, repairs missed cells, skips stale tabs, reads the master list directly' do
       claude = FakeClaude.new(
         'record_options' => [

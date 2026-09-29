@@ -44,7 +44,13 @@ module Catalog
       def call
         book = open_workbook
         summary = {}
+        outdated = outdated_tabs(book.sheets)
         book.sheets.each do |name|
+          if (newer = outdated[name])
+            summary[name] = { 'kind' => 'order_form', 'stale' => true, 'reason' => "older copy of \"#{newer}\"" }
+            next
+          end
+
           sheet = book.sheet(name)
           summary[name] = extract_sheet(name, sheet)
         end
@@ -73,6 +79,22 @@ module Catalog
           extract_master_list(name, sheet)
         else
           extract_order_form(name, sheet, grid)
+        end
+      end
+
+      # A tab repeated under an older year ("2023 DGAE HUD" beside "DGAE - HUD"
+      # or "2025 DGAE HUD") is an outdated copy. Reading it cost as much as the
+      # real one on the Champion package. Returns { older tab => newer tab }.
+      def outdated_tabs(names)
+        keyed = names.map do |n|
+          year = n[/\b(20\d{2})\b/, 1].to_i
+          [n, n.sub(/\b20\d{2}\b/, '').downcase.gsub(/[^a-z0-9]/, ''), year]
+        end
+        keyed.each_with_object({}) do |(name, key, year), out|
+          next if key.empty?
+
+          newer = keyed.find { |(other, okey, oyear)| other != name && okey == key && (oyear.zero? ? year.positive? : oyear > year) }
+          out[name] = newer.first if newer && year.positive?
         end
       end
 

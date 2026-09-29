@@ -90,19 +90,34 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     return render json: { error: 'No files waiting to be read' }, status: :unprocessable_entity if docs.none?
 
     @book.update!(status: 'extracting')
+    queued = 0
     docs.find_each do |d|
-      d.update!(extraction_status: 'pending', extraction_error: nil)
-      CatalogPriceBookExtractionJob.perform_later(d.id)
+      # A second click (or a second admin) must not read the same file again.
+      d.with_lock do
+        next if recently_queued?(d)
+
+        d.update!(extraction_status: 'pending', extraction_error: nil,
+                  metadata: d.metadata.merge('queued_at' => Time.current.iso8601))
+        CatalogPriceBookExtractionJob.perform_later(d.id)
+        queued += 1
+      end
     end
-    render json: book_json(@book.reload, detailed: true), status: :accepted
+    render json: book_json(@book.reload, detailed: true).merge(queued: queued), status: :accepted
   end
 
   # POST /api/admin/catalog_price_books/:id/documents/:document_id/retry
   def retry_document
     doc = @book.documents.find(params[:document_id])
-    @book.update!(status: 'extracting')
-    doc.update!(extraction_status: 'pending', extraction_error: nil)
-    CatalogPriceBookExtractionJob.perform_later(doc.id)
+    doc.with_lock do
+      if doc.extraction_status == 'running' || recently_queued?(doc)
+        return render json: { error: 'This file is already being read' }, status: :conflict
+      end
+
+      @book.update!(status: 'extracting')
+      doc.update!(extraction_status: 'pending', extraction_error: nil,
+                  metadata: doc.metadata.merge('queued_at' => Time.current.iso8601))
+      CatalogPriceBookExtractionJob.perform_later(doc.id)
+    end
     render json: document_json(doc), status: :accepted
   end
 
@@ -258,6 +273,12 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     @book = CatalogPriceBook.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
+  end
+
+  # Queued in the last 15 minutes and not started yet.
+  def recently_queued?(doc)
+    at = doc.metadata['queued_at'].presence&.then { |t| Time.zone.parse(t) rescue nil }
+    doc.extraction_status == 'pending' && at && at > 15.minutes.ago
   end
 
   def require_editable

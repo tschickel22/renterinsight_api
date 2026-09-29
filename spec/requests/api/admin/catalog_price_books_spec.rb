@@ -63,6 +63,10 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     expect { post "/api/admin/catalog_price_books/#{book['id']}/extract", headers: headers }
       .to have_enqueued_job(CatalogPriceBookExtractionJob)
     expect(CatalogPriceBook.find(book['id']).status).to eq('extracting')
+
+    # A second click does not read the same file again.
+    expect { post "/api/admin/catalog_price_books/#{book['id']}/extract", headers: headers }
+      .not_to have_enqueued_job(CatalogPriceBookExtractionJob)
   end
 
   it 'lists items for review, approves the unflagged ones in bulk, and publishes' do
