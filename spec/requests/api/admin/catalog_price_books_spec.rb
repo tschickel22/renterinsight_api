@@ -23,6 +23,15 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
+  it 'lists only platform manufacturers for the price book picker' do
+    mfr
+    own = Manufacturer.create!(name: 'Champion Athens', industry_type: 'manufactured_housing', company_id: company.id)
+    get '/api/admin/manufacturers', headers: headers, params: { platform: true }
+    ids = JSON.parse(response.body).map { |m| m['id'] }
+    expect(ids).to include(mfr.id)
+    expect(ids).not_to include(own.id)
+  end
+
   it 'refuses a dealer-owned manufacturer, since price books are platform data' do
     own = Manufacturer.create!(name: 'Dealer brand', industry_type: 'manufactured_housing', company_id: company.id)
     post '/api/admin/catalog_price_books', headers: headers, params: { manufacturer_id: own.id }
