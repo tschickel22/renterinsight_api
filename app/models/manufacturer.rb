@@ -17,6 +17,13 @@ class Manufacturer < ApplicationRecord
   # Configurator associations
   has_many :factories, dependent: :destroy
   has_many :floor_plans, dependent: :destroy
+
+  # TrueBuild platform catalog
+  has_many :catalog_plans, dependent: :restrict_with_error
+  has_many :catalog_plan_variants, dependent: :restrict_with_error
+  has_many :catalog_price_books, dependent: :restrict_with_error
+  has_many :catalog_option_groups, dependent: :restrict_with_error
+  has_many :catalog_options, dependent: :restrict_with_error
   
   # Validations
   validates :name, presence: true, length: { maximum: 255 }

@@ -53,6 +53,8 @@ class Vehicle < ApplicationRecord
   belongs_to :company, optional: true
   belongs_to :location, optional: true
   belongs_to :floor_plan, optional: true
+  # TrueBuild: the factory model this home is, when the catalog knows it.
+  belongs_to :catalog_plan_variant, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
   # Service tickets attached to this home. Includes dealer-only (pre-sale)
