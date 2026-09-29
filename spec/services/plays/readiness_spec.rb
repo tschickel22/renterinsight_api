@@ -46,6 +46,48 @@ RSpec.describe Plays::Readiness do
     expect(checks['booking_links']).to include(status: 'ok')
   end
 
+  describe 'other workflows that start on the same leads' do
+    def new_lead_rule(name, conditions)
+      WorkflowRule.create!(
+        company_id: company.id, name: name, entity_type: 'Lead', status: 'active',
+        trigger: { 'event_type' => 'lead.created', 'entity_type_filter' => 'Lead' }, conditions: conditions,
+        steps: { 'nodes' => [{ 'id' => 'n1', 'type' => 'wait', 'config' => { 'duration' => 1 } }] }
+      )
+    end
+
+    it 'warns about a new-lead workflow with no conditions, before and after the play is on' do
+      day_zero = new_lead_rule('Day 0 First Touch', [])
+
+      _, checks = readiness(Plays::NewFacebookLead)
+      expect(checks['other_workflows']).to include(status: 'warn', label: 'Another workflow also starts on these leads',
+                                                   fix: { label: 'Open the workflow', path: "/workflow-automation/rules/#{day_zero.id}" })
+      expect(checks['other_workflows'][:detail]).to include('"Day 0 First Touch"', 'from Facebook')
+
+      installation = Plays::NewFacebookLead.new(company: company, user: manager,
+                                                answers: { 'reps_by_location' => { location.id.to_s => [rep.id] } }).install!
+      _, checks = readiness(Plays::NewFacebookLead, installation)
+      expect(checks['other_workflows']).to include(status: 'warn')
+    end
+
+    it 'is satisfied once the workflow leaves out the play sources' do
+      new_lead_rule('Day 0 First Touch', [{ 'field' => 'source.name', 'operator' => 'not_in', 'value' => ['Facebook'] }])
+      new_lead_rule('Website leads', [{ 'field' => 'source.name', 'operator' => 'equals', 'value' => 'Website' }])
+
+      _, checks = readiness(Plays::NewFacebookLead)
+      expect(checks['other_workflows']).to include(status: 'ok')
+    end
+
+    it "does not count the play's own rules, a workflow that is off, or one with no steps" do
+      new_lead_rule('Paused', []).update!(status: 'paused')
+      new_lead_rule('Untitled Workflow', []).update_columns(steps: { 'nodes' => [] })
+      installation = Plays::NewFacebookLead.new(company: company, user: manager,
+                                                answers: { 'reps_by_location' => { location.id.to_s => [rep.id] } }).install!
+
+      _, checks = readiness(Plays::NewFacebookLead, installation)
+      expect(checks['other_workflows']).to include(status: 'ok')
+    end
+  end
+
   it 'has no Facebook check for a play that does not start from Facebook' do
     _, checks = readiness(Plays::WalkInVisit)
 

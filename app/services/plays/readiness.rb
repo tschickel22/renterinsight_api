@@ -20,6 +20,9 @@ module Plays
 
     HOME_STATUSES = %w[available available_to_order].freeze
 
+    # Condition fields that say which lead sources a workflow starts for.
+    SOURCE_FIELDS = %w[source.name source_id].freeze
+
     def initialize(play:, company:, installation: nil)
       @play = play
       @company = company
@@ -62,6 +65,7 @@ module Plays
         booking_check(reps),
         texting_check,
         facebook_check,
+        competing_rules_check,
         company_email_check,
         domain_check
       ]
@@ -109,6 +113,66 @@ module Plays
         check('facebook', 'warn', 'Facebook Lead Ads not connected',
               'Point your ads at the Facebook Contact form in the meantime. It works without the connection.', :facebook)
       end
+    end
+
+    # A dealer's own new-lead workflow that also starts for this play's
+    # sources sends a second first text, email and call task. Factory Direct's
+    # "Day 0" rule had no conditions and ran alongside New Facebook lead.
+    def competing_rules_check
+      sources = @installation ? Array(answers['sources']) : Array(@play.try(:default_sources))
+      return nil if sources.empty?
+
+      rules = competing_new_lead_rules(sources)
+      if rules.empty?
+        return check('other_workflows', 'ok', 'No other workflow starts on these leads',
+                     'Only this play sends the first messages.')
+      end
+
+      names = rules.map { |rule| %("#{rule.name}") }.to_sentence
+      sources_text = sources.to_sentence(two_words_connector: ' or ', last_word_connector: ', or ')
+      fix = if rules.one?
+              { label: 'Open the workflow', path: "/workflow-automation/rules/#{rules.first.id}" }
+            else
+              { label: 'Open workflows', path: '/workflow-automation' }
+            end
+      {
+        key: 'other_workflows', status: 'warn',
+        label: rules.one? ? 'Another workflow also starts on these leads' : "#{rules.size} other workflows also start on these leads",
+        detail: "#{names} #{rules.one? ? 'starts' : 'start'} on new leads from #{sources_text} too, so those leads " \
+                "would get two first messages. Add a condition that leaves out #{sources_text}, or pause #{rules.one? ? 'it' : 'them'}.",
+        fix: fix
+      }
+    end
+
+    # Active lead.created rules outside any play whose source conditions let a
+    # lead from one of these sources through. Only source conditions are
+    # judged: a rule that also filters on something else may still collide,
+    # and a warning the dealer can dismiss by reading beats a silent double
+    # send. Nested and/or groups can't be judged this way, so they count.
+    def competing_new_lead_rules(source_names)
+      play_rule_ids = PlayInstallation.active.where(company_id: @company.id).flat_map do |installation|
+        Array((installation.assets || {})['workflow_rule_ids'])
+      end.map(&:to_i)
+
+      known = @company.sources.where(name: source_names).to_a
+      samples = source_names.flat_map do |name|
+        matches = known.select { |source| source.name == name }
+        (matches.presence || [Source.new(name: name)]).map { |source| Lead.new(company_id: @company.id, source: source) }
+      end
+
+      @company.workflow_rules.where(status: 'active').where.not(id: play_rule_ids).order(:name).select do |rule|
+        rule.trigger.is_a?(Hash) && rule.trigger['event_type'] == 'lead.created' &&
+          # An empty rule (a saved "Untitled Workflow") sends nothing.
+          Array((rule.steps || {})['nodes']).any? &&
+          samples.any? { |lead| source_conditions_pass?(rule.conditions, lead) }
+      end
+    end
+
+    def source_conditions_pass?(conditions, lead)
+      return true unless conditions.is_a?(Array)
+
+      leaves = conditions.select { |c| c.is_a?(Hash) && SOURCE_FIELDS.include?(c['field'].to_s) }
+      WorkflowEngine::ConditionEvaluator.evaluate(leaves, lead)
     end
 
     # ── Email ────────────────────────────────────────────────────────────
