@@ -19,7 +19,7 @@ module Accounting
 
       period_balances = balance_service.period_balances(start_date: fy_start, end_date: fy_end)
 
-      accounts = @company.chart_of_accounts.active.postable.ordered
+      accounts = @company.chart_of_accounts.reportable.ordered
       lines = []
 
       accounts.each do |account|
@@ -79,7 +79,7 @@ module Accounting
 
       period_balances = balance_service.period_balances(start_date: fy_start, end_date: fy_end)
 
-      accounts = @company.chart_of_accounts.active.postable.ordered
+      accounts = @company.chart_of_accounts.reportable.ordered
       lines = []
 
       accounts.each do |account|

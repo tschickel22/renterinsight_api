@@ -17,7 +17,7 @@ module Reports
       period_balances = balance_service.period_balances(
         start_date: start_date, end_date: end_date, location_id: location_id, basis: basis
       )
-      accounts = @company.chart_of_accounts.active.postable.ordered.index_by(&:id)
+      accounts = @company.chart_of_accounts.reportable.ordered.index_by(&:id)
 
       operating_adjustments = []
 

@@ -10,7 +10,7 @@ module Reports
       balance_service = AccountBalanceService.new(@company)
       raw_balances = balance_service.all_balances(as_of_date: as_of_date, location_id: location_id, basis: basis)
 
-      accounts = @company.chart_of_accounts.active.postable.ordered
+      accounts = @company.chart_of_accounts.reportable.ordered
 
       assets = []
       liabilities = []
@@ -84,6 +84,18 @@ module Reports
           account_name: 'Retained Earnings (prior years, not closed)',
           sub_type: 'retained_earnings',
           amount: prior_unclosed,
+          is_calculated: true
+        }
+      end
+
+      unposted_opening = balance_service.legacy_opening_offset(as_of_date)
+      if unposted_opening != 0
+        equity << {
+          account_id: nil,
+          account_number: '',
+          account_name: 'Opening Balance Equity (not yet posted)',
+          sub_type: 'owners_equity',
+          amount: unposted_opening,
           is_calculated: true
         }
       end

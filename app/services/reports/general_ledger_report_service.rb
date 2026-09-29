@@ -12,9 +12,10 @@ module Reports
       lines = JournalEntryLine
         .joins(:journal_entry)
         .includes(journal_entry: :posted_by)
+        .merge(JournalEntry.in_ledger)
         .where(
           chart_of_account_id: account.id,
-          journal_entries: { company_id: @company.id, is_void: false }
+          journal_entries: { company_id: @company.id }
         )
         .where(journal_entries: { entry_date: start_date..end_date })
         .order('journal_entries.entry_date ASC, journal_entries.entry_number ASC')

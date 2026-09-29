@@ -17,15 +17,42 @@ class JournalEntry < ApplicationRecord
   validate :at_least_two_lines
   validate :no_edits_if_locked
   validate :no_edits_if_voided
+  validate :period_is_open, if: -> { new_record? || will_save_change_to_entry_date? }
 
   before_create :assign_entry_number
   before_save :set_fiscal_period
 
   scope :posted, -> { where(is_void: false) }
+  # Entries that count toward balances. Voiding keeps the original in its own
+  # period and adds a reversal on the void date, so both must be counted and
+  # net to zero. Filtering on is_void alone dropped the original but kept the
+  # reversal, so every void showed up as the negative of the entry, and a
+  # void in a closed year rewrote that year's profit.
+  scope :in_ledger, -> { where(is_void: false).or(where(is_void: true).where.not(reversed_by_id: nil)) }
+  # Live entries minus void pairs: what bank reconciliation and matching
+  # should see, since a voided entry and its reversal never touched the bank.
+  scope :excluding_void_pairs, lambda {
+    where(is_void: false).where.not(id: unscoped.where(is_void: true).where.not(reversed_by_id: nil).select(:reversed_by_id))
+  }
   scope :voided, -> { where(is_void: true) }
   scope :manual, -> { where(source_type: 'manual') }
   scope :for_period, ->(year, period) { where(fiscal_year: year, fiscal_period: period) }
   scope :for_date_range, ->(start_date, end_date) { where(entry_date: start_date..end_date) }
+
+  # Closing a period only locked the entries already in it; new or backdated
+  # entries still landed there, so a closed year's profit changed after its
+  # Year-End Close had moved it into Retained Earnings.
+  def period_is_open
+    return if entry_date.blank? || company_id.blank?
+
+    closed = FiscalPeriod.where(company_id: company_id, status: %w[closed locked])
+                         .where('start_date <= ? AND end_date >= ?', entry_date, entry_date)
+                         .first
+    return unless closed
+
+    errors.add(:entry_date, "#{entry_date} is in a closed period (FY#{closed.fiscal_year} period #{closed.period_number}). " \
+                            'Reopen the period or date the entry in an open one.')
+  end
 
   def lines_balance
     return if journal_entry_lines.empty?

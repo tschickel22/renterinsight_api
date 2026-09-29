@@ -16,7 +16,7 @@ module Accounting
       tax_account = settings.default_sales_tax_payable_account
 
       unless ar_account
-        Rails.logger.warn("[Accounting] Skipping invoice #{@invoice.id} post — no AR account configured")
+        @invoice.record_gl_post_failure!('No Accounts Receivable account is set in Accounting Settings')
         return
       end
 
@@ -25,10 +25,11 @@ module Accounting
       # whichever location the actor happens to have selected — wrong for reports.
       location_id = @invoice.location_id
       unless location_id.present?
-        Rails.logger.error("[Accounting] Cannot post invoice #{@invoice.id} — no location_id on invoice")
+        @invoice.record_gl_post_failure!('The invoice has no location')
         return
       end
 
+      failure = nil
       ActiveRecord::Base.transaction do
         je = @company.journal_entries.build(
           entry_date: @invoice.invoice_date || @invoice.created_at.to_date,
@@ -84,12 +85,15 @@ module Accounting
         end
 
         unless je.save
-          Rails.logger.error("[Accounting] Failed to post invoice #{@invoice.id}: #{je.errors.full_messages.join(', ')}")
+          failure = je.errors.full_messages.join(', ')
           raise ActiveRecord::Rollback
         end
 
         Rails.logger.info("[Accounting] Posted invoice #{@invoice.id} → JE #{je.entry_number}")
         je
+      end.tap do |posted|
+        # Recorded outside the rolled-back transaction so the reason survives.
+        posted ? @invoice.clear_gl_post_failure! : @invoice.record_gl_post_failure!(failure || 'Journal entry was not created')
       end
     end
 
@@ -153,6 +157,27 @@ module Accounting
       buckets.each_value do |b|
         b[:memo] = "Sales tax (#{b[:memo_parts].uniq.first(3).join(', ')}) — Invoice #{@invoice.invoice_number}"
         b.delete(:memo_parts)
+      end
+
+      buckets = buckets.reject { |_acct, b| b[:amount] <= 0 }
+      reconcile_to_invoice_tax(buckets)
+    end
+
+    # The invoice's tax is rounded per line item; the snapshots are 4-decimal
+    # amounts summed per liability account. Posted as-is they could differ by
+    # a cent from the AR debit (subtotal + invoice tax), the entry failed to
+    # balance, and the invoice never reached the ledger. Round each bucket to
+    # cents and put any remaining cent on the largest one, so the tax credits
+    # always add up to exactly the tax on the invoice.
+    def reconcile_to_invoice_tax(buckets)
+      return buckets if buckets.empty?
+
+      buckets.each_value { |b| b[:amount] = b[:amount].round(2) }
+      target = (@invoice.tax_amount || BigDecimal('0')).round(2)
+      diff = target - buckets.values.sum { |b| b[:amount] }
+      unless diff.zero?
+        largest = buckets.max_by { |_acct, b| b[:amount] }.last
+        largest[:amount] += diff
       end
 
       buckets.reject { |_acct, b| b[:amount] <= 0 }

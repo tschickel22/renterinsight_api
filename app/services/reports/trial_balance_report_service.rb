@@ -15,7 +15,7 @@ module Reports
         basis: basis
       )
 
-      accounts = @company.chart_of_accounts.active.postable.ordered
+      accounts = @company.chart_of_accounts.reportable.ordered
 
       rows = []
       total_debits = BigDecimal('0')
@@ -48,6 +48,25 @@ module Reports
           account_type: account.account_type,
           debit_balance: debit_balance,
           credit_balance: credit_balance
+        }
+      end
+
+      # The other side of opening balances typed before they were posted as
+      # entries (see AccountBalanceService#legacy_opening_balances).
+      offset = balance_service.legacy_opening_offset(as_of_date)
+      unless offset.zero?
+        debit_side = offset.negative? ? offset.abs : BigDecimal('0')
+        credit_side = offset.positive? ? offset : BigDecimal('0')
+        total_debits += debit_side
+        total_credits += credit_side
+        rows << {
+          account_id: nil,
+          account_number: '',
+          account_name: 'Opening Balance Equity (not yet posted)',
+          account_type: 'equity',
+          debit_balance: debit_side,
+          credit_balance: credit_side,
+          is_calculated: true
         }
       end
 

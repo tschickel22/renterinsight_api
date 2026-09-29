@@ -59,7 +59,8 @@ class Api::V1::ChartOfAccountsController < ApplicationController
         opening = acct.opening_balance || BigDecimal('0')
         net = balances[acct.id] || BigDecimal('0')
         acct.as_json.merge(
-          'balance' => net + opening,
+          # The opening balance is a posted entry now, so it's already in net.
+          'balance' => net,
           'opening_balance' => opening,
           'opening_balance_date' => acct.opening_balance_date,
           'bank_balance' => bank_bals[acct.id]
@@ -169,7 +170,8 @@ class Api::V1::ChartOfAccountsController < ApplicationController
   def account_balances
     query = JournalEntryLine
       .joins(:journal_entry)
-      .where(journal_entries: { company_id: @company.id, is_void: false })
+      .merge(JournalEntry.in_ledger)
+      .where(journal_entries: { company_id: @company.id })
 
     if accounting_location_filtered?
       query = query.where(journal_entry_lines: { location_id: accounting_location_id })

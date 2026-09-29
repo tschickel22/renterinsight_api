@@ -321,7 +321,7 @@ module Api
           # Process refund through Zego API
           api = ZegoPaymentApi.new(@company)
           
-          refund_amount = params[:amount]&.to_f || @payment.amount
+          refund_amount = params[:amount].present? ? BigDecimal(params[:amount].to_s).round(2) : @payment.amount
           refund_reason = params[:reason]
           
           if api.refund_transaction(@payment, request)

@@ -96,7 +96,8 @@ class BudgetService
 
     scope = JournalEntryLine
               .joins(:journal_entry, :chart_of_account)
-              .where(journal_entries: { company_id: company.id, is_void: false,
+              .merge(JournalEntry.in_ledger)
+              .where(journal_entries: { company_id: company.id,
                                         entry_date: start_date..end_date })
     scope = scope.where(journal_entries: { location_id: location_id }) if location_id.present?
 

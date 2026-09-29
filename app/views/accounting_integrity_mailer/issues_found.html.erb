@@ -1,0 +1,10 @@
+<p>Nightly accounting check found issues in <%= @results.size %> <%= 'company'.pluralize(@results.size) %>.
+Run <code>script/accounting_integrity_report.rb &lt;company_id&gt;</code> for the full breakdown.</p>
+<% @results.each do |r| %>
+  <h3 style="margin-bottom:4px"><%= r[:company_name] %> (id <%= r[:company_id] %><%= r[:account_number].present? ? ", #{r[:account_number]}" : '' %>)</h3>
+  <ul style="margin-top:0">
+    <% r[:issues].each do |i| %>
+      <li><strong><%= i[:severity] %></strong>: <%= i[:message] %></li>
+    <% end %>
+  </ul>
+<% end %>
