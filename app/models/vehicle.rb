@@ -238,6 +238,11 @@ class Vehicle < ApplicationRecord
   # Auto-compute discounted sale price when discount fields change
   before_save :compute_discounted_price
 
+  # TrueBuild: a home arriving from a Champion feed finds its factory model,
+  # and so its factory prices, by the Champion model id (see InventoryLinker).
+  before_save :link_catalog_variant,
+              if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? && (new_record? || will_save_change_to_champion_model_id?) }
+
   # Structured "landed" cost of the unit — the single source of truth for cost.
   # `total_cost` is authoritative when maintained; otherwise the sum of its components
   # (dealer_cost + freight_cost + pdi_cost). It is NOT maintained by any callback, so we
@@ -393,6 +398,10 @@ class Vehicle < ApplicationRecord
   end
 
   private
+
+  def link_catalog_variant
+    self.catalog_plan_variant_id = Catalog::PriceBooks::InventoryLinker.variant_for(self)&.id
+  end
 
   def normalize_fields
     # Champion catalog rows come pre-formatted from the manufacturer's master

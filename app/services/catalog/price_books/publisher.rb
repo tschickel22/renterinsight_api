@@ -169,10 +169,11 @@ module Catalog
       # id (reaches any dealer's feed, including later ones) and by the exact
       # homes a loaded-catalog match named.
       def link_inventory
-        CatalogPlanVariant.where(manufacturer_id: @mfr).where("external_ids ?| array['champion_model_id','vehicle_ids']").find_each do |v|
-          ids = v.external_ids
-          Vehicle.where(champion_model_id: ids['champion_model_id']).where(catalog_plan_variant_id: nil).update_all(catalog_plan_variant_id: v.id) if ids['champion_model_id'].present?
-          Vehicle.where(id: Array(ids['vehicle_ids']), catalog_plan_variant_id: nil).update_all(catalog_plan_variant_id: v.id) if Array(ids['vehicle_ids']).any?
+        variants = CatalogPlanVariant.where(manufacturer_id: @mfr).where("external_ids ?| array['champion_model_id','vehicle_ids']").to_a
+        InventoryLinker.link_all(variants.filter_map { |v| v.external_ids['champion_model_id'].presence }.uniq)
+        variants.each do |v|
+          ids = Array(v.external_ids['vehicle_ids'])
+          Vehicle.where(id: ids, catalog_plan_variant_id: nil).update_all(catalog_plan_variant_id: v.id) if ids.any?
         end
       end
     end
