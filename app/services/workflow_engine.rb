@@ -13,6 +13,14 @@ module WorkflowEngine
       return nil
     end
 
+    # A record saved with skip_workflows (bulk imports) starts nothing. The
+    # flag sits on every model but nothing read it, so a CSV of leads ran
+    # every new-lead workflow once per row.
+    if entity.respond_to?(:skip_workflows) && entity.skip_workflows
+      Rails.logger.debug "[WorkflowEngine.emit] suppressed #{event_type} for #{entity.class.name}##{entity.id} (skip_workflows)"
+      return nil
+    end
+
     company_id = entity.respond_to?(:company_id) ? entity.company_id : nil
     return if company_id.nil?
 

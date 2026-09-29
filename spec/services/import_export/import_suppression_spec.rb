@@ -82,6 +82,44 @@ RSpec.describe 'Import engine — side-effect suppression', :aggregate_failures 
     end
   end
 
+  # The flags above were set but nothing read skip_workflows, so every
+  # imported lead started every new-lead workflow: a CSV of 500 old leads was
+  # 500 welcome texts and emails.
+  it 'starts no workflow for an imported lead, including through its tags' do
+    rule = WorkflowRule.create!(
+      company_id: company.id, name: 'Welcome', entity_type: 'Lead', status: 'active',
+      trigger: { 'event_type' => 'lead.created' }, conditions: [],
+      steps: { 'nodes' => [{ 'id' => 'n1', 'type' => 'wait', 'config' => { 'duration' => 1 } }] }
+    )
+    file = Tempfile.new(['tagged', '.csv'])
+    tempfiles << file
+    CSV.open(file.path, 'w') do |csv|
+      csv << ['First Name', 'Last Name', 'Email', 'Tags']
+      csv << ['Ada', 'Lovelace', "ada-#{SecureRandom.hex(3)}@example.com", 'facebook-lead']
+    end
+    tagged_job = ImportJob.create!(
+      company: company, user: user, module_type: 'leads', status: 'pending',
+      source_filename: 'tagged.csv', source_file_url: file.path, duplicate_strategy: 'skip',
+      column_mapping: { 'First Name' => 'first_name', 'Last Name' => 'last_name', 'Email' => 'email', 'Tags' => 'tags' }
+    )
+
+    expect { ImportExport::Importer.new(tagged_job).process! }
+      .to change { Lead.where(company_id: company.id).count }.by(1)
+
+    lead = Lead.where(company_id: company.id).last
+    expect(lead.tags.pluck(:name)).to include('facebook-lead')
+    expect(WorkflowEvent.where(entity_type: 'Lead', entity_id: lead.id)).to be_empty
+
+    DispatchWorkflowEventsJob.new.perform
+    expect(WorkflowRun.where(workflow_rule_id: rule.id)).to be_empty
+  end
+
+  it 'leaves workflows alone for a lead saved outside an import' do
+    lead = Lead.create!(company_id: company.id, first_name: 'Live', email: "live-#{SecureRandom.hex(3)}@example.com")
+
+    expect(WorkflowEvent.where(entity_type: 'Lead', entity_id: lead.id, event_type: 'lead.created')).to exist
+  end
+
   it 'suppresses per-record ActivityLog rows and writes a single summary entry' do
     before_count = company.activity_logs.count
 
