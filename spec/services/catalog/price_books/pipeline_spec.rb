@@ -92,6 +92,16 @@ RSpec.describe 'TrueBuild price book pipeline' do
     end
   end
 
+  describe Catalog::PriceBooks::ClaudeClient do
+    it 'turns an out-of-credits refusal into something an admin can act on' do
+      stub_const('ENV', ENV.to_h.merge('ANTHROPIC_API_KEY' => 'test-key'))
+      body = { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }.to_json
+      allow_any_instance_of(described_class).to receive(:post).and_return(instance_double(Net::HTTPResponse, code: '400', body: body))
+      expect { described_class.call(content: [], tool: Catalog::PriceBooks::Tools::CLASSIFY, system: '') }
+        .to raise_error(described_class::Error, 'The Anthropic account is out of credits. Add credits, then choose Read again.')
+    end
+  end
+
   describe Catalog::PriceBooks::Classifier do
     it 'reads a page of model numbers as a price list even when its notes mention standards' do
       pdf = Prawn::Document.new do |d|

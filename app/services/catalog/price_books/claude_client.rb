@@ -33,7 +33,7 @@ module Catalog
                      input_tokens: json.dig('usage', 'input_tokens').to_i,
                      output_tokens: json.dig('usage', 'output_tokens').to_i }
           end
-          raise Error, "Claude API error #{code}: #{response.body.to_s[0, 300]}" unless RETRYABLE.include?(code)
+          raise Error, readable_error(code, response.body) unless RETRYABLE.include?(code)
 
           sleep(backoff(attempt))
         end
@@ -53,6 +53,16 @@ module Catalog
                                            'anthropic-version' => '2023-06-01')
         request.body = body
         http.request(request)
+      end
+
+      # The admin sees this on the file, so say what to do rather than show JSON.
+      def readable_error(code, body)
+        message = JSON.parse(body.to_s).dig('error', 'message') rescue nil
+        if message.to_s.match?(/credit balance/i)
+          'The Anthropic account is out of credits. Add credits, then choose Read again.'
+        else
+          "The AI service refused the request (#{code}): #{(message.presence || body.to_s)[0, 200]}"
+        end
       end
 
       def backoff(attempt)
