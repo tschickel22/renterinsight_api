@@ -135,6 +135,14 @@ default: &default
     class: RefreshWebsiteDomainStatusJob
     queue: default
     schedule: every 10 minutes
+  accounting_integrity_check:
+    # Read-only check of every company's books (ledger balanced, balance
+    # sheet and trial balance tie, nothing failed to post); emails the
+    # platform support address only when something needs attention.
+    # 1pm UTC = 7am MDT / 6am MST, before dealers start the day.
+    class: AccountingIntegrityCheckJob
+    queue: default
+    schedule: every day at 1pm
 
 production:
   <<: *default

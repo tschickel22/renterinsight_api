@@ -19,7 +19,8 @@ module Accounting
         *ledger_issues,
         *report_issues,
         *posting_failures,
-        *unposted_documents
+        *unposted_documents,
+        *changed_after_posting
       ]
     end
 
@@ -74,6 +75,22 @@ module Accounting
 
       [Issue.new(:warning, "#{count} sent/paid #{'invoice'.pluralize(count)} not in the ledger, " \
                            "totaling #{money(missing.sum(:total))}")]
+    end
+
+    # An invoice whose total no longer matches the receivable its entry
+    # recorded, e.g. QuickBooks-wins sync rewrote a posted invoice's totals.
+    def changed_after_posting
+      rows = @company.invoices
+                     .joins("JOIN journal_entries je ON je.source_entity_type = 'Invoice' " \
+                            'AND je.source_entity_id = invoices.id AND je.is_void = FALSE')
+                     .joins('JOIN journal_entry_lines jl ON jl.journal_entry_id = je.id')
+                     .group('invoices.id', 'invoices.invoice_number', 'invoices.total')
+                     .pluck('invoices.invoice_number', 'invoices.total', Arel.sql('SUM(jl.debit_amount)'))
+      off = rows.reject { |_num, total, posted| total.to_d == posted.to_d }
+      return [] if off.empty?
+
+      sample = off.first(3).map { |num, total, posted| "#{num}: #{money(total)} vs #{money(posted)} posted" }.join('; ')
+      [Issue.new(:error, "#{off.size} #{'invoice'.pluralize(off.size)} changed after posting (#{sample})")]
     end
 
     def money(value) = format('%.2f', value.to_d)
