@@ -77,20 +77,30 @@ class Api::V1::FacebookIntegrationsController < ApplicationController
   def lead_log
     return unless authorize_action!('integrations', 'read')
 
-    leads = Lead.where(company_id: @company.id, utm_source: 'facebook')
+    # Leads that came through this connection: live from Meta, or pulled in by
+    # the 90-day import (both carry a Facebook lead id). utm_source alone
+    # missed imports and matched nothing for a dealer whose Facebook leads
+    # arrive by Zapier, so the log sat empty.
+    leads = Lead.where(company_id: @company.id)
+                .where('facebook_leadgen_id IS NOT NULL OR utm_source = ?', 'facebook')
                 .order(created_at: :desc)
                 .limit(50)
 
     render json: leads.map { |l|
       {
         id:         l.id,
+        # The settings table reads name, ad_name and status.
+        name:       [l.first_name, l.last_name].compact.join(' ').presence,
         first_name: l.first_name,
         last_name:  l.last_name,
         email:      l.email,
         phone:      l.phone,
-        status:     l.status,
+        ad_name:    l.utm_content,
+        status:     l.source_created_at.present? && l.facebook_leadgen_id.present? ? 'imported' : 'received',
+        lead_status: l.status,
         utm_campaign: l.utm_campaign,
         utm_content:  l.utm_content,
+        submitted_at: l.source_created_at,
         created_at: l.created_at
       }
     }
