@@ -157,7 +157,14 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
         colors: ops.count { |op| op.option.kind == 'color' } }
     end.sort_by { |g| [g[:position].to_i, g[:name]] }
 
-    render json: { plans: plans, groups: groups, standard_features: @book.standard_features.count }
+    # Options priced for a series with no plans in the catalog reach no home
+    # until that series' base price list is loaded.
+    known = CatalogPlan.where(manufacturer_id: @book.manufacturer_id).distinct.pluck(:series)
+    unreached = option_prices.select { |op| op.series.present? && !known.include?(op.series) }
+                             .group_by(&:series).map { |s, ops| { series: s, options: ops.map(&:catalog_option_id).uniq.size } }
+                             .sort_by { |u| -u[:options] }
+
+    render json: { plans: plans, groups: groups, standard_features: @book.standard_features.count, unreached_series: unreached }
   end
 
   # GET /api/admin/catalog_price_books/:id/documents/:document_id/tabs
