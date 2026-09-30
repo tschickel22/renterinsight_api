@@ -48,34 +48,65 @@ module Truebuild
       [/shingle|roof/i, 'Shingles means only the roof surface.']
     ].freeze
 
-    def prompt(room:, selection:)
-      # A finish name alone ("Timberwolf") is a guess to the model; the
-      # swatch color, where we know it, is what keeps renders consistent.
-      changes = TruebuildRender.normalize(selection).map do |f|
-        hex = ColorSwatches.hex(f['value'])
-        "- #{f['surface']}: #{f['value']}#{" (color #{hex})" if hex}"
+    # The factory's own sample for each finish, where a decor sheet has one:
+    # an array matching the normalized selection, nil where there is none.
+    def swatches_for(variant, selection)
+      return [] unless variant
+
+      factory_id = variant.catalog_plan&.factory_id
+      TruebuildRender.normalize(selection).map do |f|
+        CatalogSwatch.for_finish(manufacturer_id: variant.manufacturer_id, factory_id: factory_id,
+                                 surface: f['surface'], value: f['value'])
+      end
+    end
+
+    # swatches: from swatches_for. A finish with a sample is drawn from the
+    # sample image, sent after the room photo; the rest from name and color.
+    def prompt(room:, selection:, swatches: [])
+      shown = 0
+      changes = TruebuildRender.normalize(selection).each_with_index.map do |f, i|
+        swatch = swatches[i]
+        if swatch
+          shown += 1
+          "- #{f['surface']}: #{f['value']}, exactly as in sample image #{shown + 1} (color #{swatch.hex})"
+        else
+          hex = ColorSwatches.hex(f['value'])
+          "- #{f['surface']}: #{f['value']}#{" (color #{hex})" if hex}"
+        end
       end
       scopes = TruebuildRender.normalize(selection).filter_map { |f| SURFACE_SCOPE.find { |re, _| f['surface'].match?(re) }&.last }.uniq
       place = room.present? ? "the #{room} of a manufactured home" : 'a room in a manufactured home'
+      samples = if shown.positive?
+                  "Image 1 is the room. The other images are flat samples of the actual finishes, cut from the factory's " \
+                    'decor sheet: reproduce each sample\'s color, grain and pattern on its surface at a realistic scale, ' \
+                    'with the room\'s own lighting and shadows.'
+                end
       <<~TEXT.strip
         This is a real photograph of #{place}. Edit it so the finishes are:
         #{changes.join("\n")}
         #{scopes.join("\n")}
+        #{samples}
 
         Match each listed color exactly where one is given. Change only those surfaces. Keep everything else exactly as it is: the room layout, walls, ceiling, windows, doors, cabinet and appliance positions and sizes, fixtures, lighting, camera position, lens and framing. Do not add, remove or move any object. The result must look like an unedited real estate photograph of the same room.
       TEXT
     end
 
-    # Renders one row: downloads the source, calls the model, stores the image.
     def perform!(render)
       spec = MODELS.fetch(render.model_key)
       render.update!(status: 'running', error: nil)
       source = fetch_source(render.source_url)
+      # The samples named when the row was made, in prompt order.
+      ids = Array(render.usage['swatch_ids'])
+      samples = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact.map { |sw| fetch_source(sw.image_url) }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      result = spec[:provider] == 'gemini' ? Providers::Gemini.edit(spec, source, render.prompt) : Providers::OpenAi.edit(spec, source, render.prompt)
+      result = if spec[:provider] == 'gemini'
+                 Providers::Gemini.edit(spec, source, render.prompt, samples: samples)
+               else
+                 Providers::OpenAi.edit(spec, source, render.prompt, samples: samples)
+               end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
-      attrs = { status: 'done', image_url: url, latency_ms: latency, usage: result[:usage],
+      attrs = { status: 'done', image_url: url, latency_ms: latency, usage: render.usage.merge(result[:usage]),
                 model: result[:model] || render.model, cost_usd: cost(spec, result[:usage]) }
       if render.purpose == 'layer'
         layer = Layer.build(source[:bytes], result[:bytes])

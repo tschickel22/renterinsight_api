@@ -11,13 +11,12 @@ module Truebuild
 
         BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
-        def edit(spec, source, prompt)
+        def edit(spec, source, prompt, samples: [])
           model = resolve(spec[:model])
           config = { responseModalities: ['IMAGE'] }
           config[:imageConfig] = { imageSize: spec[:size] } if spec[:size]
-          body = { contents: [{ role: 'user', parts: [{ text: prompt },
-                                                    { inline_data: { mime_type: source[:mime], data: Base64.strict_encode64(source[:bytes]) } }] }],
-                   generationConfig: config }
+          images = [source, *samples].map { |img| { inline_data: { mime_type: img[:mime], data: Base64.strict_encode64(img[:bytes]) } } }
+          body = { contents: [{ role: 'user', parts: [{ text: prompt }, *images] }], generationConfig: config }
           res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 180)
           raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
 
@@ -63,10 +62,10 @@ module Truebuild
 
         URL = 'https://api.openai.com/v1/images/edits'
 
-        def edit(spec, source, prompt)
-          res = post(spec, source, prompt, fidelity: true)
+        def edit(spec, source, prompt, samples: [])
+          res = post(spec, [source, *samples], prompt, fidelity: true)
           # input_fidelity keeps the source's detail; drop it if this model refuses it.
-          res = post(spec, source, prompt, fidelity: false) if res.code == 400 && res.body.to_s.include?('input_fidelity')
+          res = post(spec, [source, *samples], prompt, fidelity: false) if res.code == 400 && res.body.to_s.include?('input_fidelity')
           raise Error, "OpenAI #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
 
           b64 = res.parsed_response.dig('data', 0, 'b64_json') or raise Error, 'OpenAI returned no image'
@@ -77,16 +76,21 @@ module Truebuild
                      'output_tokens' => u['output_tokens'].to_i, 'total_tokens' => u['total_tokens'].to_i } }
         end
 
-        def post(spec, source, prompt, fidelity:)
+        # The room first; OpenAI edits the first image and reads the rest as references.
+        def post(spec, images, prompt, fidelity:)
           key = ENV['OPENAI_API_KEY'].presence or raise Error, 'OPENAI_API_KEY is not set'
-          file = Tempfile.new(['trueview', source[:mime].to_s.include?('png') ? '.png' : '.jpg'], binmode: true)
-          file.write(source[:bytes])
-          file.rewind
-          body = { model: spec[:model], prompt: prompt, 'image[]': file, quality: spec[:quality], size: 'auto', n: 1 }
+          files = images.map do |img|
+            Tempfile.new(['trueview', img[:mime].to_s.include?('png') ? '.png' : '.jpg'], binmode: true).tap do |f|
+              f.write(img[:bytes])
+              f.rewind
+            end
+          end
+          body = { model: spec[:model], prompt: prompt, 'image[]': files.size == 1 ? files.first : files,
+                   quality: spec[:quality], size: 'auto', n: 1 }
           body[:input_fidelity] = 'high' if fidelity
           HTTParty.post(URL, headers: { 'Authorization' => "Bearer #{key}" }, multipart: true, body: body, timeout: 240)
         ensure
-          file&.close!
+          files&.each(&:close!)
         end
       end
     end

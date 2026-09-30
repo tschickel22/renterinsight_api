@@ -1721,6 +1721,40 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000200) do
     t.index ["catalog_price_book_id"], name: "index_catalog_standard_features_on_catalog_price_book_id"
   end
 
+  create_table "catalog_swatch_sheets", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "filename", null: false
+    t.string "storage_ref", null: false
+    t.string "status", default: "queued", null: false
+    t.text "error"
+    t.integer "swatch_count", default: 0, null: false
+    t.jsonb "missed", default: [], null: false
+    t.decimal "cost_usd", precision: 10, scale: 4
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["factory_id"], name: "index_catalog_swatch_sheets_on_factory_id"
+    t.index ["manufacturer_id"], name: "index_catalog_swatch_sheets_on_manufacturer_id"
+  end
+
+  create_table "catalog_swatches", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.bigint "catalog_swatch_sheet_id"
+    t.string "set_name", null: false
+    t.string "name", null: false
+    t.string "note"
+    t.string "hex"
+    t.string "image_url", null: false
+    t.integer "page"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "manufacturer_id, COALESCE(factory_id, (0)::bigint), lower((set_name)::text), lower((name)::text)", name: "idx_catalog_swatches_unique_name", unique: true
+    t.index ["catalog_swatch_sheet_id"], name: "index_catalog_swatches_on_catalog_swatch_sheet_id"
+    t.index ["factory_id"], name: "index_catalog_swatches_on_factory_id"
+    t.index ["manufacturer_id"], name: "index_catalog_swatches_on_manufacturer_id"
+  end
+
   create_table "catalog_variant_prices", force: :cascade do |t|
     t.bigint "catalog_price_book_id", null: false
     t.bigint "catalog_plan_variant_id", null: false
@@ -8249,6 +8283,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000200) do
   add_foreign_key "catalog_price_books", "users", column: "created_by_id"
   add_foreign_key "catalog_price_books", "users", column: "published_by_id"
   add_foreign_key "catalog_standard_features", "catalog_price_books"
+  add_foreign_key "catalog_swatch_sheets", "factories", on_delete: :nullify
+  add_foreign_key "catalog_swatch_sheets", "manufacturers"
+  add_foreign_key "catalog_swatches", "catalog_swatch_sheets", on_delete: :nullify
+  add_foreign_key "catalog_swatches", "factories", on_delete: :nullify
+  add_foreign_key "catalog_swatches", "manufacturers"
   add_foreign_key "catalog_variant_prices", "catalog_plan_variants"
   add_foreign_key "catalog_variant_prices", "catalog_price_books"
   add_foreign_key "champion_ims_retailers", "companies"

@@ -30,12 +30,20 @@ class Api::Admin::TrueviewLabController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return render json: { sets: [] } unless variant
 
-    sets = CatalogOption.where(manufacturer_id: variant.manufacturer_id, kind: 'color', status: 'active')
-                        .pluck(:name, Arel.sql("metadata->>'color_set'"))
-                        .group_by { |_, set| set.presence || 'Colors' }
-                        .map { |set, rows| { name: set, values: rows.map(&:first).uniq.sort.first(60) } }
-                        .sort_by { |s| s[:name] }
-    render json: { sets: sets }
+    # The factory's decor sheet samples first (they carry a picture), then
+    # the price book's named colors.
+    factory_id = variant.catalog_plan&.factory_id
+    samples = CatalogSwatch.where(manufacturer_id: variant.manufacturer_id, factory_id: [factory_id, nil].uniq)
+                           .pluck(:set_name, :name)
+                           .group_by(&:first)
+                           .map { |set, rows| { name: set, values: rows.map(&:last).uniq.sort, samples: true } }
+                           .sort_by { |s| s[:name] }
+    colors = CatalogOption.where(manufacturer_id: variant.manufacturer_id, kind: 'color', status: 'active')
+                          .pluck(:name, Arel.sql("metadata->>'color_set'"))
+                          .group_by { |_, set| set.presence || 'Colors' }
+                          .map { |set, rows| { name: set, values: rows.map(&:first).uniq.sort.first(60), samples: false } }
+                          .sort_by { |s| s[:name] }
+    render json: { sets: samples + colors.reject { |c| samples.any? { |s| s[:name].casecmp?(c[:name]) } } }
   end
 
   # GET /api/admin/trueview_lab/runs
@@ -63,7 +71,9 @@ class Api::Admin::TrueviewLabController < ApplicationController
     room = RENDER_ROOMS.include?(params[:room].to_s) ? params[:room].to_s : photo['room']
     rows = TruebuildRender.done.where(source_url: photo['url'], model_key: params[:model].to_s, purpose: 'layer')
                           .where.not(layer_url: nil).select(:selection, :prompt).to_a
-    finishes = rows.select { |r| r.prompt == Truebuild::Trueview.prompt(room: room, selection: r.selection) }
+    finishes = rows.select do |r|
+      r.prompt == Truebuild::Trueview.prompt(room: room, selection: r.selection, swatches: Truebuild::Trueview.swatches_for(variant, r.selection))
+    end
                    .map { |r| r.selection.first.slice('surface', 'value') }.uniq
     render json: { finishes: finishes }
   end
@@ -125,9 +135,11 @@ class Api::Admin::TrueviewLabController < ApplicationController
   def build_render(variant, source_url, room, key, selection, purpose, run)
     spec = Truebuild::Trueview::MODELS[key]
     selection_key = TruebuildRender.key_for(selection)
+    swatches = Truebuild::Trueview.swatches_for(variant, selection)
     attrs = { catalog_plan_variant_id: variant.id, room: room, source_url: source_url, selection: selection,
               selection_key: selection_key, model_key: key, provider: spec[:provider], model: spec[:model], purpose: purpose,
-              prompt: Truebuild::Trueview.prompt(room: room, selection: selection), lab_run: run }
+              prompt: Truebuild::Trueview.prompt(room: room, selection: selection, swatches: swatches), lab_run: run,
+              usage: { 'swatch_ids' => swatches.compact.map(&:id) } }
     cached = !ActiveModel::Type::Boolean.new.cast(params[:fresh]) &&
              # Same prompt too: when the instructions improve, old drawings are not reused.
              TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose,
