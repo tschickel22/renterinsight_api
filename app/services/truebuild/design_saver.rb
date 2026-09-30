@@ -49,6 +49,7 @@ module Truebuild
         marketing_consent_at: (Time.current if consented)
       )
       design.update!(intake_submission: submission, lead_id: submission.reload.lead_id)
+      PortalAccess.call(design)
       design
     end
 

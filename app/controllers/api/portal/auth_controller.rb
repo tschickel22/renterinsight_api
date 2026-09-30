@@ -251,6 +251,10 @@ module Api
       end
       
       private
+
+      # A lead-level login (from a saved TrueBuild design) may read its own profile.
+      def lead_portal_allowed? = true
+
       
       def buyer_profile(buyer_access)
         {

@@ -106,6 +106,10 @@ module Api
 
       private
 
+      # Branding, module switches and preferences are safe for a lead-level login.
+      def lead_portal_allowed? = true
+
+
       def serialize_branding(company, location = nil)
         # Get platform branding (fallback/defaults)
         platform_branding = get_platform_branding

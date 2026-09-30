@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_235900) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_235950) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7201,13 +7201,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235900) do
     t.jsonb "metadata", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "contact_id"
+    t.bigint "account_id"
+    t.bigint "deal_id"
+    t.bigint "quote_id"
+    t.index ["account_id"], name: "index_truebuild_designs_on_account_id"
     t.index ["catalog_plan_variant_id"], name: "index_truebuild_designs_on_catalog_plan_variant_id"
     t.index ["catalog_price_book_id"], name: "index_truebuild_designs_on_catalog_price_book_id"
     t.index ["company_id", "created_at"], name: "index_truebuild_designs_on_company_id_and_created_at"
     t.index ["company_id"], name: "index_truebuild_designs_on_company_id"
+    t.index ["contact_id"], name: "index_truebuild_designs_on_contact_id"
+    t.index ["deal_id"], name: "index_truebuild_designs_on_deal_id"
     t.index ["intake_submission_id"], name: "index_truebuild_designs_on_intake_submission_id"
     t.index ["lead_id"], name: "index_truebuild_designs_on_lead_id"
     t.index ["public_token"], name: "index_truebuild_designs_on_public_token", unique: true
+    t.index ["quote_id"], name: "index_truebuild_designs_on_quote_id"
     t.index ["vehicle_id"], name: "index_truebuild_designs_on_vehicle_id"
   end
 
@@ -8793,11 +8801,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235900) do
   add_foreign_key "tracked_link_events", "tracked_links"
   add_foreign_key "tracked_links", "communications"
   add_foreign_key "tracked_links", "companies"
+  add_foreign_key "truebuild_designs", "accounts"
   add_foreign_key "truebuild_designs", "catalog_plan_variants"
   add_foreign_key "truebuild_designs", "catalog_price_books"
   add_foreign_key "truebuild_designs", "companies"
+  add_foreign_key "truebuild_designs", "contacts"
+  add_foreign_key "truebuild_designs", "deals"
   add_foreign_key "truebuild_designs", "intake_submissions"
   add_foreign_key "truebuild_designs", "leads"
+  add_foreign_key "truebuild_designs", "quotes"
   add_foreign_key "truebuild_designs", "vehicles"
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"

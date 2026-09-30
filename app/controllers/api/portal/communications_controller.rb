@@ -119,6 +119,10 @@ module Api
       end
       
       private
+
+      # Scoped by the polymorphic buyer, so a lead-level login is safe here.
+      def lead_portal_allowed? = true
+
       
       def communication_json(communication)
         {

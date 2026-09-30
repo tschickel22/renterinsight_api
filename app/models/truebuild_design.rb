@@ -10,6 +10,10 @@ class TruebuildDesign < ApplicationRecord
   belongs_to :lead, optional: true
   belongs_to :intake_submission, optional: true
   belongs_to :price_book, class_name: 'CatalogPriceBook', foreign_key: :catalog_price_book_id, optional: true
+  belongs_to :contact, optional: true
+  belongs_to :account, optional: true
+  belongs_to :deal, optional: true
+  belongs_to :quote, optional: true
 
   validates :status, inclusion: { in: STATUSES }
   validates :public_token, presence: true, uniqueness: true
