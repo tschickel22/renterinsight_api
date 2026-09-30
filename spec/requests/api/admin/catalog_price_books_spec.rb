@@ -4,6 +4,8 @@ require 'rails_helper'
 require Rails.root.join('spec/support/private_files_stub')
 
 RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
+  include ActiveJob::TestHelper
+
   let!(:s3) { stub_private_files }
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
   let(:admin) do
@@ -96,10 +98,13 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     expect(flagged.reload).to have_attributes(review_status: 'edited', reviewed_by_id: admin.id)
     expect(flagged.payload['width_ft']).to eq('30')
 
-    post "/api/admin/catalog_price_books/#{book.id}/publish", headers: headers
-    expect(response).to have_http_status(:ok)
-    expect(JSON.parse(response.body)['counts']).to include('variant_prices' => 2)
+    perform_enqueued_jobs(only: CatalogPriceBookPublishJob) do
+      post "/api/admin/catalog_price_books/#{book.id}/publish", headers: headers
+      expect(response).to have_http_status(:accepted)
+      expect(JSON.parse(response.body)['queued']).to be(true)
+    end
     expect(book.reload.status).to eq('published')
+    expect(book.metadata['publishing']).to include('state' => 'done', 'counts' => a_hash_including('variant_prices' => 2))
 
     patch "/api/admin/catalog_price_books/#{book.id}/items/#{clean.id}", headers: headers, params: { review_status: 'rejected' }
     expect(response).to have_http_status(:unprocessable_content)

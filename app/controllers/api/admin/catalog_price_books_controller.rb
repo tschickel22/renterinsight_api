@@ -331,11 +331,21 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
   end
 
   # POST /api/admin/catalog_price_books/:id/publish
+  # Checks what can be checked quickly, then publishes in the background.
+  # The book's publishing state says queued, running, done or failed.
   def publish
-    counts = Catalog::PriceBooks::Publisher.new(@book, by: original_user).call
-    render json: { published: true, counts: counts, book: book_json(@book.reload, detailed: true) }
-  rescue Catalog::PriceBooks::Publisher::NotReady, ActiveRecord::RecordInvalid, ArgumentError => e
-    render json: { error: e.message }, status: :unprocessable_entity
+    return render json: { error: "This price book is #{@book.status}" }, status: :unprocessable_entity unless @book.editable?
+
+    pending = @book.import_items.pending.count
+    return render json: { error: "#{pending} items still need review" }, status: :unprocessable_entity if pending.positive?
+
+    state = @book.metadata['publishing'] || {}
+    at = state['queued_at'].presence&.then { |t| Time.zone.parse(t) rescue nil }
+    unless %w[queued running].include?(state['state']) && at && at > 15.minutes.ago
+      @book.update!(metadata: @book.metadata.merge('publishing' => { 'state' => 'queued', 'queued_at' => Time.current.iso8601 }))
+      CatalogPriceBookPublishJob.perform_later(@book.id, original_user.id)
+    end
+    render json: { queued: true, book: book_json(@book.reload, detailed: true) }, status: :accepted
   end
 
   private
@@ -402,6 +412,7 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
       notes: book.notes, supersedes_id: book.supersedes_id, compared_with: book.metadata['compared_with'],
       catalog_links: book.metadata['catalog_links'] || [],
       auto_resolve: book.metadata['auto_resolve'],
+      publishing: book.metadata['publishing'],
       cost: {
         spent_usd: Catalog::PriceBooks::Recorder.spent_usd(book).round(2),
         budget_usd: Catalog::PriceBooks::Recorder.budget_usd,
