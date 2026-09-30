@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2952,10 +2952,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_160000) do
     t.bigint "decided_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "summary", default: {}, null: false
+    t.datetime "notified_at"
+    t.bigint "previous_book_id"
     t.index ["catalog_price_book_id"], name: "index_dealer_price_book_adoptions_on_catalog_price_book_id"
     t.index ["company_id", "catalog_price_book_id"], name: "idx_dealer_pb_adoptions_unique", unique: true
     t.index ["company_id"], name: "index_dealer_price_book_adoptions_on_company_id"
     t.index ["decided_by_id"], name: "index_dealer_price_book_adoptions_on_decided_by_id"
+    t.index ["previous_book_id"], name: "index_dealer_price_book_adoptions_on_previous_book_id"
   end
 
   create_table "deals", force: :cascade do |t|
@@ -8428,6 +8432,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_160000) do
   add_foreign_key "dealer_markup_rules", "locations"
   add_foreign_key "dealer_markup_rules", "manufacturers"
   add_foreign_key "dealer_price_book_adoptions", "catalog_price_books"
+  add_foreign_key "dealer_price_book_adoptions", "catalog_price_books", column: "previous_book_id"
   add_foreign_key "dealer_price_book_adoptions", "companies"
   add_foreign_key "dealer_price_book_adoptions", "users", column: "decided_by_id"
   add_foreign_key "deals", "accounts"

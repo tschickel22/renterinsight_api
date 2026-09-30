@@ -8,6 +8,7 @@
 class Api::V1::TruebuildPricingController < ApplicationController
   before_action :set_company_scope
   before_action :set_rule, only: %i[update_rule destroy_rule]
+  before_action :set_update, only: %i[show_update accept_update decline_update]
 
   TERM_FIELDS = %i[price_update_policy price_display program_discount_pct freight_per_mile freight_flat freight_miles
                    margin_floor_pct round_retail_to].freeze
@@ -30,8 +31,38 @@ class Api::V1::TruebuildPricingController < ApplicationController
       defaults: term_json(@company.dealer_catalog_terms.find_by(manufacturer_id: nil) || @company.dealer_catalog_terms.new),
       manufacturers: manufacturers,
       rules: @company.dealer_markup_rules.order(:scope_type, :id).map { |r| rule_json(r) },
-      locations: @company.locations.order(:name).map { |l| { id: l.id, name: l.name } }
+      locations: @company.locations.order(:name).map { |l| { id: l.id, name: l.name } },
+      updates: @company.dealer_price_book_adoptions.where.not(previous_book_id: nil).where.not(status: 'superseded')
+                       .includes(price_book: %i[manufacturer factory]).order(created_at: :desc).limit(20)
+                       .map { |a| update_json(a) }
     }
+  end
+
+  # GET /api/v1/truebuild_pricing/updates/:id
+  def show_update
+    return unless authorize_action!('company_settings', 'read')
+
+    render json: update_json(@update, full: true)
+  end
+
+  # POST /api/v1/truebuild_pricing/updates/:id/accept
+  # Start pricing from the new book. Also undoes a decline.
+  def accept_update
+    return unless authorize_action!('company_settings', 'update')
+    return render json: { error: 'A newer price book replaced this one' }, status: :unprocessable_entity unless @update.price_book.published?
+
+    @update.update!(status: 'adopted', decided_at: Time.current, decided_by: current_user)
+    render json: update_json(@update, full: true)
+  end
+
+  # POST /api/v1/truebuild_pricing/updates/:id/decline
+  # Keep pricing from the previous book.
+  def decline_update
+    return unless authorize_action!('company_settings', 'update')
+    return render json: { error: 'A newer price book replaced this one' }, status: :unprocessable_entity unless @update.price_book.published?
+
+    @update.update!(status: 'declined', decided_at: Time.current, decided_by: current_user)
+    render json: update_json(@update, full: true)
   end
 
   # PUT /api/v1/truebuild_pricing/terms   { manufacturer_id (blank = company default), ...fields }
@@ -119,14 +150,17 @@ class Api::V1::TruebuildPricingController < ApplicationController
     render json: { error: 'Model not found' }, status: :not_found
   end
 
-  # POST /api/v1/truebuild_pricing/preview   { variant_id, option_ids: [], location_id }
+  # POST /api/v1/truebuild_pricing/preview   { variant_id, option_ids: [], location_id, update_id }
+  # With update_id, prices from that pending update's new book, so a dealer
+  # can see and adjust their prices before accepting it.
   def preview
     return unless authorize_action!('company_settings', 'read')
 
     variant = CatalogPlanVariant.find(params[:variant_id])
     location = params[:location_id].present? ? @company.locations.find(params[:location_id]) : nil
+    book = params[:update_id].present? ? @company.dealer_price_book_adoptions.find(params[:update_id]).price_book : nil
     result = Truebuild::PricingEngine.new(company: @company, variant: variant, option_ids: Array(params[:option_ids]),
-                                          location: location).call
+                                          location: location, book: book).call
     render json: result.to_h
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
@@ -135,6 +169,25 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   private
+
+  def set_update
+    @update = @company.dealer_price_book_adoptions.find(params[:id])
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
+  def update_json(a, full: false)
+    book = a.price_book
+    json = {
+      id: a.id, status: a.status, manufacturer: book.manufacturer.name, plant: book.factory&.name,
+      book_id: book.id, book_name: book.name, effective_on: book.effective_on, published_at: book.published_at,
+      previous_book_name: a.previous_book&.name, decided_at: a.decided_at, decided_by: a.decided_by&.full_name,
+      ready: a.notified_at.present?, headline: a.summary.present? ? Truebuild::PriceBookNotifier.headline(a.summary) : nil,
+      can_decide: book.published?
+    }
+    json[:summary] = a.summary if full
+    json
+  end
 
   def set_rule
     @rule = @company.dealer_markup_rules.find(params[:id])

@@ -79,6 +79,7 @@ class Notification < ApplicationRecord
     mention_received: { category: 'system', priority: 'normal', title: 'You Were Mentioned' },
     approval_required: { category: 'system', priority: 'high', title: 'Approval Required' },
     approval_completed: { category: 'system', priority: 'normal', title: 'Approval Completed' },
+    truebuild_price_update: { category: 'sales', priority: 'normal', title: 'New Factory Prices' },
     
     # Broadcast notifications
     broadcast_message: { category: 'broadcast', priority: 'normal', title: 'Company Announcement' },

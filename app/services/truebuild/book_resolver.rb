@@ -17,15 +17,20 @@ module Truebuild
       adoption = company.dealer_price_book_adoptions.find_by(catalog_price_book_id: current.id)
       return current if adoption.nil? || adoption.status == 'adopted'
 
-      # Pending or declined: walk back to the newest book this dealer accepted.
-      book = current.supersedes
+      accepted_before(company, current) || current
+    end
+
+    # The newest book older than this one that the dealer accepted, or that
+    # was published before they started reviewing. Nil when there is none.
+    def accepted_before(company, book)
+      book = book.supersedes
       while book
         a = company.dealer_price_book_adoptions.find_by(catalog_price_book_id: book.id)
         return book if a.nil? || a.status == 'adopted'
 
         book = book.supersedes
       end
-      current
+      nil
     end
 
     def holds_for_review?(company, manufacturer_id)

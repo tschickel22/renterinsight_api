@@ -35,8 +35,10 @@ module Catalog
 
           @book.update!(metadata: @book.metadata.merge('published_counts' => counts))
           @book.publish!(by: @user)
+          Truebuild::PriceBookNotifier.hold_for_review(@book)
           link_inventory
         end
+        CatalogPriceBookNoticeJob.perform_later(@book.id)
         counts
       end
 

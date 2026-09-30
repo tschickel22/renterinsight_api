@@ -86,4 +86,34 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
     expect(body['totals']).to include('cost' => 58_060.0, 'retail' => 75_478.0)
     expect(body['lines'].map { |l| l['kind'] }).to eq(%w[base option])
   end
+
+  it 'shows a pending price update, previews at its new prices, and accepts or declines it' do
+    company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.3)
+    newer = CatalogPriceBook.create!(manufacturer: mfr, factory: factory, name: 'Topeka 2027', status: 'in_review')
+    CatalogVariantPrice.create!(price_book: newer, variant: variant, net_base_price: 60_000)
+    newer.publish!(by: User.new(role: 'platform_admin'))
+    Truebuild::PriceBookNotifier.hold_for_review(newer)
+    Truebuild::PriceBookNotifier.deliver(newer)
+    update = company.dealer_price_book_adoptions.find_by!(price_book: newer)
+    foreign = other.dealer_price_book_adoptions.create!(price_book: newer, previous_book: book)
+
+    get '/api/v1/truebuild_pricing', headers: headers
+    listed = JSON.parse(response.body)['updates']
+    expect(listed.map { |u| u['id'] }).to eq([update.id])
+    expect(listed.first).to include('status' => 'pending', 'previous_book_name' => 'Topeka 2026', 'can_decide' => true)
+
+    post '/api/v1/truebuild_pricing/preview', headers: headers, params: { variant_id: variant.id }
+    expect(JSON.parse(response.body)['totals']['cost']).to eq(57_995.0)
+    post '/api/v1/truebuild_pricing/preview', headers: headers, params: { variant_id: variant.id, update_id: update.id }
+    expect(JSON.parse(response.body)['totals']['cost']).to eq(60_000.0)
+
+    get "/api/v1/truebuild_pricing/updates/#{foreign.id}", headers: headers
+    expect(response).to have_http_status(:not_found)
+
+    post "/api/v1/truebuild_pricing/updates/#{update.id}/decline", headers: headers
+    expect(update.reload).to have_attributes(status: 'declined', decided_by_id: admin.id)
+    post "/api/v1/truebuild_pricing/updates/#{update.id}/accept", headers: headers
+    expect(JSON.parse(response.body)).to include('status' => 'adopted', 'summary' => a_hash_including('homes'))
+    expect(Truebuild::BookResolver.book_for(company, variant)).to eq(newer)
+  end
 end
