@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class ApiKey < ApplicationRecord
+  # Plaintext keys lived here until ClearPlaintextApiKeys emptied it. Ignored so
+  # nothing reads or writes it again, and so the column can be dropped safely.
+  self.ignored_columns += %w[key]
+
   # Associations
   belongs_to :company, optional: true  # NULL = platform-level key
   belongs_to :created_by_user, class_name: "User", foreign_key: "created_by_user_id"
@@ -29,15 +33,10 @@ class ApiKey < ApplicationRecord
     Digest::SHA256.hexdigest(token.to_s)
   end
 
-  # Rows written by a release older than the digest migration have no digest
-  # yet. The plaintext fallback covers them until the follow-up migration
-  # clears the plaintext column, and backfills the digest on first use.
   def self.find_active_by_token(token)
     return nil if token.blank?
 
-    active.find_by(key_digest: digest(token)) || active.find_by(key: token)&.tap do |legacy|
-      legacy.update_columns(key_digest: digest(token), key_preview: preview_for(token))
-    end
+    active.find_by(key_digest: digest(token))
   end
 
   def self.preview_for(token)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_01_000100) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_01_000200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -598,7 +598,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000100) do
     t.index ["company_id", "status"], name: "index_api_keys_on_company_id_and_status"
     t.index ["company_id"], name: "index_api_keys_on_company_id"
     t.index ["created_by_user_id"], name: "index_api_keys_on_created_by_user_id"
-    t.index ["key"], name: "index_api_keys_on_key", unique: true
     t.index ["key_digest"], name: "index_api_keys_on_key_digest", unique: true
     t.index ["status"], name: "index_api_keys_on_status"
     t.index ["webhook_config"], name: "index_api_keys_on_webhook_config", using: :gin
