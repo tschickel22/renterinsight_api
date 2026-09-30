@@ -318,6 +318,22 @@ class Quote < ApplicationRecord
     results
   end
   
+  # Item keys that are the dealer's business, never the customer's: cost,
+  # unit_cost, margin, profit, markup, gross, internal notes. Items built from
+  # templates and products carry cost, and the public page shows items as stored.
+  INTERNAL_ITEM_KEY = /cost|margin|profit|markup|gross|internal/i
+
+  # What the public quote page (/q/:token) may show.
+  def public_as_json
+    json = as_json
+    %w[items lineItems].each do |k|
+      next unless json[k].is_a?(Array)
+
+      json[k] = json[k].map { |item| item.is_a?(Hash) ? item.reject { |key, _| key.to_s.match?(INTERNAL_ITEM_KEY) } : item }
+    end
+    json
+  end
+
   private
   
   def serialize_items(items_array)
