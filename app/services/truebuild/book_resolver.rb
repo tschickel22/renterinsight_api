@@ -29,7 +29,7 @@ module Truebuild
     end
 
     def holds_for_review?(company, manufacturer_id)
-      DealerCatalogTerm.for(company, manufacturer_id).price_update_policy == 'review'
+      DealerCatalogTerm.effective(company, manufacturer_id).price_update_policy == 'review'
     end
   end
 end

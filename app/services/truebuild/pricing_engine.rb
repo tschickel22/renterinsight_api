@@ -33,7 +33,7 @@ module Truebuild
       @location = location
       @construction = construction
       @book = book || BookResolver.book_for(company, variant)
-      @terms = DealerCatalogTerm.for(company, variant.manufacturer_id)
+      @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
                       .select { |r| r.location_id.nil? || r.location_id == location&.id }
       @warnings = []

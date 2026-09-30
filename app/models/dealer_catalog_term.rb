@@ -19,6 +19,24 @@ class DealerCatalogTerm < ApplicationRecord
   validates :round_retail_to, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true
   validates :freight_miles, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
 
+  # Settled once per dealer: what buyers see, how new books arrive, margin
+  # floor, rounding. Set per manufacturer: program discount and freight.
+  COMPANY_WIDE = %i[price_update_policy price_display margin_floor_pct round_retail_to].freeze
+  PER_MANUFACTURER = %i[program_discount_pct freight_per_mile freight_flat freight_miles].freeze
+
+  # The terms that apply to one manufacturer's homes: company-wide settings
+  # from the company row, discount and freight from the manufacturer row.
+  # Unsaved; for reading only.
+  def self.effective(company, manufacturer_id)
+    rows = company.dealer_catalog_terms.where(manufacturer_id: [manufacturer_id, nil]).to_a
+    base = rows.find { |t| t.manufacturer_id.nil? }
+    specific = rows.find { |t| t.manufacturer_id == manufacturer_id && manufacturer_id }
+    merged = company.dealer_catalog_terms.new(manufacturer_id: manufacturer_id)
+    COMPANY_WIDE.each { |f| merged[f] = base[f] if base }
+    PER_MANUFACTURER.each { |f| merged[f] = specific[f] if specific }
+    merged
+  end
+
   # The manufacturer row if there is one, else the company default, else a new
   # unsaved default so callers never branch on nil.
   def self.for(company, manufacturer_id)

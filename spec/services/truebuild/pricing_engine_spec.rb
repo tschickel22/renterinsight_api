@@ -74,7 +74,8 @@ RSpec.describe Truebuild::PricingEngine do
 
   it 'adds freight, rounds the retail up, and warns under the margin floor' do
     company.dealer_catalog_terms.create!(manufacturer: mfr, freight_flat: 500, freight_per_mile: 4.5, freight_miles: 200,
-                                         round_retail_to: 100, margin_floor_pct: 25)
+                                         round_retail_to: 5, margin_floor_pct: 90) # ignored: company-wide settings
+    company.dealer_catalog_terms.create!(round_retail_to: 100, margin_floor_pct: 25)
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.2)
 
     r = price
