@@ -127,4 +127,13 @@ RSpec.describe 'Public TrueBuild', type: :request do
     get "/public/inventory/#{vehicle.id}", params: { token: token }
     expect(JSON.parse(response.body)['truebuild']).to eq('available' => true)
   end
+
+  it "shows the manufacturer's photos and floor plan for a linked home with none of its own" do
+    variant.update!(media: { 'photos' => [{ 'url' => 'https://img/kitchen-1', 'room' => 'kitchen' }],
+                             'floor_plans' => ['https://img/plan'], 'matterport_url' => 'https://my.matterport.com/show/?m=x' })
+    get "/public/inventory/#{vehicle.id}", params: { token: token }
+    home = JSON.parse(response.body)['vehicle']
+    expect(home).to include('image_urls' => ['https://img/kitchen-1'], 'floor_plan_images' => ['https://img/plan'],
+                            'tour_url' => 'https://my.matterport.com/show/?m=x')
+  end
 end

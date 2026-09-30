@@ -52,7 +52,7 @@ class Public::InventoryController < ApplicationController
       get_public_statuses
     end
     
-    @vehicles = @company.vehicles
+    @vehicles = @company.vehicles.includes(:catalog_plan_variant)
                        .where(status: statuses)
                        .where(is_deleted: [false, nil])
     
@@ -593,8 +593,28 @@ class Public::InventoryController < ApplicationController
   # Matterport walkthrough beats a generic 360 embed, which beats the legacy
   # column kept from an older import.
   def tour_url_for(vehicle)
-    [vehicle.matterport_url, vehicle.virtual_tour_url, vehicle.try(:virtual_tour)]
-      .find(&:present?)
+    [vehicle.matterport_url, vehicle.virtual_tour_url, vehicle.try(:virtual_tour),
+     catalog_media(vehicle)['matterport_url']].find(&:present?)
+  end
+
+  # A home's own photos; a home linked to a catalog model and photographed by
+  # nobody yet shows the manufacturer's photos of that model instead of a
+  # blank card (Truebuild::ModelMedia).
+  def display_image_urls(vehicle)
+    own = extract_image_urls(vehicle.images)
+    return own if own.any?
+
+    media = catalog_media(vehicle)
+    (Array(media['photos']).map { |p| p['url'] } + Array(media['elevations'])).compact.first(24)
+  end
+
+  def display_floor_plans(vehicle)
+    own = extract_image_urls(vehicle.floor_plan_images)
+    own.any? ? own : Array(catalog_media(vehicle)['floor_plans'])
+  end
+
+  def catalog_media(vehicle)
+    vehicle.catalog_plan_variant_id ? (vehicle.catalog_plan_variant&.media || {}) : {}
   end
 
   # Extract plain URL strings from images array
@@ -698,9 +718,9 @@ class Public::InventoryController < ApplicationController
       location_state: vehicle.location&.state,
       
       # Images (extract URL strings from hash objects if needed)
-      primary_image_url: extract_image_urls(vehicle.images).first,
-      image_urls: extract_image_urls(vehicle.images),
-      floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
+      primary_image_url: display_image_urls(vehicle).first,
+      image_urls: display_image_urls(vehicle),
+      floor_plan_images: display_floor_plans(vehicle),
       
       # Media flags for list view icons
       has_virtual_tour: vehicle.virtual_tour_url.present?,
@@ -806,7 +826,7 @@ class Public::InventoryController < ApplicationController
       # What a visitor should actually be sent to, already resolved.
       tour_url: tour_url_for(vehicle),
       video_url: vehicle.video_url,
-      floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
+      floor_plan_images: display_floor_plans(vehicle),
       
       # Identifiers
       vin: vehicle.vin,
