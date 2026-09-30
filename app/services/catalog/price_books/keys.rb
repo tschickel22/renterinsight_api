@@ -13,8 +13,14 @@ module Catalog
         Sections.group_for(section).first
       end
 
+      # Comparisons are spelled out first: "SW<=60' box" and "SW >60' box"
+      # are two options, and parameterize alone makes them one.
       def option(section, description)
-        "#{group(section)}--#{description.to_s.parameterize[0, 90]}"
+        "#{group(section)}--#{describe_comparisons(description).parameterize[0, 90]}"
+      end
+
+      def describe_comparisons(text)
+        text.to_s.gsub(/<=|≤/, ' lte ').gsub(/>=|≥/, ' gte ').gsub('<', ' lt ').gsub('>', ' gt ').gsub('+', ' plus ')
       end
 
       # "56' Belvidere" is the Belvidere plan at 56 feet; a list with no names

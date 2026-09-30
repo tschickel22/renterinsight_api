@@ -32,7 +32,7 @@ RSpec.describe Truebuild::PricingEngine do
     expect(base[:detail][:program_discount]).to eq(1318.3) # 2% of 65,915
     expect(base[:cost]).to eq(64_596.7)
     expect(base[:retail]).to eq(83_975.71)
-    expect(base[:detail][:rule]).to eq('all rule: 1.3 x cost')
+    expect(base[:detail][:rule]).to eq('Every home rule: 1.3 x cost')
   end
 
   it 'uses the most specific rule, and a location rule over the company one' do
@@ -42,7 +42,7 @@ RSpec.describe Truebuild::PricingEngine do
     company.dealer_markup_rules.create!(scope_type: 'series', manufacturer: mfr, scope_value: 'Aspire', location: loc,
                                         markup_type: 'percent', value: 20)
 
-    expect(price.lines.first[:detail][:rule]).to eq('series rule: 25.0% over cost')
+    expect(price.lines.first[:detail][:rule]).to eq('Series rule: 25% over cost')
     expect(price(location: loc).lines.first[:retail]).to eq(79_098.0)
 
     company.dealer_markup_rules.create!(scope_type: 'plan', scope_id: plan.id, markup_type: 'manual', value: 89_900)

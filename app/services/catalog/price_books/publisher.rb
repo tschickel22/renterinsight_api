@@ -131,17 +131,21 @@ module Catalog
         applies = p['applies_to'] || {}
         models = Array(applies['model_numbers']).presence || [Sections.model_number_in(p['section'])].compact
         variant_id = models.filter_map { |m| variant_for_option(m, p['tab']) }.first
+        where = Applicability.resolve(name: p['description'], tab: p['tab'], series_list: series_list,
+                                      model_specific: variant_id.present?, ai: applies)
         CatalogOptionPrice.create!(
           price_book: @book, option: option, dealer_cost: p['dealer_cost'], suggested_retail: p['suggested_retail'],
-          is_standard: p['is_standard'] == true, catalog_plan_variant_id: variant_id,
-          min_length_ft: applies['box_length_min_ft'], max_length_ft: applies['box_length_max_ft'],
-          width_ft: applies['width_ft'], section_type: applies['section_type'].presence_in(CatalogOptionPrice::SECTION_TYPES),
+          is_standard: p['is_standard'] == true, catalog_plan_variant_id: variant_id, **where.symbolize_keys,
           construction: applies['construction'].presence_in(CatalogOptionPrice::CONSTRUCTIONS),
           building_code: applies['building_code'].presence_in(CatalogPlanVariant::BUILDING_CODES),
           source_ref: item.source_ref
         )
         item.update_columns(matched_type: 'CatalogOption', matched_id: option.id)
         counts['option_prices'] += 1
+      end
+
+      def series_list
+        @series_list ||= CatalogPlan.where(manufacturer_id: @mfr).distinct.pluck(:series)
       end
 
       # A model-specific option names a model number; when two series share

@@ -180,15 +180,19 @@ module Truebuild
       return nil unless rule
 
       value = rule.value.to_d
+      number = value.frac.zero? ? value.to_i.to_s : value.to_s('F')
       how = case rule.markup_type
-            when 'percent' then "#{value.to_s('F')}% over cost"
-            when 'multiplier' then "#{value.to_s('F')} x cost"
-            when 'flat' then "cost + #{money(value)}"
-            when 'manual' then "set price #{money(value)}"
+            when 'percent' then "#{number}% over cost"
+            when 'multiplier' then "#{number} x cost"
+            when 'flat' then "cost + #{ActiveSupport::NumberHelper.number_to_currency(value, precision: value.frac.zero? ? 0 : 2)}"
+            when 'manual' then "set price #{ActiveSupport::NumberHelper.number_to_currency(value, precision: value.frac.zero? ? 0 : 2)}"
             end
       where = rule.location_id ? " at #{rule.location&.name}" : ''
-      "#{rule.scope_type.tr('_', ' ')} rule: #{how}#{where}"
+      "#{SCOPE_WORDS[rule.scope_type]} rule: #{how}#{where}"
     end
+
+    SCOPE_WORDS = { 'all' => 'Every home', 'manufacturer' => 'Manufacturer', 'series' => 'Series', 'plan' => 'Plan',
+                    'variant' => 'Model', 'option_group' => 'Option group', 'option' => 'Option' }.freeze
 
     def money(value)
       value&.to_d&.round(2)&.to_f

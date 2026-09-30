@@ -217,7 +217,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
   def scope_label(r)
     case r.scope_type
-    when 'all' then 'Everything'
+    when 'all' then 'Every home'
     when 'manufacturer' then r.manufacturer&.name
     when 'series' then "#{r.manufacturer&.name} #{r.scope_value}"
     when 'plan' then CatalogPlan.find_by(id: r.scope_id)&.name
