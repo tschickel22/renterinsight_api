@@ -39,6 +39,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
   let(:floor_plan) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'floor-plan', name: 'Floor Plan Options', position: 1) }
   let!(:shutter_black) { option(floor_plan, 'Shutters: Black', kind: 'standard', is_standard: true) }
   let!(:siding_olive) { option(floor_plan, 'Siding: Olive', kind: 'standard', is_standard: true) }
+  let!(:roofing) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'roofing', name: 'Roofing', position: 4) }
+  let!(:shingles) { option(floor_plan, '3 Tab Shingles: Black Weatherwood', kind: 'standard', is_standard: true) }
 
   before do
     CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 80_000)
@@ -65,6 +67,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
     sets = body['groups'].find { |g| g['name'] == 'Exterior' }['color_sets'].to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
     expect(sets).to eq('Shutters' => ['Black'], 'Siding' => %w[Clay Olive White])
     expect(body['groups'].map { |g| g['name'] }).not_to include('Floor Plan Options')
+    expect(body['groups'].find { |g| g['name'] == 'Roofing' }['color_sets']).to match([a_hash_including('name' => 'Shingles')])
     expect(response.body).not_to match(/cost/i)
     expect(body['media']).to include('photos' => [], 'floor_plans' => [], 'tour_url' => nil)
   end

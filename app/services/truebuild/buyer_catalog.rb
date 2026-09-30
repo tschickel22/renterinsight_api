@@ -94,25 +94,23 @@ module Truebuild
     # is an add-on the buyer ticks. A standard option is shown as included.
     # "Shutters: Black" as a no-charge option is a color choice written as an
     # option: one of a set the buyer picks from, not something included.
-    NAMED_CHOICE = /\A([A-Za-z][A-Za-z ]{2,30}):\s*(.+)\z/
+    NAMED_CHOICE = /\A([A-Za-z0-9][A-Za-z0-9 ]{2,30}):\s*(.+)\z/ # "3 Tab Shingles: Black Weatherwood"
 
     def groups(prices, retail)
       uniq = prices.uniq(&:catalog_option_id)
       choices, rest = uniq.partition { |op| op.is_standard && op.option.kind != 'color' && op.option.name.match?(NAMED_CHOICE) }
       by_group = rest.group_by { |op| op.option.group }
-      extra_sets = Hash.new { |h, k| h[k] = [] } # group name => [[set, option json]]
+      extra_sets = Hash.new { |h, k| h[k] = [] } # group id => [[set, option json]]
       choices.each do |op|
         set_title, value = op.option.name.match(NAMED_CHOICE).captures
-        target = Catalog::PriceBooks::Sections.group_for(set_title).last
-        extra_sets[target] << [Catalog::PriceBooks::ColorSets.normalize(set_title),
-                               option_json(op, retail).merge(name: value.strip, kind: 'color', hex: ColorSwatches.hex(value))]
-      end
-      # A group that holds only such choices still needs to appear.
-      extra_sets.each_key do |name|
-        next if by_group.keys.any? { |g| g.name == name }
-
-        group = CatalogOptionGroup.find_by(manufacturer_id: @variant.manufacturer_id, name: name)
-        by_group[group] = [] if group
+        # Filed under the group its set belongs to (Shutters under Exterior),
+        # else left in the group it came in.
+        name = Catalog::PriceBooks::Sections.group_for(set_title).last
+        group = by_group.keys.find { |g| g.name == name } ||
+                CatalogOptionGroup.find_by(manufacturer_id: @variant.manufacturer_id, name: name) || op.option.group
+        by_group[group] ||= []
+        extra_sets[group.id] << [Catalog::PriceBooks::ColorSets.normalize(set_title),
+                                 option_json(op, retail).merge(name: value.strip, kind: 'color', hex: ColorSwatches.hex(value))]
       end
 
       by_group.sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
@@ -120,7 +118,7 @@ module Truebuild
         families = OptionFamilies.for(others.map(&:option))
         sets = colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
                      .transform_values { |cs| cs.map { |op| option_json(op, retail) } }
-        extra_sets[group.name].each { |set, json| (sets[set] ||= []) << json }
+        extra_sets[group.id].each { |set, json| (sets[set] ||= []) << json }
         {
           id: group.id, name: group.name,
           color_sets: sets.map { |set, os| { name: set, options: os.uniq { |o| o[:name].downcase }.sort_by { |o| o[:name] } } }
