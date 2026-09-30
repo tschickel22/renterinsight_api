@@ -93,6 +93,8 @@ gem 'stripe'
 
 # HTTP requests for QuickBooks API integration
 gem 'httparty'
+# TrueView layers: cut each finish out of its rendering (libvips is in the Docker image).
+gem 'ruby-vips', '~> 2.2'
 
 # AWS SDK for SES email sending
 gem 'aws-sdk-ses', '~> 1.0'

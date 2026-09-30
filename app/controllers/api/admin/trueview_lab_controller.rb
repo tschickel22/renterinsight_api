@@ -8,6 +8,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
 
   RENDER_ROOMS = %w[kitchen bath living bedroom dining laundry exterior].freeze
   MAX_FINISHES = 8
+  MAX_LAYERS = 40
 
   # GET /api/admin/trueview_lab
   # Models with photos, the image models on offer, and finish suggestions.
@@ -52,7 +53,10 @@ class Api::Admin::TrueviewLabController < ApplicationController
   end
 
   # POST /api/admin/trueview_lab/runs
-  # { variant_id, source_url, room, finishes: [{surface, value}], models: [key], fresh }
+  # Full redraw: { variant_id, source_url, room, finishes: [{surface, value}], models: [key], fresh }
+  #   every image model draws the whole combination.
+  # Layers: { mode: 'layers', variant_id, source_url, room, model: key, layers: [{surface, values: []}], fresh }
+  #   one image model draws each finish on its own, cut out to stack.
   def create_run
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return render json: { error: 'Choose a model' }, status: :unprocessable_entity unless variant
@@ -61,47 +65,80 @@ class Api::Admin::TrueviewLabController < ApplicationController
     photo = Array(variant.media['photos']).find { |p| p['url'] == params[:source_url].to_s }
     return render json: { error: 'Choose one of this model\'s photos' }, status: :unprocessable_entity unless photo
 
-    selection = TruebuildRender.normalize(Array(params[:finishes]).map { |f| f.permit(:surface, :value).to_h }).first(MAX_FINISHES)
-    return render json: { error: 'Add at least one finish' }, status: :unprocessable_entity if selection.empty?
-
-    keys = Array(params[:models]).map(&:to_s) & Truebuild::Trueview::MODELS.keys
-    return render json: { error: 'Choose at least one image model' }, status: :unprocessable_entity if keys.empty?
-
     room = RENDER_ROOMS.include?(params[:room].to_s) ? params[:room].to_s : photo['room']
+    jobs = params[:mode] == 'layers' ? layer_jobs : full_jobs
+    return if performed?
+
     run = SecureRandom.uuid
-    selection_key = TruebuildRender.key_for(selection)
-    prompt = Truebuild::Trueview.prompt(room: room, selection: selection)
-    rows = keys.map do |key|
-      spec = Truebuild::Trueview::MODELS[key]
-      cached = !ActiveModel::Type::Boolean.new.cast(params[:fresh]) &&
-               TruebuildRender.done.where(source_url: photo['url'], selection_key: selection_key, model_key: key).order(:id).last
-      attrs = { catalog_plan_variant_id: variant.id, room: room, source_url: photo['url'], selection: selection,
-                selection_key: selection_key, model_key: key, provider: spec[:provider], model: spec[:model], prompt: prompt, lab_run: run }
-      if cached
-        # Served from the cache: what a buyer repeating this combination costs.
-        TruebuildRender.create!(attrs.merge(status: 'done', image_url: cached.image_url, latency_ms: 0, cost_usd: 0,
-                                            usage: { 'cached_from' => cached.id }, model: cached.model))
-      elsif !Truebuild::Trueview.configured?(key)
-        TruebuildRender.create!(attrs.merge(status: 'failed', error: "#{spec[:provider] == 'gemini' ? 'GEMINI' : 'OPENAI'}_API_KEY is not set"))
-      else
-        TruebuildRender.create!(attrs).tap { |r| TruebuildRenderJob.perform_later(r.id) }
-      end
-    end
+    rows = jobs.map { |key, selection, purpose| build_render(variant, photo['url'], room, key, selection, purpose, run) }
     render json: run_json(run, rows), status: :created
   end
 
   private
 
+  # [[model_key, selection, purpose]]
+  def full_jobs
+    selection = TruebuildRender.normalize(Array(params[:finishes]).map { |f| f.permit(:surface, :value).to_h }).first(MAX_FINISHES)
+    return render(json: { error: 'Add at least one finish' }, status: :unprocessable_entity) && [] if selection.empty?
+
+    keys = Array(params[:models]).map(&:to_s) & Truebuild::Trueview::MODELS.keys
+    return render(json: { error: 'Choose at least one image model' }, status: :unprocessable_entity) && [] if keys.empty?
+
+    keys.map { |key| [key, selection, 'full'] }
+  end
+
+  def layer_jobs
+    key = params[:model].to_s
+    unless Truebuild::Trueview::MODELS.key?(key)
+      return render(json: { error: 'Choose an image model' }, status: :unprocessable_entity) && []
+    end
+
+    finishes = Array(params[:layers]).flat_map do |l|
+      surface = l[:surface].to_s.strip
+      Array(l[:values]).map { |v| { 'surface' => surface, 'value' => v.to_s.strip } }
+    end
+    finishes = TruebuildRender.normalize(finishes).uniq
+    return render(json: { error: 'Add at least one finish' }, status: :unprocessable_entity) && [] if finishes.empty?
+    if finishes.size > MAX_LAYERS
+      return render(json: { error: "At most #{MAX_LAYERS} finishes per run" }, status: :unprocessable_entity) && []
+    end
+
+    finishes.map { |f| [key, [f], 'layer'] }
+  end
+
+  def build_render(variant, source_url, room, key, selection, purpose, run)
+    spec = Truebuild::Trueview::MODELS[key]
+    selection_key = TruebuildRender.key_for(selection)
+    attrs = { catalog_plan_variant_id: variant.id, room: room, source_url: source_url, selection: selection,
+              selection_key: selection_key, model_key: key, provider: spec[:provider], model: spec[:model], purpose: purpose,
+              prompt: Truebuild::Trueview.prompt(room: room, selection: selection), lab_run: run }
+    cached = !ActiveModel::Type::Boolean.new.cast(params[:fresh]) &&
+             TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose)
+                            .where(purpose == 'layer' ? 'layer_url IS NOT NULL' : 'TRUE').order(:id).last
+    if cached
+      # Served from the cache: what a buyer repeating this combination costs.
+      TruebuildRender.create!(attrs.merge(status: 'done', image_url: cached.image_url, layer_url: cached.layer_url,
+                                          mask_coverage: cached.mask_coverage, latency_ms: 0, cost_usd: 0,
+                                          usage: { 'cached_from' => cached.id }, model: cached.model))
+    elsif !Truebuild::Trueview.configured?(key)
+      TruebuildRender.create!(attrs.merge(status: 'failed', error: "#{spec[:provider] == 'gemini' ? 'GEMINI' : 'OPENAI'}_API_KEY is not set"))
+    else
+      TruebuildRender.create!(attrs).tap { |r| TruebuildRenderJob.perform_later(r.id) }
+    end
+  end
+
   def run_json(run, rows)
     first = rows.first
-    { id: run, created_at: first.created_at, variant_id: first.catalog_plan_variant_id, room: first.room,
+    { id: run, mode: first.purpose == 'layer' ? 'layers' : 'full', created_at: first.created_at, variant_id: first.catalog_plan_variant_id, room: first.room,
       source_url: first.source_url, finishes: first.selection, prompt: first.prompt,
       total_cost_usd: rows.sum { |r| r.cost_usd.to_f }.round(4),
       renders: rows.map do |r|
         spec = Truebuild::Trueview::MODELS[r.model_key] || {}
         { id: r.id, model_key: r.model_key, label: spec[:label] || r.model_key, provider: r.provider, model: r.model,
           status: r.status, image_url: r.image_url, cost_usd: r.cost_usd&.to_f, latency_ms: r.latency_ms,
-          usage: r.usage, error: r.error, cached: r.usage.is_a?(Hash) && r.usage.key?('cached_from') }
+          usage: r.usage, error: r.error, cached: r.usage.is_a?(Hash) && r.usage.key?('cached_from'),
+          purpose: r.purpose, layer_url: r.layer_url, mask_coverage: r.mask_coverage&.to_f,
+          surface: r.selection.first&.dig('surface'), value: r.selection.first&.dig('value') }
       end }
   end
 end

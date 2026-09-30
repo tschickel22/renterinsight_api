@@ -95,4 +95,44 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
     TruebuildRenderJob.perform_now(TruebuildRender.last.id)
     expect(TruebuildRender.last).to have_attributes(status: 'failed', error: 'Source photo returned 404')
   end
+
+  describe 'layers' do
+    def layers!(extra = {})
+      post '/api/admin/trueview_lab/runs', headers: admin, params: {
+        mode: 'layers', variant_id: variant.id, source_url: kitchen_photo, model: 'nb2-lite',
+        layers: [{ surface: 'Cabinets', values: %w[Timberwolf Destin\ White] }, { surface: 'Countertop', values: ['Calcutta'] }]
+      }.merge(extra).to_json
+    end
+
+    it 'draws each finish on its own with one image model' do
+      expect { layers! }.to have_enqueued_job(TruebuildRenderJob).exactly(3).times
+      body = JSON.parse(response.body)
+      expect(body['mode']).to eq('layers')
+      expect(body['renders'].map { |r| [r['surface'], r['value']] })
+        .to contain_exactly(%w[Cabinets Timberwolf], ['Cabinets', 'Destin White'], %w[Countertop Calcutta])
+      expect(TruebuildRender.pluck(:purpose).uniq).to eq(['layer'])
+    end
+
+    it 'cuts the drawn finish out of the photo' do
+      layers!(layers: [{ surface: 'Cabinets', values: ['Timberwolf'] }])
+      base = (Vips::Image.black(400, 300, bands: 3) + [120, 110, 100]).cast(:uchar)
+      drawn = base.draw_rect([30, 60, 200], 100, 100, 120, 80, fill: true).resize(0.64).cast(:uchar)
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: base.jpegsave_buffer(Q: 95), mime: 'image/jpeg')
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
+        .and_return(bytes: drawn.pngsave_buffer, mime: 'image/png', usage: { 'prompt_tokens' => 10, 'output_tokens' => 1120 })
+      stored = []
+      allow(Truebuild::Trueview).to receive(:store) { |_r, bytes, mime, **opts| stored << [mime, opts[:suffix]]; "https://b/#{opts[:suffix] || 'full'}" }
+
+      TruebuildRenderJob.perform_now(TruebuildRender.last.id)
+      row = TruebuildRender.last
+      expect(row).to have_attributes(status: 'done', layer_url: 'https://b/layer')
+      expect(row.mask_coverage.to_f).to be_within(0.02).of(0.08)
+      expect(stored).to eq([['image/png', nil], ['image/webp', 'layer']])
+    end
+
+    it 'caps a run at 40 finishes' do
+      layers!(layers: [{ surface: 'Backsplash', values: (1..41).map { |i| "Tile #{i}" } }])
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
 end

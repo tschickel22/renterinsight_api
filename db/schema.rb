@@ -7100,6 +7100,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000200) do
     t.string "lab_run"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "purpose", default: "full", null: false
+    t.string "layer_url"
+    t.decimal "mask_coverage", precision: 5, scale: 4
     t.index ["catalog_plan_variant_id"], name: "index_truebuild_renders_on_catalog_plan_variant_id"
     t.index ["lab_run"], name: "index_truebuild_renders_on_lab_run"
     t.index ["source_url", "selection_key", "model_key"], name: "idx_on_source_url_selection_key_model_key_0cffdeaa5e"

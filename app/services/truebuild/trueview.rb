@@ -59,8 +59,13 @@ module Truebuild
       result = spec[:provider] == 'gemini' ? Providers::Gemini.edit(spec, source, render.prompt) : Providers::OpenAi.edit(spec, source, render.prompt)
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
-      render.update!(status: 'done', image_url: url, latency_ms: latency, usage: result[:usage],
-                     model: result[:model] || render.model, cost_usd: cost(spec, result[:usage]))
+      attrs = { status: 'done', image_url: url, latency_ms: latency, usage: result[:usage],
+                model: result[:model] || render.model, cost_usd: cost(spec, result[:usage]) }
+      if render.purpose == 'layer'
+        layer = Layer.build(source[:bytes], result[:bytes])
+        attrs.merge!(layer_url: store(render, layer[:bytes], layer[:mime], suffix: 'layer'), mask_coverage: layer[:coverage])
+      end
+      render.update!(attrs)
     rescue StandardError => e
       render.update!(status: 'failed', error: e.message.to_s.first(1000))
     end
@@ -85,10 +90,10 @@ module Truebuild
       { bytes: res.body, mime: res.headers['content-type'].presence || 'image/jpeg' }
     end
 
-    def store(render, bytes, mime)
-      ext = mime.to_s.include?('png') ? 'png' : 'jpg'
+    def store(render, bytes, mime, suffix: nil)
+      ext = { 'png' => 'png', 'webp' => 'webp' }.find { |k, _| mime.to_s.include?(k) }&.last || 'jpg'
       s3 = S3UploadService.new
-      key = "truebuild/trueview/#{render.selection_key}-#{render.model_key}-#{render.id}.#{ext}"
+      key = "truebuild/trueview/#{render.selection_key}-#{render.model_key}-#{render.id}#{"-#{suffix}" if suffix}.#{ext}"
       s3.s3_client.put_object(bucket: s3.bucket_name, key: key, body: bytes, content_type: mime)
       "https://#{s3.bucket_name}.s3.#{s3.region}.amazonaws.com/#{key}"
     end
