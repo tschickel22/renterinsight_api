@@ -25,7 +25,14 @@ module Truebuild
       @book = BookResolver.current_for(variant)
     end
 
+    # Pricing every option on a model takes a second or two, so the priced
+    # catalog is cached per dealer, model and location until their prices
+    # can have moved. Photos are added fresh (the lot home's own come first).
     def call
+      Rails.cache.fetch(cache_key, expires_in: 30.minutes) { build }.merge(media: media)
+    end
+
+    def build
       offered = offered_prices
       engine = PricingEngine.new(company: @company, variant: @variant, location: @location,
                                  option_ids: offered.map(&:catalog_option_id).uniq).call
@@ -41,8 +48,7 @@ module Truebuild
         base_price: show ? base[:retail] : nil,
         base_monthly: monthly ? payments.monthly(base[:retail]) : nil,
         groups: groups(offered, show ? retail_by_option : {}),
-        standard_features: standard_features,
-        media: media
+        standard_features: standard_features
       }
     end
 
@@ -76,6 +82,14 @@ module Truebuild
 
     def payments
       @payments ||= PaymentEstimate.new(@company)
+    end
+
+    def cache_key
+      stamp = [@company.dealer_markup_rules.maximum(:updated_at), @company.dealer_catalog_terms.maximum(:updated_at),
+               @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
+               CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
+               @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
+      "truebuild:catalog:v1:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
