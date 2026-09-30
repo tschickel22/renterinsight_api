@@ -289,6 +289,7 @@ Rails.application.routes.draw do
       get    'truebuild_pricing/plans', to: 'truebuild_pricing#plans'
       get    'truebuild_pricing/options', to: 'truebuild_pricing#options'
       post   'truebuild_pricing/preview', to: 'truebuild_pricing#preview'
+      get    'truebuild_designs', to: 'truebuild_designs#index'
       get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
       post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'
       post   'truebuild_pricing/updates/:id/decline', to: 'truebuild_pricing#decline_update'

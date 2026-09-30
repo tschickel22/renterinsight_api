@@ -34,7 +34,8 @@ module Truebuild
         buyer_email: @contact['email'].to_s.strip.downcase,
         buyer_name: [@contact['first_name'], @contact['last_name']].compact.join(' ').strip,
         price_snapshot: snapshot(price).deep_stringify_keys,
-        metadata: { 'utm' => @context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term]) }.deep_stringify_keys
+        metadata: { 'utm' => @context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term]),
+                    'page_url' => @context['page_url'].presence }.compact.deep_stringify_keys
       )
 
       form = self.class.form_for(@company)
@@ -105,10 +106,14 @@ module Truebuild
       }.merge(@context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term])).compact
     end
 
-    # Where the buyer designed it, with the design reopened.
     def design_url(design)
-      page = @context['page_url'].to_s
-      base = page.present? ? page.sub(/[?#].*\z/, '') : Brand.current(company: @company).app_url.to_s
+      self.class.design_url(design)
+    end
+
+    # Where the buyer designed it, with the design reopened.
+    def self.design_url(design)
+      page = design.metadata['page_url'].to_s
+      base = page.present? ? page.sub(/[?#].*\z/, '') : Brand.current(company: design.company).app_url.to_s
       "#{base}?design=#{design.public_token}"
     end
   end
