@@ -89,7 +89,7 @@ module Truebuild
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v1:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v2:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
