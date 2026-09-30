@@ -102,6 +102,7 @@ module Truebuild
     def option_json(op, retail)
       o = op.option
       { id: o.id, name: o.name, kind: o.kind, standard: op.is_standard, swatch_url: o.swatch_url,
+        hex: (ColorSwatches.hex(o.name) if o.kind == 'color'),
         in_place_of: o.in_place_of, price: op.is_standard ? nil : retail[o.id] }
     end
 

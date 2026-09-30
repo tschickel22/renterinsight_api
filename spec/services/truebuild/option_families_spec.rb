@@ -19,3 +19,13 @@ RSpec.describe Truebuild::OptionFamilies do
     expect(families('Stainless Steel Package - Gas', 'Decorator Pkg')).to be_empty
   end
 end
+
+RSpec.describe Truebuild::ColorSwatches do
+  it 'names known finishes and falls back on words in the name' do
+    expect(described_class.hex('Wedgewood')).to eq('#6f8394')
+    expect(described_class.hex('Rum Cream (38oz)')).to eq('#d7cbb3')
+    expect(described_class.hex('2 Rows Catch Ice (subway)')).to eq('#f3f3f0')
+    expect(described_class.hex('Sunlit Maple')).to eq('#b58b5b')
+    expect(described_class.hex('Mystery')).to be_nil
+  end
+end
