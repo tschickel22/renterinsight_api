@@ -22,7 +22,7 @@ class Api::V1::TruebuildDesignsController < ApplicationController
     shown = d.price_snapshot['show_prices'] ? d.price_snapshot['total'] : nil
     {
       id: d.id, name: d.name, status: d.status, created_at: d.created_at,
-      buyer_name: d.buyer_name, vehicle_id: d.vehicle_id, stock_number: d.vehicle&.stock_number,
+      buyer_name: d.buyer_name, lead_id: d.lead_id, vehicle_id: d.vehicle_id, stock_number: d.vehicle&.stock_number,
       options: d.option_ids.filter_map { |id| names[id] },
       price_shown: shown, price_today: price_today(d),
       view_count: d.view_count, last_viewed_at: d.last_viewed_at,
