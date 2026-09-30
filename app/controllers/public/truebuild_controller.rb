@@ -94,7 +94,8 @@ class Public::TruebuildController < ApplicationController
   def design_json(design)
     snap = design.price_snapshot
     { token: design.public_token, name: design.name, variant_id: design.catalog_plan_variant_id,
-      vehicle_id: design.vehicle_id, option_ids: design.option_ids, created_at: design.created_at,
+      vehicle_id: design.vehicle_id, option_ids: design.option_ids, addon_ids: Array(design.metadata['addon_ids']),
+      created_at: design.created_at,
       price: snap['show_prices'] ? { total: snap['total'], lines: snap['lines'], priced_at: snap['priced_at'] } : nil }
   end
 

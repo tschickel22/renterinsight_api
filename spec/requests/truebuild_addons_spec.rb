@@ -54,6 +54,7 @@ RSpec.describe 'TrueBuild dealer add-ons', type: :request do
                                                   'description' => nil, 'price' => 2500.0 }],
                                  'optional' => [{ 'id' => skirt['id'], 'name' => 'Vinyl Skirting', 'description' => nil, 'price' => 1950.0 }])
     expect(response.body).not_to include('Documentation Fee')
+    expect(body['base_price']).to eq(102_500.0) # the opening price already includes delivery
 
     post '/public/truebuild/price', params: { token: token, variant_id: variant.id }
     expect(JSON.parse(response.body)['total']).to eq(102_500.0) # 100,000 + delivery

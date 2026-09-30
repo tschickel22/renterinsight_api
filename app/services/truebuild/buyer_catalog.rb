@@ -36,17 +36,17 @@ module Truebuild
       offered = offered_prices
       engine = PricingEngine.new(company: @company, variant: @variant, location: @location,
                                  option_ids: offered.map(&:catalog_option_id).uniq).call
-      base = engine.lines.find { |l| l[:kind] == 'base' }
       retail_by_option = engine.lines.select { |l| l[:kind] == 'option' }.to_h { |l| [l[:option_id], l[:retail]] }
-      show = SHOWS_PRICES.include?(@terms.price_display) && base[:retail].present?
-      monthly = SHOWS_MONTHLY.include?(@terms.price_display) && base[:retail].present? && payments.enabled?
+      starting = self.class.starting_retail(engine.lines)
+      show = SHOWS_PRICES.include?(@terms.price_display) && starting.present?
+      monthly = SHOWS_MONTHLY.include?(@terms.price_display) && starting.present? && payments.enabled?
 
       {
         variant: variant_json,
         display: { mode: @terms.price_display, show_prices: show, show_monthly: monthly,
                    payment_terms: (payments.terms if monthly) },
-        base_price: show ? base[:retail] : nil,
-        base_monthly: monthly ? payments.monthly(base[:retail]) : nil,
+        base_price: show ? starting : nil,
+        base_monthly: monthly ? payments.monthly(starting) : nil,
         groups: groups(offered, show ? retail_by_option : {}),
         standard_features: standard_features,
         # The dealer's own: always in the price (delivery, setup), or the buyer's
@@ -77,6 +77,15 @@ module Truebuild
         monthly: monthly ? payments.monthly(result.totals[:retail]) : nil,
         lines: show ? result.retail_only[:lines] : [], book_id: result.book&.id, option_ids: allowed(option_ids),
         addon_ids: allowed_addons(addon_ids) }
+    end
+
+    # The price before any choices: the home plus what is always in it
+    # (freight, the dealer's included add-ons like delivery and setup).
+    def self.starting_retail(lines)
+      always = lines.reject { |l| l[:kind] == 'option' }
+      return nil if always.empty? || always.any? { |l| l[:retail].nil? }
+
+      always.sum { |l| l[:retail].to_d }.to_f
     end
 
     # Only this dealer's optional add-ons; included ones are always priced.
@@ -111,7 +120,7 @@ module Truebuild
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v3:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v4:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
