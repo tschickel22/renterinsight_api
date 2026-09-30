@@ -7,7 +7,7 @@ class ApiKey < ApplicationRecord
 
   # Validations
   validates :name, presence: true
-  validates :key, presence: true, uniqueness: true
+  validates :key_digest, presence: true, uniqueness: true
   validates :status, presence: true, inclusion: { in: %w[active revoked] }
   validates :rate_limit, numericality: { greater_than: 0 }
   validate :validate_permissions, if: -> { permissions.present? }
@@ -20,6 +20,39 @@ class ApiKey < ApplicationRecord
 
   # Callbacks
   before_validation :generate_key, on: :create
+
+  # Only a SHA-256 digest and a display preview are persisted. The plaintext is
+  # held in memory on the instance that created it, so the create endpoint can
+  # hand it back exactly once. Keys are 192 random bits, so an unsalted fast
+  # hash is the right tool: there is nothing to brute force.
+  def self.digest(token)
+    Digest::SHA256.hexdigest(token.to_s)
+  end
+
+  # Rows written by a release older than the digest migration have no digest
+  # yet. The plaintext fallback covers them until the follow-up migration
+  # clears the plaintext column, and backfills the digest on first use.
+  def self.find_active_by_token(token)
+    return nil if token.blank?
+
+    active.find_by(key_digest: digest(token)) || active.find_by(key: token)&.tap do |legacy|
+      legacy.update_columns(key_digest: digest(token), key_preview: preview_for(token))
+    end
+  end
+
+  def self.preview_for(token)
+    "#{token[0..11]}...#{token[-4..]}"
+  end
+
+  def key
+    @plaintext_key
+  end
+
+  def key=(token)
+    @plaintext_key = token
+    self.key_digest = token.present? ? self.class.digest(token) : nil
+    self.key_preview = token.present? ? self.class.preview_for(token) : nil
+  end
   
   # ==================== AUTOMATED API SCOPE GENERATION ====================
   # Auto-generate available resources from the resources table
@@ -78,8 +111,11 @@ class ApiKey < ApplicationRecord
   # strings directly ("create", "update", "delete"), those still match too.
   WRITE_ACTIONS = %w[create update delete].freeze
 
+  # A key with no permissions can do nothing. This used to be the reverse (blank
+  # meant full access), so a key created with every toggle left off could read
+  # and write every resource in the company.
   def has_permission?(resource, action)
-    return true if permissions.blank? || permissions.empty?
+    return false if permissions.blank?
 
     resource_perms = permissions[resource.to_s]
     return false if resource_perms.blank?
@@ -91,14 +127,10 @@ class ApiKey < ApplicationRecord
     false
   end
 
-  def rate_limit_key
-    "api_key:#{id}:rate_limit"
-  end
-
   private
 
   def generate_key
-    self.key = "ri_live_#{SecureRandom.hex(24)}" if key.blank?
+    self.key = "ri_live_#{SecureRandom.hex(24)}" if key_digest.blank?
   end
   
   # Validate that all permission resources exist in resources table

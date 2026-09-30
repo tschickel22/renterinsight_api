@@ -4,6 +4,10 @@ module Api
   module V1
     class ApiKeysController < ApplicationController
       before_action :set_company_scope
+
+      # A key with no permissions can do nothing, so creating one is always a
+      # mistake (every toggle left off). Blank used to mean full access.
+      NO_PERMISSIONS_ERROR = 'Choose at least one permission. A key with none cannot access anything.'
       before_action :set_api_key, only: [:show, :update, :destroy, :revoke]
 
       # GET /api/v1/api-keys/available_resources
@@ -45,6 +49,10 @@ module Api
         api_key = ApiKey.new(api_key_params)
         api_key.company_id = target_company_id
         api_key.created_by_user_id = current_user.id
+
+        if api_key.permissions.blank?
+          return render json: { errors: [NO_PERMISSIONS_ERROR] }, status: :unprocessable_entity
+        end
 
         if (err = webhook_config_error(api_key))
           return render json: { errors: [err] }, status: :unprocessable_entity
@@ -119,6 +127,10 @@ module Api
         if target_company_id.nil?
           return render json: { errors: ['bulk create requires a company scope (not platform-level)'] },
                         status: :unprocessable_entity
+        end
+
+        if normalize_permissions(params[:permissions] || {}).blank?
+          return render json: { errors: [NO_PERMISSIONS_ERROR] }, status: :unprocessable_entity
         end
 
         base_name = params[:name].to_s.strip.presence || 'Inbound Leads'
@@ -420,7 +432,7 @@ module Api
         json = {
           id: api_key.id,
           name: api_key.name,
-          key_preview: mask_key(api_key.key),
+          key_preview: api_key.key_preview,
           status: api_key.status,
           company_id: api_key.company_id,
           company_name: api_key.company&.name,
@@ -447,10 +459,6 @@ module Api
         json
       end
 
-      def mask_key(key)
-        return nil unless key
-        "#{key[0..11]}...#{key[-4..]}"
-      end
     end
   end
 end

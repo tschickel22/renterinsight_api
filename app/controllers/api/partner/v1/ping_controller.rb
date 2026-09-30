@@ -4,6 +4,8 @@ module Api
   module Partner
     module V1
       class PingController < BaseController
+        skip_before_action :require_company_context!
+
         def show
           render json: {
             status: "ok",

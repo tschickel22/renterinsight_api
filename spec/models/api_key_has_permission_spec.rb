@@ -78,10 +78,13 @@ RSpec.describe ApiKey, '#has_permission?', type: :model do
     end
   end
 
-  context 'empty permissions (legacy behavior)' do
-    it 'allows everything when permissions hash is blank (matches existing model docs)' do
+  # Blank used to mean full access, so a key created with every toggle left
+  # off could read and write the whole company. It now means no access.
+  context 'empty permissions' do
+    it 'denies everything when the permissions hash is blank' do
       k = key_with({})
-      expect(k.has_permission?(:anything, :anything)).to be true
+      expect(k.has_permission?(:leads, :read)).to be false
+      expect(k.has_permission?(:anything, :anything)).to be false
     end
   end
 end
