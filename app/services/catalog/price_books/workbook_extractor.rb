@@ -160,6 +160,9 @@ module Catalog
         flags.concat(markup_flags)
         return [] if cost.nil? && retail.nil? && !opt['is_standard']
 
+        # A 0 or a blank where the price should be: a person decides.
+        flags << 'price_missing' if !opt['is_standard'] && !cost.to_f.positive? && !retail.to_f.positive?
+
         @sink.item(
           document: @doc, item_type: 'option_price', flags: flags.uniq,
           source_ref: { 'document_id' => @doc.id, 'sheet' => tab, 'cells' => [cost_cell, retail_cell].compact },

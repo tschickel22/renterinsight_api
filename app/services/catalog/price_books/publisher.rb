@@ -21,6 +21,8 @@ module Catalog
         raise NotReady, "#{pending} items still need review" if pending.positive?
         raise NotReady, 'Nothing was approved' unless @book.import_items.where(review_status: ACCEPTED).exists?
 
+        preflight!
+
         counts = Hash.new(0)
         CatalogPriceBook.transaction do
           items(:variant_price).each { |i| publish_variant_price(i, counts) }
@@ -40,8 +42,41 @@ module Catalog
 
       private
 
+      # Every approved row must be priceable before anything is written. An
+      # option with only a retail price gets its cost from the tab's markup
+      # (noted on the item); anything else is listed for the admin, rather
+      # than failing halfway with a database error.
+      def preflight!
+        problems = []
+        items(:variant_price).each do |i|
+          next if i.change_type == 'removed' || i.payload['net_base_price'].to_f.positive?
+
+          problems << "#{i.payload['model_number']}: no base price"
+        end
+        items(:option_price).each do |i|
+          p = i.payload
+          next if p['is_standard'] == true || p['dealer_cost'].to_f.positive?
+
+          retail = p['suggested_retail'].to_f
+          markup = p['markup'].to_f
+          if retail.positive? && markup.positive?
+            cost = (retail / markup).round(2)
+            note = "Cost #{format('%.2f', cost)} worked out from retail #{format('%.2f', retail)} at the tab's #{markup} markup."
+            i.update_columns(payload: p.merge('dealer_cost' => cost, 'resolution' => [p['resolution'], note].compact.join(' ')))
+          else
+            problems << "#{p['description']} (#{p['tab']}): enter its cost or reject it"
+          end
+        end
+        # Reload so publishing uses the costs worked out above.
+        @items = nil
+        return if problems.empty?
+
+        more = problems.size > 5 ? " and #{problems.size - 5} more" : ''
+        raise NotReady, "#{problems.size} approved rows have no price: #{problems.first(5).join('; ')}#{more}"
+      end
+
       def items(type)
-        @items ||= @book.import_items.where(review_status: ACCEPTED).to_a.group_by(&:item_type)
+        @items ||= @book.import_items.where(review_status: ACCEPTED).includes(:matched).to_a.group_by(&:item_type)
         @items.fetch(type.to_s, [])
       end
 

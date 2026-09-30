@@ -258,6 +258,26 @@ RSpec.describe 'TrueBuild price book pipeline' do
         .to raise_error(Catalog::PriceBooks::Publisher::NotReady, /1 items still need review/)
     end
 
+    it 'works out a missing cost from retail and the markup, and lists rows it cannot price' do
+      variant_item(book, '2856H32392', 57_995)
+      retail_only = book.import_items.create!(item_type: 'option_price', review_status: 'approved', payload: {
+        'tab' => '2025 Aspire DW', 'section' => 'Windows', 'description' => '30 x 42 Picture Window',
+        'suggested_retail' => 325.5, 'markup' => 1.55
+      })
+      blank = book.import_items.create!(item_type: 'option_price', review_status: 'approved', payload: {
+        'tab' => 'DGAE - HUD', 'section' => 'Windows', 'description' => 'Bay Window', 'suggested_retail' => 0.0, 'markup' => 1.55
+      })
+
+      expect { Catalog::PriceBooks::Publisher.new(book, by: admin).call }
+        .to raise_error(Catalog::PriceBooks::Publisher::NotReady, /1 approved rows have no price: Bay Window \(DGAE - HUD\)/)
+      expect(book.reload.status).not_to eq('published')
+
+      blank.update!(review_status: 'rejected')
+      Catalog::PriceBooks::Publisher.new(book, by: admin).call
+      expect(retail_only.reload.payload['dealer_cost']).to eq(210.0)
+      expect(CatalogOptionPrice.find_by!(price_book: book).dealer_cost).to eq(210)
+    end
+
     it 'keeps two series that share a model number apart' do
       # Champion prices 2848M32160 as the Aspire 48' Lancaster and as a Genesis ranch.
       aspire = variant_item(book, '2848M32160', 54_695, name: "48' Lancaster")
