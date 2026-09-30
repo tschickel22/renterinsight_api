@@ -20,7 +20,10 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     books = CatalogPriceBook.includes(:manufacturer, :factory).order(created_at: :desc)
     books = books.where(manufacturer_id: params[:manufacturer_id]) if params[:manufacturer_id].present?
     books = books.where(status: params[:status]) if params[:status].present?
-    render json: { items: books.limit(200).map { |b| book_json(b) } }
+    books = books.limit(200).to_a
+    pending = CatalogImportItem.where(catalog_price_book_id: books.map(&:id), review_status: 'pending')
+                               .group(:catalog_price_book_id).count
+    render json: { items: books.map { |b| book_json(b).merge(pending: pending[b.id].to_i) } }
   end
 
   # GET /api/admin/catalog_price_books/:id
@@ -128,6 +131,33 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     url = PrivateFiles.url(PrivateFiles.ref(doc.storage_key, doc.storage_bucket), expires_in: 10.minutes,
                            filename: doc.filename, disposition: params[:inline] == 'true' ? 'inline' : 'attachment')
     render json: { url: url, filename: doc.filename }
+  end
+
+  # GET /api/admin/catalog_price_books/:id/catalog
+  # What a published book put live: plans by series with each model's base
+  # price and links, and option groups with their counts.
+  def catalog
+    prices = @book.variant_prices.includes(variant: :catalog_plan).to_a
+    homes = Vehicle.where(catalog_plan_variant_id: prices.map(&:catalog_plan_variant_id)).group(:catalog_plan_variant_id).count
+    plans = prices.group_by { |vp| vp.variant.catalog_plan }.map do |plan, vps|
+      { id: plan.id, name: plan.name, series: plan.series,
+        variants: vps.sort_by { |vp| vp.variant.model_number }.map do |vp|
+          v = vp.variant
+          { id: v.id, model_number: v.model_number, building_code: v.building_code, width_ft: v.width_ft,
+            length_ft: v.length_ft, beds: v.beds, baths: v.baths&.to_f, home_type: v.home_type,
+            net_base_price: vp.net_base_price.to_f, base_cost: vp.base_cost.to_f,
+            champion_linked: v.external_ids['champion_model_id'].present?, homes_linked: homes[v.id].to_i }
+        end }
+    end.sort_by { |p| [p[:series].to_s, p[:name].to_s] }
+
+    option_prices = @book.option_prices.includes(option: :group).to_a
+    groups = option_prices.group_by { |op| op.option.group }.map do |group, ops|
+      { key: group.key, name: group.name, position: group.position, options: ops.map(&:catalog_option_id).uniq.size,
+        prices: ops.size, model_specific: ops.count(&:catalog_plan_variant_id),
+        colors: ops.count { |op| op.option.kind == 'color' } }
+    end.sort_by { |g| [g[:position].to_i, g[:name]] }
+
+    render json: { plans: plans, groups: groups, standard_features: @book.standard_features.count }
   end
 
   # GET /api/admin/catalog_price_books/:id/documents/:document_id/tabs
@@ -392,7 +422,8 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
       page_count: doc.page_count, extraction_status: doc.extraction_status, extraction_error: doc.extraction_error,
       extracted_at: doc.extracted_at, archive_path: doc.metadata['archive_path'],
       scanned: doc.metadata['scanned'], missing_model_numbers: doc.metadata['missing_model_numbers'],
-      tabs: doc.metadata['tabs'], usage: usage.presence,
+      tabs: doc.metadata['tabs'],
+      usage: usage.presence && usage.merge('cost_usd' => Catalog::PriceBooks::Recorder.usage_cost(usage).round(4)),
       estimate_usd: Catalog::PriceBooks::CostEstimate.for_document(doc).round(2),
       item_count: doc.import_items.size
     }

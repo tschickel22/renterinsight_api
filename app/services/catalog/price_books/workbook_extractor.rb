@@ -75,7 +75,8 @@ module Catalog
         grid = grid_rows(sheet)
         return { 'kind' => 'empty' } if grid.empty?
 
-        if name.match?(/announc/i)
+        # Champion spells it "ANNOUCEMENTS!!!".
+        if name.match?(/annou?n?c/i)
           extract_announcements(name, grid)
         elsif master_list?(sheet)
           extract_master_list(name, sheet)

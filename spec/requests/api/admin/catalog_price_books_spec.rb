@@ -129,6 +129,24 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     expect(keep.reload.review_status).to eq('pending')
   end
 
+  it 'shows what a published book put live' do
+    book = CatalogPriceBook.create!(manufacturer: mfr, name: 'Topeka 2026', status: 'in_review')
+    book.import_items.create!(item_type: 'variant_price', review_status: 'approved', payload: {
+      'model_number' => '2856H32392', 'plan_name' => 'Belvidere', 'plan_series' => 'Aspire', 'building_code' => 'HUD', 'net_base_price' => 57_995
+    })
+    book.import_items.create!(item_type: 'option_price', review_status: 'approved', payload: {
+      'tab' => '2025 Aspire DW', 'section' => 'Cabinets Cont.', 'description' => 'Cabinet Knobs', 'dealer_cost' => 65, 'suggested_retail' => 100.75
+    })
+    Catalog::PriceBooks::Publisher.new(book, by: admin).call
+
+    get "/api/admin/catalog_price_books/#{book.id}/catalog", headers: headers
+    body = JSON.parse(response.body)
+    expect(body['plans'].first).to include('name' => 'Belvidere', 'series' => 'Aspire')
+    expect(body['plans'].first['variants'].first).to include('model_number' => '2856H32392', 'net_base_price' => 57_995.0)
+    expect(body['groups']).to eq([{ 'key' => 'cabinets', 'name' => 'Cabinets', 'position' => Catalog::PriceBooks::Sections::GROUPS.index { |k, _, _| k == 'cabinets' },
+                                    'options' => 1, 'prices' => 1, 'model_specific' => 0, 'colors' => 0 }])
+  end
+
   it 'hands out an expiring link to a source file' do
     book = CatalogPriceBook.create!(manufacturer: mfr, name: 'Topeka 2026')
     doc = book.documents.create!(filename: 'Aspire Net.pdf', checksum_sha256: 'abc', storage_bucket: 'dt-private-test',

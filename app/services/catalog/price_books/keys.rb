@@ -7,8 +7,10 @@ module Catalog
     module Keys
       module_function
 
+      # The canonical group (see Sections), so "Cabinets" and "Cabinets Cont."
+      # are one group and the same option keeps its identity between books.
       def group(section)
-        section.to_s.parameterize.presence || 'other-options'
+        Sections.group_for(section).first
       end
 
       def option(section, description)

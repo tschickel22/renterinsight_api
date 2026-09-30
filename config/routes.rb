@@ -2994,6 +2994,7 @@ Rails.application.routes.draw do
           patch 'items/:item_id', action: :update_item, as: :update_item
           post :bulk_review
           post :auto_resolve
+          get  :catalog
           get  :link_sources
           post :link_catalog
           post :publish

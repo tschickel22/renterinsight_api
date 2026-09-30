@@ -19,8 +19,16 @@ module Catalog
 
       # Dollars spent reading this book's files so far.
       def self.spent_usd(book)
-        book.documents.reload.sum { |d| d.metadata.dig('usage', 'cost_usd').to_f + d.metadata['cost_usd_prior_runs'].to_f } +
-          book.metadata.dig('review_usage', 'cost_usd').to_f
+        book.documents.reload.sum { |d| usage_cost(d.metadata['usage']) + d.metadata['cost_usd_prior_runs'].to_f } +
+          usage_cost(book.metadata['review_usage'])
+      end
+
+      # Files read before costs were recorded only carry token counts.
+      def self.usage_cost(usage)
+        return 0.0 unless usage.is_a?(Hash)
+        return usage['cost_usd'].to_f if usage.key?('cost_usd')
+
+        ClaudeClient.cost_usd(usage['input_tokens'], usage['output_tokens'])
       end
 
       def initialize(price_book, client: ClaudeClient, document: nil)

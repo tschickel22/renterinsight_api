@@ -120,13 +120,15 @@ module Catalog
         option = CatalogOption.find_or_initialize_by(manufacturer_id: @mfr, key: p['option_key'] || Keys.option(p['section'], p['description']))
         option.assign_attributes(
           group: group, name: p['description'].to_s.truncate(250), status: 'active',
-          kind: kind_for(p), in_place_of: p['in_place_of'], package_items: Array(p['package_items'])
+          kind: kind_for(p), in_place_of: p['in_place_of'], package_items: Array(p['package_items']),
+          metadata: option.metadata.merge('section' => p['section'], 'tab' => p['tab'])
         )
         option.factory_code ||= coded.find { |c| coded_match?(c.payload, p) }&.payload&.dig('factory_code')
         option.save!
 
         applies = p['applies_to'] || {}
-        variant_id = Array(applies['model_numbers']).filter_map { |m| variant_for_option(m, p['tab']) }.first
+        models = Array(applies['model_numbers']).presence || [Sections.model_number_in(p['section'])].compact
+        variant_id = models.filter_map { |m| variant_for_option(m, p['tab']) }.first
         CatalogOptionPrice.create!(
           price_book: @book, option: option, dealer_cost: p['dealer_cost'], suggested_retail: p['suggested_retail'],
           is_standard: p['is_standard'] == true, catalog_plan_variant_id: variant_id,
@@ -183,11 +185,12 @@ module Catalog
 
       def group_for(section)
         @groups ||= {}
-        key = Keys.group(section)
+        key, name = Sections.group_for(section)
         @groups[key] ||= CatalogOptionGroup.find_or_create_by!(manufacturer_id: @mfr, factory_id: @book.factory_id,
                                                                series: nil, key: key) do |g|
-          g.name = section.to_s.strip.titleize.presence || 'Other Options'
+          g.name = name
           g.selection_type = 'multiple'
+          g.position = Sections::GROUPS.index { |k, _, _| k == key } || Sections::GROUPS.size
         end
       end
 
