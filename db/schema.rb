@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_235995) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2308,38 +2308,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
     t.index ["company_id"], name: "index_company_email_connections_on_company_id", unique: true
   end
 
-  create_table "company_floor_plan_option_overrides", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "floor_plan_option_id", null: false
-    t.decimal "dealer_cost", precision: 10, scale: 2
-    t.decimal "retail_price", precision: 10, scale: 2
-    t.boolean "is_hidden", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "floor_plan_option_id"], name: "idx_company_option_overrides_unique", unique: true
-    t.index ["company_id"], name: "index_company_floor_plan_option_overrides_on_company_id"
-    t.index ["floor_plan_option_id"], name: "idx_on_floor_plan_option_id_8747bca926"
-  end
-
-  create_table "company_floor_plans", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "floor_plan_id", null: false
-    t.boolean "is_visible", default: true, null: false
-    t.decimal "dealer_cost", precision: 10, scale: 2
-    t.decimal "retail_price", precision: 10, scale: 2
-    t.string "markup_type"
-    t.decimal "markup_value", precision: 10, scale: 2
-    t.string "custom_name"
-    t.text "custom_description"
-    t.integer "display_order", default: 0
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "floor_plan_id"], name: "index_company_floor_plans_on_company_id_and_floor_plan_id", unique: true
-    t.index ["company_id"], name: "index_company_floor_plans_on_company_id"
-    t.index ["floor_plan_id"], name: "index_company_floor_plans_on_floor_plan_id"
-    t.index ["is_visible"], name: "index_company_floor_plans_on_is_visible"
-  end
-
   create_table "company_hidden_roles", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "role_id", null: false
@@ -2368,39 +2336,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
     t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
     t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
     t.index ["manufacturer_id"], name: "index_company_manufacturers_on_manufacturer_id"
-  end
-
-  create_table "configurations", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "floor_plan_id", null: false
-    t.bigint "user_id"
-    t.string "configurable_type"
-    t.bigint "configurable_id"
-    t.string "name"
-    t.jsonb "selections", default: []
-    t.decimal "base_price", precision: 10, scale: 2
-    t.decimal "options_total", precision: 10, scale: 2
-    t.decimal "total_price", precision: 10, scale: 2
-    t.decimal "price_range_low", precision: 10, scale: 2
-    t.decimal "price_range_high", precision: 10, scale: 2
-    t.string "public_token", null: false
-    t.string "status", default: "draft", null: false
-    t.string "customer_name"
-    t.string "customer_email"
-    t.string "customer_phone"
-    t.datetime "shared_at"
-    t.datetime "viewed_at"
-    t.datetime "quoted_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "status"], name: "index_configurations_on_company_id_and_status"
-    t.index ["company_id"], name: "index_configurations_on_company_id"
-    t.index ["configurable_type", "configurable_id"], name: "index_configurations_on_configurable"
-    t.index ["configurable_type", "configurable_id"], name: "index_configurations_on_configurable_type_and_configurable_id"
-    t.index ["floor_plan_id"], name: "index_configurations_on_floor_plan_id"
-    t.index ["public_token"], name: "index_configurations_on_public_token", unique: true
-    t.index ["status"], name: "index_configurations_on_status"
-    t.index ["user_id"], name: "index_configurations_on_user_id"
   end
 
   create_table "contact_activities", force: :cascade do |t|
@@ -3282,91 +3217,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
     t.index ["company_id", "fiscal_year", "period_number"], name: "idx_fiscal_periods_company_year_period", unique: true
     t.index ["company_id", "status"], name: "index_fiscal_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_fiscal_periods_on_company_id"
-  end
-
-  create_table "floor_plan_option_applicabilities", force: :cascade do |t|
-    t.bigint "floor_plan_id", null: false
-    t.bigint "floor_plan_option_id", null: false
-    t.boolean "is_default_for_model", default: false, null: false
-    t.decimal "price_dealer_override", precision: 10, scale: 2
-    t.decimal "price_retail_override", precision: 10, scale: 2
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["floor_plan_id", "floor_plan_option_id"], name: "idx_fp_option_applicability_unique", unique: true
-    t.index ["floor_plan_id"], name: "index_floor_plan_option_applicabilities_on_floor_plan_id"
-    t.index ["floor_plan_option_id"], name: "idx_on_floor_plan_option_id_e985b29c0c"
-    t.index ["is_default_for_model"], name: "idx_on_is_default_for_model_2782a513db"
-  end
-
-  create_table "floor_plan_options", force: :cascade do |t|
-    t.bigint "option_category_id", null: false
-    t.string "name", null: false
-    t.text "description"
-    t.string "image_url"
-    t.decimal "price_impact_low", precision: 10, scale: 2
-    t.decimal "price_impact_high", precision: 10, scale: 2
-    t.jsonb "compatibility_rules", default: {}
-    t.integer "display_order", default: 0
-    t.boolean "is_default", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.string "option_code"
-    t.decimal "price_dealer", precision: 10, scale: 2
-    t.decimal "price_retail", precision: 10, scale: 2
-    t.string "swatch_image_url"
-    t.string "material_type"
-    t.string "dimensions"
-    t.string "series_restriction"
-    t.bigint "factory_id"
-    t.boolean "is_standard_included", default: false, null: false
-    t.index ["factory_id", "option_code"], name: "index_floor_plan_options_on_factory_id_and_option_code"
-    t.index ["factory_id"], name: "index_floor_plan_options_on_factory_id"
-    t.index ["is_default"], name: "index_floor_plan_options_on_is_default"
-    t.index ["is_standard_included"], name: "index_floor_plan_options_on_is_standard_included"
-    t.index ["option_category_id", "display_order"], name: "idx_on_option_category_id_display_order_92fbf53154"
-    t.index ["option_category_id"], name: "index_floor_plan_options_on_option_category_id"
-    t.index ["option_code"], name: "index_floor_plan_options_on_option_code"
-    t.index ["series_restriction"], name: "index_floor_plan_options_on_series_restriction"
-  end
-
-  create_table "floor_plans", force: :cascade do |t|
-    t.bigint "manufacturer_id", null: false
-    t.bigint "factory_id"
-    t.string "name", null: false
-    t.string "model_code", null: false
-    t.string "series"
-    t.integer "beds"
-    t.decimal "baths", precision: 3, scale: 1
-    t.integer "sqft"
-    t.decimal "width_feet", precision: 6, scale: 2
-    t.decimal "length_feet", precision: 6, scale: 2
-    t.jsonb "specifications", default: {}
-    t.jsonb "images_array", default: []
-    t.decimal "base_price_low", precision: 10, scale: 2
-    t.decimal "base_price_high", precision: 10, scale: 2
-    t.decimal "suggested_retail_low", precision: 10, scale: 2
-    t.decimal "suggested_retail_high", precision: 10, scale: 2
-    t.boolean "is_active", default: true, null: false
-    t.string "scraper_source_url"
-    t.datetime "last_scraped_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.decimal "net_price", precision: 10, scale: 2
-    t.string "box_size"
-    t.string "home_type", default: "hud"
-    t.string "s3_folder_path"
-    t.string "virtual_tour_url"
-    t.string "spec_sheet_url"
-    t.date "price_effective_date"
-    t.string "brand"
-    t.index ["brand"], name: "index_floor_plans_on_brand"
-    t.index ["factory_id"], name: "index_floor_plans_on_factory_id"
-    t.index ["home_type"], name: "index_floor_plans_on_home_type"
-    t.index ["is_active"], name: "index_floor_plans_on_is_active"
-    t.index ["manufacturer_id", "model_code"], name: "index_floor_plans_on_manufacturer_id_and_model_code", unique: true
-    t.index ["manufacturer_id"], name: "index_floor_plans_on_manufacturer_id"
-    t.index ["net_price"], name: "index_floor_plans_on_net_price"
-    t.index ["series"], name: "index_floor_plans_on_series"
   end
 
   create_table "fni_products", force: :cascade do |t|
@@ -4875,27 +4725,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
     t.index ["company_id"], name: "index_offline_sync_logs_on_company_id"
     t.index ["device_id"], name: "index_offline_sync_logs_on_device_id"
     t.index ["user_id"], name: "index_offline_sync_logs_on_user_id"
-  end
-
-  create_table "option_categories", force: :cascade do |t|
-    t.bigint "floor_plan_id"
-    t.string "name", null: false
-    t.text "description"
-    t.integer "display_order", default: 0
-    t.boolean "is_required", default: false, null: false
-    t.boolean "allow_multiple_selections", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.string "scope", default: "factory", null: false
-    t.string "category_key"
-    t.string "series"
-    t.bigint "factory_id"
-    t.index ["category_key"], name: "index_option_categories_on_category_key"
-    t.index ["factory_id", "category_key"], name: "index_option_categories_on_factory_id_and_category_key"
-    t.index ["factory_id"], name: "index_option_categories_on_factory_id"
-    t.index ["floor_plan_id", "display_order"], name: "index_option_categories_on_floor_plan_id_and_display_order"
-    t.index ["floor_plan_id"], name: "index_option_categories_on_floor_plan_id"
-    t.index ["scope"], name: "index_option_categories_on_scope"
   end
 
   create_table "package_templates", force: :cascade do |t|
@@ -8405,17 +8234,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
   add_foreign_key "company_allowance_defaults", "companies"
   add_foreign_key "company_domains", "companies"
   add_foreign_key "company_domains", "websites"
-  add_foreign_key "company_floor_plan_option_overrides", "companies"
-  add_foreign_key "company_floor_plan_option_overrides", "floor_plan_options"
-  add_foreign_key "company_floor_plans", "companies"
-  add_foreign_key "company_floor_plans", "floor_plans"
   add_foreign_key "company_hidden_roles", "companies"
   add_foreign_key "company_hidden_roles", "roles"
   add_foreign_key "company_manufacturers", "companies"
   add_foreign_key "company_manufacturers", "manufacturers"
-  add_foreign_key "configurations", "companies"
-  add_foreign_key "configurations", "floor_plans"
-  add_foreign_key "configurations", "users"
   add_foreign_key "contact_activities", "accounts"
   add_foreign_key "contact_activities", "contact_activities", column: "related_activity_id"
   add_foreign_key "contact_activities", "contacts"
@@ -8498,12 +8320,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
   add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "fiscal_periods", "companies"
   add_foreign_key "fiscal_periods", "users", column: "closed_by_id"
-  add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"
-  add_foreign_key "floor_plan_option_applicabilities", "floor_plans"
-  add_foreign_key "floor_plan_options", "factories"
-  add_foreign_key "floor_plan_options", "option_categories"
-  add_foreign_key "floor_plans", "factories"
-  add_foreign_key "floor_plans", "manufacturers"
   add_foreign_key "fni_products", "companies"
   add_foreign_key "import_jobs", "companies"
   add_foreign_key "import_jobs", "users"
@@ -8615,8 +8431,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
   add_foreign_key "nurture_steps", "templates"
   add_foreign_key "offline_sync_logs", "companies"
   add_foreign_key "offline_sync_logs", "users"
-  add_foreign_key "option_categories", "factories"
-  add_foreign_key "option_categories", "floor_plans"
   add_foreign_key "package_templates", "companies"
   add_foreign_key "page_visit_events", "page_visits"
   add_foreign_key "page_visits", "campaigns"
@@ -8628,7 +8442,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
   add_foreign_key "part_categories", "users", column: "updated_by_id"
   add_foreign_key "parts", "companies"
   add_foreign_key "parts", "factories"
-  add_foreign_key "parts", "floor_plans"
   add_foreign_key "parts", "manufacturers"
   add_foreign_key "parts", "part_categories", column: "category_id"
   add_foreign_key "parts", "users", column: "created_by_id"
@@ -8836,7 +8649,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
   add_foreign_key "vehicle_invoices", "vehicles"
   add_foreign_key "vehicles", "catalog_plan_variants"
   add_foreign_key "vehicles", "companies"
-  add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"
   add_foreign_key "vehicles", "vehicles", column: "cloned_from_id"
   add_foreign_key "vendors", "companies"

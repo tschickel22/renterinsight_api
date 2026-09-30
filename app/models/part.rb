@@ -48,7 +48,10 @@ class Part < ApplicationRecord
 
   # Configurator associations
   belongs_to :factory, optional: true
-  belongs_to :floor_plan, optional: true
+  # floor_plan_id pointed at the retired configurator's floor_plans table
+  # (dropped; the column was empty everywhere). Ignored until it is dropped
+  # too, which is safe only once no running server still writes it.
+  self.ignored_columns += %w[floor_plan_id]
   
   # Validations
   validates :company_id, presence: true

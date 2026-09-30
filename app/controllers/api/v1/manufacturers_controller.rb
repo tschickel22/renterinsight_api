@@ -1,18 +1,14 @@
 class Api::V1::ManufacturersController < ApplicationController
   before_action :set_company_scope
 
-  # GET /api/v1/manufacturers
-  # Returns manufacturers that have active floor plans
+  # GET /api/v1/manufacturers(?industry_type=)
+  # Platform manufacturers and this company's own. This used to list only
+  # manufacturers with an active floor plan in the retired configurator,
+  # which were none, so the warranty claim and AR payment pickers were empty.
   def index
-    manufacturer_ids = FloorPlan
-      .where(is_active: true)
-      .distinct
-      .pluck(:manufacturer_id)
-      .compact
-
-    manufacturers = Manufacturer
-      .where(id: manufacturer_ids)
-      .order(:name)
+    manufacturers = Manufacturer.visible_to_company(@company.id)
+    manufacturers = manufacturers.where(industry_type: params[:industry_type]) if params[:industry_type].present?
+    manufacturers = manufacturers.order(:name)
 
     render json: {
       items: manufacturers.map { |m| { id: m.id, name: m.name } }

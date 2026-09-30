@@ -2,9 +2,6 @@
 
 class Factory < ApplicationRecord
   belongs_to :manufacturer
-  has_many :floor_plans
-  has_many :option_categories
-  has_many :floor_plan_options
   has_many :parts
   has_many :catalog_plans, dependent: :nullify
   has_many :catalog_price_books, dependent: :restrict_with_error

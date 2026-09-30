@@ -52,7 +52,10 @@ class Vehicle < ApplicationRecord
   # Associations
   belongs_to :company, optional: true
   belongs_to :location, optional: true
-  belongs_to :floor_plan, optional: true
+  # floor_plan_id pointed at the retired configurator's floor_plans table
+  # (dropped; the column was empty everywhere). Ignored until it is dropped
+  # too, which is safe only once no running server still writes it.
+  self.ignored_columns += %w[floor_plan_id]
   # TrueBuild: the factory model this home is, when the catalog knows it.
   belongs_to :catalog_plan_variant, optional: true
   has_many :deals, dependent: :nullify

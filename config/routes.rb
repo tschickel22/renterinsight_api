@@ -212,17 +212,6 @@ Rails.application.routes.draw do
     namespace :public do
       get 'invitations/verify', to: 'invitations#verify_token'
       post 'invitations/accept', to: 'invitations#accept'
-
-      # ==================== PUBLIC CONFIGURATION VIEWING ====================
-      get 'configurations/:token', to: 'configurations#show', as: :public_configuration
-
-      # ==================== PUBLIC CONFIGURATOR (Anonymous Builder) ====================
-      scope 'configurator/:subdomain' do
-        get 'info', to: 'configurator#company_info'
-        get 'floor-plans', to: 'configurator#floor_plans'
-        get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
-        post 'submit', to: 'configurator#submit'
-      end
     end
     
     # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================
@@ -1566,16 +1555,6 @@ Rails.application.routes.draw do
         end
       end
       
-      # ==================== HOME CONFIGURATOR ====================
-      resources :floor_plans, path: 'floor-plans', only: [:index, :show]
-      resources :company_floor_plans, path: 'company-floor-plans', only: [:index, :show, :create, :update, :destroy]
-      resources :configurations do
-        member do
-          post :calculate_price, path: 'calculate-price'
-          post :share
-        end
-      end
-
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
@@ -3295,15 +3274,6 @@ Rails.application.routes.draw do
         member do
           get :download
         end
-      end
-
-      # Portal Home Configurator
-      scope 'configurator' do
-        get 'settings', to: 'configurator#settings'
-        get 'floor-plans', to: 'configurator#floor_plans'
-        get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
-        post 'submit', to: 'configurator#submit'
-        get 'my-configurations', to: 'configurator#my_configurations'
       end
     end
   end

@@ -152,16 +152,12 @@ class Company < ApplicationRecord
   has_many :stock_balances, dependent: :destroy
   has_many :reorder_rules, dependent: :destroy
   # Configurator Associations
-  has_many :company_floor_plans, dependent: :destroy
-  has_many :floor_plans, through: :company_floor_plans
-  has_many :configurations, dependent: :destroy
 
   # TrueBuild: this dealer's layer over the platform catalog
   has_many :dealer_catalog_terms, dependent: :destroy
   has_many :dealer_markup_rules, dependent: :destroy
   has_many :dealer_price_book_adoptions, dependent: :destroy
   has_many :truebuild_designs, dependent: :destroy
-  has_many :company_floor_plan_option_overrides, dependent: :destroy
 
   # Website Builder Associations
   has_many :websites, dependent: :destroy

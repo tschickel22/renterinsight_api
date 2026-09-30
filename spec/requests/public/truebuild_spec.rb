@@ -60,8 +60,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(body['base_monthly']).to eq(697) # the dealer's calculator: 90,000 at 6.99% over 240 months
     kitchen_group = body['groups'].find { |g| g['name'] == 'Kitchen & Appliances' }
     expect(kitchen_group['options'].map { |o| [o['name'], o['price']] })
-      .to eq([['Stainless Fridge', 1250.0], ['Stainless Package - Electric', 2500.0], ['Stainless Package - Gas', 2500.0]])
-    expect(kitchen_group['options'].map { |o| o['family'] }.compact.uniq).to eq(['stainless package - {fuel}'])
+      .to eq([['Stainless Package - Electric', 2500.0], ['Stainless Package - Gas', 2500.0], ['Stainless Fridge', 1250.0]])
+    expect(kitchen_group['options'].map { |o| o['family'] }.compact.uniq).to eq(['appliance package'])
     expect(body['standard_features']).to eq([{ 'category' => 'Kitchen', 'items' => ['Shaker cabinets'] }])
     # "Shutters: Black" is a color to choose, filed under Exterior, not an included Floor Plan option.
     sets = body['groups'].find { |g| g['name'] == 'Exterior' }['color_sets'].to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
