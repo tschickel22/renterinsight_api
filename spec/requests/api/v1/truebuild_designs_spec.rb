@@ -39,5 +39,8 @@ RSpec.describe 'Api::V1::TruebuildDesigns', type: :request do
     expect(designs.size).to eq(1)
     expect(designs.first).to include('lead_id' => lead.id, 'options' => ['Stainless Fridge'], 'price_shown' => 99_000.0, 'price_today' => 101_250.0)
     expect(designs.first['link']).to start_with('https://summit.example.com/homes/belvidere-1?design=')
+
+    get '/api/v1/truebuild_designs', params: { deal_id: 0 }, headers: headers
+    expect(JSON.parse(response.body)['designs']).to be_empty
   end
 end

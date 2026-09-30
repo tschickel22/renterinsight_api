@@ -6,12 +6,12 @@
 class Api::V1::TruebuildDesignsController < ApplicationController
   before_action :set_company_scope
 
-  # GET /api/v1/truebuild_designs?lead_id=
+  # GET /api/v1/truebuild_designs?lead_id= | deal_id= | contact_id=
   def index
     return unless authorize_action!('leads', 'read')
 
     designs = @company.truebuild_designs.includes(variant: :catalog_plan, vehicle: []).order(created_at: :desc)
-    designs = designs.where(lead_id: params[:lead_id]) if params[:lead_id].present?
+    %i[lead_id deal_id contact_id].each { |key| designs = designs.where(key => params[key]) if params[key].present? }
     render json: { designs: designs.limit(50).map { |d| design_json(d) } }
   end
 
