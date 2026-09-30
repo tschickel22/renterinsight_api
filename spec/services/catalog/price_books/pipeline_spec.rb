@@ -258,6 +258,23 @@ RSpec.describe 'TrueBuild price book pipeline' do
         .to raise_error(Catalog::PriceBooks::Publisher::NotReady, /1 items still need review/)
     end
 
+    it 'keeps two series that share a model number apart' do
+      # Champion prices 2848M32160 as the Aspire 48' Lancaster and as a Genesis ranch.
+      aspire = variant_item(book, '2848M32160', 54_695, name: "48' Lancaster")
+      genesis = book.import_items.create!(item_type: 'variant_price', review_status: 'approved', payload: {
+        'model_number' => '2848M32160', 'series' => 'Genesis', 'plant' => 'Champion Genesis', 'building_code' => 'MOD',
+        'width_ft' => 28, 'length_ft' => 48, 'beds' => 3, 'baths' => 2, 'home_type' => 'RANCH', 'net_base_price' => 81_645
+      })
+      Catalog::PriceBooks::Reconciler.new(book).call
+      expect([aspire, genesis].map { |i| i.reload.payload['plan_series'] }).to eq(%w[Aspire Genesis])
+
+      Catalog::PriceBooks::Publisher.new(book, by: admin).call
+      variants = CatalogPlanVariant.where(manufacturer: mfr, model_number: '2848M32160').index_by(&:series)
+      expect(variants.keys).to contain_exactly('Aspire', 'Genesis')
+      expect(variants['Aspire'].variant_prices.first.net_base_price).to eq(54_695)
+      expect(variants['Genesis'].variant_prices.first.net_base_price).to eq(81_645)
+    end
+
     it 'turns a model missing from the new book into a removal to confirm' do
       variant_item(book, '2856H32392', 57_995)
       Catalog::PriceBooks::Publisher.new(book, by: admin).call

@@ -22,7 +22,8 @@ module Catalog
           series = Keys.series(p['series'], p['plant'])
           p = p.merge('plan_series' => p['plan_series'] || series,
                       'plan_name' => p['plan_name'] || Keys.plan_name(p['model_name'], series, p['model_number']))
-          variant = CatalogPlanVariant.find_by(manufacturer_id: @book.manufacturer_id, model_number: p['model_number'])
+          variant = CatalogPlanVariant.find_by(manufacturer_id: @book.manufacturer_id, series: p['plan_series'],
+                                               model_number: p['model_number'])
           prev = variant && @current&.variant_prices&.find_by(catalog_plan_variant_id: variant.id)
           change, previous = compare(prev && { 'net_base_price' => prev.net_base_price.to_f }, 'net_base_price' => p['net_base_price'].to_f)
           item.update!(payload: p, matched: variant, change_type: change, previous_values: previous)

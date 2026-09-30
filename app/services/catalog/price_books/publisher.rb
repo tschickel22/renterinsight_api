@@ -47,21 +47,22 @@ module Catalog
 
       def publish_variant_price(item, counts)
         p = item.payload
-        variant = CatalogPlanVariant.find_by(manufacturer_id: @mfr, model_number: p['model_number'])
+        series = p['plan_series'].presence || Keys.series(p['series'], p['plant'])
+        variant = item.change_type == 'removed' && item.matched.is_a?(CatalogPlanVariant) ? item.matched :
+                    CatalogPlanVariant.find_by(manufacturer_id: @mfr, series: series, model_number: p['model_number'])
         if item.change_type == 'removed'
           variant&.update!(status: 'discontinued')
           counts['variants_discontinued'] += 1
           return
         end
 
-        series = p['plan_series'].presence || Keys.series(p['series'], p['plant'])
         name = p['plan_name'].presence || Keys.plan_name(p['model_name'], series, p['model_number'])
         plan = CatalogPlan.find_or_initialize_by(manufacturer_id: @mfr, series: series, slug: name.parameterize)
         plan.assign_attributes(name: name, factory_id: @book.factory_id, status: 'active')
         plan.plan_code ||= Catalog::ModelNumber.parse(p['model_number']).plan_code
         plan.save!
 
-        variant ||= CatalogPlanVariant.new(manufacturer_id: @mfr, model_number: p['model_number'])
+        variant ||= CatalogPlanVariant.new(manufacturer_id: @mfr, series: series, model_number: p['model_number'])
         variant.assign_attributes(catalog_plan: plan, model_number_as_printed: p['model_number_as_printed'],
                                   width_ft: p['width_ft'], length_ft: p['length_ft'], beds: p['beds'],
                                   baths: p['baths'], home_type: p['home_type'], status: 'active',
@@ -88,9 +89,7 @@ module Catalog
         option.save!
 
         applies = p['applies_to'] || {}
-        variant_id = Array(applies['model_numbers']).filter_map do |m|
-          CatalogPlanVariant.find_by(manufacturer_id: @mfr, model_number: Catalog::ModelNumber.normalize(m))&.id
-        end.first
+        variant_id = Array(applies['model_numbers']).filter_map { |m| variant_for_option(m, p['tab']) }.first
         CatalogOptionPrice.create!(
           price_book: @book, option: option, dealer_cost: p['dealer_cost'], suggested_retail: p['suggested_retail'],
           is_standard: p['is_standard'] == true, catalog_plan_variant_id: variant_id,
@@ -102,6 +101,15 @@ module Catalog
         )
         item.update_columns(matched_type: 'CatalogOption', matched_id: option.id)
         counts['option_prices'] += 1
+      end
+
+      # A model-specific option names a model number; when two series share
+      # that number, prefer the series the option's tab is for.
+      def variant_for_option(model_number, tab)
+        found = CatalogPlanVariant.where(manufacturer_id: @mfr, model_number: Catalog::ModelNumber.normalize(model_number)).to_a
+        return found.first&.id if found.size <= 1
+
+        (found.find { |v| v.series.present? && tab.to_s.downcase.include?(v.series.downcase) } || found.first).id
       end
 
       # A coded master-list option already priced through an order form gets

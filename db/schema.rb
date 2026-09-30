@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_100000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1604,9 +1604,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_100000) do
     t.jsonb "external_ids", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "series"
     t.index "((external_ids ->> 'champion_model_id'::text))", name: "idx_catalog_plan_variants_champion_model_id"
+    t.index "manufacturer_id, COALESCE(series, ''::character varying), model_number", name: "idx_catalog_plan_variants_unique_model", unique: true
     t.index ["catalog_plan_id"], name: "index_catalog_plan_variants_on_catalog_plan_id"
-    t.index ["manufacturer_id", "model_number"], name: "idx_on_manufacturer_id_model_number_bef02c020a", unique: true
+    t.index ["manufacturer_id", "model_number"], name: "idx_on_manufacturer_id_model_number_bef02c020a"
     t.index ["manufacturer_id"], name: "index_catalog_plan_variants_on_manufacturer_id"
   end
 
