@@ -34,6 +34,16 @@ RSpec.describe 'Designed a Home work queue', type: :model do
     expect(ids).not_to include(theirs.id, old.id)
   end
 
+  it 'lists leads whose saved design was opened in the last two days' do
+    fresh = create(:lead, company: company, owner_id: user.id, status: 'new')
+    stale = create(:lead, company: company, owner_id: user.id, status: 'new')
+    designed(fresh, at: 10.days.ago).update!(last_viewed_at: 3.hours.ago, view_count: 2)
+    designed(stale, at: 10.days.ago).update!(last_viewed_at: 5.days.ago, view_count: 1)
+
+    ids = WorkqueueService.new(company: company, user: user, queue_id: 'leads_design_opened').items[:items].map { |r| r[:entity_id] }
+    expect(ids).to eq([fresh.id])
+  end
+
   # Checked on the rule itself: the full summary also counts the activity
   # queues, which read a database view the test schema does not load.
   it 'only appears for dealers who use TrueBuild' do

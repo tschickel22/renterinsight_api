@@ -33,6 +33,7 @@ class WorkqueueService
     'leads_replied'               => :leads_replied,
     'leads_designed_home'         => :leads_designed_home,
     'leads_design_price_up'       => :leads_design_price_up,
+    'leads_design_opened'         => :leads_design_opened,
     'contacts_replied'            => :contacts_replied,
     'leads_mine'                  => :leads_mine,
     'leads_new_24h'               => :leads_new_24h,
@@ -54,7 +55,7 @@ class WorkqueueService
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
-      queue_ids: %w[leads_inbound_new leads_designed_home leads_design_price_up leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
+      queue_ids: %w[leads_inbound_new leads_designed_home leads_design_opened leads_design_price_up leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
     { id: 'my_deals', label: 'My Deals',
       queue_ids: %w[deals_mine deals_closing_month deals_closing_week deals_stale_30d] },
     { id: 'my_service', label: 'My Service Work',
@@ -380,7 +381,7 @@ class WorkqueueService
   end
 
   def hidden_queue?(queue_id)
-    return true if %w[leads_designed_home leads_design_price_up].include?(queue_id.to_s) && !truebuild_dealer?
+    return true if %w[leads_designed_home leads_design_opened leads_design_price_up].include?(queue_id.to_s) && !truebuild_dealer?
 
     hidden = Array(prefs[:hidden_queues]).map(&:to_s)
     hidden.include?(queue_id.to_s)
@@ -446,6 +447,7 @@ class WorkqueueService
     when 'leads_replied'               then 'Replied — Needs Response'
     when 'leads_designed_home'         then 'Designed a Home'
     when 'leads_design_price_up'       then 'Saved Design Price Went Up'
+    when 'leads_design_opened'         then 'Saved Design Opened'
     when 'contacts_replied'            then 'Contact Replies'
     when 'leads_mine'                  then 'My Leads'
     when 'leads_new_24h'               then "New — Last #{prefs[:new_leads_days]}d"
@@ -691,6 +693,18 @@ class WorkqueueService
   def leads_designed_home
     scope = @company.leads.where.not(status: excluded_lead_status_keys)
                     .where(id: @company.truebuild_designs.where('truebuild_designs.created_at >= ?', 7.days.ago).select(:lead_id))
+    unassigned = @company.leads.where(owner_id: nil)
+    unless @user.effective_admin?
+      unassigned = unassigned.where(location_id: @user.accessible_locations.select(:id))
+    end
+    scope.where(owner_id: @user.id).or(scope.merge(unassigned))
+  end
+
+  # A saved design opened from its link in the last two days: the buyer came
+  # back to it, or someone they shared it with looked. A reason to call now.
+  def leads_design_opened
+    designs = @company.truebuild_designs.where('truebuild_designs.last_viewed_at >= ?', 48.hours.ago)
+    scope = @company.leads.where.not(status: excluded_lead_status_keys).where(id: designs.select(:lead_id))
     unassigned = @company.leads.where(owner_id: nil)
     unless @user.effective_admin?
       unassigned = unassigned.where(location_id: @user.accessible_locations.select(:id))
