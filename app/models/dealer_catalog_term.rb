@@ -17,6 +17,7 @@ class DealerCatalogTerm < ApplicationRecord
   validates :margin_floor_pct, numericality: { greater_than_or_equal_to: 0, less_than: 100 }, allow_nil: true
   validates :freight_per_mile, :freight_flat, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :round_retail_to, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true
+  validates :freight_miles, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
 
   # The manufacturer row if there is one, else the company default, else a new
   # unsaved default so callers never branch on nil.

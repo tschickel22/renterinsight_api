@@ -273,6 +273,16 @@ Rails.application.routes.draw do
         end
       end
       resources :import_templates, only: %i[index show create update destroy]
+      # TrueBuild: this dealer's pricing layer over the platform catalog
+      get    'truebuild_pricing', to: 'truebuild_pricing#show'
+      put    'truebuild_pricing/terms', to: 'truebuild_pricing#update_terms'
+      post   'truebuild_pricing/rules', to: 'truebuild_pricing#create_rule'
+      patch  'truebuild_pricing/rules/:id', to: 'truebuild_pricing#update_rule'
+      delete 'truebuild_pricing/rules/:id', to: 'truebuild_pricing#destroy_rule'
+      get    'truebuild_pricing/plans', to: 'truebuild_pricing#plans'
+      get    'truebuild_pricing/options', to: 'truebuild_pricing#options'
+      post   'truebuild_pricing/preview', to: 'truebuild_pricing#preview'
+
       resources :export_jobs, only: %i[index show create] do
         member { get :download }
         collection { get :policy }
