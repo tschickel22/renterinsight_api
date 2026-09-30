@@ -43,6 +43,7 @@ module Truebuild
         adoption.update!(summary: summary.deep_stringify_keys, notified_at: Time.current)
         DesignRepricer.call(adoption.company) if adoption.status == 'adopted'
         notify(adoption, book, summary)
+        TruebuildModelListWarmJob.perform_later(adoption.company_id)
       end
     end
 

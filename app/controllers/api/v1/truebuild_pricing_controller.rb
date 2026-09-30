@@ -9,6 +9,8 @@ class Api::V1::TruebuildPricingController < ApplicationController
   before_action :set_company_scope
   before_action :set_rule, only: %i[update_rule destroy_rule]
   before_action :set_update, only: %i[show_update accept_update decline_update]
+  # A price change re-prices the site's Design Your Home list before a buyer asks.
+  after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update]
 
   TERM_FIELDS = %i[price_update_policy price_display program_discount_pct freight_per_mile freight_flat freight_miles
                    margin_floor_pct round_retail_to].freeze
@@ -170,6 +172,10 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   private
+
+  def warm_model_list
+    TruebuildModelListWarmJob.perform_later(@company.id) if response.successful?
+  end
 
   def set_update
     @update = @company.dealer_price_book_adoptions.find(params[:id])
