@@ -179,6 +179,7 @@ Rails.application.routes.draw do
 
     # ==================== TRUEBUILD (design a home) ====================
     get  'truebuild/homes/:vehicle_id', to: 'truebuild#home'
+    get  'truebuild/models', to: 'truebuild#models'
     get  'truebuild/models/:variant_id', to: 'truebuild#model'
     post 'truebuild/price', to: 'truebuild#price'
     post 'truebuild/designs', to: 'truebuild#create_design'

@@ -140,6 +140,17 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(response).to have_http_status(:unauthorized)
   end
 
+  it 'lists the models a dealer offers, with a starting price and photo' do
+    variant.update!(media: { 'elevations' => ['https://img/front'] })
+    get '/public/truebuild/models', params: { token: token }
+    models = JSON.parse(response.body)['models']
+    expect(models.size).to eq(1)
+    expect(models.first).to include('name' => 'Belvidere', 'series' => 'Aspire', 'starting_price' => 100_000.0,
+                                    'starting_monthly' => 697, 'image' => 'https://img/front', 'sizes' => ["28' x 56'"])
+    expect(models.first['variants'].map { |v| v['id'] }).to eq([variant.id])
+    expect(response.body).not_to match(/cost/i)
+  end
+
   it 'tells the home page whether the home can be designed' do
     get "/public/inventory/#{vehicle.id}", params: { token: token }
     expect(JSON.parse(response.body)['truebuild']).to eq('available' => true)

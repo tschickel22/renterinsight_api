@@ -26,6 +26,11 @@ class Public::TruebuildController < ApplicationController
     render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).call.merge(vehicle_id: vehicle.id)
   end
 
+  # GET /public/truebuild/models   Every model this dealer offers, for a site block.
+  def models
+    render json: { models: Truebuild::ModelList.new(@company).call(manufacturer_id: params[:manufacturer_id].presence) }
+  end
+
   def model
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
