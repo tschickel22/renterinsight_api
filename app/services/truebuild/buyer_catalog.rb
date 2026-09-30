@@ -91,11 +91,28 @@ module Truebuild
         in_place_of: o.in_place_of, price: op.is_standard ? nil : retail[o.id] }
     end
 
+    # Standards sheets are titled by product line, not plan series ("Dutch
+    # Aspire Sectionals", "Genesis Homes"): take the sheets naming this
+    # series, then the one for this home's construction.
     def standard_features
-      plan = @variant.catalog_plan
-      @book.standard_features.where(series: [nil, plan.series])
-           .where(building_code: [nil, @variant.building_code]).order(:category, :position)
+      words = @variant.catalog_plan.series.to_s.downcase.split - %w[champion homes of the]
+      sheets = @book.standard_features.distinct.pluck(:series).select do |s|
+        s.nil? || words.any? { |w| s.downcase.match?(/\b#{Regexp.escape(w)}\b/) }
+      end
+      sheet = best_sheet(sheets.compact)
+      @book.standard_features.where(series: [nil, sheet].uniq).where(building_code: [nil, @variant.building_code])
+           .order(:category, :position)
            .group_by(&:category).map { |cat, fs| { category: cat, items: fs.map(&:name).uniq } }
+    end
+
+    def best_sheet(sheets)
+      return sheets.first if sheets.size <= 1
+
+      want = if @variant.building_code == 'MOD' then /modular/i
+             elsif @variant.width_ft.to_i > 18 then /sectional|multi|double/i
+             else /single/i
+             end
+      sheets.find { |s| s.match?(want) } || sheets.reject { |s| s.match?(/modular|sectional|multi|double|single/i) }.first
     end
   end
 end

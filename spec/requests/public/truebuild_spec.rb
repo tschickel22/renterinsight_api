@@ -37,8 +37,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
 
   before do
     CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 80_000)
-    book.standard_features.create!(series: 'Aspire', category: 'Kitchen', name: 'Shaker cabinets')
-    book.standard_features.create!(series: 'Genesis', category: 'Kitchen', name: 'Not for Aspire')
+    book.standard_features.create!(series: 'Dutch Aspire Sectionals', category: 'Kitchen', name: 'Shaker cabinets')
+    book.standard_features.create!(series: 'Dutch Aspire Singles', category: 'Kitchen', name: 'Not for a sectional')
+    book.standard_features.create!(series: 'Genesis Homes', category: 'Kitchen', name: 'Not for Aspire')
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'percent', value: 25)
     company.dealer_catalog_terms.create!(price_display: 'full')
   end

@@ -10,7 +10,7 @@ module Catalog
       module_function
 
       SETS = [
-        ['Siding', /siding/i],
+        ['Siding', /siding|4[24]00 series/i],
         ['Shutters', /shutter/i],
         ['Countertop', /counter ?top/i],
         ['Backsplash', /backsplash|subway|\btile\b/i],
