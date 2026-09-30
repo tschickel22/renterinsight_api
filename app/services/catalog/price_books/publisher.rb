@@ -167,8 +167,9 @@ module Catalog
         option.assign_attributes(group: group_for('Other options'), name: p['description'].to_s.truncate(250),
                                  factory_code: p['factory_code'], kind: 'upgrade', status: 'active')
         option.save!
+        where = Applicability.resolve(name: p['description'], tab: nil, series_list: series_list)
         CatalogOptionPrice.create!(price_book: @book, option: option, dealer_cost: p['dealer_cost'],
-                                   suggested_retail: p['suggested_retail'], source_ref: item.source_ref)
+                                   suggested_retail: p['suggested_retail'], source_ref: item.source_ref, **where.symbolize_keys)
         counts['coded_options'] += 1
       end
 
