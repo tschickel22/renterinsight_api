@@ -28,7 +28,7 @@ module Api
         # Return JSON for frontend to display
         render json: {
           ok: true,
-          quote: @quote.as_json.merge(
+          quote: @quote.public_as_json.merge(
             company: company_info,
             contact: @quote.contact ? {
               first_name: @quote.contact.first_name,
@@ -64,7 +64,7 @@ module Api
         # Send notification email to company
         notify_company_quote_accepted(@quote)
         
-        render json: { ok: true, quote: @quote.as_json }
+        render json: { ok: true, quote: @quote.public_as_json }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Quote not found' }, status: :not_found
       end
@@ -91,7 +91,7 @@ module Api
         # Send notification email to company
         notify_company_quote_rejected(@quote, reason)
         
-        render json: { ok: true, quote: @quote.as_json }
+        render json: { ok: true, quote: @quote.public_as_json }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Quote not found' }, status: :not_found
       end
