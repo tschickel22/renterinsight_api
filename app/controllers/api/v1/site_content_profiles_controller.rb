@@ -521,7 +521,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   end
 
   def authorize_with_api_key!(token)
-    key = ApiKey.active.find_by(key: token)
+    key = ApiKey.find_active_by_token(token)
     return render json: { error: 'Invalid or revoked API key' }, status: :unauthorized if key.nil?
 
     unless key.has_permission?('websites', 'write')

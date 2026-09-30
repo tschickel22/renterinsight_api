@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_235997) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_01_000100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -582,7 +582,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235997) do
   create_table "api_keys", force: :cascade do |t|
     t.bigint "company_id"
     t.string "name", null: false
-    t.string "key", null: false
+    t.string "key"
     t.string "secret_digest"
     t.jsonb "permissions", default: {}
     t.string "status", default: "active", null: false
@@ -593,10 +593,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235997) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "webhook_config", default: {}, null: false
+    t.string "key_digest"
+    t.string "key_preview"
     t.index ["company_id", "status"], name: "index_api_keys_on_company_id_and_status"
     t.index ["company_id"], name: "index_api_keys_on_company_id"
     t.index ["created_by_user_id"], name: "index_api_keys_on_created_by_user_id"
     t.index ["key"], name: "index_api_keys_on_key", unique: true
+    t.index ["key_digest"], name: "index_api_keys_on_key_digest", unique: true
     t.index ["status"], name: "index_api_keys_on_status"
     t.index ["webhook_config"], name: "index_api_keys_on_webhook_config", using: :gin
   end
@@ -623,6 +626,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235997) do
     t.index ["provider", "action"], name: "index_api_logs_on_provider_and_action"
     t.index ["provider"], name: "index_api_logs_on_provider"
     t.index ["status"], name: "index_api_logs_on_status"
+  end
+
+  create_table "api_request_logs", force: :cascade do |t|
+    t.bigint "api_key_id"
+    t.bigint "company_id"
+    t.string "http_method", null: false
+    t.string "path", null: false
+    t.integer "status", null: false
+    t.integer "duration_ms"
+    t.string "ip_address"
+    t.string "user_agent"
+    t.datetime "created_at", null: false
+    t.index ["api_key_id", "created_at"], name: "index_api_request_logs_on_api_key_id_and_created_at"
+    t.index ["company_id", "created_at"], name: "index_api_request_logs_on_company_id_and_created_at"
   end
 
   create_table "approval_actions", force: :cascade do |t|

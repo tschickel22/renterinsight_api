@@ -8,7 +8,35 @@ module ApiKeyAuthentication
     before_action :enforce_rate_limit
   end
 
+  RATE_LIMIT_WINDOW = 1.hour
+
   private
+
+  # Wraps the whole request, including rescue_from handlers and before_actions
+  # that halt, so every call is logged with the status the caller actually got.
+  def process_action(*)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    super
+  ensure
+    log_api_request(started)
+  end
+
+  def log_api_request(started)
+    ApiRequestLog.insert({
+      api_key_id: @current_api_key&.id,
+      company_id: @current_company&.id,
+      http_method: request.request_method,
+      path: request.path.to_s[0, 255],
+      status: response.status,
+      duration_ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round,
+      ip_address: request.remote_ip,
+      user_agent: request.user_agent.to_s[0, 255].presence,
+      created_at: Time.current
+    })
+  rescue StandardError => e
+    # Logging must never take down the request it is logging.
+    Rails.logger.error("[ApiKeyAuthentication] request log failed: #{e.class}: #{e.message}")
+  end
 
   def authenticate_api_key
     token = extract_bearer_token
@@ -17,7 +45,7 @@ module ApiKeyAuthentication
       return
     end
 
-    @current_api_key = ApiKey.active.find_by(key: token)
+    @current_api_key = ApiKey.find_active_by_token(token)
     unless @current_api_key
       render json: { error: "Invalid or revoked API key" }, status: :unauthorized
       return
@@ -77,9 +105,14 @@ module ApiKeyAuthentication
     limit = @current_api_key.rate_limit.to_i
     return if limit <= 0
 
-    key = @current_api_key.rate_limit_key
-    window = 1.hour
-    count = Rails.cache.increment(key, 1, expires_in: window, initial: 1).to_i
+    # Counted from the request log, which every instance shares. Rails.cache is
+    # per instance in production, so the old cache counter let each instance
+    # grant the full limit. Refused requests are excluded so a client that keeps
+    # retrying through a 429 recovers once its window drains.
+    window = RATE_LIMIT_WINDOW
+    count = ApiRequestLog.where(api_key_id: @current_api_key.id, created_at: window.ago..)
+                         .where.not(status: 429)
+                         .count + 1
 
     if count > limit
       response.set_header("X-RateLimit-Limit", limit.to_s)
@@ -115,9 +148,9 @@ module ApiKeyAuthentication
     end
   end
 
+  # No blank-permissions shortcut: a key with no permissions is refused
+  # everything (see ApiKey#has_permission?).
   def authorize_permission!(resource, action)
-    return if @current_api_key.permissions.blank? || @current_api_key.permissions.empty?
-
     unless @current_api_key.has_permission?(resource, action)
       render json: {
         error: "Insufficient permissions",

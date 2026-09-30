@@ -6,6 +6,11 @@ module Api
       class BaseController < ActionController::API
         include ApiKeyAuthentication
 
+        # A platform-level key sent without X-Company-ID has no tenant, and
+        # company_scope would then query company_id IS NULL. Refuse instead.
+        # Ping and webhook-events carry no tenant data and opt out.
+        before_action :require_company_context!
+
         rescue_from ActiveRecord::RecordNotFound do |e|
           render json: { error: "Resource not found" }, status: :not_found
         end

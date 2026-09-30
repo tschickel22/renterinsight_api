@@ -4,6 +4,8 @@ module Api
   module Partner
     module V1
       class WebhookEventsController < BaseController
+        skip_before_action :require_company_context!
+
         # GET /api/partner/v1/webhook-events
         # Lists all available webhook events partners can subscribe to
         def index
