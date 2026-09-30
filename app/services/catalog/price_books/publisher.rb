@@ -186,11 +186,12 @@ module Catalog
       def group_for(section)
         @groups ||= {}
         key, name = Sections.group_for(section)
-        @groups[key] ||= CatalogOptionGroup.find_or_create_by!(manufacturer_id: @mfr, factory_id: @book.factory_id,
-                                                               series: nil, key: key) do |g|
+        @groups[key] ||= CatalogOptionGroup.find_or_initialize_by(manufacturer_id: @mfr, factory_id: @book.factory_id,
+                                                                  series: nil, key: key).tap do |g|
           g.name = name
-          g.selection_type = 'multiple'
+          g.selection_type ||= 'multiple'
           g.position = Sections::GROUPS.index { |k, _, _| k == key } || Sections::GROUPS.size
+          g.save!
         end
       end
 
