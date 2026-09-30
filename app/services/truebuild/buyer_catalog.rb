@@ -120,7 +120,7 @@ module Truebuild
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v4:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v5:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -158,9 +158,11 @@ module Truebuild
                                  option_json(op, retail).merge(name: value.strip, kind: 'color', hex: ColorSwatches.hex(value))]
       end
 
+      # Families span groups: order forms file a fireplace under Fireplaces
+      # in one series and Interior Walls & Trim in another.
+      families = OptionFamilies.for(rest.reject { |op| op.option.kind == 'color' }.map(&:option))
       by_group.sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
         colors, others = ops.partition { |op| op.option.kind == 'color' }
-        families = OptionFamilies.for(others.map(&:option))
         sets = colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
                      .transform_values { |cs| cs.map { |op| option_json(op, retail) } }
         extra_sets[group.id].each { |set, json| (sets[set] ||= []) << json }
