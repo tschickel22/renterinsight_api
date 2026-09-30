@@ -52,7 +52,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
     body = JSON.parse(response.body)
 
     expect(body['base_price']).to eq(100_000.0)
-    expect(body['base_monthly']).to eq(725) # 90,000 at 7.5% over 20 years
+    expect(body['base_monthly']).to eq(697) # the dealer's calculator: 90,000 at 6.99% over 240 months
     kitchen_group = body['groups'].find { |g| g['name'] == 'Kitchen & Appliances' }
     expect(kitchen_group['options'].map { |o| [o['name'], o['price']] })
       .to eq([['Stainless Fridge', 1250.0], ['Stainless Package - Electric', 2500.0], ['Stainless Package - Gas', 2500.0]])
@@ -82,11 +82,16 @@ RSpec.describe 'Public TrueBuild', type: :request do
     company.dealer_catalog_terms.first.update!(price_display: 'monthly')
     get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
     body = JSON.parse(response.body)
-    expect(body).to include('base_price' => nil, 'base_monthly' => 725)
+    expect(body).to include('base_price' => nil, 'base_monthly' => 697)
+    expect(body['display']['payment_terms']).to include('down_pct' => 10.0, 'apr' => 6.99, 'years' => 20.0)
     expect(body['display']).to include('show_prices' => false, 'show_monthly' => true)
 
     post '/public/truebuild/price', params: { token: token, variant_id: variant.id, option_ids: [fridge.id] }
-    expect(JSON.parse(response.body)).to include('total' => nil, 'monthly' => 734)
+    expect(JSON.parse(response.body)).to include('total' => nil, 'monthly' => 706)
+
+    company.update!(loan_settings: { 'calculator_enabled' => false })
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    expect(JSON.parse(response.body)).to include('base_monthly' => nil)
   end
 
   it 'prices a selection, dropping options this model does not offer' do

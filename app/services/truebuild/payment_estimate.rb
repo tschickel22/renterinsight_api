@@ -1,25 +1,26 @@
 # frozen_string_literal: true
 
 module Truebuild
-  # A monthly payment estimate for a buyer, on the same assumptions as the
-  # site builder's payment calculator: 10% down, 7.5% APR, 20 years. Labelled
-  # an estimate wherever it is shown; not an offer of credit.
-  module PaymentEstimate
-    module_function
+  # A buyer's monthly payment estimate on the dealer's own calculator
+  # settings (rate, term, down payment, on or off, disclaimer): the same
+  # figure their site's payment calculator and listing cards show.
+  class PaymentEstimate
+    def initialize(company)
+      @calculator = Websites::CalculatorSettings.new(company)
+      @settings = @calculator.to_h
+    end
 
-    DOWN_PCT = 10
-    APR = 7.5
-    YEARS = 20
+    def enabled? = @settings[:enabled]
 
-    def terms = { down_pct: DOWN_PCT, apr: APR, years: YEARS }
+    def terms
+      { down_pct: @settings[:minDownPaymentPercent].to_f, apr: @settings[:defaultInterestRate].to_f,
+        years: (@settings[:defaultLoanTermMonths].to_i / 12.0).round(1), disclaimer: @settings[:disclaimerText] }
+    end
 
     def monthly(total)
-      return nil unless total.to_f.positive?
+      return nil unless enabled?
 
-      principal = total.to_f * (1 - DOWN_PCT / 100.0)
-      rate = APR / 100.0 / 12
-      n = YEARS * 12
-      (principal * rate / (1 - ((1 + rate)**-n))).round
+      @calculator.monthly_payment_for(total)&.round
     end
   end
 end
