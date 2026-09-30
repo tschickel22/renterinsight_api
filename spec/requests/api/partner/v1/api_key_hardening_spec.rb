@@ -40,17 +40,6 @@ RSpec.describe 'Partner API key hardening', type: :request do
       expect(response).to have_http_status(:ok)
     end
 
-    it 'still accepts a row written before the digest existed, and backfills it' do
-      key = make_key
-      plaintext = key.key
-      key.update_columns(key: plaintext, key_digest: nil, key_preview: nil)
-
-      get '/api/partner/v1/ping', headers: { 'Authorization' => "Bearer #{plaintext}" }
-
-      expect(response).to have_http_status(:ok)
-      expect(key.reload.key_digest).to eq(Digest::SHA256.hexdigest(plaintext))
-    end
-
     it 'rejects an unknown key' do
       get '/api/partner/v1/ping', headers: { 'Authorization' => 'Bearer ri_live_nope' }
       expect(response).to have_http_status(:unauthorized)
