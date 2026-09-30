@@ -145,11 +145,16 @@ module Truebuild
     # Only photos already on the model are rendered, fetched at a size the
     # models work well with. Champion serves them from scene7.
     def fetch_source(url)
-      sized = url.include?('scene7.com') && !url.include?('?') ? "#{url}?wid=1600&fmt=jpeg&qlt=90" : url
-      res = HTTParty.get(sized, timeout: 30)
+      res = HTTParty.get(sized(url), timeout: 30)
       raise Error, "Source photo returned #{res.code}" unless res.code == 200
 
       { bytes: res.body, mime: res.headers['content-type'].presence || 'image/jpeg' }
+    end
+
+    # The exact image layers are cut against; a page stacking layers must
+    # show this one underneath or they will not line up.
+    def sized(url)
+      url.include?('scene7.com') && !url.include?('?') ? "#{url}?wid=1600&fmt=jpeg&qlt=90" : url
     end
 
     def store(render, bytes, mime, suffix: nil)

@@ -181,6 +181,7 @@ Rails.application.routes.draw do
     get  'truebuild/homes/:vehicle_id', to: 'truebuild#home'
     get  'truebuild/models', to: 'truebuild#models'
     get  'truebuild/models/:variant_id', to: 'truebuild#model'
+    get  'truebuild/models/:variant_id/trueview', to: 'truebuild#trueview'
     post 'truebuild/price', to: 'truebuild#price'
     post 'truebuild/designs', to: 'truebuild#create_design'
     get  'truebuild/designs/:design_token', to: 'truebuild#show_design'

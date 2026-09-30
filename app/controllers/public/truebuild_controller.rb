@@ -6,6 +6,7 @@
 #
 #   GET  /public/truebuild/homes/:vehicle_id   design data for a home on the lot
 #   GET  /public/truebuild/models/:variant_id  design data for a catalog model
+#   GET  /public/truebuild/models/:variant_id/trueview  finish layers for the model's photos
 #   POST /public/truebuild/price               { variant_id, option_ids }
 #   POST /public/truebuild/designs             { variant_id, vehicle_id, option_ids, contact, context }
 #   GET  /public/truebuild/designs/:design_token      a saved design, for its share link
@@ -36,6 +37,18 @@ class Public::TruebuildController < ApplicationController
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
     render json: Truebuild::BuyerCatalog.new(@company, variant).call
+  end
+
+  # GET /public/truebuild/models/:variant_id/trueview
+  # The model's photos with a layer per finish drawn so far. The first visit
+  # queues the rest in the background; poll while drawing is above zero.
+  def trueview
+    variant = CatalogPlanVariant.find_by(id: params[:variant_id])
+    return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
+
+    buyer = Truebuild::Trueview::Buyer.new(@company, variant)
+    buyer.predraw!
+    render json: buyer.call
   end
 
   def price

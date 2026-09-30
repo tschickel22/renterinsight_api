@@ -170,4 +170,51 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(home).to include('image_urls' => ['https://img/kitchen-1'], 'floor_plan_images' => ['https://img/plan'],
                             'tour_url' => 'https://my.matterport.com/show/?m=x')
   end
+
+  describe 'TrueView' do
+    let(:front) { 'https://s7d9.scene7.com/is/image/championhomes/belvidere-exterior-1' }
+
+    around do |ex|
+      old = ENV['GEMINI_API_KEY']
+      ENV['GEMINI_API_KEY'] = 'test'
+      ex.run
+    ensure
+      ENV['GEMINI_API_KEY'] = old
+    end
+
+    before { variant.update!(media: { 'photos' => [{ 'url' => front, 'room' => 'exterior' }, { 'url' => 'https://x/bed.jpg', 'room' => 'bedroom' }] }) }
+
+    def trueview = (get "/public/truebuild/models/#{variant.id}/trueview", params: { token: token }) && JSON.parse(response.body)
+
+    it 'queues a layer per exterior finish on the first visit and shows each as it is drawn' do
+      body = nil
+      expect { body = trueview }.to have_enqueued_job(TruebuildRenderJob).on_queue('low').exactly(5).times
+      expect(body['photos'].first).to include('room' => 'exterior', 'url' => "#{front}?wid=1600&fmt=jpeg&qlt=90", 'layers' => {})
+      expect(body['photos'].first['pending']).to include(clay.id, white.id)
+      expect(body['drawing']).to eq(5)
+      expect(TruebuildRender.pluck(:selection).map { |s| s.first.values_at('surface', 'value') })
+        .to contain_exactly(%w[Siding Clay], %w[Siding Olive], %w[Siding White], %w[Shutters Black], ['Shingles', 'Black Weatherwood'])
+
+      TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
+                     .update!(status: 'done', layer_url: 'https://b/clay.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      expect { body = trueview }.not_to have_enqueued_job(TruebuildRenderJob)
+      expect(body['photos'].first['layers']).to eq(clay.id.to_s => 'https://b/clay.webp')
+      expect(body['photos'].first['pending']).not_to include(clay.id)
+      expect(body['drawing']).to eq(4)
+    end
+
+    it 'stops drawing for the day at the platform limit' do
+      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+      ENV['TRUEVIEW_DAILY_LIMIT'] = '2'
+      expect { trueview }.to have_enqueued_job(TruebuildRenderJob).exactly(2).times
+    ensure
+      ENV.delete('TRUEVIEW_DAILY_LIMIT')
+    end
+
+    it 'draws nothing when the image key is not set' do
+      ENV.delete('GEMINI_API_KEY')
+      expect { trueview }.not_to have_enqueued_job(TruebuildRenderJob)
+      expect(response).to have_http_status(:ok)
+    end
+  end
 end
