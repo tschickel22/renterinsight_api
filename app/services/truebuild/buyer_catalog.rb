@@ -75,12 +75,15 @@ module Truebuild
       prices.uniq(&:catalog_option_id).group_by { |op| op.option.group }
             .sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
         colors, others = ops.partition { |op| op.option.kind == 'color' }
+        families = OptionFamilies.for(others.map(&:option))
         {
           id: group.id, name: group.name,
           color_sets: colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
                             .map { |set, cs| { name: set, options: cs.map { |op| option_json(op, retail) }.sort_by { |o| o[:name] } } }
                             .sort_by { |s| s[:name] },
-          options: others.map { |op| option_json(op, retail) }.sort_by { |o| [o[:standard] ? 0 : 1, o[:name]] }
+          # A family's members sit together, under the first one's name.
+          options: others.map { |op| option_json(op, retail).merge(family: families[op.catalog_option_id]) }
+                         .sort_by { |o| [o[:standard] ? 0 : 1, (o[:family] || o[:name]).downcase, o[:name].downcase] }
         }
       end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
     end

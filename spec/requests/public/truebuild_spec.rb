@@ -32,6 +32,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
   let!(:fridge) { option(kitchen, 'Stainless Fridge', dealer_cost: 1000, suggested_retail: 1550) }
   let!(:dw_only) { option(kitchen, 'Island', dealer_cost: 2000, section_type: 'single') }
   let!(:other_model) { option(kitchen, 'Big Porch', dealer_cost: 900, variant: other_variant) }
+  let!(:gas) { option(kitchen, 'Stainless Package - Gas', dealer_cost: 2000) }
+  let!(:electric) { option(kitchen, 'Stainless Package - Electric', dealer_cost: 2000) }
   let!(:white) { option(exterior, 'White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Siding' }) }
   let!(:clay) { option(exterior, 'Clay', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Siding' }) }
 
@@ -51,7 +53,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
 
     expect(body['base_price']).to eq(100_000.0)
     kitchen_group = body['groups'].find { |g| g['name'] == 'Kitchen & Appliances' }
-    expect(kitchen_group['options'].map { |o| [o['name'], o['price']] }).to eq([['Stainless Fridge', 1250.0]])
+    expect(kitchen_group['options'].map { |o| [o['name'], o['price']] })
+      .to eq([['Stainless Fridge', 1250.0], ['Stainless Package - Electric', 2500.0], ['Stainless Package - Gas', 2500.0]])
+    expect(kitchen_group['options'].map { |o| o['family'] }.compact.uniq).to eq(['stainless package - {fuel}'])
     siding = body['groups'].find { |g| g['name'] == 'Exterior' }['color_sets']
     expect(siding).to match([{ 'name' => 'Siding', 'options' => [
       a_hash_including('name' => 'Clay', 'standard' => true), a_hash_including('name' => 'White', 'standard' => true)
