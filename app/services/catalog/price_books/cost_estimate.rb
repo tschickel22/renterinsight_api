@@ -3,12 +3,13 @@
 module Catalog
   module PriceBooks
     # What reading a file should cost, shown before the admin starts. Rates
-    # come from the Champion Topeka package (2026-09-29): about 6 cents per
-    # price list page, 4 cents per standards sheet, and 0.15 cents per filled
-    # spreadsheet row (the 2,000-option workbook cost about $3.50).
+    # come from the Champion Topeka package on staging (2026-09-29): about 6
+    # cents per price list page, 4 cents per standards sheet, and the full
+    # 14-tab options workbook (3,287 filled rows) cost $5.98, so 0.18 cents a
+    # row, rounded up to 0.2 so estimates err high.
     module CostEstimate
       PDF_PAGE_USD = 0.06
-      SPREADSHEET_ROW_USD = 0.0015
+      SPREADSHEET_ROW_USD = 0.002
       UNKNOWN_FILE_USD = 0.25
 
       module_function
