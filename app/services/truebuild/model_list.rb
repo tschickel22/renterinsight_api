@@ -43,7 +43,7 @@ module Truebuild
                       .map { |v| { id: v.id, model_number: v.model_number, building_code: v.building_code, beds: v.beds,
                                    baths: v.baths&.to_f, width_ft: v.width_ft, length_ft: v.length_ft } }
         }
-      end.sort_by { |p| [p[:series].to_s, p[:name].to_s] }
+      end.sort_by { |p| [p[:image] ? 0 : 1, p[:series].to_s, p[:name].to_s] } # photographed homes lead
     end
 
     def base_retail(variant)

@@ -36,6 +36,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
   let!(:electric) { option(kitchen, 'Stainless Package - Electric', dealer_cost: 2000) }
   let!(:white) { option(exterior, 'White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Siding' }) }
   let!(:clay) { option(exterior, 'Clay', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Siding' }) }
+  let(:floor_plan) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'floor-plan', name: 'Floor Plan Options', position: 1) }
+  let!(:shutter_black) { option(floor_plan, 'Shutters: Black', kind: 'standard', is_standard: true) }
+  let!(:siding_olive) { option(floor_plan, 'Siding: Olive', kind: 'standard', is_standard: true) }
 
   before do
     CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 80_000)
@@ -57,11 +60,11 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(kitchen_group['options'].map { |o| [o['name'], o['price']] })
       .to eq([['Stainless Fridge', 1250.0], ['Stainless Package - Electric', 2500.0], ['Stainless Package - Gas', 2500.0]])
     expect(kitchen_group['options'].map { |o| o['family'] }.compact.uniq).to eq(['stainless package - {fuel}'])
-    siding = body['groups'].find { |g| g['name'] == 'Exterior' }['color_sets']
-    expect(siding).to match([{ 'name' => 'Siding', 'options' => [
-      a_hash_including('name' => 'Clay', 'standard' => true), a_hash_including('name' => 'White', 'standard' => true)
-    ] }])
     expect(body['standard_features']).to eq([{ 'category' => 'Kitchen', 'items' => ['Shaker cabinets'] }])
+    # "Shutters: Black" is a color to choose, filed under Exterior, not an included Floor Plan option.
+    sets = body['groups'].find { |g| g['name'] == 'Exterior' }['color_sets'].to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
+    expect(sets).to eq('Shutters' => ['Black'], 'Siding' => %w[Clay Olive White])
+    expect(body['groups'].map { |g| g['name'] }).not_to include('Floor Plan Options')
     expect(response.body).not_to match(/cost/i)
     expect(body['media']).to include('photos' => [], 'floor_plans' => [], 'tour_url' => nil)
   end
