@@ -177,6 +177,13 @@ Rails.application.routes.draw do
       end
     end
 
+    # ==================== TRUEBUILD (design a home) ====================
+    get  'truebuild/homes/:vehicle_id', to: 'truebuild#home'
+    get  'truebuild/models/:variant_id', to: 'truebuild#model'
+    post 'truebuild/price', to: 'truebuild#price'
+    post 'truebuild/designs', to: 'truebuild#create_design'
+    get  'truebuild/designs/:design_token', to: 'truebuild#show_design'
+
     # ==================== PUBLIC LAND PARCELS ====================
     resources :land_parcels, only: [:index, :show], controller: 'land_parcels' do
       collection do

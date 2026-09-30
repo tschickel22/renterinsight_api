@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_234000) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_235500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7181,6 +7181,36 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_234000) do
     t.index ["vehicle_id"], name: "index_tracked_links_on_vehicle_id"
   end
 
+  create_table "truebuild_designs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "catalog_plan_variant_id", null: false
+    t.bigint "vehicle_id"
+    t.bigint "lead_id"
+    t.bigint "intake_submission_id"
+    t.bigint "catalog_price_book_id"
+    t.string "public_token", null: false
+    t.string "name"
+    t.string "status", default: "saved", null: false
+    t.jsonb "option_ids", default: [], null: false
+    t.jsonb "price_snapshot", default: {}, null: false
+    t.string "buyer_email"
+    t.string "buyer_name"
+    t.integer "view_count", default: 0, null: false
+    t.datetime "last_viewed_at"
+    t.integer "share_count", default: 0, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_plan_variant_id"], name: "index_truebuild_designs_on_catalog_plan_variant_id"
+    t.index ["catalog_price_book_id"], name: "index_truebuild_designs_on_catalog_price_book_id"
+    t.index ["company_id", "created_at"], name: "index_truebuild_designs_on_company_id_and_created_at"
+    t.index ["company_id"], name: "index_truebuild_designs_on_company_id"
+    t.index ["intake_submission_id"], name: "index_truebuild_designs_on_intake_submission_id"
+    t.index ["lead_id"], name: "index_truebuild_designs_on_lead_id"
+    t.index ["public_token"], name: "index_truebuild_designs_on_public_token", unique: true
+    t.index ["vehicle_id"], name: "index_truebuild_designs_on_vehicle_id"
+  end
+
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "sub_account_sid"
@@ -8763,6 +8793,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_234000) do
   add_foreign_key "tracked_link_events", "tracked_links"
   add_foreign_key "tracked_links", "communications"
   add_foreign_key "tracked_links", "companies"
+  add_foreign_key "truebuild_designs", "catalog_plan_variants"
+  add_foreign_key "truebuild_designs", "catalog_price_books"
+  add_foreign_key "truebuild_designs", "companies"
+  add_foreign_key "truebuild_designs", "intake_submissions"
+  add_foreign_key "truebuild_designs", "leads"
+  add_foreign_key "truebuild_designs", "vehicles"
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"

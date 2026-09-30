@@ -37,3 +37,13 @@ RSpec.describe Catalog::PriceBooks::Applicability do
     expect(keys.option('Drywall', "Drywall T/O SW<=60' box")).not_to eq(keys.option('Drywall', "Drywall T/O SW >60' box"))
   end
 end
+
+RSpec.describe Catalog::PriceBooks::ColorSets do
+  it 'reduces the many titles of a color set to one short name' do
+    expect(%w[Siding SIDING].push('Standard Siding').map { |t| described_class.normalize(t) }.uniq).to eq(['Siding'])
+    expect(described_class.normalize('STANDARD COUNTERTOPS T/O')).to eq('Countertop')
+    expect(described_class.normalize('Subway Tile - 2 Rows')).to eq('Backsplash')
+    expect(described_class.normalize('Accent Wall - VOG')).to eq('Accent wall')
+    expect(described_class.normalize('Corner Post Colors')).to eq('Corner post')
+  end
+end

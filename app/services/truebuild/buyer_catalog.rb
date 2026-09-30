@@ -1,0 +1,101 @@
+# frozen_string_literal: true
+
+module Truebuild
+  # What a buyer on a dealer's website may see for one model: the options it
+  # can have, grouped the way a buyer chooses (one color per set), standard
+  # features, and retail prices only when the dealer shows prices. Never cost.
+  class BuyerCatalog
+    SHOWS_PRICES = %w[full starting_at].freeze
+
+    # A dealer offers TrueBuild once they have set up pricing, and only on
+    # models a published book covers.
+    def self.available?(company, variant)
+      return false unless variant && BookResolver.current_for(variant)
+
+      company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
+    end
+
+    def initialize(company, variant, location: nil)
+      @company = company
+      @variant = variant
+      @location = location
+      @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
+      @book = BookResolver.current_for(variant)
+    end
+
+    def call
+      offered = offered_prices
+      engine = PricingEngine.new(company: @company, variant: @variant, location: @location,
+                                 option_ids: offered.map(&:catalog_option_id).uniq).call
+      base = engine.lines.find { |l| l[:kind] == 'base' }
+      retail_by_option = engine.lines.select { |l| l[:kind] == 'option' }.to_h { |l| [l[:option_id], l[:retail]] }
+      show = SHOWS_PRICES.include?(@terms.price_display) && base[:retail].present?
+
+      {
+        variant: variant_json,
+        display: { mode: @terms.price_display, show_prices: show },
+        base_price: show ? base[:retail] : nil,
+        groups: groups(offered, show ? retail_by_option : {}),
+        standard_features: standard_features
+      }
+    end
+
+    # Retail total for a selection, or nil when the dealer hides prices.
+    def price(option_ids)
+      result = PricingEngine.new(company: @company, variant: @variant, location: @location,
+                                 option_ids: allowed(option_ids)).call
+      show = SHOWS_PRICES.include?(@terms.price_display) && result.totals[:retail].present?
+      { show_prices: show, total: show ? result.totals[:retail] : nil,
+        lines: show ? result.retail_only[:lines] : [], book_id: result.book&.id, option_ids: allowed(option_ids) }
+    end
+
+    # Only options this model offers; anything else from the client is dropped.
+    def allowed(option_ids)
+      ids = Array(option_ids).map(&:to_i).uniq
+      ids & offered_prices.map(&:catalog_option_id)
+    end
+
+    private
+
+    def offered_prices
+      @offered_prices ||= @book.option_prices.includes(option: :group).to_a
+                               .select { |op| op.applies_to?(@variant) && op.option.status == 'active' }
+    end
+
+    def variant_json
+      plan = @variant.catalog_plan
+      { id: @variant.id, model_number: @variant.model_number, name: plan.name, series: plan.series,
+        manufacturer: @variant.manufacturer&.name, building_code: @variant.building_code,
+        beds: @variant.beds, baths: @variant.baths&.to_f, width_ft: @variant.width_ft, length_ft: @variant.length_ft }
+    end
+
+    # Options by group. Colors form one-of-a-kind choice sets; everything else
+    # is an add-on the buyer ticks. A standard option is shown as included.
+    def groups(prices, retail)
+      prices.uniq(&:catalog_option_id).group_by { |op| op.option.group }
+            .sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
+        colors, others = ops.partition { |op| op.option.kind == 'color' }
+        {
+          id: group.id, name: group.name,
+          color_sets: colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
+                            .map { |set, cs| { name: set, options: cs.map { |op| option_json(op, retail) }.sort_by { |o| o[:name] } } }
+                            .sort_by { |s| s[:name] },
+          options: others.map { |op| option_json(op, retail) }.sort_by { |o| [o[:standard] ? 0 : 1, o[:name]] }
+        }
+      end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
+    end
+
+    def option_json(op, retail)
+      o = op.option
+      { id: o.id, name: o.name, kind: o.kind, standard: op.is_standard, swatch_url: o.swatch_url,
+        in_place_of: o.in_place_of, price: op.is_standard ? nil : retail[o.id] }
+    end
+
+    def standard_features
+      plan = @variant.catalog_plan
+      @book.standard_features.where(series: [nil, plan.series])
+           .where(building_code: [nil, @variant.building_code]).order(:category, :position)
+           .group_by(&:category).map { |cat, fs| { category: cat, items: fs.map(&:name).uniq } }
+    end
+  end
+end

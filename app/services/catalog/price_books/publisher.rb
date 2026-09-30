@@ -177,9 +177,11 @@ module Catalog
         p = item.payload
         group = group_for(p['group'].presence || 'Colors')
         option = CatalogOption.find_or_initialize_by(manufacturer_id: @mfr, key: Keys.option(p['group'], p['name']))
-        option.assign_attributes(group: group, name: p['name'].to_s.truncate(250), kind: 'color', status: 'active')
+        option.assign_attributes(group: group, name: p['name'].to_s.truncate(250), kind: 'color', status: 'active',
+                                 metadata: option.metadata.merge('color_set' => ColorSets.normalize(p['group'])))
         option.save!
-        CatalogOptionPrice.create!(price_book: @book, option: option, is_standard: true, source_ref: item.source_ref)
+        CatalogOptionPrice.create!(price_book: @book, option: option, is_standard: true, source_ref: item.source_ref,
+                                   series: Applicability.series_for(p['tab'].to_s, series_list))
         counts['colors'] += 1
       end
 
