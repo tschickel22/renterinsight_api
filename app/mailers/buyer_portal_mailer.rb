@@ -45,18 +45,18 @@ class BuyerPortalMailer < ApplicationMailer
     )
   end
   
-  # A buyer saved a home they designed on the dealer's website. A new login
-  # gets a sign-in link valid for 7 days; an existing one, a link to sign in.
-  def truebuild_design_email(buyer_access, design, magic: false)
-    @buyer_access = buyer_access
+  # A buyer saved a home they designed on the dealer's website. Without a
+  # login yet, the account link claims one (Truebuild::PortalAccess.claim!);
+  # with one, it goes to sign in.
+  def truebuild_design_email(design, access: nil)
     @design = design
-    @company_name = dealership_name(buyer_access)
-    @first_name = buyer_access.buyer.try(:first_name)
+    @company_name = design.company.name.presence || Brand.current.name
+    @first_name = design.lead&.first_name
     frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
-    @portal_link = if magic && buyer_access.login_token.present?
-                     "#{frontend_url}/magic-link?token=#{buyer_access.login_token}&next=designs"
+    @portal_link = if access
+                     "#{frontend_url}/client/login?email=#{CGI.escape(access.email)}"
                    else
-                     "#{frontend_url}/client/login?email=#{CGI.escape(buyer_access.email)}"
+                     "#{frontend_url}/magic-link?claim=#{CGI.escape(Truebuild::PortalAccess.claim_token(design))}&next=designs"
                    end
     @design_link = Truebuild::DesignSaver.design_url(design)
     snap = design.price_snapshot
@@ -64,7 +64,7 @@ class BuyerPortalMailer < ApplicationMailer
     @options = CatalogOption.where(id: design.option_ids).pluck(:name)
 
     configure_mailer_from_settings
-    mail(to: buyer_access.email, from: "#{get_from_name} <#{get_from_email}>",
+    mail(to: design.buyer_email, from: "#{get_from_name} <#{get_from_email}>",
          subject: "Your #{design.variant.catalog_plan.name} design is saved")
   end
 

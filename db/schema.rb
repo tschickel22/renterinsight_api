@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_235970) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_235990) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8802,16 +8802,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235970) do
   add_foreign_key "tracked_link_events", "tracked_links"
   add_foreign_key "tracked_links", "communications"
   add_foreign_key "tracked_links", "companies"
-  add_foreign_key "truebuild_designs", "accounts"
+  add_foreign_key "truebuild_designs", "accounts", on_delete: :nullify
   add_foreign_key "truebuild_designs", "catalog_plan_variants"
   add_foreign_key "truebuild_designs", "catalog_price_books"
   add_foreign_key "truebuild_designs", "companies"
-  add_foreign_key "truebuild_designs", "contacts"
-  add_foreign_key "truebuild_designs", "deals"
-  add_foreign_key "truebuild_designs", "intake_submissions"
-  add_foreign_key "truebuild_designs", "leads"
-  add_foreign_key "truebuild_designs", "quotes"
-  add_foreign_key "truebuild_designs", "vehicles"
+  add_foreign_key "truebuild_designs", "contacts", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "deals", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "intake_submissions", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "leads", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "quotes", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "vehicles", on_delete: :nullify
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"

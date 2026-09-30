@@ -3173,6 +3173,7 @@ Rails.application.routes.draw do
       post 'auth/request_magic_link', to: 'auth#request_magic_link'
       post 'auth/magic-link', to: 'auth#request_magic_link'
       get 'auth/verify_magic_link', to: 'auth#verify_magic_link'
+      get 'auth/claim_design', to: 'auth#claim_design'
       post 'auth/request_reset', to: 'auth#request_reset'
       # Alias for request_reset. Used to point at a nonexistent auth#forgot_password,
       # so anything hitting this path got a 404 instead of a reset email.

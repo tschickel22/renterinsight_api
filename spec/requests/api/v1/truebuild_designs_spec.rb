@@ -43,4 +43,11 @@ RSpec.describe 'Api::V1::TruebuildDesigns', type: :request do
     get '/api/v1/truebuild_designs', params: { deal_id: 0 }, headers: headers
     expect(JSON.parse(response.body)['designs']).to be_empty
   end
+
+  it 'lets a contact with a design be deleted; the design just loses the link' do
+    contact = Contact.create!(company_id: company.id, first_name: 'Tia', last_name: 'May', email: 'tia@example.com')
+    design = company.truebuild_designs.create!(variant: variant, lead: lead, contact: contact, name: 'Belvidere')
+    contact.destroy!
+    expect(design.reload.contact_id).to be_nil
+  end
 end

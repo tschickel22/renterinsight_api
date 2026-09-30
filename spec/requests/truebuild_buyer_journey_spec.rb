@@ -47,29 +47,55 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     TruebuildDesign.last
   end
 
-  it 'gives the buyer a lead-level portal login that sees designs and nothing else' do
+  def claim(design)
+    get '/api/portal/auth/claim_design', params: { token: Truebuild::PortalAccess.claim_token(design) }
+    JSON.parse(response.body)
+  end
+
+  it 'invites the buyer by email, makes the login when they click, and that login sees designs and nothing else' do
     design = nil
     expect { design = save_design }.to have_enqueued_mail(BuyerPortalMailer, :truebuild_design_email)
+    expect(BuyerPortalAccess.find_by(email: 'tia@example.com')).to be_nil # nothing until they prove the inbox
+    expect(design.reload.metadata['portal']).to include('state' => 'invited')
+
+    mail = BuyerPortalMailer.truebuild_design_email(design)
+    expect(mail.subject).to eq('Your Belvidere design is saved')
+    expect(mail.body.encoded).to include('Stainless Fridge', '$101,250', 'magic-link?claim=', 'next=designs')
+    expect(mail.body.encoded).not_to match(/\u2014|\u2013/)
+
+    body = claim(design)
+    expect(body).to include('success' => true)
     access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
     expect(access).to have_attributes(buyer: design.lead, company_id: company.id, portal_enabled: true)
-    expect(access.login_token_expires_at).to be > 6.days.from_now
-    expect(design.reload.metadata['portal']).to include('state' => 'created')
-    mail = BuyerPortalMailer.truebuild_design_email(access, design, magic: true)
-    expect(mail.subject).to eq('Your Belvidere design is saved')
-    expect(mail.body.encoded).to include('Stainless Fridge', '$101,250', "magic-link?token=#{access.login_token}&amp;next=designs")
-    expect(mail.body.encoded).not_to match(/—|–/)
+    expect(claim(design)['success']).to be(true) # the link signs in again, making nothing new
+    expect(BuyerPortalAccess.where(email: 'tia@example.com').count).to eq(1)
 
-    portal = { 'Authorization' => "Bearer #{JsonWebToken.encode(buyer_portal_access_id: access.id)}" }
+    portal = { 'Authorization' => "Bearer #{body['token']}" }
     get '/api/portal/truebuild_designs', headers: portal
     expect(JSON.parse(response.body)['designs'].first).to include('plan' => 'Belvidere', 'price' => 101_250.0,
                                                                    'options' => ['Stainless Fridge'])
     get '/api/portal/quotes', headers: portal
     expect(response).to have_http_status(:forbidden)
     expect(JSON.parse(response.body)['code']).to eq('lead_portal')
+
+    get '/api/portal/auth/claim_design', params: { token: 'forged' }
+    expect(response).to have_http_status(:unauthorized)
+  end
+
+  it "never gives a login to a lead whose email is not the saver's (a phone match merged them)" do
+    design = save_design
+    someone_else = company.leads.create!(first_name: 'Ana', last_name: 'Lee', email: 'ana@example.com', status: 'new')
+    design.update!(lead: someone_else)
+
+    Truebuild::PortalAccess.call(design)
+    expect(design.reload.metadata['portal']).to eq('state' => 'lead_email_mismatch')
+    expect(claim(design)['success']).to be(false)
+    expect(BuyerPortalAccess.where(buyer: someone_else)).to be_empty
   end
 
   it 'moves the login and designs to the contact on conversion, then quotes the design' do
     design = save_design
+    claim(design)
     post "/api/v1/truebuild_designs/#{design.id}/quote", headers: rep_headers
     expect(response).to have_http_status(:unprocessable_entity)
 

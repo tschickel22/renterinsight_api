@@ -7,12 +7,22 @@ RSpec.describe Catalog::PriceBooks::Plants do
   let!(:topeka) { mfr.factories.create!(name: 'Topeka, Dutch Housing', code: "TOP#{SecureRandom.hex(2)}") }
   let(:book) { CatalogPriceBook.create!(manufacturer: mfr, factory: topeka, name: 'Topeka 2026', status: 'published', published_at: 1.day.ago) }
 
+  it 'does not match a plant on generic words like factory or homes' do
+    mfr.factories.create!(name: 'Meridian Factory', code: 'MER')
+    mfr.factories.create!(name: 'Champion Homes - Benton', code: 'BEN')
+    expect(described_class.detect('Prime - Decatur factory', mfr)).to be_nil
+    expect(described_class.detect('Homes options', mfr)).to be_nil
+    expect(described_class.detect('Benton specials', mfr).name).to eq('Champion Homes - Benton')
+  end
+
   it 'finds a known plant by name, adds one a tab names plainly, and ignores tabs naming none' do
     expect(described_class.detect('Topeka specials', mfr)).to eq(topeka)
-    decatur = described_class.detect('Prime - Decatur factory', mfr)
+    expect(described_class.detect('Prime - Decatur factory', mfr)).to be_nil # finding only, unless publishing
+    decatur = described_class.detect('Prime - Decatur factory', mfr, create: true)
     expect(decatur).to have_attributes(name: 'Decatur', manufacturer_id: mfr.id)
     expect(described_class.detect('Prime - Decatur factory', mfr)).to eq(decatur)
     expect(described_class.detect('2025 Aspire DW', mfr)).to be_nil
+    expect(described_class.detect('Base Factory Options', mfr, create: true)).to be_nil
   end
 
   it "labels a series with the plant its tab names, and the model stays priced by its book" do

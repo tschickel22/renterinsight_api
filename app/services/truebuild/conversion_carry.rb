@@ -13,9 +13,11 @@ module Truebuild
       return 0 if designs.none?
 
       designs.update_all(contact_id: contact&.id, account_id: account&.id, deal_id: deal&.id, updated_at: Time.current)
-      if contact
-        BuyerPortalAccess.where(buyer_type: 'Lead', buyer_id: lead.id).update_all(buyer_type: 'Contact', buyer_id: contact.id,
-                                                                                 updated_at: Time.current)
+      # Only a login with the contact's own email follows them: a login is a
+      # person's, and a lead can have been merged with someone else's saves.
+      if contact&.email.present?
+        BuyerPortalAccess.where(buyer_type: 'Lead', buyer_id: lead.id).where('LOWER(email) = ?', contact.email.downcase)
+                         .update_all(buyer_type: 'Contact', buyer_id: contact.id, updated_at: Time.current)
       end
       fill_deal(deal, designs.order(created_at: :desc).first) if deal
       designs.size

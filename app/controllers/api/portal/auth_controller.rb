@@ -6,6 +6,7 @@ module Api
         :login, 
         :request_magic_link, 
         :verify_magic_link, 
+        :claim_design,
         :request_reset, 
         :reset_password,
         :verify_invitation,
@@ -57,6 +58,21 @@ module Api
         end
       end
       
+      # GET /api/portal/auth/claim_design?token=
+      # The link in a saved-design email: creates the buyer's login on first
+      # use (Truebuild::PortalAccess.claim!) and signs them in.
+      def claim_design
+        buyer_access = Truebuild::PortalAccess.claim!(params[:token])
+        unless buyer_access
+          return render json: { success: false, error: 'This link has expired or is no longer valid' }, status: :unauthorized
+        end
+
+        buyer_access.record_login!(request.remote_ip)
+        profile = buyer_profile(buyer_access)
+        render json: { success: true, token: JsonWebToken.encode(buyer_portal_access_id: buyer_access.id),
+                       user: profile.merge(user_type: 'client'), buyer: profile }, status: :ok
+      end
+
       def verify_magic_link
         buyer_access = BuyerPortalAccess.find_by(login_token: params[:token])
         

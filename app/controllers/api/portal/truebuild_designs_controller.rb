@@ -8,8 +8,9 @@ module Api
       # GET /api/portal/truebuild_designs
       def index
         designs = @company.truebuild_designs.includes(variant: :catalog_plan).order(created_at: :desc)
+        # By the buyer record only. Matching on email too let anyone who
+        # changed their login email see designs saved under it.
         designs = designs.where(lead_id: buyer_lead_ids).or(designs.where(contact_id: buyer_contact_ids))
-                         .or(designs.where('LOWER(truebuild_designs.buyer_email) = ?', current_buyer_access.email.to_s.downcase))
         render json: { designs: designs.limit(50).map { |d| design_json(d) } }
       end
 

@@ -13,6 +13,10 @@ module Truebuild
     end
 
     def call(manufacturer_id: nil)
+      # Only manufacturers with a published book: an arbitrary id must not
+      # force a fresh, expensive build on every request.
+      manufacturer_id = nil unless manufacturer_id.blank? || CatalogPriceBook.published.exists?(manufacturer_id: manufacturer_id)
+      manufacturer_id = manufacturer_id.presence&.to_i
       Rails.cache.fetch(cache_key(manufacturer_id), expires_in: 30.minutes) { build(manufacturer_id) }
     end
 
@@ -27,10 +31,10 @@ module Truebuild
                                    .where(status: 'active').includes(:catalog_plan, :manufacturer).to_a
 
       variants.group_by(&:catalog_plan).filter_map do |plan, vs|
-        priced = vs.filter_map { |v| [v, base_retail(v)] }
-        next if priced.empty?
+        priced = vs.filter_map { |v| (r = base_retail(v)) ? [v, r] : nil }
+        next if priced.empty? # no retail for any size: nothing a buyer can price
 
-        cheapest = priced.min_by { |_, r| r || Float::INFINITY }
+        cheapest = priced.min_by { |_, r| r }
         media = vs.map(&:media).find { |m| m.present? && (Array(m['photos']).any? || Array(m['elevations']).any?) } || {}
         {
           plan_id: plan.id, name: plan.name, series: plan.series, manufacturer: vs.first.manufacturer&.name,

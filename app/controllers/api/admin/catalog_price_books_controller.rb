@@ -313,7 +313,7 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
         CatalogPlan.where(id: plan_ids).update_all(factory_id: factory.id)
       end
     end
-    Catalog::PriceBooks::Plants.label_series(@book) if @book.published?
+    Catalog::PriceBooks::Plants.label_series(@book, create: false) if @book.published?
     render json: document_json(doc.reload)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found

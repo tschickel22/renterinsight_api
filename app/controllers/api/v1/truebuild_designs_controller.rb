@@ -36,6 +36,8 @@ class Api::V1::TruebuildDesignsController < ApplicationController
     render json: quote_json(quote), status: :created
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: "Could not price this design for a quote: #{e.message}" }, status: :unprocessable_entity
   end
 
   private
