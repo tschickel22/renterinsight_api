@@ -41,6 +41,7 @@ module Truebuild
           adoption.assign_attributes(status: 'adopted', decided_at: Time.current)
         end
         adoption.update!(summary: summary.deep_stringify_keys, notified_at: Time.current)
+        DesignRepricer.call(adoption.company) if adoption.status == 'adopted'
         notify(adoption, book, summary)
       end
     end

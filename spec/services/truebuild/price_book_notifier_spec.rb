@@ -63,6 +63,15 @@ RSpec.describe Truebuild::PriceBookNotifier do
 
     adoption.update!(status: 'adopted')
     expect(Truebuild::BookResolver.book_for(company, variant)).to eq(book)
+
+    # A design saved at the old price is flagged once the dealer's prices move.
+    lead = company.leads.create!(first_name: 'Tia', last_name: 'May', email: 'tia@example.com', owner_id: admin.id, status: 'new')
+    design = company.truebuild_designs.create!(variant: variant, lead: lead, name: 'Belvidere',
+                                               price_snapshot: { 'show_prices' => true, 'total' => 75_000.0 })
+    Truebuild::DesignRepricer.call(company)
+    expect(design.reload.metadata).to include('price_today' => 78_750.0, 'price_change' => 3750.0)
+    queue = WorkqueueService.new(company: company, user: admin, queue_id: 'leads_design_price_up')
+    expect(queue.items[:items].map { |r| r[:entity_id] }).to eq([lead.id])
   end
 
   it 'adopts right away for dealers on automatic updates, and for feature-only books' do

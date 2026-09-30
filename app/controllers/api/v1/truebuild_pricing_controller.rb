@@ -52,6 +52,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return render json: { error: 'A newer price book replaced this one' }, status: :unprocessable_entity unless @update.price_book.published?
 
     @update.update!(status: 'adopted', decided_at: Time.current, decided_by: current_user)
+    Truebuild::DesignRepricer.call(@company)
     render json: update_json(@update, full: true)
   end
 
