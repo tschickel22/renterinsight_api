@@ -9,9 +9,15 @@ module Truebuild
   module BookResolver
     module_function
 
-    # The plant's published book: where cost always comes from.
+    # The newest published book that prices this model: where cost always
+    # comes from. Decided by the price row, not the plan's plant, so a
+    # package covering two plants, or a later book for just one of them,
+    # never leaves a model unpriced.
     def current_for(variant)
-      CatalogPriceBook.current_for(manufacturer_id: variant.manufacturer_id, factory_id: variant.catalog_plan.factory_id)
+      CatalogPriceBook.published.where(manufacturer_id: variant.manufacturer_id)
+                      .where(id: CatalogVariantPrice.where(catalog_plan_variant_id: variant.id).select(:catalog_price_book_id))
+                      .order(published_at: :desc, id: :desc).first ||
+        CatalogPriceBook.current_for(manufacturer_id: variant.manufacturer_id, factory_id: variant.catalog_plan.factory_id)
     end
 
     # The book the dealer's retail comes from.

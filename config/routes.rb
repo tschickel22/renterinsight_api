@@ -3023,6 +3023,7 @@ Rails.application.routes.draw do
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
           get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs
           patch 'documents/:document_id/tabs', action: :update_tabs, as: :update_document_tabs
+          patch 'documents/:document_id/plant', action: :update_plant, as: :update_document_plant
         end
       end
 

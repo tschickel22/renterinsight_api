@@ -35,6 +35,7 @@ module Catalog
 
           @book.update!(metadata: @book.metadata.merge('published_counts' => counts))
           @book.publish!(by: @user)
+          counts['plants_labelled'] = Plants.label_series(@book).size
           Truebuild::PriceBookNotifier.hold_for_review(@book)
           link_inventory
         end
@@ -97,7 +98,7 @@ module Catalog
 
         name = p['plan_name'].presence || Keys.plan_name(p['model_name'], series, p['model_number'])
         plan = CatalogPlan.find_or_initialize_by(manufacturer_id: @mfr, series: series, slug: name.parameterize)
-        plan.assign_attributes(name: name, factory_id: @book.factory_id, status: 'active')
+        plan.assign_attributes(name: name, factory_id: Plants.for_item(item, @book), status: 'active')
         plan.plan_code ||= Catalog::ModelNumber.parse(p['model_number']).plan_code
         plan.save!
 

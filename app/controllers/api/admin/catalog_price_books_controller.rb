@@ -296,6 +296,28 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     render json: { items: items }
   end
 
+  # PATCH /api/admin/catalog_price_books/:id/documents/:document_id/plant   { factory_id, tab }
+  # Which plant builds the homes in a file, or in one tab of a workbook. A
+  # label only: prices come from whichever book prices the model.
+  def update_plant
+    doc = @book.documents.find(params[:document_id])
+    factory = @book.manufacturer.factories.find(params[:factory_id])
+    if params[:tab].present?
+      doc.update!(metadata: doc.metadata.merge('tab_plants' => (doc.metadata['tab_plants'] || {}).merge(params[:tab] => factory.id)))
+    else
+      doc.update!(metadata: doc.metadata.merge('plant_id' => factory.id))
+      if @book.published?
+        variant_ids = doc.import_items.where(item_type: 'variant_price', matched_type: 'CatalogPlanVariant').pluck(:matched_id)
+        plan_ids = CatalogPlanVariant.where(id: variant_ids).select(:catalog_plan_id)
+        CatalogPlan.where(id: plan_ids).update_all(factory_id: factory.id)
+      end
+    end
+    Catalog::PriceBooks::Plants.label_series(@book) if @book.published?
+    render json: document_json(doc.reload)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
   # GET /api/admin/catalog_price_books/:id/link_sources
   def link_sources
     render json: { loaded: Catalog::PriceBooks::LinkSources.loaded,
@@ -428,7 +450,11 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
   def tabs_json(doc)
     selected = Array(doc.metadata['selected_tabs'])
     items = @book.import_items.where(document: doc).group(Arel.sql("source_ref->>'sheet'")).count
-    tabs = Array(doc.metadata['tab_list']).map { |t| t.merge('selected' => selected.include?(t['name']), 'items' => items[t['name']].to_i) }
+    plants = Catalog::PriceBooks::Plants.tab_plants(doc, @book.manufacturer)
+    tabs = Array(doc.metadata['tab_list']).map do |t|
+      t.merge('selected' => selected.include?(t['name']), 'items' => items[t['name']].to_i,
+              'plant_id' => plants[t['name']] || @book.factory_id)
+    end
     { document_id: doc.id, tabs: tabs, selected_tabs: selected,
       estimate_usd: Catalog::PriceBooks::CostEstimate.for_document(doc).round(2) }
   end
@@ -443,7 +469,8 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
       tabs: doc.metadata['tabs'],
       usage: usage.presence && usage.merge('cost_usd' => Catalog::PriceBooks::Recorder.usage_cost(usage).round(4)),
       estimate_usd: Catalog::PriceBooks::CostEstimate.for_document(doc).round(2),
-      item_count: doc.import_items.size
+      item_count: doc.import_items.size,
+      plant_id: doc.metadata['plant_id'] || doc.price_book.factory_id
     }
   end
 

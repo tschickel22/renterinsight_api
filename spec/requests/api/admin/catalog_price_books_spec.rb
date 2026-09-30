@@ -159,4 +159,26 @@ RSpec.describe 'Api::Admin::CatalogPriceBooks', type: :request do
     get "/api/admin/catalog_price_books/#{book.id}/documents/#{doc.id}/download", headers: headers
     expect(JSON.parse(response.body)['url']).to include('dt-private-test', 'X-Amz-Expires=600')
   end
+
+  it 'sets the plant for a file or a tab, and relabels a published book' do
+    topeka = mfr.factories.create!(name: 'Topeka', code: "T#{SecureRandom.hex(2)}")
+    decatur = mfr.factories.create!(name: 'Decatur', code: "D#{SecureRandom.hex(2)}")
+    book = CatalogPriceBook.create!(manufacturer: mfr, factory: topeka, name: 'Topeka 2026', status: 'published', published_at: Time.current)
+    plan = CatalogPlan.create!(manufacturer: mfr, factory: topeka, series: 'Prime Of Indiana', name: 'P01')
+    variant = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '1676H32P01')
+    doc = book.documents.create!(filename: 'prime.pdf', checksum_sha256: SecureRandom.hex(16), kind: 'price_list')
+    book.import_items.create!(document: doc, item_type: 'variant_price', review_status: 'approved', payload: {},
+                              matched_type: 'CatalogPlanVariant', matched_id: variant.id)
+    sheet = book.documents.create!(filename: 'options.xlsx', checksum_sha256: SecureRandom.hex(16), kind: 'order_form',
+                                   metadata: { 'tab_list' => [{ 'name' => 'Prime options' }] })
+
+    patch "/api/admin/catalog_price_books/#{book.id}/documents/#{doc.id}/plant", headers: headers, params: { factory_id: decatur.id }
+    expect(JSON.parse(response.body)['plant_id']).to eq(decatur.id)
+    expect(plan.reload.factory_id).to eq(decatur.id)
+
+    patch "/api/admin/catalog_price_books/#{book.id}/documents/#{sheet.id}/plant", headers: headers,
+                                                                                  params: { factory_id: decatur.id, tab: 'Prime options' }
+    get "/api/admin/catalog_price_books/#{book.id}/documents/#{sheet.id}/tabs", headers: headers
+    expect(JSON.parse(response.body)['tabs'].first['plant_id']).to eq(decatur.id)
+  end
 end
