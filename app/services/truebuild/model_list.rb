@@ -61,6 +61,7 @@ module Truebuild
 
     def cache_key(manufacturer_id)
       stamp = [@company.dealer_markup_rules.maximum(:updated_at), @company.dealer_catalog_terms.maximum(:updated_at),
+               @company.truebuild_addons.maximum(:updated_at),
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogPlanVariant.maximum(:updated_at), @company.updated_at].map { |t| t&.to_i }.join('-')
       "truebuild:models:#{@company.id}:#{manufacturer_id}:#{stamp}"

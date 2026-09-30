@@ -42,7 +42,7 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location).price(params[:option_ids])
+    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location).price(params[:option_ids], params[:addon_ids])
   end
 
   def create_design
@@ -52,7 +52,7 @@ class Public::TruebuildController < ApplicationController
     return render json: { error: 'Too many saves. Please try again later.' }, status: :too_many_requests if throttled?
 
     design = Truebuild::DesignSaver.new(
-      company: @company, variant: variant, vehicle: vehicle, option_ids: params[:option_ids],
+      company: @company, variant: variant, vehicle: vehicle, option_ids: params[:option_ids], addon_ids: params[:addon_ids],
       contact: params.fetch(:contact, {}).permit(:first_name, :last_name, :email, :phone, :message, :marketing_consent).to_h,
       context: params.fetch(:context, {}).permit(:page_url, :utm_source, :utm_medium, :utm_campaign, :utm_content, :utm_term).to_h,
       request: request

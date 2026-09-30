@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_30_235995) do
+ActiveRecord::Schema[8.0].define(version: 2026_09_30_235997) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7011,6 +7011,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235995) do
     t.index ["vehicle_id"], name: "index_tracked_links_on_vehicle_id"
   end
 
+  create_table "truebuild_addons", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "source_type", null: false
+    t.bigint "source_id", null: false
+    t.string "mode", default: "included", null: false
+    t.decimal "price_override", precision: 12, scale: 2
+    t.bigint "manufacturer_id"
+    t.integer "position", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "source_type", "source_id"], name: "idx_on_company_id_source_type_source_id_ac014cffc1", unique: true
+    t.index ["company_id"], name: "index_truebuild_addons_on_company_id"
+    t.index ["manufacturer_id"], name: "index_truebuild_addons_on_manufacturer_id"
+  end
+
   create_table "truebuild_designs", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "catalog_plan_variant_id", null: false
@@ -8615,6 +8631,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_30_235995) do
   add_foreign_key "tracked_link_events", "tracked_links"
   add_foreign_key "tracked_links", "communications"
   add_foreign_key "tracked_links", "companies"
+  add_foreign_key "truebuild_addons", "companies"
+  add_foreign_key "truebuild_addons", "manufacturers"
   add_foreign_key "truebuild_designs", "accounts", on_delete: :nullify
   add_foreign_key "truebuild_designs", "catalog_plan_variants"
   add_foreign_key "truebuild_designs", "catalog_price_books"

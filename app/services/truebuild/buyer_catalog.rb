@@ -48,7 +48,13 @@ module Truebuild
         base_price: show ? base[:retail] : nil,
         base_monthly: monthly ? payments.monthly(base[:retail]) : nil,
         groups: groups(offered, show ? retail_by_option : {}),
-        standard_features: standard_features
+        standard_features: standard_features,
+        # The dealer's own: always in the price (delivery, setup), or the buyer's
+        # choice. Quote-only ones never reach a buyer.
+        addons: {
+          included: dealer_addons.select { |a| a.mode == 'included' }.map { |a| addon_json(a, show) },
+          optional: dealer_addons.select { |a| a.mode == 'optional' }.map { |a| addon_json(a, show) }
+        }
       }
     end
 
@@ -62,14 +68,20 @@ module Truebuild
     end
 
     # Retail total for a selection, or nil when the dealer hides prices.
-    def price(option_ids)
+    def price(option_ids, addon_ids = [])
       result = PricingEngine.new(company: @company, variant: @variant, location: @location,
-                                 option_ids: allowed(option_ids)).call
+                                 option_ids: allowed(option_ids), addon_ids: allowed_addons(addon_ids)).call
       show = SHOWS_PRICES.include?(@terms.price_display) && result.totals[:retail].present?
       monthly = SHOWS_MONTHLY.include?(@terms.price_display) && result.totals[:retail].present? && payments.enabled?
       { show_prices: show, total: show ? result.totals[:retail] : nil,
         monthly: monthly ? payments.monthly(result.totals[:retail]) : nil,
-        lines: show ? result.retail_only[:lines] : [], book_id: result.book&.id, option_ids: allowed(option_ids) }
+        lines: show ? result.retail_only[:lines] : [], book_id: result.book&.id, option_ids: allowed(option_ids),
+        addon_ids: allowed_addons(addon_ids) }
+    end
+
+    # Only this dealer's optional add-ons; included ones are always priced.
+    def allowed_addons(addon_ids)
+      Array(addon_ids).map(&:to_i).uniq & dealer_addons.select { |a| a.mode == 'optional' }.map(&:id)
     end
 
     # Only options this model offers; anything else from the client is dropped.
@@ -84,12 +96,22 @@ module Truebuild
       @payments ||= PaymentEstimate.new(@company)
     end
 
+    def dealer_addons
+      @dealer_addons ||= @company.truebuild_addons.active.for_manufacturer(@variant.manufacturer_id)
+                                 .where.not(mode: 'quote_only').includes(:source).order(:position, :id).to_a
+    end
+
+    def addon_json(addon, show)
+      { id: addon.id, name: addon.name, description: addon.description.presence, price: show ? addon.price.to_f : nil }
+    end
+
     def cache_key
       stamp = [@company.dealer_markup_rules.maximum(:updated_at), @company.dealer_catalog_terms.maximum(:updated_at),
+               @company.truebuild_addons.maximum(:updated_at),
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v2:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v3:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices

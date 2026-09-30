@@ -13,11 +13,12 @@ module Truebuild
 
     class Invalid < StandardError; end
 
-    def initialize(company:, variant:, vehicle: nil, option_ids: [], contact: {}, request: nil, context: {})
+    def initialize(company:, variant:, vehicle: nil, option_ids: [], contact: {}, request: nil, context: {}, addon_ids: [])
       @company = company
       @variant = variant
       @vehicle = vehicle
       @option_ids = option_ids
+      @addon_ids = addon_ids
       @contact = contact.to_h.transform_keys(&:to_s)
       @request = request
       @context = context.to_h.transform_keys(&:to_s)
@@ -26,7 +27,7 @@ module Truebuild
     def call
       validate!
       catalog = BuyerCatalog.new(@company, @variant, location: @vehicle&.location)
-      price = catalog.price(@option_ids)
+      price = catalog.price(@option_ids, @addon_ids)
 
       design = @company.truebuild_designs.create!(
         variant: @variant, vehicle: @vehicle, option_ids: price[:option_ids], price_book: BookResolver.current_for(@variant),
@@ -34,7 +35,7 @@ module Truebuild
         buyer_email: @contact['email'].to_s.strip.downcase,
         buyer_name: [@contact['first_name'], @contact['last_name']].compact.join(' ').strip,
         price_snapshot: snapshot(price).deep_stringify_keys,
-        metadata: { 'utm' => @context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term]),
+        metadata: { 'addon_ids' => price[:addon_ids], 'utm' => @context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term]),
                     'page_url' => @context['page_url'].presence }.compact.deep_stringify_keys
       )
 

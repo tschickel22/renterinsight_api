@@ -10,7 +10,8 @@ class Api::V1::TruebuildPricingController < ApplicationController
   before_action :set_rule, only: %i[update_rule destroy_rule]
   before_action :set_update, only: %i[show_update accept_update decline_update]
   # A price change re-prices the site's Design Your Home list before a buyer asks.
-  after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update]
+  after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update
+                                          create_addon update_addon destroy_addon]
 
   TERM_FIELDS = %i[price_update_policy price_display program_discount_pct freight_per_mile freight_flat freight_miles
                    margin_floor_pct round_retail_to].freeze
@@ -38,6 +39,54 @@ class Api::V1::TruebuildPricingController < ApplicationController
                        .includes(price_book: %i[manufacturer factory]).order(created_at: :desc).limit(20)
                        .map { |a| update_json(a) }
     }
+  end
+
+  # GET /api/v1/truebuild_pricing/addons
+  # The dealer's package and fee templates, and which are in TrueBuild how.
+  def addons
+    return unless authorize_action!('company_settings', 'read')
+
+    chosen = @company.truebuild_addons.includes(:source).order(:position, :id).to_a
+    by_source = chosen.index_by { |a| [a.source_type, a.source_id] }
+    templates = @company.package_templates.active.ordered.map { |t| template_json(t, 'PackageTemplate', t.default_price, by_source) } +
+                FeeTemplate.where(company_id: @company.id).active.ordered.map { |t| template_json(t, 'FeeTemplate', t.default_amount, by_source) }
+    render json: { templates: templates, addons: chosen.map { |a| addon_json(a) } }
+  end
+
+  # POST /api/v1/truebuild_pricing/addons   { source_type, source_id, mode, price_override, manufacturer_id }
+  def create_addon
+    return unless authorize_action!('company_settings', 'update')
+
+    addon = @company.truebuild_addons.build(addon_params.merge(source_type: params[:source_type], source_id: params[:source_id]))
+    if addon.source_type.in?(TruebuildAddon::SOURCES) && addon.save
+      render json: addon_json(addon), status: :created
+    else
+      render json: { errors: addon.errors.full_messages.presence || ['Choose one of your packages or fees'] }, status: :unprocessable_entity
+    end
+  end
+
+  # PATCH /api/v1/truebuild_pricing/addons/:id   { mode, price_override, manufacturer_id, active, position }
+  def update_addon
+    return unless authorize_action!('company_settings', 'update')
+
+    addon = @company.truebuild_addons.find(params[:id])
+    if addon.update(addon_params)
+      render json: addon_json(addon)
+    else
+      render json: { errors: addon.errors.full_messages }, status: :unprocessable_entity
+    end
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
+  # DELETE /api/v1/truebuild_pricing/addons/:id
+  def destroy_addon
+    return unless authorize_action!('company_settings', 'update')
+
+    @company.truebuild_addons.find(params[:id]).destroy!
+    head :no_content
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
   end
 
   # GET /api/v1/truebuild_pricing/updates/:id
@@ -175,6 +224,27 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
   def warm_model_list
     TruebuildModelListWarmJob.perform_later(@company.id) if response.successful?
+  end
+
+  # Never company_id or source: an add-on is built on @company from its own templates.
+  def addon_params
+    permitted = params.permit(:mode, :price_override, :manufacturer_id, :active, :position)
+    permitted[:price_override] = nil if permitted.key?(:price_override) && permitted[:price_override].blank?
+    permitted[:manufacturer_id] = nil if permitted.key?(:manufacturer_id) && permitted[:manufacturer_id].blank?
+    permitted
+  end
+
+  def template_json(template, type, price, by_source)
+    chosen = by_source[[type, template.id]]
+    { source_type: type, source_id: template.id, name: template.name, price: price.to_f,
+      kind: type == 'FeeTemplate' ? template.fee_type : 'package', addon_id: chosen&.id }
+  end
+
+  def addon_json(a)
+    { id: a.id, source_type: a.source_type, source_id: a.source_id, name: a.name, mode: a.mode,
+      template_price: (a.fee? ? a.source.default_amount : a.source.default_price).to_f,
+      price_override: a.price_override&.to_f, price: a.price.to_f, manufacturer_id: a.manufacturer_id,
+      active: a.active, position: a.position }
   end
 
   def set_update

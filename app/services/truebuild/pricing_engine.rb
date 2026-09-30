@@ -24,14 +24,18 @@ module Truebuild
       # What a buyer may see: retail only, no cost, no rule detail.
       def retail_only
         { model_number: variant.model_number, total: totals[:retail],
-          lines: lines.map { |l| l.slice(:kind, :label, :retail) } }
+          lines: lines.map { |l| l.slice(:kind, :label, :retail, :addon_id) } }
       end
     end
 
-    def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil)
+    # addon_ids: the buyer's chosen optional dealer add-ons. quote: include
+    # the dealer's quote-only add-ons too (never for a buyer).
+    def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
+      @addon_ids = Array(addon_ids).map(&:to_i).uniq
+      @quote = quote
       @location = location
       @construction = construction
       # Cost always follows the factory's current book: that is what the
@@ -53,7 +57,7 @@ module Truebuild
         @warnings << "Your prices are still based on #{@book.name}, but costs follow #{@cost_book.name}. " \
                      'Review the new price book to update your prices.'
       end
-      lines = [base_line, *option_lines, freight_line].compact
+      lines = [base_line, *option_lines, freight_line, *addon_lines].compact
       totals = totals_for(lines)
       Result.new(book: @book, cost_book: @cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
@@ -156,6 +160,20 @@ module Truebuild
       rule = rule_for(:freight)
       { kind: 'freight', label: 'Freight', cost: money(cost), retail: money(rule ? rule.apply(cost) : cost),
         detail: { flat: money(flat), per_mile: money(per_mile), miles: miles } }
+    end
+
+    # ---- the dealer's own add-ons ---------------------------------------
+
+    # Always-included add-ons (delivery, setup), the optional ones the buyer
+    # chose, and on a quote the quote-only ones. Priced as the dealer set them.
+    def addon_lines
+      addons = @company.truebuild_addons.active.for_manufacturer(@variant.manufacturer_id).includes(:source).order(:position, :id)
+      addons.select do |a|
+        a.mode == 'included' || (a.mode == 'optional' && @addon_ids.include?(a.id)) || (a.mode == 'quote_only' && @quote)
+      end.map do |a|
+        { kind: 'addon', addon_id: a.id, label: a.name, cost: money(a.cost), retail: money(a.price),
+          detail: { mode: a.mode, fee: a.fee?, taxable: a.taxable } }
+      end
     end
 
     # ---- totals --------------------------------------------------------
