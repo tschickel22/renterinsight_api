@@ -13,10 +13,12 @@ module Truebuild
   # The breakdown includes cost. Only dealer staff may see it; anything a
   # buyer sees must come from #retail_only.
   class PricingEngine
-    Result = Struct.new(:book, :variant, :lines, :totals, :warnings, keyword_init: true) do
+    # book: where retail comes from (the book the dealer accepted).
+    # cost_book: where cost comes from (always the plant's current book).
+    Result = Struct.new(:book, :cost_book, :variant, :lines, :totals, :warnings, keyword_init: true) do
       def to_h
-        { book_id: book&.id, book_name: book&.name, variant_id: variant.id, model_number: variant.model_number,
-          lines: lines, totals: totals, warnings: warnings }
+        { book_id: book&.id, book_name: book&.name, cost_book_id: cost_book&.id, cost_book_name: cost_book&.name,
+          variant_id: variant.id, model_number: variant.model_number, lines: lines, totals: totals, warnings: warnings }
       end
 
       # What a buyer may see: retail only, no cost, no rule detail.
@@ -32,7 +34,12 @@ module Truebuild
       @option_ids = Array(option_ids).map(&:to_i).uniq
       @location = location
       @construction = construction
+      # Cost always follows the factory's current book: that is what the
+      # factory invoices. A dealer holding a new book for review keeps their
+      # retail, marked up from the book they accepted, until they accept it.
+      # An explicit book prices both from that book.
       @book = book || BookResolver.book_for(company, variant)
+      @cost_book = book || BookResolver.current_for(variant) || @book
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
                       .select { |r| r.location_id.nil? || r.location_id == location&.id }
@@ -42,9 +49,13 @@ module Truebuild
     def call
       raise ArgumentError, 'No published price book covers this model' unless @book
 
+      if @cost_book != @book
+        @warnings << "Your prices are still based on #{@book.name}, but costs follow #{@cost_book.name}. " \
+                     'Review the new price book to update your prices.'
+      end
       lines = [base_line, *option_lines, freight_line].compact
       totals = totals_for(lines)
-      Result.new(book: @book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
+      Result.new(book: @book, cost_book: @cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
 
     private
@@ -52,14 +63,14 @@ module Truebuild
     # ---- base ----------------------------------------------------------
 
     def base_line
-      vp = @book.variant_prices.find_by(catalog_plan_variant_id: @variant.id)
-      raise ArgumentError, "#{@variant.model_number} has no price in #{@book.name}" unless vp
+      vp = @cost_book.variant_prices.find_by(catalog_plan_variant_id: @variant.id)
+      raise ArgumentError, "#{@variant.model_number} has no price in #{@cost_book.name}" unless vp
 
       gross = vp.base_cost.to_d
       discount = (gross * @terms.program_discount_pct.to_d / 100).round(2)
       cost = gross - discount
       rule = rule_for(:base)
-      retail = rule ? rule.apply(cost) : nil
+      retail = rule ? rule.apply(retail_basis(vp) || cost) : nil
       @warnings << 'No markup rule covers this home, so it has no retail price. Add a markup rule.' unless rule
       {
         kind: 'base', label: "#{@variant.catalog_plan.name} (#{@variant.model_number})",
@@ -71,20 +82,36 @@ module Truebuild
 
     # ---- options -------------------------------------------------------
 
+    # The accepted book's cost for this home, less the same program
+    # discount: what the dealer's retail is marked up from while they hold a
+    # new book for review. Nil when both books are the same.
+    def retail_basis(cost_vp)
+      return nil if @book == @cost_book
+
+      vp = @book.variant_prices.find_by(catalog_plan_variant_id: @variant.id) || cost_vp
+      gross = vp.base_cost.to_d
+      gross - (gross * @terms.program_discount_pct.to_d / 100).round(2)
+    end
+
     def option_lines
       return [] if @option_ids.empty?
 
-      prices = @book.option_prices.where(catalog_option_id: @option_ids).includes(option: :group).to_a
+      prices = offered(@cost_book)
+      retail_prices = @book == @cost_book ? prices : offered(@book)
       @option_ids.filter_map do |id|
-        candidates = prices.select { |op| op.catalog_option_id == id && op.applies_to?(@variant, construction: @construction) }
-        price = most_specific(candidates)
+        price = most_specific(prices.select { |op| op.catalog_option_id == id })
         unless price
-          name = prices.find { |op| op.catalog_option_id == id }&.option&.name || "option #{id}"
+          name = CatalogOption.find_by(id: id)&.name || "option #{id}"
           @warnings << "#{name} is not offered on #{@variant.model_number}."
           next
         end
-        option_line(price)
+        option_line(price, most_specific(retail_prices.select { |op| op.catalog_option_id == id }) || price)
       end
+    end
+
+    def offered(book)
+      book.option_prices.where(catalog_option_id: @option_ids).includes(option: :group).to_a
+          .select { |op| op.applies_to?(@variant, construction: @construction) }
     end
 
     # A price for this exact model beats a size band beats a general price.
@@ -95,7 +122,9 @@ module Truebuild
       end
     end
 
-    def option_line(price)
+    # price: the current book's row (cost). retail_price: the accepted
+    # book's row, which the retail is built from.
+    def option_line(price, retail_price = price)
       option = price.option
       if price.is_standard
         return { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
@@ -103,11 +132,12 @@ module Truebuild
       end
 
       cost = price.dealer_cost.to_d
+      basis = retail_price.is_standard ? cost : retail_price.dealer_cost.to_d
       rule = rule_for(:option, option)
       retail, source =
-        if rule then [rule.apply(cost), describe(rule)]
-        elsif price.suggested_retail then [price.suggested_retail.to_d, "factory suggested retail"]
-        else [cost, 'no markup']
+        if rule then [rule.apply(basis), describe(rule)]
+        elsif retail_price.suggested_retail then [retail_price.suggested_retail.to_d, "factory suggested retail"]
+        else [basis, 'no markup']
         end
       { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
         cost: money(cost), retail: money(retail), detail: { rule: source, factory_code: option.factory_code } }

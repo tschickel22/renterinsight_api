@@ -41,6 +41,11 @@ RSpec.describe Truebuild::PriceBookNotifier do
     book = publish_new
 
     expect(Truebuild::BookResolver.book_for(company, variant)).to eq(old_book)
+    # Cost follows the factory now; retail stays marked up from the accepted book.
+    held = Truebuild::PricingEngine.new(company: company, variant: variant, option_ids: [knobs.id]).call
+    expect(held.lines.first).to include(cost: 63_000.0, retail: 75_000.0)
+    expect(held.lines.last).to include(cost: 70.0, retail: 81.25)
+    expect(held.warnings.first).to start_with('Your prices are still based on Topeka 2026, but costs follow Topeka 2027.')
     described_class.deliver(book)
 
     adoption = company.dealer_price_book_adoptions.find_by!(price_book: book)

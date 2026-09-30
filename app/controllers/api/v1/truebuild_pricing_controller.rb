@@ -134,7 +134,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return unless authorize_action!('company_settings', 'read')
 
     variant = CatalogPlanVariant.find(params[:variant_id])
-    book = Truebuild::BookResolver.book_for(@company, variant)
+    book = Truebuild::BookResolver.current_for(variant)
     return render json: { groups: [] } unless book
 
     offered = book.option_prices.includes(option: :group).select { |op| op.applies_to?(variant) }

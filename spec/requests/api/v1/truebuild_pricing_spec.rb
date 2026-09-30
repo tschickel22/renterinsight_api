@@ -102,10 +102,11 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
     expect(listed.map { |u| u['id'] }).to eq([update.id])
     expect(listed.first).to include('status' => 'pending', 'previous_book_name' => 'Topeka 2026', 'can_decide' => true)
 
+    # Held: cost follows the new book, retail stays at 57,995 x 1.3 until accepted.
     post '/api/v1/truebuild_pricing/preview', headers: headers, params: { variant_id: variant.id }
-    expect(JSON.parse(response.body)['totals']['cost']).to eq(57_995.0)
+    expect(JSON.parse(response.body)['totals']).to include('cost' => 60_000.0, 'retail' => 75_393.5)
     post '/api/v1/truebuild_pricing/preview', headers: headers, params: { variant_id: variant.id, update_id: update.id }
-    expect(JSON.parse(response.body)['totals']['cost']).to eq(60_000.0)
+    expect(JSON.parse(response.body)['totals']).to include('cost' => 60_000.0, 'retail' => 78_000.0)
 
     get "/api/v1/truebuild_pricing/updates/#{foreign.id}", headers: headers
     expect(response).to have_http_status(:not_found)

@@ -1,16 +1,22 @@
 # frozen_string_literal: true
 
 module Truebuild
-  # Which price book a dealer prices a model from. The plant's published book,
+  # Which price book a dealer's RETAIL comes from. The plant's published book,
   # unless the dealer reviews new books and has not adopted this one yet: then
   # the newest earlier book they did adopt (or that was published before they
-  # started reviewing), so their prices do not move until they say so.
+  # started reviewing), so their prices do not move until they say so. Cost
+  # always comes from the current book (current_for): the factory invoices it.
   module BookResolver
     module_function
 
+    # The plant's published book: where cost always comes from.
+    def current_for(variant)
+      CatalogPriceBook.current_for(manufacturer_id: variant.manufacturer_id, factory_id: variant.catalog_plan.factory_id)
+    end
+
+    # The book the dealer's retail comes from.
     def book_for(company, variant)
-      factory_id = variant.catalog_plan.factory_id
-      current = CatalogPriceBook.current_for(manufacturer_id: variant.manufacturer_id, factory_id: factory_id)
+      current = current_for(variant)
       return nil unless current
       return current unless holds_for_review?(company, variant.manufacturer_id)
 
