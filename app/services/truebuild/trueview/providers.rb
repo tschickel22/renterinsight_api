@@ -1,0 +1,94 @@
+# frozen_string_literal: true
+
+module Truebuild
+  module Trueview
+    module Providers
+      # Google's Gemini image models (Nano Banana). The published model ids
+      # carry suffixes that change between preview and release, so the id is
+      # resolved against the account's model list and cached.
+      module Gemini
+        module_function
+
+        BASE = 'https://generativelanguage.googleapis.com/v1beta'
+
+        def edit(spec, source, prompt)
+          model = resolve(spec[:model])
+          config = { responseModalities: ['IMAGE'] }
+          config[:imageConfig] = { imageSize: spec[:size] } if spec[:size]
+          body = { contents: [{ role: 'user', parts: [{ text: prompt },
+                                                    { inline_data: { mime_type: source[:mime], data: Base64.strict_encode64(source[:bytes]) } }] }],
+                   generationConfig: config }
+          res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 180)
+          raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
+
+          parts = res.parsed_response.dig('candidates', 0, 'content', 'parts') || []
+          image = parts.find { |p| p['inlineData'] || p['inline_data'] }
+          unless image
+            reason = res.parsed_response.dig('candidates', 0, 'finishReason') || parts.filter_map { |p| p['text'] }.join(' ').first(300)
+            raise Error, "Gemini returned no image (#{reason.presence || 'no reason given'})"
+          end
+
+          data = image['inlineData'] || image['inline_data']
+          meta = res.parsed_response['usageMetadata'] || {}
+          { bytes: Base64.decode64(data['data']), mime: data['mimeType'] || data['mime_type'] || 'image/png', model: model,
+            usage: { 'prompt_tokens' => meta['promptTokenCount'].to_i, 'output_tokens' => meta['candidatesTokenCount'].to_i,
+                     'total_tokens' => meta['totalTokenCount'].to_i } }
+        end
+
+        # "gemini-3.1-flash-image" may be published as "...-preview"; take the
+        # exact id when it exists, else the shortest id that starts with it.
+        def resolve(base)
+          ids = Rails.cache.fetch('truebuild:trueview:gemini-models', expires_in: 1.hour) do
+            res = HTTParty.get("#{BASE}/models?pageSize=1000", headers: headers, timeout: 30)
+            raise Error, "Gemini model list #{res.code}: #{res.parsed_response.dig('error', 'message')}" unless res.code == 200
+
+            Array(res.parsed_response['models']).map { |m| m['name'].to_s.delete_prefix('models/') }
+          end
+          return base if ids.include?(base)
+
+          ids.select { |id| id.start_with?(base) }.min_by(&:length) or
+            raise Error, "No Gemini model named #{base}* on this key. Available image models: " \
+                         "#{ids.grep(/image/).first(12).join(', ').presence || 'none'}"
+        end
+
+        def headers
+          key = ENV['GEMINI_API_KEY'].presence or raise Error, 'GEMINI_API_KEY is not set'
+          { 'x-goog-api-key' => key, 'Content-Type' => 'application/json' }
+        end
+      end
+
+      # OpenAI's image edits endpoint.
+      module OpenAi
+        module_function
+
+        URL = 'https://api.openai.com/v1/images/edits'
+
+        def edit(spec, source, prompt)
+          res = post(spec, source, prompt, fidelity: true)
+          # input_fidelity keeps the source's detail; drop it if this model refuses it.
+          res = post(spec, source, prompt, fidelity: false) if res.code == 400 && res.body.to_s.include?('input_fidelity')
+          raise Error, "OpenAI #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
+
+          b64 = res.parsed_response.dig('data', 0, 'b64_json') or raise Error, 'OpenAI returned no image'
+          u = res.parsed_response['usage'] || {}
+          details = u['input_tokens_details'] || {}
+          { bytes: Base64.decode64(b64), mime: "image/#{res.parsed_response['output_format'] || 'png'}", model: spec[:model],
+            usage: { 'text_tokens' => details['text_tokens'].to_i, 'image_tokens' => details['image_tokens'].to_i,
+                     'output_tokens' => u['output_tokens'].to_i, 'total_tokens' => u['total_tokens'].to_i } }
+        end
+
+        def post(spec, source, prompt, fidelity:)
+          key = ENV['OPENAI_API_KEY'].presence or raise Error, 'OPENAI_API_KEY is not set'
+          file = Tempfile.new(['trueview', source[:mime].to_s.include?('png') ? '.png' : '.jpg'], binmode: true)
+          file.write(source[:bytes])
+          file.rewind
+          body = { model: spec[:model], prompt: prompt, 'image[]': file, quality: spec[:quality], size: 'auto', n: 1 }
+          body[:input_fidelity] = 'high' if fidelity
+          HTTParty.post(URL, headers: { 'Authorization' => "Bearer #{key}" }, multipart: true, body: body, timeout: 240)
+        ensure
+          file&.close!
+        end
+      end
+    end
+  end
+end

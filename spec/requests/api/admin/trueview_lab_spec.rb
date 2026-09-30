@@ -1,0 +1,98 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
+  let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
+  let(:mfr) { Manufacturer.create!(name: "Champion #{SecureRandom.hex(3)}", industry_type: 'manufactured_home') }
+  let(:factory) { mfr.factories.create!(name: 'Topeka', code: "TOP#{SecureRandom.hex(2)}") }
+  let(:plan) { CatalogPlan.create!(manufacturer: mfr, factory: factory, series: 'Aspire', name: 'Bay Port') }
+  let(:kitchen_photo) { 'https://s7d9.scene7.com/is/image/championhomes/bay-port-kitchen-1' }
+  let!(:variant) do
+    CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '2856H32168', width_ft: 28, length_ft: 56,
+                               media: { 'name' => 'Aspire Bay Port', 'photos' => [{ 'url' => kitchen_photo, 'room' => 'kitchen' }] })
+  end
+  let(:finishes) { [{ surface: 'Cabinets', value: 'Timberwolf' }, { surface: 'Countertops', value: 'Calcutta Marble' }] }
+
+  def headers_for(role)
+    user = User.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: 'T', last_name: 'S',
+                        password: 'Pass1234!', company_id: company.id, role: role)
+    { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id)}", 'Content-Type' => 'application/json' }
+  end
+
+  let(:admin) { headers_for('platform_admin') }
+
+  around do |ex|
+    old = ENV.values_at('GEMINI_API_KEY', 'OPENAI_API_KEY')
+    ENV['GEMINI_API_KEY'] = 'test-gemini'
+    ENV.delete('OPENAI_API_KEY')
+    ex.run
+  ensure
+    ENV['GEMINI_API_KEY'], ENV['OPENAI_API_KEY'] = old
+  end
+
+  def run!(extra = {})
+    post '/api/admin/trueview_lab/runs', headers: admin,
+         params: { variant_id: variant.id, source_url: kitchen_photo, finishes: finishes, models: %w[nb2 gpt-image-2-high] }.merge(extra).to_json
+  end
+
+  it 'is for platform admins only' do
+    get '/api/admin/trueview_lab', headers: headers_for('sales')
+    expect(response).to have_http_status(:forbidden)
+  end
+
+  it 'lists models with photos and which image models have keys' do
+    get '/api/admin/trueview_lab', headers: admin
+    body = JSON.parse(response.body)
+    expect(body['variants'].map { |v| v['id'] }).to include(variant.id)
+    expect(body['models'].find { |m| m['key'] == 'nb2' }['configured']).to be(true)
+    expect(body['models'].find { |m| m['key'] == 'gpt-image-2-high' }['configured']).to be(false)
+  end
+
+  it 'queues one rendering per image model and says when a key is missing' do
+    expect { run! }.to have_enqueued_job(TruebuildRenderJob).once
+    body = JSON.parse(response.body)
+    expect(response).to have_http_status(:created)
+    expect(body['renders'].map { |r| [r['model_key'], r['status']] }).to eq([%w[nb2 queued], %w[gpt-image-2-high failed]])
+    expect(body['renders'].last['error']).to include('OPENAI_API_KEY')
+    expect(body['prompt']).to include('Cabinets: Timberwolf', 'Do not add, remove or move any object')
+  end
+
+  it 'only renders photos that belong to the model' do
+    run!(source_url: 'http://169.254.169.254/latest/meta-data')
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(TruebuildRender.count).to eq(0)
+  end
+
+  it 'serves a repeated combination from the cache at no cost, in any finish order' do
+    TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, selection: TruebuildRender.normalize(finishes.map(&:stringify_keys)),
+                            selection_key: TruebuildRender.key_for(finishes.reverse.map(&:stringify_keys)), model_key: 'nb2',
+                            provider: 'gemini', model: 'gemini-3.1-flash-image', status: 'done', image_url: 'https://s3/x.png', cost_usd: 0.07)
+    expect { run!(models: %w[nb2]) }.not_to have_enqueued_job(TruebuildRenderJob)
+    render = JSON.parse(response.body)['renders'].first
+    expect(render).to include('status' => 'done', 'image_url' => 'https://s3/x.png', 'cost_usd' => 0.0, 'cached' => true)
+  end
+
+  it 'renders, stores and prices a queued row' do
+    run!(models: %w[nb2])
+    row = TruebuildRender.last
+    allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: 'jpg', mime: 'image/jpeg')
+    allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
+      .and_return(bytes: 'png', mime: 'image/png', model: 'gemini-3.1-flash-image-preview',
+                  usage: { 'prompt_tokens' => 1500, 'output_tokens' => 1680 })
+    allow(Truebuild::Trueview).to receive(:store).and_return('https://bucket/truebuild/trueview/a.png')
+
+    TruebuildRenderJob.perform_now(row.id)
+    row.reload
+    expect(row.status).to eq('done')
+    expect(row.model).to eq('gemini-3.1-flash-image-preview')
+    expect(row.cost_usd.to_f).to eq(0.1016) # 1,500 x $0.50/M + 1,680 x $60/M
+  end
+
+  it 'records a provider failure on the row' do
+    run!(models: %w[nb2])
+    allow(Truebuild::Trueview).to receive(:fetch_source).and_raise(Truebuild::Trueview::Error, 'Source photo returned 404')
+    TruebuildRenderJob.perform_now(TruebuildRender.last.id)
+    expect(TruebuildRender.last).to have_attributes(status: 'failed', error: 'Source photo returned 404')
+  end
+end

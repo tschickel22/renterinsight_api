@@ -7082,6 +7082,30 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000100) do
     t.index ["vehicle_id"], name: "index_truebuild_designs_on_vehicle_id"
   end
 
+  create_table "truebuild_renders", force: :cascade do |t|
+    t.bigint "catalog_plan_variant_id"
+    t.string "room"
+    t.string "source_url", null: false
+    t.jsonb "selection", default: [], null: false
+    t.string "selection_key", null: false
+    t.string "model_key", null: false
+    t.string "provider", null: false
+    t.string "model", null: false
+    t.string "status", default: "queued", null: false
+    t.string "image_url"
+    t.decimal "cost_usd", precision: 10, scale: 4
+    t.integer "latency_ms"
+    t.jsonb "usage", default: {}, null: false
+    t.text "prompt"
+    t.text "error"
+    t.string "lab_run"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_plan_variant_id"], name: "index_truebuild_renders_on_catalog_plan_variant_id"
+    t.index ["lab_run"], name: "index_truebuild_renders_on_lab_run"
+    t.index ["source_url", "selection_key", "model_key"], name: "idx_on_source_url_selection_key_model_key_0cffdeaa5e"
+  end
+
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "sub_account_sid"
@@ -8660,6 +8684,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000100) do
   add_foreign_key "truebuild_designs", "leads", on_delete: :nullify
   add_foreign_key "truebuild_designs", "quotes", on_delete: :nullify
   add_foreign_key "truebuild_designs", "vehicles", on_delete: :nullify
+  add_foreign_key "truebuild_renders", "catalog_plan_variants", on_delete: :nullify
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"
