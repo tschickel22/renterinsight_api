@@ -6,6 +6,7 @@ module Truebuild
   # features, and retail prices only when the dealer shows prices. Never cost.
   class BuyerCatalog
     SHOWS_PRICES = %w[full starting_at].freeze
+    SHOWS_MONTHLY = %w[full starting_at monthly].freeze
 
     # A dealer offers TrueBuild once they have set up pricing, and only on
     # models a published book covers.
@@ -31,11 +32,14 @@ module Truebuild
       base = engine.lines.find { |l| l[:kind] == 'base' }
       retail_by_option = engine.lines.select { |l| l[:kind] == 'option' }.to_h { |l| [l[:option_id], l[:retail]] }
       show = SHOWS_PRICES.include?(@terms.price_display) && base[:retail].present?
+      monthly = SHOWS_MONTHLY.include?(@terms.price_display) && base[:retail].present?
 
       {
         variant: variant_json,
-        display: { mode: @terms.price_display, show_prices: show },
+        display: { mode: @terms.price_display, show_prices: show, show_monthly: monthly,
+                   payment_terms: (PaymentEstimate.terms if monthly) },
         base_price: show ? base[:retail] : nil,
+        base_monthly: monthly ? PaymentEstimate.monthly(base[:retail]) : nil,
         groups: groups(offered, show ? retail_by_option : {}),
         standard_features: standard_features,
         media: media
@@ -56,7 +60,9 @@ module Truebuild
       result = PricingEngine.new(company: @company, variant: @variant, location: @location,
                                  option_ids: allowed(option_ids)).call
       show = SHOWS_PRICES.include?(@terms.price_display) && result.totals[:retail].present?
+      monthly = SHOWS_MONTHLY.include?(@terms.price_display) && result.totals[:retail].present?
       { show_prices: show, total: show ? result.totals[:retail] : nil,
+        monthly: monthly ? PaymentEstimate.monthly(result.totals[:retail]) : nil,
         lines: show ? result.retail_only[:lines] : [], book_id: result.book&.id, option_ids: allowed(option_ids) }
     end
 
