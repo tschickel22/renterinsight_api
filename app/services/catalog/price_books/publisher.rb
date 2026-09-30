@@ -40,6 +40,7 @@ module Catalog
           link_inventory
         end
         CatalogPriceBookNoticeJob.perform_later(@book.id)
+        CatalogModelMediaJob.perform_later(@book.manufacturer_id)
         counts
       end
 

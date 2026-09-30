@@ -3025,6 +3025,7 @@ Rails.application.routes.draw do
           get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs
           patch 'documents/:document_id/tabs', action: :update_tabs, as: :update_document_tabs
           patch 'documents/:document_id/plant', action: :update_plant, as: :update_document_plant
+          post 'refresh_media'
         end
       end
 

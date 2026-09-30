@@ -15,10 +15,11 @@ module Truebuild
       company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
     end
 
-    def initialize(company, variant, location: nil)
+    def initialize(company, variant, location: nil, vehicle: nil)
       @company = company
       @variant = variant
-      @location = location
+      @vehicle = vehicle
+      @location = location || vehicle&.location
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
       @book = BookResolver.current_for(variant)
     end
@@ -36,8 +37,18 @@ module Truebuild
         display: { mode: @terms.price_display, show_prices: show },
         base_price: show ? base[:retail] : nil,
         groups: groups(offered, show ? retail_by_option : {}),
-        standard_features: standard_features
+        standard_features: standard_features,
+        media: media
       }
+    end
+
+    # The home on the lot first, then the manufacturer's photos of the model.
+    def media
+      m = @variant.media || {}
+      lot = Array(@vehicle&.public_image_urls).compact.map { |url| { url: url, room: nil, lot: true } }
+      photos = lot + Array(m['photos']).map { |p| { url: p['url'], room: p['room'] } }
+      { photos: photos.uniq { |p| p[:url] }.first(60), floor_plans: Array(m['floor_plans']).first(4),
+        elevations: Array(m['elevations']).first(6), tour_url: m['matterport_url'], video_url: m['video_url'] }
     end
 
     # Retail total for a selection, or nil when the dealer hides prices.

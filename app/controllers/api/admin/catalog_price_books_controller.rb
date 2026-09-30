@@ -146,7 +146,8 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
           { id: v.id, model_number: v.model_number, building_code: v.building_code, width_ft: v.width_ft,
             length_ft: v.length_ft, beds: v.beds, baths: v.baths&.to_f, home_type: v.home_type,
             net_base_price: vp.net_base_price.to_f, base_cost: vp.base_cost.to_f,
-            champion_linked: v.external_ids['champion_model_id'].present?, homes_linked: homes[v.id].to_i }
+            champion_linked: v.external_ids['champion_model_id'].present?, homes_linked: homes[v.id].to_i,
+            photos: Array(v.media['photos']).size, tour: v.media['matterport_url'].present? }
         end }
     end.sort_by { |p| [p[:series].to_s, p[:name].to_s] }
 
@@ -316,6 +317,13 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
     render json: document_json(doc.reload)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
+  end
+
+  # POST /api/admin/catalog_price_books/:id/refresh_media
+  # Pull model photos, floor plans and tours from the manufacturer's site.
+  def refresh_media
+    CatalogModelMediaJob.perform_later(@book.manufacturer_id)
+    render json: { queued: true }, status: :accepted
   end
 
   # GET /api/admin/catalog_price_books/:id/link_sources

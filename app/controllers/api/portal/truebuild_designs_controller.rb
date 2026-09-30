@@ -33,7 +33,7 @@ module Api
           beds: d.variant.beds, baths: d.variant.baths&.to_f, width_ft: d.variant.width_ft, length_ft: d.variant.length_ft,
           options: CatalogOption.where(id: d.option_ids).pluck(:name),
           price: snap['show_prices'] ? snap['total'] : nil, saved_at: d.created_at,
-          image: d.vehicle&.try(:primary_image_url) || Array(d.vehicle&.try(:image_urls)).first || d.variant.try(:image_url),
+          image: Array(d.vehicle&.public_image_urls).first || d.variant.media.dig('photos', 0, 'url') || d.variant.media.dig('elevations', 0),
           link: Truebuild::DesignSaver.design_url(d)
         }
       end

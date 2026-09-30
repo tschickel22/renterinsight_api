@@ -23,7 +23,7 @@ class Public::TruebuildController < ApplicationController
     variant = vehicle.catalog_plan_variant
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle.location).call.merge(vehicle_id: vehicle.id)
+    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).call.merge(vehicle_id: vehicle.id)
   end
 
   def model

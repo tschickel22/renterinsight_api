@@ -62,6 +62,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
     ] }])
     expect(body['standard_features']).to eq([{ 'category' => 'Kitchen', 'items' => ['Shaker cabinets'] }])
     expect(response.body).not_to match(/cost/i)
+    expect(body['media']).to include('photos' => [], 'floor_plans' => [], 'tour_url' => nil)
   end
 
   it 'hides every price when the dealer does' do
