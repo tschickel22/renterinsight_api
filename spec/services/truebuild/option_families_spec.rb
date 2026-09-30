@@ -13,6 +13,17 @@ RSpec.describe Truebuild::OptionFamilies do
     expect(families('PACKAGE 1', 'PACKAGE 3 (DRYWALL)').size).to eq(2)
   end
 
+  it 'gives a kitchen one appliance package and one refrigerator, whichever line they come from' do
+    fams = families('Appliance Package 1 - Black', 'Stainless Steel Package - Gas', 'Black Appliance Package - Electric',
+                    'Ultimate Kitchen 2 (see Package Details) - Package 1 - Elec - French Door Refer', 'Dishwasher discount w/ Package #1')
+    expect(fams.values.uniq).to eq(['appliance package'])
+    expect(fams.keys).to eq([0, 1, 2, 3])
+
+    fridges = families('20.5CF O/U Refer w/o Ice IPO 18.2', '24.7CF SS FrenchDoorRef IPO 18.2', '21.2 CF Black SxS Refer IPO 18.2CF',
+                       '24.7CF SS FrenchDrRef IPO 20.5 O/U', 'Carpet IPO lino (per bdrm)', 'Carpet IPO lino (per LR)')
+    expect(fridges.keys).to eq([0, 1, 2])
+  end
+
   it 'leaves additive options, and lone members, alone' do
     expect(families('Crescent Edging - Kitchen', 'Crescent Edging - Utility')).to be_empty
     expect(families('Soft Close Drwrs & Doors - Baths', 'Soft Close Drwrs & Doors - Kit')).to be_empty

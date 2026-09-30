@@ -16,9 +16,22 @@ module Truebuild
     FUEL = /\b(gas|electric|elec)\b/
     PACKAGE = /\b(package|pkg)\s*#?\s*([0-9]|[a-e])\b/
 
+    # A kitchen gets one appliance package, whichever line it comes from:
+    # Appliance Package 1 - Black, Stainless Steel Package - Gas, Black
+    # Appliance Package, Ultimate Kitchen 2 - Package 1.
+    APPLIANCE_PACKAGE = /\b(appliance|stainless|ultimate kitchen)\b.*\b(package|pkg)\b|\bultimate kitchen\b/
+    # And one refrigerator: upgrades that each replace the same standard
+    # fridge ("... Refer IPO 18.2", "... French Door Ref IPO 18.2CF").
+    FRIDGE_SWAP = /\b(refer|ref|refrigerator|frenchdoorref|frenchdrref)\b.*\bipo\s+([0-9.]+)/
+
     # The family key, or nil when the name has no fuel or package axis.
     def key(name)
       text = name.to_s.downcase.gsub(/\(.*?\)/, ' ')
+      return 'appliance package' if text.match?(APPLIANCE_PACKAGE) && !text.match?(/discount|omit/)
+      if (m = text.match(FRIDGE_SWAP))
+        return "refrigerator in place of #{m[2].sub(/\.?0+\z/, '')}"
+      end
+
       keyed = text.gsub(FUEL, '{fuel}').gsub(PACKAGE, '\\1 {pkg}')
       return nil if keyed == text
 
