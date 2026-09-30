@@ -40,7 +40,9 @@ module Truebuild
     SURFACE_SCOPE = [
       [/accent/i, 'An accent wall is ONE wall only: the single largest wall section facing the camera. Every other wall keeps its current color.'],
       [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets. Countertops, walls and appliances stay exactly as they are.'],
-      [/counter/i, 'Countertops means every countertop surface, including the island top. Cabinets, backsplash and walls stay exactly as they are.'],
+      # These homes use a matching 4 inch laminate lip along the wall; left
+      # alone it kept the old counter's pattern under a new counter.
+      [/counter/i, 'Countertops means every countertop surface, including the island top and the short matching backsplash lip of the same material along the wall. Cabinets, tile backsplash and walls stay exactly as they are.'],
       [/backsplash/i, 'Backsplash means only the wall surface between the countertop and the upper cabinets.'],
       [/floor|carpet/i, 'Flooring means only the visible floor.'],
       [/siding/i, 'Siding means only the exterior wall cladding. Trim, shutters, doors, windows, skirting and roof stay exactly as they are.'],
@@ -99,6 +101,10 @@ module Truebuild
       ids = Array(render.usage['swatch_ids'])
       samples = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact.map { |sw| fetch_source(sw.image_url) }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      # A layer cut by an older Layer::VERSION is cut again from its saved
+      # drawing: no call to the image model, no charge.
+      return recut!(render, source) if render.usage['recut_from'] && render.image_url.present?
+
       result = if spec[:provider] == 'gemini'
                  Providers::Gemini.edit(spec, source, render.prompt, samples: samples)
                else
@@ -111,10 +117,19 @@ module Truebuild
       if render.purpose == 'layer'
         layer = Layer.build(source[:bytes], result[:bytes])
         attrs.merge!(layer_url: store(render, layer[:bytes], layer[:mime], suffix: 'layer'), mask_coverage: layer[:coverage])
+        attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION)
       end
       render.update!(attrs)
     rescue StandardError => e
       render.update!(status: 'failed', error: e.message.to_s.first(1000))
+    end
+
+    def recut!(render, source)
+      drawn = fetch_source(render.image_url)
+      layer = Layer.build(source[:bytes], drawn[:bytes])
+      render.update!(status: 'done', cost_usd: 0, latency_ms: 0, mask_coverage: layer[:coverage],
+                     layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
+                     usage: render.usage.merge('mask_version' => Layer::VERSION))
     end
 
     def cost(spec, usage)

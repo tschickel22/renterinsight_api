@@ -145,7 +145,12 @@ class Api::Admin::TrueviewLabController < ApplicationController
              TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose,
                                         prompt: attrs[:prompt])
                             .where(purpose == 'layer' ? 'layer_url IS NOT NULL' : 'TRUE').order(:id).last
-    if cached
+    if cached && purpose == 'layer' && cached.usage['mask_version'].to_i < Truebuild::Trueview::Layer::VERSION
+      # Drawn already but cut by an older version: cut again from the saved drawing, free.
+      TruebuildRender.create!(attrs.merge(image_url: cached.image_url, model: cached.model,
+                                          usage: attrs[:usage].merge('recut_from' => cached.id)))
+                     .tap { |r| TruebuildRenderJob.perform_later(r.id) }
+    elsif cached
       # Served from the cache: what a buyer repeating this combination costs.
       TruebuildRender.create!(attrs.merge(status: 'done', image_url: cached.image_url, layer_url: cached.layer_url,
                                           mask_coverage: cached.mask_coverage, latency_ms: 0, cost_usd: 0,

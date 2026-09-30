@@ -133,7 +133,8 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
 
     it 'reuses a layer only when it was drawn with the current instructions' do
       layers!(layers: [{ surface: 'Cabinets', values: ['Timberwolf'] }])
-      TruebuildRender.last.update!(status: 'done', image_url: 'https://b/i.png', layer_url: 'https://b/l.webp')
+      TruebuildRender.last.update!(status: 'done', image_url: 'https://b/i.png', layer_url: 'https://b/l.webp',
+                                   usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
       get '/api/admin/trueview_lab/drawn', headers: admin, params: { variant_id: variant.id, source_url: kitchen_photo, model: 'nb2-lite' }
       expect(JSON.parse(response.body)['finishes']).to eq([{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }])
       expect { layers!(layers: [{ surface: 'Cabinets', values: ['Timberwolf'] }]) }.not_to have_enqueued_job(TruebuildRenderJob)
@@ -149,6 +150,24 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(prompt).to include('including the island base')
       expect(Truebuild::Trueview.prompt(room: 'kitchen', selection: [{ 'surface' => 'Accent wall', 'value' => 'Jurupa' }]))
         .to include('ONE wall only')
+    end
+
+    it 'cuts an old layer again from its saved drawing without calling the image model' do
+      layers!(layers: [{ surface: 'Flooring', values: ['9701 - Serenity'] }])
+      old = TruebuildRender.last
+      old.update!(status: 'done', image_url: 'https://b/drawn.png', layer_url: 'https://b/old.webp', cost_usd: 0.042, usage: { 'mask_version' => 1 })
+
+      expect { layers!(layers: [{ surface: 'Flooring', values: ['9701 - Serenity'] }]) }.to have_enqueued_job(TruebuildRenderJob)
+      row = TruebuildRender.last
+      expect(row.usage).to include('recut_from' => old.id)
+
+      base = (Vips::Image.black(80, 60, bands: 3) + 150).cast(:uchar)
+      allow(Truebuild::Trueview).to receive(:fetch_source) { |url| { bytes: (url.include?('drawn') ? base + 40 : base).cast(:uchar).pngsave_buffer, mime: 'image/png' } }
+      allow(Truebuild::Trueview).to receive(:store).and_return('https://b/new.webp')
+      expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)
+      TruebuildRenderJob.perform_now(row.id)
+      expect(row.reload).to have_attributes(status: 'done', layer_url: 'https://b/new.webp', cost_usd: 0)
+      expect(row.usage['mask_version']).to eq(Truebuild::Trueview::Layer::VERSION)
     end
 
     it 'caps a run at 40 finishes' do
