@@ -265,7 +265,15 @@ RSpec.describe 'TrueBuild price book pipeline' do
         'suggested_retail' => 325.5, 'markup' => 1.55
       })
       blank = book.import_items.create!(item_type: 'option_price', review_status: 'approved', payload: {
-        'tab' => 'DGAE - HUD', 'section' => 'Windows', 'description' => 'Bay Window', 'suggested_retail' => 0.0, 'markup' => 1.55
+        'tab' => 'DGAE - HUD', 'section' => 'Windows', 'description' => 'Bay Window'
+      })
+      credit = book.import_items.create!(item_type: 'option_price', review_status: 'approved', payload: {
+        'tab' => '2025 Aspire DW', 'section' => 'Appliances', 'description' => 'Omit Range', 'dealer_cost' => -100.0,
+        'suggested_retail' => -100.0
+      })
+      no_charge = book.import_items.create!(item_type: 'option_price', review_status: 'approved', payload: {
+        'tab' => 'DIAMOND Model Specific', 'section' => 'Floor plan', 'description' => '2 Bedroom Option', 'dealer_cost' => 0.0,
+        'suggested_retail' => 0.0
       })
 
       expect { Catalog::PriceBooks::Publisher.new(book, by: admin).call }
@@ -275,7 +283,9 @@ RSpec.describe 'TrueBuild price book pipeline' do
       blank.update!(review_status: 'rejected')
       Catalog::PriceBooks::Publisher.new(book, by: admin).call
       expect(retail_only.reload.payload['dealer_cost']).to eq(210.0)
-      expect(CatalogOptionPrice.find_by!(price_book: book).dealer_cost).to eq(210)
+      costs = CatalogOptionPrice.where(price_book: book).includes(:option).to_h { |op| [op.option.name, op.dealer_cost] }
+      expect(costs).to eq('30 x 42 Picture Window' => 210, 'Omit Range' => -100, '2 Bedroom Option' => 0)
+      expect([credit, no_charge].map { |i| i.reload.review_status }).to all(eq('approved'))
     end
 
     it 'keeps two series that share a model number apart' do

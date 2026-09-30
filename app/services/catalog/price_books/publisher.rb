@@ -55,11 +55,13 @@ module Catalog
         end
         items(:option_price).each do |i|
           p = i.payload
-          next if p['is_standard'] == true || p['dealer_cost'].to_f.positive?
+          # Credits and $0 no-charge options are prices; only blank is missing.
+          next if p['is_standard'] == true || !p['dealer_cost'].nil?
 
-          retail = p['suggested_retail'].to_f
+          retail = p['suggested_retail']
           markup = p['markup'].to_f
-          if retail.positive? && markup.positive?
+          if !retail.nil? && markup.positive?
+            retail = retail.to_f
             cost = (retail / markup).round(2)
             note = "Cost #{format('%.2f', cost)} worked out from retail #{format('%.2f', retail)} at the tab's #{markup} markup."
             i.update_columns(payload: p.merge('dealer_cost' => cost, 'resolution' => [p['resolution'], note].compact.join(' ')))

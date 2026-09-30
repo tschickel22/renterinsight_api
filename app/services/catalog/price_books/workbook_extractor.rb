@@ -160,8 +160,10 @@ module Catalog
         flags.concat(markup_flags)
         return [] if cost.nil? && retail.nil? && !opt['is_standard']
 
-        # A 0 or a blank where the price should be: a person decides.
-        flags << 'price_missing' if !opt['is_standard'] && !cost.to_f.positive? && !retail.to_f.positive?
+        # Credits (Omit Range, -$100) and no-charge options (2 Bedroom Option,
+        # $0) are real prices. Only a blank cost with no retail to derive it
+        # from is missing.
+        flags << 'price_missing' if !opt['is_standard'] && cost.nil? && retail.nil?
 
         @sink.item(
           document: @doc, item_type: 'option_price', flags: flags.uniq,
