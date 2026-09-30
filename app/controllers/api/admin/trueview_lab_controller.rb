@@ -52,6 +52,22 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: run_json(params[:id], rows)
   end
 
+  # GET /api/admin/trueview_lab/drawn?variant_id=&source_url=&model=&room=
+  # Layers already drawn for this photo and image model under the current
+  # instructions: a new run reuses them at no cost.
+  def drawn
+    variant = CatalogPlanVariant.find_by(id: params[:variant_id])
+    photo = variant && Array(variant.media['photos']).find { |p| p['url'] == params[:source_url].to_s }
+    return render json: { finishes: [] } unless photo
+
+    room = RENDER_ROOMS.include?(params[:room].to_s) ? params[:room].to_s : photo['room']
+    rows = TruebuildRender.done.where(source_url: photo['url'], model_key: params[:model].to_s, purpose: 'layer')
+                          .where.not(layer_url: nil).select(:selection, :prompt).to_a
+    finishes = rows.select { |r| r.prompt == Truebuild::Trueview.prompt(room: room, selection: r.selection) }
+                   .map { |r| r.selection.first.slice('surface', 'value') }.uniq
+    render json: { finishes: finishes }
+  end
+
   # POST /api/admin/trueview_lab/runs
   # Full redraw: { variant_id, source_url, room, finishes: [{surface, value}], models: [key], fresh }
   #   every image model draws the whole combination.
@@ -113,7 +129,9 @@ class Api::Admin::TrueviewLabController < ApplicationController
               selection_key: selection_key, model_key: key, provider: spec[:provider], model: spec[:model], purpose: purpose,
               prompt: Truebuild::Trueview.prompt(room: room, selection: selection), lab_run: run }
     cached = !ActiveModel::Type::Boolean.new.cast(params[:fresh]) &&
-             TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose)
+             # Same prompt too: when the instructions improve, old drawings are not reused.
+             TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose,
+                                        prompt: attrs[:prompt])
                             .where(purpose == 'layer' ? 'layer_url IS NOT NULL' : 'TRUE').order(:id).last
     if cached
       # Served from the cache: what a buyer repeating this combination costs.

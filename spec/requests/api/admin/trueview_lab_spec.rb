@@ -67,7 +67,8 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
   it 'serves a repeated combination from the cache at no cost, in any finish order' do
     TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, selection: TruebuildRender.normalize(finishes.map(&:stringify_keys)),
                             selection_key: TruebuildRender.key_for(finishes.reverse.map(&:stringify_keys)), model_key: 'nb2',
-                            provider: 'gemini', model: 'gemini-3.1-flash-image', status: 'done', image_url: 'https://s3/x.png', cost_usd: 0.07)
+                            provider: 'gemini', model: 'gemini-3.1-flash-image', status: 'done', image_url: 'https://s3/x.png', cost_usd: 0.07,
+                            prompt: Truebuild::Trueview.prompt(room: 'kitchen', selection: finishes.map(&:stringify_keys)))
     expect { run!(models: %w[nb2]) }.not_to have_enqueued_job(TruebuildRenderJob)
     render = JSON.parse(response.body)['renders'].first
     expect(render).to include('status' => 'done', 'image_url' => 'https://s3/x.png', 'cost_usd' => 0.0, 'cached' => true)
@@ -128,6 +129,26 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(row).to have_attributes(status: 'done', layer_url: 'https://b/layer')
       expect(row.mask_coverage.to_f).to be_within(0.02).of(0.08)
       expect(stored).to eq([['image/png', nil], ['image/webp', 'layer']])
+    end
+
+    it 'reuses a layer only when it was drawn with the current instructions' do
+      layers!(layers: [{ surface: 'Cabinets', values: ['Timberwolf'] }])
+      TruebuildRender.last.update!(status: 'done', image_url: 'https://b/i.png', layer_url: 'https://b/l.webp')
+      get '/api/admin/trueview_lab/drawn', headers: admin, params: { variant_id: variant.id, source_url: kitchen_photo, model: 'nb2-lite' }
+      expect(JSON.parse(response.body)['finishes']).to eq([{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }])
+      expect { layers!(layers: [{ surface: 'Cabinets', values: ['Timberwolf'] }]) }.not_to have_enqueued_job(TruebuildRenderJob)
+
+      TruebuildRender.update_all(prompt: 'older instructions')
+      get '/api/admin/trueview_lab/drawn', headers: admin, params: { variant_id: variant.id, source_url: kitchen_photo, model: 'nb2-lite' }
+      expect(JSON.parse(response.body)['finishes']).to eq([])
+      expect { layers!(layers: [{ surface: 'Cabinets', values: ['Timberwolf'] }]) }.to have_enqueued_job(TruebuildRenderJob)
+    end
+
+    it 'tells the model what each surface covers' do
+      prompt = Truebuild::Trueview.prompt(room: 'kitchen', selection: [{ 'surface' => 'Cabinets', 'value' => 'Destin White' }])
+      expect(prompt).to include('including the island base')
+      expect(Truebuild::Trueview.prompt(room: 'kitchen', selection: [{ 'surface' => 'Accent wall', 'value' => 'Jurupa' }]))
+        .to include('ONE wall only')
     end
 
     it 'caps a run at 40 finishes' do

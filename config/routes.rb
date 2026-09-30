@@ -2990,6 +2990,7 @@ Rails.application.routes.draw do
       # TrueView lab: AI renderings of model photos, every image model side by side.
       get  'trueview_lab', to: 'trueview_lab#index'
       get  'trueview_lab/finishes', to: 'trueview_lab#finishes'
+      get  'trueview_lab/drawn', to: 'trueview_lab#drawn'
       get  'trueview_lab/runs', to: 'trueview_lab#runs'
       post 'trueview_lab/runs', to: 'trueview_lab#create_run'
       get  'trueview_lab/runs/:id', to: 'trueview_lab#show_run'

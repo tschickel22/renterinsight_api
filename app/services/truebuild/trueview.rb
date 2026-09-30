@@ -34,6 +34,20 @@ module Truebuild
       ENV[spec[:provider] == 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'].present?
     end
 
+    # What each surface covers. Left to itself a model reads "Cabinets" as
+    # the wall cabinets but not the island, and "Accent wall" as a different
+    # wall each time (or every wall), which breaks layers that must line up.
+    SURFACE_SCOPE = [
+      [/accent/i, 'An accent wall is ONE wall only: the single largest wall section facing the camera. Every other wall keeps its current color.'],
+      [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets. Countertops, walls and appliances stay exactly as they are.'],
+      [/counter/i, 'Countertops means every countertop surface, including the island top. Cabinets, backsplash and walls stay exactly as they are.'],
+      [/backsplash/i, 'Backsplash means only the wall surface between the countertop and the upper cabinets.'],
+      [/floor|carpet/i, 'Flooring means only the visible floor.'],
+      [/siding/i, 'Siding means only the exterior wall cladding. Trim, shutters, doors, windows, skirting and roof stay exactly as they are.'],
+      [/shutter/i, 'Shutters means only the shutters beside the windows.'],
+      [/shingle|roof/i, 'Shingles means only the roof surface.']
+    ].freeze
+
     def prompt(room:, selection:)
       # A finish name alone ("Timberwolf") is a guess to the model; the
       # swatch color, where we know it, is what keeps renders consistent.
@@ -41,10 +55,12 @@ module Truebuild
         hex = ColorSwatches.hex(f['value'])
         "- #{f['surface']}: #{f['value']}#{" (color #{hex})" if hex}"
       end
+      scopes = TruebuildRender.normalize(selection).filter_map { |f| SURFACE_SCOPE.find { |re, _| f['surface'].match?(re) }&.last }.uniq
       place = room.present? ? "the #{room} of a manufactured home" : 'a room in a manufactured home'
       <<~TEXT.strip
         This is a real photograph of #{place}. Edit it so the finishes are:
         #{changes.join("\n")}
+        #{scopes.join("\n")}
 
         Match each listed color exactly where one is given. Change only those surfaces. Keep everything else exactly as it is: the room layout, walls, ceiling, windows, doors, cabinet and appliance positions and sizes, fixtures, lighting, camera position, lens and framing. Do not add, remove or move any object. The result must look like an unedited real estate photograph of the same room.
       TEXT
