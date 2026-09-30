@@ -55,7 +55,7 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
     expect(response).to have_http_status(:created)
     expect(body['renders'].map { |r| [r['model_key'], r['status']] }).to eq([%w[nb2 queued], %w[gpt-image-2-high failed]])
     expect(body['renders'].last['error']).to include('OPENAI_API_KEY')
-    expect(body['prompt']).to include('Cabinets: Timberwolf', 'Do not add, remove or move any object')
+    expect(body['prompt']).to include('Cabinets: Timberwolf (color #8a867e)', 'Do not add, remove or move any object')
   end
 
   it 'only renders photos that belong to the model' do

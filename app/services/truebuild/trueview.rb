@@ -35,13 +35,18 @@ module Truebuild
     end
 
     def prompt(room:, selection:)
-      changes = TruebuildRender.normalize(selection).map { |f| "- #{f['surface']}: #{f['value']}" }
+      # A finish name alone ("Timberwolf") is a guess to the model; the
+      # swatch color, where we know it, is what keeps renders consistent.
+      changes = TruebuildRender.normalize(selection).map do |f|
+        hex = ColorSwatches.hex(f['value'])
+        "- #{f['surface']}: #{f['value']}#{" (color #{hex})" if hex}"
+      end
       place = room.present? ? "the #{room} of a manufactured home" : 'a room in a manufactured home'
       <<~TEXT.strip
         This is a real photograph of #{place}. Edit it so the finishes are:
         #{changes.join("\n")}
 
-        Change only those surfaces. Keep everything else exactly as it is: the room layout, walls, ceiling, windows, doors, cabinet and appliance positions and sizes, fixtures, lighting, camera position, lens and framing. Do not add, remove or move any object. The result must look like an unedited real estate photograph of the same room.
+        Match each listed color exactly where one is given. Change only those surfaces. Keep everything else exactly as it is: the room layout, walls, ceiling, windows, doors, cabinet and appliance positions and sizes, fixtures, lighting, camera position, lens and framing. Do not add, remove or move any object. The result must look like an unedited real estate photograph of the same room.
       TEXT
     end
 
