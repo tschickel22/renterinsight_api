@@ -53,11 +53,12 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     JSON.parse(response.body)
   end
 
-  it 'invites the buyer by email, makes the login when they click, and that login sees designs and nothing else' do
+  it 'makes the login when the buyer saves, emails a link that signs them in, and that login sees designs and nothing else' do
     design = nil
     expect { design = save_design }.to have_enqueued_mail(BuyerPortalMailer, :truebuild_design_email)
-    expect(BuyerPortalAccess.find_by(email: 'tia@example.com')).to be_nil # nothing until they prove the inbox
-    expect(design.reload.metadata['portal']).to include('state' => 'invited')
+    # There at once, so they can sign in later even without the email.
+    expect(BuyerPortalAccess.find_by(email: 'tia@example.com')).to have_attributes(buyer: design.lead, portal_enabled: true)
+    expect(design.reload.metadata['portal']).to include('state' => 'created')
 
     mail = BuyerPortalMailer.truebuild_design_email(design)
     expect(mail.subject).to eq('Your Belvidere design is saved')
@@ -84,6 +85,21 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
 
     get '/api/portal/auth/claim_design', params: { token: 'forged' }
     expect(response).to have_http_status(:unauthorized)
+  end
+
+  it 'lets a buyer with only a design login sign in from the main app sign in, by magic link' do
+    design = save_design
+    access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
+    allow(BuyerPortalService).to receive(:send_magic_link_email)
+    post '/api/auth/request_magic_link', params: { email: 'TIA@example.com' }
+    expect(BuyerPortalService).to have_received(:send_magic_link_email).with(access)
+
+    get '/api/auth/verify_magic_link', params: { token: access.reload.login_token }
+    body = JSON.parse(response.body)
+    expect(body['success']).to be(true)
+    portal = { 'Authorization' => "Bearer #{body['token'] || body['access_token']}" }
+    get '/api/portal/truebuild_designs', headers: portal
+    expect(JSON.parse(response.body)['designs'].map { |d| d['id'] }).to eq([design.id])
   end
 
   it "never gives a login to a lead whose email is not the saver's (a phone match merged them)" do

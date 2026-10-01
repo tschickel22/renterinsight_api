@@ -1,17 +1,22 @@
 # frozen_string_literal: true
 
 module Truebuild
-  # A buyer who saves a design is invited to a portal login, so their designs
-  # are waiting and the dealer sees their logins and returns.
+  # A buyer who saves a design gets a portal login there and then, so they can
+  # sign in later (magic link, or set a password) even if they never open the
+  # email, from the portal sign in or the main app sign in.
   #
-  # The login is created only when the buyer clicks the link we email them
-  # (claim!), never at save time, and only for a lead with that same email:
-  #   * intake matches leads by phone too, so a save with someone else's
-  #     phone can be absorbed into THEIR lead; a login made then would hang
-  #     another person's records off the saver's email.
-  #   * portal emails are unique platform-wide, so a login made from an
-  #     anonymous save would let anyone reserve a stranger's email.
-  # Clicking proves the inbox is theirs; the email check proves the lead is.
+  # Only for a lead with that same email: intake matches leads by phone too,
+  # so a save with someone else's phone can be absorbed into THEIR lead, and a
+  # login then would hang another person's records off the saver's email.
+  # Signing in always proves the inbox (an emailed link, or a reset), so a
+  # login made for an email someone typed shows nothing to whoever typed it.
+  # What it can still do: portal emails are unique platform-wide, so a save
+  # at one dealer with a stranger's email holds that email there, and that
+  # person's own save at another dealer then gets no login (state
+  # exists_at_another_dealer). Accepted (Tom, 2026-10-01): rare, and the
+  # dealer still gets the lead.
+  #
+  # The emailed link (claim!) signs the buyer straight in.
   #
   # The login belongs to the lead until the rep converts it (it then moves to
   # the contact, see ConversionCarry). A lead-level login sees My Designs and a
@@ -30,8 +35,13 @@ module Truebuild
       return note(design, 'exists_at_another_dealer') if access && access.company_id != design.company_id
       return note(design, 'disabled') if access && !access.portal_enabled
 
+      # An existing login gets a sign in link; a new one the claim link,
+      # which signs them straight in (they have no password yet).
       BuyerPortalMailer.truebuild_design_email(design, access: access).deliver_later
-      note(design, access ? 'existing' : 'invited', access)
+      created = access ? nil : create_for(design)
+      note(design, access ? 'existing' : 'created', access || created)
+    rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+      note(design, 'invited')
     end
 
     def claim_token(design)
