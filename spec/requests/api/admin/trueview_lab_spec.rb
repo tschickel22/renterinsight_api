@@ -240,4 +240,52 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(TruebuildRender.last.usage).to include('recut_from' => layer.id)
     end
   end
+
+  describe 'photos, held back layers and what needs review' do
+    let(:k1) { 'https://s7d9.scene7.com/is/image/championhomes/bay-port-kitchen-2' }
+    let(:k2) { 'https://s7d9.scene7.com/is/image/championhomes/bay-port-kitchen-3' }
+    let(:den) { 'https://s7d9.scene7.com/is/image/championhomes/bay-port-den' }
+
+    before do
+      variant.update!(media: { 'name' => 'Aspire Bay Port', 'photos' => [{ 'url' => kitchen_photo, 'room' => 'kitchen' },
+                                                                         { 'url' => k1, 'room' => 'kitchen' },
+                                                                         { 'url' => k2, 'room' => 'kitchen' },
+                                                                         { 'url' => den, 'room' => nil }] })
+    end
+
+    it "uses an admin's choice, else Claude's pick, else the first labelled photo" do
+      choice = Truebuild::Trueview::PhotoChoice
+      expect(choice.photos(variant)).to eq([['kitchen', kitchen_photo]])
+      expect(choice.needs_pick?(variant)).to be(true)
+
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: (Vips::Image.black(40, 30, bands: 3) + 99).cast(:uchar).jpegsave_buffer, mime: 'image/jpeg')
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(input: { 'photo' => 2 }, input_tokens: 1, output_tokens: 1)
+      choice.pick!(variant)
+      expect(choice.photos(variant.reload)).to eq([['kitchen', k1]])
+      expect(choice.needs_pick?(variant)).to be(false)
+
+      post '/api/admin/trueview_lab/photos', headers: admin, params: { variant_id: variant.id, room: 'kitchen', urls: [k2, den, 'https://evil.example/x.jpg'] }.to_json
+      expect(JSON.parse(response.body)).to include('chosen' => [k2, den], 'source' => 'chosen')
+      expect(choice.photos(variant.reload)).to eq([['kitchen', k2], ['kitchen', den]])
+
+      get '/api/admin/trueview_lab/review', headers: admin, params: { variant_id: variant.id }
+      room = JSON.parse(response.body)['rooms'].find { |r| r['room'] == 'kitchen' }
+      expect(room['candidates'].map { |c| c['url'] }).to eq([kitchen_photo, k1, k2, den])
+      expect(room['candidates'].last['labelled']).to be(false)
+    end
+
+    it 'lets a reviewer show a held back layer, and lists models needing review worst first' do
+      row = TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
+                                    selection: [{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }], selection_key: 'k9',
+                                    model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
+                                    error: 'Hidden: smear on the island', layer_url: 'https://b/l.webp',
+                                    usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION, 'check' => { 'score' => 3 } })
+      get '/api/admin/trueview_lab/attention', headers: admin
+      expect(JSON.parse(response.body)['items'].first).to include('variant_id' => variant.id, 'held_back' => 1)
+
+      post "/api/admin/trueview_lab/layers/#{row.id}/approve", headers: admin
+      expect(row.reload).to have_attributes(status: 'done', error: nil)
+      expect(row.usage['approved']).to be_present
+    end
+  end
 end

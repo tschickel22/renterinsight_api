@@ -53,17 +53,26 @@ class Api::Admin::TrueviewLabController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return render json: { error: 'Choose a model' }, status: :unprocessable_entity unless variant
 
-    photos = Array(variant.media['photos']).select { |p| Truebuild::Trueview::Buyer::ROOMS.key?(p['room']) }
-                                          .uniq { |p| p['room'] }
+    choice = Truebuild::Trueview::PhotoChoice
+    media = variant.media || {}
+    photos = choice.photos(variant).map { |room, url| { 'room' => room, 'url' => url } }
     render json: {
       variant: { id: variant.id, name: variant.media['name'].presence || variant.model_number },
+      # Which photos TrueView uses per room, how they were chosen, and every
+      # photo that could be used instead (the room's own first).
+      rooms: choice::ROOMS.map do |room|
+        labelled = choice.candidate_urls(media, room)
+        others = choice.candidate_urls(media, room, all: true) - labelled
+        { room: room, chosen: choice.chosen(media, room), source: choice.source(media, room),
+          candidates: (labelled + others).map { |u| { url: u, thumb: Truebuild::Trueview.sized(u), labelled: labelled.include?(u) } } }
+      end,
       photos: photos.map do |p|
         masks = TruebuildSurfaceMask.where(source_url: p['url'], version: Truebuild::Trueview::Surfaces::VERSION).order(:surface)
         layers = TruebuildRender.where(source_url: p['url'], purpose: 'layer', model_key: Truebuild::Trueview::Buyer::MODEL)
                                 .where.not(status: 'superseded').order(:id)
                                 .select { |r| r.status != 'done' || r.usage['mask_version'].to_i >= Truebuild::Trueview::Layer::VERSION }
                                 .group_by(&:selection_key).map { |_, rs| rs.last }
-        { room: p['room'], url: Truebuild::Trueview.sized(p['url']),
+        { room: p['room'], url: Truebuild::Trueview.sized(p['url']), source_url: p['url'],
           outlines: masks.map do |m|
             last = Array(m.usage['attempts']).last || {}
             { id: m.id, surface: m.surface, status: m.status, used: m.present?, coverage: m.coverage&.to_f, mask_url: m.mask_url,
@@ -72,10 +81,69 @@ class Api::Admin::TrueviewLabController < ApplicationController
           layers: layers.map do |r|
             { id: r.id, surface: r.selection.first&.dig('surface'), value: r.selection.first&.dig('value'), status: r.status,
               layer_url: r.layer_url, image_url: r.image_url, coverage: r.mask_coverage&.to_f, error: r.error,
-              reviewer_note: r.usage['reviewer_note'], cost_usd: r.cost_usd&.to_f }
+              reviewer_note: r.usage['reviewer_note'], cost_usd: r.cost_usd&.to_f,
+              check: r.usage['check'], approved: r.usage['approved'].present? }
           end }
       end
     }
+  end
+
+  # POST /api/admin/trueview_lab/photos { variant_id, room, urls: [] }
+  # The photos TrueView uses for a room, in order (empty: back to Claude's
+  # pick). New photos are drawn the next time a buyer opens the model.
+  def choose_photos
+    variant = CatalogPlanVariant.find_by(id: params[:variant_id])
+    return render json: { error: 'Choose a model' }, status: :unprocessable_entity unless variant
+
+    choice = Truebuild::Trueview::PhotoChoice
+    room = params[:room].to_s
+    return render json: { error: 'Unknown room' }, status: :unprocessable_entity unless choice::ROOMS.include?(room)
+
+    media = variant.media || {}
+    allowed = choice.candidate_urls(media, room, all: true)
+    urls = Array(params[:urls]).map(&:to_s).select { |u| allowed.include?(u) }.uniq.first(choice::MAX)
+    picks = (media['trueview_photos'] || {}).merge(room => urls)
+    variant.update_columns(media: media.merge('trueview_photos' => picks.reject { |_, v| v.blank? }))
+    # The next buyer visit draws for the new photos.
+    Rails.cache.delete("truebuild:trueview:predraw:#{variant.id}:v#{Truebuild::Trueview::Layer::VERSION}")
+    render json: { room: room, chosen: choice.chosen(variant.reload.media, room), source: choice.source(variant.media, room) }
+  end
+
+  # POST /api/admin/trueview_lab/layers/:id/approve
+  # A layer its check held back, shown to buyers after all.
+  def approve_layer
+    row = TruebuildRender.find_by(id: params[:id], purpose: 'layer', status: 'rejected')
+    return render json: { error: 'Not found' }, status: :not_found unless row
+
+    row.update!(status: 'done', error: nil, usage: row.usage.merge('approved' => { 'by' => current_user&.id, 'at' => Time.current.iso8601 }))
+    render json: { approved: row.id }
+  end
+
+  # GET /api/admin/trueview_lab/attention
+  # Models with something to look at, worst first: layers held back by their
+  # check, outlines not used though the surface is there, drawings that failed.
+  def attention
+    version = Truebuild::Trueview::Layer::VERSION
+    rows = TruebuildRender.where(purpose: 'layer', model_key: Truebuild::Trueview::Buyer::MODEL)
+                          .where(status: %w[rejected failed]).where.not(catalog_plan_variant_id: nil)
+                          .where("(usage->>'mask_version')::int >= ? OR status = 'failed'", version)
+                          .group(:catalog_plan_variant_id, :status).count
+    outlines = TruebuildSurfaceMask.where(version: Truebuild::Trueview::Surfaces::VERSION, status: 'done', coverage: 0)
+                                   .where("usage->'presence'->>'present' = 'true' OR usage->'attempts'->-1->>'present' = 'true'")
+                                   .pluck(:source_url)
+    by_photo = CatalogPlanVariant.where("jsonb_array_length(COALESCE(media->'photos', '[]'::jsonb)) > 0").pluck(:id, :media)
+    outline_counts = Hash.new(0)
+    by_photo.each do |id, media|
+      urls = Array(media['photos']).map { |p| p['url'] }
+      outline_counts[id] += outlines.count { |u| urls.include?(u) }
+    end
+    ids = (rows.keys.map(&:first) + outline_counts.select { |_, n| n.positive? }.keys).uniq
+    names = CatalogPlanVariant.where(id: ids).pluck(:id, Arel.sql("media->>'name'"), :model_number).to_h { |i, n, m| [i, n.presence || m] }
+    items = ids.map do |id|
+      { variant_id: id, name: names[id], held_back: rows[[id, 'rejected']].to_i, failed: rows[[id, 'failed']].to_i,
+        outlines_not_used: outline_counts[id] }
+    end
+    render json: { items: items.sort_by { |i| -(i[:held_back] * 2 + i[:failed] + i[:outlines_not_used]) } }
   end
 
   # POST /api/admin/trueview_lab/layers/:id/flag { note }

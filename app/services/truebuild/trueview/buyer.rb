@@ -52,7 +52,17 @@ module Truebuild
 
       # Queues every missing layer, once per PREDRAW_EVERY, within the daily
       # limit. Returns the number queued.
-      def predraw!
+      # force: draw now (after the photos were picked), not once per PREDRAW_EVERY.
+      def predraw!(force: false)
+        # Claude picks the photos first; drawing waits for it, so nothing is
+        # drawn on a photo about to be replaced.
+        if PhotoChoice.needs_pick?(@variant)
+          if Rails.cache.write("truebuild:trueview:pick:#{@variant.id}", true, expires_in: 30.minutes, unless_exist: true)
+            TruebuildPhotoPickJob.perform_later(@company.id, @variant.id)
+          end
+          return 0
+        end
+        Rails.cache.delete("truebuild:trueview:predraw:#{@variant.id}:v#{Layer::VERSION}") if force
         return 0 unless Trueview.configured?(MODEL)
         return 0 unless Rails.cache.write("truebuild:trueview:predraw:#{@variant.id}:v#{Layer::VERSION}", true,
                                           expires_in: PREDRAW_EVERY, unless_exist: true)
@@ -133,10 +143,9 @@ module Truebuild
 
       private
 
-      # The first photo of each room the model has.
+      # The photos drawn on, per room (PhotoChoice).
       def photos
-        list = Array(@variant.media&.dig('photos'))
-        ROOMS.keys.filter_map { |room| (p = list.find { |x| x['room'] == room && x['url'].present? }) && [room, p['url']] }
+        PhotoChoice.photos(@variant)
       end
 
       # [photo, selection_key, prompt] => layer_url, current cut only.

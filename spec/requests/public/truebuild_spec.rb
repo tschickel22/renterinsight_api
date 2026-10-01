@@ -287,6 +287,12 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect { trueview }.to have_enqueued_job(TruebuildRenderJob).exactly(plan.map { |p| p[:key] }.uniq.size).times
     end
 
+    it 'has Claude pick the photos before drawing anything when a room has several' do
+      variant.update!(media: { 'photos' => [{ 'url' => front, 'room' => 'exterior' }, { 'url' => "#{front}-2", 'room' => 'exterior' }] })
+      expect { trueview }.to have_enqueued_job(TruebuildPhotoPickJob).with(company.id, variant.id)
+      expect(TruebuildRender.count).to eq(0)
+    end
+
     it 'puts a job lost in a restart back on the queue' do
       trueview
       lost = TruebuildRender.first
