@@ -221,6 +221,14 @@ RSpec.describe 'Public TrueBuild', type: :request do
       ENV.delete('TRUEVIEW_DAILY_LIMIT')
     end
 
+    it 'puts a job lost in a restart back on the queue' do
+      trueview
+      lost = TruebuildRender.first
+      lost.update_columns(status: 'running', updated_at: 1.hour.ago)
+      expect { trueview }.to have_enqueued_job(TruebuildRenderJob).with(lost.id)
+      expect(lost.reload.status).to eq('queued')
+    end
+
     it 'stops drawing for the day at the platform limit' do
       allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
       ENV['TRUEVIEW_DAILY_LIMIT'] = '2'

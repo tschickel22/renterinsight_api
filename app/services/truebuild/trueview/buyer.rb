@@ -19,7 +19,8 @@ module Truebuild
       }.freeze
       # A choice of nothing ("Accent wall: None") is the photo as built.
       NOTHING = /\A\s*(none|no\b.*|n\/?a|omit.*)\s*\z/i
-      PREDRAW_EVERY = 6.hours   # a model's missing layers are queued at most this often
+      PREDRAW_EVERY = 6.hours
+      STALE_AFTER = 15.minutes # a job this old was lost (a deploy restarted its worker)   # a model's missing layers are queued at most this often
       DAILY_LIMIT_DEFAULT = 300 # layers a day across the platform; TRUEVIEW_DAILY_LIMIT overrides
 
       def initialize(company, variant)
@@ -33,8 +34,8 @@ module Truebuild
         plan = self.plan
         done = done_layers(plan)
         skipped = skipped_layers(plan)
-        drawing = TruebuildRender.where(status: %w[queued running], purpose: 'layer', model_key: MODEL,
-                                        source_url: plan.map { |p| p[:photo] }.uniq).count
+        requeue_stale(plan)
+        drawing = rows(plan).where(status: %w[queued running]).count
         photos = plan.group_by { |p| p[:photo] }.map do |photo, items|
           layers = items.filter_map { |i| (url = done[[photo, i[:key], i[:prompt]]]) && [i[:option_id], url] }.to_h
           # Finishes this photo will show once drawn, so the page can say so.
@@ -115,6 +116,15 @@ module Truebuild
                        .where.not(layer_url: nil)
                        .select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                        .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
+      end
+
+      # Lost jobs go back on the queue, or the page would say "still drawing"
+      # for ever. Only the row's own job is enqueued again; nothing is redrawn.
+      def requeue_stale(plan)
+        rows(plan).where(status: %w[queued running]).where(updated_at: ...STALE_AFTER.ago).find_each do |row|
+          row.update!(status: 'queued')
+          TruebuildRenderJob.set(queue: :low).perform_later(row.id)
+        end
       end
 
       def rows(plan)
