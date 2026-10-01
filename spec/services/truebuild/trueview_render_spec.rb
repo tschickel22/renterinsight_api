@@ -23,7 +23,10 @@ RSpec.describe 'TrueView rendering' do
     let(:verdict) { { 'present' => true, 'fit' => 4 } }
 
     before do
-      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: verdict, input_tokens: 2000, output_tokens: 50 } }
+      # The presence question, then the outline score.
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        { input: tool[:name] == 'judge_presence' ? { 'present' => verdict['present'] } : verdict, input_tokens: 2000, output_tokens: 50 }
+      end
     end
 
     def paints(image)
@@ -40,10 +43,10 @@ RSpec.describe 'TrueView rendering' do
     it 'outlines a surface by having the model paint it magenta, once per photo' do
       paints(painted)
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 9)
+      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 10)
       expect(mask.usage['attempts']).to eq([{ 'present' => true, 'fit' => 4 }])
       expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
-      expect(mask.usage['cost_usd']).to eq(0.0368) # the painting, plus the check: 2,000 in and 50 out at Sonnet rates
+      expect(mask.usage['cost_usd']).to eq(0.0436) # the painting, plus two questions at 2,000 in and 50 out, Sonnet rates
       expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Kitchen cabinets')).to eq(mask)
     end
 
@@ -64,7 +67,9 @@ RSpec.describe 'TrueView rendering' do
         { bytes: png(painted), mime: 'image/png', model: 'lite', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
       end
       verdicts = [{ 'present' => true, 'fit' => 2, 'note' => 'It included the microwave.' }, { 'present' => true, 'fit' => 5 }]
-      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: verdicts.shift, input_tokens: 2000, output_tokens: 50 } }
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        { input: tool[:name] == 'judge_presence' ? { 'present' => true } : verdicts.shift, input_tokens: 2000, output_tokens: 50 }
+      end
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Backsplash')
       expect(prompts.last).to include('A previous attempt was wrong: It included the microwave.')
       expect(mask.coverage.to_f).to be > 0
@@ -75,14 +80,27 @@ RSpec.describe 'TrueView rendering' do
       old = TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: 1, mask_url: 'https://b/m.png',
                                          coverage: 0.2, usage: { 'digest' => Truebuild::Trueview::Surfaces.digest('cabinets') })
       expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: photo.jpegsave_buffer, mime: 'image/jpeg')
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(version: 9, mask_url: 'https://b/m.png')
+      expect(mask).to have_attributes(version: 10, mask_url: 'https://b/m.png', coverage: 0.2)
       expect(mask.usage['carried_from']).to eq(old.id)
+    end
+
+    it 'asks about presence on the untouched photo alone, and paints nothing in when the answer is no' do
+      paints(painted)
+      calls = []
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, content:, **|
+        calls << [tool[:name], content.count { |c| c[:type] == 'image' }]
+        { input: { 'present' => false, 'note' => 'No shutters on this house.' }, input_tokens: 1500, output_tokens: 20 }
+      end
+      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Shutters')
+      expect(calls).to eq([['judge_presence', 1]])
+      expect(mask).to have_attributes(coverage: 0, error: 'No shutters on this house.')
     end
 
     it 'leaves out what another outline of the photo already covers' do
       cabinets = png((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 75, 100, fill: true))
-      TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: 9, mask_url: 'https://b/masks/cab.png', coverage: 0.125)
+      TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: 10, mask_url: 'https://b/masks/cab.png', coverage: 0.125)
       allow(Truebuild::Trueview).to receive(:fetch_source) do |url|
         url.include?('masks/') ? { bytes: cabinets, mime: 'image/png' } : { bytes: photo.jpegsave_buffer, mime: 'image/jpeg' }
       end

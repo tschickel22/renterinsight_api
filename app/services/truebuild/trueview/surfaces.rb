@@ -21,7 +21,8 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 9       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries
+      VERSION = 10      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
+                        # 9 presence judged beside the overlay
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -88,8 +89,13 @@ module Truebuild
                                   .order(version: :desc).find { |m| m.present? && m.usage['digest'] == digest(key) }
         return nil unless old
 
-        TruebuildSurfaceMask.create!(old.attributes.except('id', 'created_at', 'updated_at').merge('version' => VERSION,
-                                                                                                    'usage' => old.usage.merge('carried_from' => old.id)))
+        # Carried outlines get the presence question too: it is new since some were made.
+        seen = presence(rgb(Vips::Image.new_from_buffer(Trueview.fetch_source(source_url)[:bytes], '')), key,
+                        CATEGORIES.find { |k, _, _| k == key }.last)
+        TruebuildSurfaceMask.create!(old.attributes.except('id', 'created_at', 'updated_at')
+                                        .merge('version' => VERSION, 'coverage' => seen['present'] ? old.coverage : 0,
+                                               'error' => seen['present'] ? old.error : seen['note'],
+                                               'usage' => old.usage.merge('carried_from' => old.id, 'presence' => seen)))
       end
 
       # A reviewer flagged this outline: outline it again with their note,
@@ -178,20 +184,50 @@ module Truebuild
       # shutters; presence is judged on the untouched photo alone. A yes or
       # no on the outline was either too lenient or, asked to be strict,
       # rejected cabinets over a few pixels of stool, so it is a 1 to 5 fit.
+      PRESENCE_TOOL = {
+        name: 'judge_presence',
+        description: 'Say whether the photo shows the named surface.',
+        input_schema: {
+          type: 'object',
+          properties: { present: { type: 'boolean' }, note: { type: 'string', description: 'One short sentence.' } },
+          required: ['present']
+        }
+      }.freeze
+
+      def look(img)
+        Base64.strict_encode64(img.thumbnail_image(1000).jpegsave_buffer(Q: 80))
+      end
+
+      # Asked of the untouched photo alone. With a painted outline beside it,
+      # Claude twice took shutter-shaped paint on Bay Port (which has no
+      # shutters) for shutters.
+      def presence(image, key, description)
+        result = Catalog::PriceBooks::ClaudeClient.call(
+          system: 'You look at photos of manufactured homes for a home configurator. Answer only from what is visible.',
+          tool: PRESENCE_TOOL, max_tokens: 200, temperature: 0,
+          content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(image) } },
+                    { type: 'text', text: "Does this photo clearly show #{key} (#{description})? Answer no if you would have to guess." }]
+        )
+        result[:input].slice('present', 'note')
+                      .merge('cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
+      end
+
       def check(image, mask, key, description)
-        look = ->(img) { Base64.strict_encode64(img.thumbnail_image(1000).jpegsave_buffer(Q: 80)) }
+        seen = presence(image, key, description)
+        return seen.merge('fit' => 0) unless seen['present']
+
         tinted = (mask > 127).ifthenelse((image * 0.4 + [153, 0, 153]).cast(:uchar), image).cast(:uchar).copy(interpretation: :srgb)
         result = Catalog::PriceBooks::ClaudeClient.call(
           system: 'You check outlines of home surfaces for a home configurator. A finish will be painted inside the ' \
                   'outline, so what matters is whether it would paint the right thing.',
           tool: CHECK_TOOL, max_tokens: 400, temperature: 0,
-          content: [{ type: 'text', text: 'Photo:' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(image) } },
-                    { type: 'text', text: "First, from that photo alone: does it show #{key}? Then the same photo with the " \
-                                          "outline filled in magenta. It should be #{key}: #{description}." },
-                    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(tinted) } }]
+          content: [{ type: 'text', text: 'Photo:' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(image) } },
+                    { type: 'text', text: "The same photo with an outline filled in magenta. It should be #{key}: #{description}. " \
+                                          'The surface is in the photo; judge only the outline (answer present: true).' },
+                    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
-        result[:input].slice('present', 'fit', 'note')
-                      .merge('cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
+        cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
+        result[:input].slice('fit', 'note').merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
       end
 
       def paint_prompt(description, correction = nil)
