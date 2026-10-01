@@ -17,11 +17,19 @@ module McpTools
 
       def read_only!
         annotations(read_only_hint: true, destructive_hint: false, idempotent_hint: true, open_world_hint: false)
+        security_schemes!('mcp:read')
       end
 
       def writes!(destructive: false)
         required_scope 'mcp:write'
         annotations(read_only_hint: false, destructive_hint: destructive, idempotent_hint: false, open_world_hint: false)
+        security_schemes!('mcp:write')
+      end
+
+      # ChatGPT reads a per-tool securitySchemes declaration to know a tool
+      # needs the linked account, and which scope. Harmless to other clients.
+      def security_schemes!(scope)
+        meta({ 'securitySchemes' => [{ 'type' => 'oauth2', 'scopes' => [scope] }] })
       end
 
       def call(server_context:, **args)

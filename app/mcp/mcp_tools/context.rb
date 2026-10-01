@@ -80,7 +80,7 @@ module McpTools
       return @location_ids if defined?(@location_ids)
 
       @location_ids =
-        if !rbac? || admin?
+        if !rbac? || admin? || company_tier_role?
           nil
         else
           user.accessible_locations.where(company_id: company.id).pluck(:id)
@@ -166,6 +166,13 @@ module McpTools
     end
 
     private
+
+    # A company-tier role covers the whole company, records with no location
+    # included, exactly as the app treats it. Only location-tier users are
+    # narrowed (and see nothing when none of their locations is usable).
+    def company_tier_role?
+      user.user_role_assignments.active.where(tier: 'company', company_id: company.id).exists?
+    end
 
     def company_admin_assignment?
       return false unless rbac?

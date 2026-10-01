@@ -1931,6 +1931,8 @@ Rails.application.routes.draw do
       # MCP connector: consent screen and connected AI apps (backlog E53)
       get 'oauth/consent', to: 'oauth_consents#show'
       post 'oauth/consent', to: 'oauth_consents#create'
+      get 'connected-apps/activity', to: 'connected_apps#activity'
+      put 'connected-apps/settings', to: 'connected_apps#update_settings'
       resources :connected_apps, only: [:index, :destroy], path: 'connected-apps'
 
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
