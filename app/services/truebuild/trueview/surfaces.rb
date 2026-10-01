@@ -21,7 +21,7 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 7       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping
+      VERSION = 8       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -39,11 +39,15 @@ module Truebuild
         ['backsplash', /backsplash/i,
          'the backsplash: the wall surface between the countertop and the upper cabinets. Not the range, microwave, hood, outlets, window or anything on the counter'],
         ['flooring', /floor|carpet/i, 'the floor. Not rugs, furniture legs or cabinets'],
-        ['accent wall', /accent|wall ?board/i, 'the single largest interior wall facing the camera'],
+        ['accent wall', /accent|wall ?board/i,
+         'the single largest flat interior wall facing the camera, from floor or countertop to ceiling. Not the ceiling, ' \
+         'cabinets, backsplash, windows, doors, mirrors, light fixtures or any other wall'],
         ['siding', /siding|shake/i, "the main house's exterior wall siding. Not trim, windows, doors, roof, skirting, porch or neighboring houses"],
         ['shutters', /shutter/i, 'the window shutters on the main house'],
         ['shingles', /shingle|roof/i,
-         "the sloped roof surfaces of the main house covered in shingles. Not the siding or shakes in the gable triangle, not the trim or gutters"],
+         "only the sloped roof planes of the main house that are covered in asphalt shingles, above the gutters and eaves. " \
+         'The triangular gable wall under the roof peak (often covered in shakes or siding) is a wall, not roof: leave it ' \
+         'as it is, along with the trim, fascia and gutters'],
         ['corner posts', /corner post/i,
          "the narrow vertical trim boards at the outside corners of the main house's walls. Not porch posts, columns or downspouts"]
       ].freeze
