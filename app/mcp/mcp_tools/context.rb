@@ -11,6 +11,8 @@ module McpTools
   class Context
     MAX_ROWS = 50
     DEFAULT_DAILY_RECORD_LIMIT = 2_000
+    DEFAULT_HOURLY_CHANGE_LIMIT = 30
+    DEFAULT_DAILY_CHANGE_LIMIT = 200
 
     attr_reader :user, :company, :grant, :ip_address
 
@@ -112,9 +114,50 @@ module McpTools
     # list and search tools, on top of the per call cap. Company 17 took
     # 9,703 leads on its way out; this connector is another door and is
     # treated as one.
+    def mcp_settings
+      @mcp_settings ||= Setting.get('Company', company.id, 'mcp_settings', {}) || {}
+    end
+
     def daily_record_limit
-      settings = Setting.get('Company', company.id, 'mcp_settings', {}) || {}
-      (settings['daily_record_limit'] || DEFAULT_DAILY_RECORD_LIMIT).to_i
+      (mcp_settings['daily_record_limit'] || DEFAULT_DAILY_RECORD_LIMIT).to_i
+    end
+
+    def hourly_change_limit
+      (mcp_settings['hourly_change_limit'] || DEFAULT_HOURLY_CHANGE_LIMIT).to_i
+    end
+
+    def daily_change_limit
+      (mcp_settings['daily_change_limit'] || DEFAULT_DAILY_CHANGE_LIMIT).to_i
+    end
+
+    # Writes are limited per person, by tool call (a status change with its
+    # note is one change), so an AI told to "mark every lead lost" stops after
+    # a handful instead of working through the whole book one record at a
+    # time. Each change is allowed on its own; five hundred in a row is not.
+    def changes_made_since(time)
+      McpChange.where(user_id: user.id, company_id: company.id, created_at: time..).distinct.count(:mcp_tool_call_id)
+    end
+
+    def check_change_limit!
+      if changes_made_since(1.hour.ago) >= hourly_change_limit
+        raise ChangeLimitReached, "Change limit reached: #{hourly_change_limit} changes an hour for this person. " \
+                                  'Try again later, or ask an admin to raise it.'
+      end
+      return unless changes_made_since(Time.current.beginning_of_day) >= daily_change_limit
+
+      raise ChangeLimitReached, "Change limit reached: #{daily_change_limit} changes a day for this person. " \
+                                'It resets at midnight, or ask an admin to raise it.'
+    end
+
+    # Write tools call this after each record they create or change. The rows
+    # are saved with the audit row for this call, and are what Undo reverses.
+    def record_change(action:, record:, before: {}, after: {})
+      pending_changes << { action: action, record_type: record.class.name, record_id: record.id,
+                           before: before.deep_stringify_keys, after: after.deep_stringify_keys }
+    end
+
+    def pending_changes
+      @pending_changes ||= []
     end
 
     def records_used_today
@@ -147,12 +190,21 @@ module McpTools
     end
 
     def audit!(tool_name:, arguments:, status:, result_count:, duration_ms:, error_message:)
-      McpToolCall.create!(
+      call = McpToolCall.create!(
         oauth_grant_id: grant&.id, user_id: user.id, company_id: company.id,
         client_name: grant&.oauth_client&.client_name, tool_name: tool_name,
         arguments: self.class.redact(arguments), status: status, result_count: result_count,
         duration_ms: duration_ms, error_message: error_message.to_s.first(500).presence, created_at: Time.current
       )
+      # Recorded whatever the call's outcome: a change saved before a later
+      # step failed still happened and must still be undoable.
+      now = Time.current
+      pending_changes.each do |change|
+        McpChange.create!(change.merge(mcp_tool_call_id: call.id, oauth_grant_id: grant&.id, user_id: user.id,
+                                       company_id: company.id, created_at: now))
+      end
+      pending_changes.clear
+      call
     rescue StandardError => e
       Rails.logger.error("[McpTools] audit write failed: #{e.class}: #{e.message}")
     end

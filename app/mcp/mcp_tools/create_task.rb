@@ -42,6 +42,7 @@ module McpTools
       task.location_id ||= ctx.default_location_id
       task.due_date = WriteHelpers.parse_due!(ctx, due_date, location_id: task.location_id) if due_date.present?
       task.save!
+      ctx.record_change(action: 'created', record: task, after: { status: task.status })
 
       Base::Result.new(payload: { created: { id: "task:#{task.id}", title: task.title, due: task.due_date&.iso8601,
                                              assigned_to: ctx.user_names[task.assigned_to_id] } }, count: 1)

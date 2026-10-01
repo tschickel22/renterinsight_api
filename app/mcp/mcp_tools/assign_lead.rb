@@ -24,7 +24,9 @@ module McpTools
 
       ctx.authorize!('leads', 'update')
       owner = WriteHelpers.assignable_user!(ctx, user_id)
+      previous = lead.owner_id
       lead.update!(owner_id: owner.id)
+      ctx.record_change(action: 'updated', record: lead, before: { owner_id: previous }, after: { owner_id: owner.id })
 
       Base::Result.new(payload: { updated: records.summary('lead', lead) }, count: 1)
     end

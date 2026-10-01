@@ -46,6 +46,7 @@ module McpTools
       attrs[:location_id] ||= ctx.default_location_id
 
       ticket = ctx.company.service_tickets.create!(attrs)
+      ctx.record_change(action: 'created', record: ticket, after: { status: ticket.status })
       Base::Result.new(payload: { created: records.summary('ticket', ticket) }, count: 1)
     end
   end
