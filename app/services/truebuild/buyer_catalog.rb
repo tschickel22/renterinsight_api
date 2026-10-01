@@ -19,6 +19,15 @@ module Truebuild
       company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
     end
 
+    # A home on the lot can be designed only while it is not built yet: a
+    # model to order, or one ordered and on its way. Built homes in stock are
+    # sold as they stand.
+    DESIGNABLE_STATUSES = %w[available_to_order ordered on_order].freeze
+
+    def self.designable_home?(company, vehicle)
+      vehicle.present? && DESIGNABLE_STATUSES.include?(vehicle.status) && available?(company, vehicle.catalog_plan_variant)
+    end
+
     def initialize(company, variant, location: nil, vehicle: nil)
       @company = company
       @variant = variant

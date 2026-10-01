@@ -19,8 +19,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
   let(:kitchen) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'kitchen', name: 'Kitchen & Appliances', position: 7) }
   let(:exterior) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'exterior', name: 'Exterior', position: 5) }
   let!(:vehicle) do
+    # On order: not built yet, so its finishes can still be chosen.
     Vehicle.create!(company: company, year: 2026, make: 'Champion', model: 'Belvidere', vin: "VIN#{SecureRandom.hex(6).upcase}",
-                    status: 'available', is_deleted: false, catalog_plan_variant: variant)
+                    status: 'on_order', is_deleted: false, catalog_plan_variant: variant)
   end
 
   def option(group, name, **price)
@@ -159,15 +160,47 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(response.body).not_to match(/cost/i)
   end
 
-  it 'tells the home page whether the home can be designed' do
-    get "/public/inventory/#{vehicle.id}", params: { token: token }
+  it 'shows only the factories, series or TrueView-ready models a site asks for' do
+    photo = 'https://s7d9.scene7.com/is/image/championhomes/belvidere-exterior-1'
+    variant.update!(media: { 'photos' => [{ 'url' => photo, 'room' => 'exterior' }] })
+    names = ->(params) { (get '/public/truebuild/models', params: { token: token }.merge(params)) && JSON.parse(response.body)['models'].map { |m| m['name'] } }
+
+    expect(names.call(factory_ids: [factory.id])).to eq(['Belvidere'])
+    expect(names.call(factory_ids: [factory.id + 999])).to eq([])
+    expect(names.call(series: ['Aspire'])).to eq(['Belvidere'])
+    expect(names.call(series: ['Genesis'])).to eq([])
+    expect(names.call(trueview_only: true)).to eq([])
+
+    TruebuildRender.create!(catalog_plan_variant: variant, source_url: photo, room: 'exterior', purpose: 'layer', status: 'done',
+                            selection: [{ 'surface' => 'Siding', 'value' => 'Clay' }], selection_key: 'k', model_key: 'nb2-lite',
+                            provider: 'gemini', model: 'lite', prompt: 'p', layer_url: 'https://b/l.webp',
+                            usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+    Rails.cache.clear
+    expect(names.call(trueview_only: true)).to eq(['Belvidere'])
+    expect(JSON.parse(response.body)['models'].first['trueview']).to be(true)
+
+    get '/public/truebuild/models', params: { token: token, facets: 1 }
+    facets = JSON.parse(response.body)['facets']
+    expect(facets['factories']).to eq([{ 'id' => factory.id, 'name' => 'Topeka', 'models' => 1 }])
+    expect(facets['series']).to eq([{ 'name' => 'Aspire', 'factory_ids' => [factory.id], 'models' => 1 }])
+    expect(facets['trueview_ready']).to eq(1)
+  end
+
+  it 'tells the home page whether the home can be designed, which a built home in stock cannot' do
+    get "/public/inventory/#{vehicle.id}", params: { token: token, statuses: 'available,on_order' }
     expect(JSON.parse(response.body)['truebuild']).to eq('available' => true)
+
+    vehicle.update!(status: 'available')
+    get "/public/inventory/#{vehicle.id}", params: { token: token, statuses: 'available,on_order' }
+    expect(JSON.parse(response.body)['truebuild']).to eq('available' => false)
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    expect(response).to have_http_status(:not_found)
   end
 
   it "shows the manufacturer's photos and floor plan for a linked home with none of its own" do
     variant.update!(media: { 'photos' => [{ 'url' => 'https://img/kitchen-1', 'room' => 'kitchen' }],
                              'floor_plans' => ['https://img/plan'], 'matterport_url' => 'https://my.matterport.com/show/?m=x' })
-    get "/public/inventory/#{vehicle.id}", params: { token: token }
+    get "/public/inventory/#{vehicle.id}", params: { token: token, statuses: 'available,on_order' }
     home = JSON.parse(response.body)['vehicle']
     expect(home).to include('image_urls' => ['https://img/kitchen-1'], 'floor_plan_images' => ['https://img/plan'],
                             'tour_url' => 'https://my.matterport.com/show/?m=x')

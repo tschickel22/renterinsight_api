@@ -266,7 +266,7 @@ class Public::InventoryController < ApplicationController
       company: company_data,
       branding: branding,
       champion_disclaimer: @vehicle.source == 'champion_ims' ? ChampionDisclaimer.for_company(@company) : { show: false },
-      truebuild: { available: Truebuild::BuyerCatalog.available?(@company, @vehicle.catalog_plan_variant) }
+      truebuild: { available: Truebuild::BuyerCatalog.designable_home?(@company, @vehicle) }
     }
   end
   

@@ -22,16 +22,22 @@ class Public::TruebuildController < ApplicationController
     return render json: { error: 'Home not found' }, status: :not_found unless vehicle
 
     variant = vehicle.catalog_plan_variant
-    return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
+    return not_designable unless Truebuild::BuyerCatalog.designable_home?(@company, vehicle)
 
     render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).for_buyer.merge(vehicle_id: vehicle.id)
   end
 
   # GET /public/truebuild/models   Every model this dealer offers, for a site block.
+  #   factory_ids[], series[]: only those. trueview_only: only models with TrueView drawn.
+  #   facets=1: also the factories and series there are, for the block's settings.
   def models
     return render json: { models: [] } unless @company.has_module?(Truebuild::BuyerCatalog::MODULE)
 
-    render json: { models: Truebuild::ModelList.new(@company).call(manufacturer_id: params[:manufacturer_id].presence) }
+    list = Truebuild::ModelList.new(@company)
+    body = { models: list.call(manufacturer_id: params[:manufacturer_id].presence, factory_ids: params[:factory_ids],
+                               series: params[:series], trueview_only: ActiveModel::Type::Boolean.new.cast(params[:trueview_only])) }
+    body[:facets] = list.facets(manufacturer_id: params[:manufacturer_id].presence) if params[:facets].present?
+    render json: body
   end
 
   def model
