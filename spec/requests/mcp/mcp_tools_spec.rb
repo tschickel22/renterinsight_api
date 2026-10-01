@@ -42,6 +42,10 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       tools = mcp_post(read_only, 'tools/list').dig('result', 'tools')
 
       expect(tools.map { |t| t['name'] }).not_to include('create_lead', 'add_note')
+      instructions = mcp_post(read_only, 'initialize', { protocolVersion: '2025-06-18', capabilities: {},
+                                                        clientInfo: { name: 'claude-ai', version: '1' } })
+                     .dig('result', 'instructions')
+      expect(instructions).to include('Also let it make changes')
       expect(tools).to all(include('annotations' => include('readOnlyHint' => true)))
     end
 
