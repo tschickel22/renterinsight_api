@@ -46,6 +46,11 @@ class Communication < ApplicationRecord
   # Polymorphic association - can belong to Lead, Account, Quote, etc.
   belongs_to :communicable, polymorphic: true, optional: true
   belongs_to :company, optional: true
+  # The user the message went out as. The column existed but the association
+  # did not, so EmailConnectionHealth's `communication.user` raised on every
+  # email sent through SendCommunicationJob, success and failure alike, and
+  # the job's retry could send a delivered email again.
+  belongs_to :user, optional: true
   belongs_to :communication_thread, optional: true
   belongs_to :template, class_name: 'CommunicationTemplate', foreign_key: 'template_id', optional: true
   belongs_to :workflow_run, class_name: 'WorkflowRun', optional: true

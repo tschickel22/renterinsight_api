@@ -145,7 +145,7 @@ module Api
 
         begin
           # Use JsonWebToken for consistency
-          decoded = JsonWebToken.decode(refresh_token)
+          decoded = JsonWebToken.decode(refresh_token, allow_refresh: true)
           
           unless decoded && decoded[:type] == 'refresh'
             render json: {

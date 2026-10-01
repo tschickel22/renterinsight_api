@@ -22,12 +22,12 @@ RSpec.describe JsonWebToken do
       expect(decoded[:exp]).to be_within(2).of(exp_time.to_i)
     end
 
-    it 'defaults to 24 hours expiration' do
+    it 'defaults to the standard session length' do
       payload = { user_id: 123 }
       token = described_class.encode(payload)
       decoded = described_class.decode(token)
 
-      expect(decoded[:exp]).to be_within(2).of(24.hours.from_now.to_i)
+      expect(decoded[:exp]).to be_within(2).of(JsonWebToken::STANDARD_EXP.from_now.to_i)
     end
   end
 

@@ -169,6 +169,7 @@ RSpec.describe BuyerPortalService do
     
     let(:quote) do
       Quote.create!(
+        company: company,
         account: account,
         quote_number: 'Q-2025-001',
         status: 'accepted',
@@ -210,6 +211,7 @@ RSpec.describe BuyerPortalService do
     
     let(:quote) do
       Quote.create!(
+        company: company,
         account: account,
         quote_number: 'Q-2025-002',
         status: 'rejected',

@@ -36,6 +36,12 @@ begin
 rescue ActiveRecord::PendingMigrationError => e
   abort e.to_s.strip
 end
+# No spec may reach real AWS. .env carries real credentials, and specs that did
+# not stub a provider were calling SES for real (they only failed because that
+# key cannot send). With stub_responses every SDK client answers locally; a
+# spec that needs a particular response still stubs it as before.
+Aws.config.update(stub_responses: true) if defined?(Aws)
+
 RSpec.configure do |config|
   # Include FactoryBot methods
   config.include FactoryBot::Syntax::Methods
