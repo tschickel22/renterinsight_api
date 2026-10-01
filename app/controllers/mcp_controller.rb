@@ -113,15 +113,24 @@ class McpController < ActionController::API
       them and fetch reads one. Call get_reference_data before filtering by a status or stage
       or assigning work to someone.
       #{ctx.write_allowed? ? 'Before any tool that changes data, confirm the change with the user.' : READ_ONLY_NOTE}
-      #{boundaries(brand)}
+      #{boundaries(brand, ctx)}
     TEXT
   end
 
   # What the connector deliberately does not do, and what to tell the user
   # instead. Without this an AI either claims it cannot help at all or invents
   # a workaround; with it, it says what it did and where the person finishes.
-  def boundaries(brand)
+  def boundaries(brand, ctx)
     app = brand.name
+    cost_answer =
+      if ctx.show_costs?
+        'Cost and gross figures appear under "costs" on deals and inventory when this person can see them in ' \
+          "#{app}; commission is never available here. Treat cost as internal: never put it in anything written " \
+          'for a customer.'
+      else
+        "Dealer cost, gross, margin or commission: \"Those figures are not available through this connector; " \
+          "your #{app} admin can allow it under Settings, AI Apps.\""
+      end
     <<~TEXT.squish
       Some things are deliberately not possible through this connector. When the user asks for one,
       say plainly that you cannot do it here and tell them where to do it, using these answers:
@@ -132,8 +141,7 @@ class McpController < ActionController::API
       "I cannot send messages, but I can draft it for you to send, add someone to an existing nurture
       sequence, or draft a campaign." Deleting any record: "I cannot delete records; that is done in
       #{app}." Changing many records at once (more than a handful): "I make changes one record at a time
-      and there is a limit per hour; for bulk changes use the bulk actions in #{app}." Dealer cost,
-      gross, margin or commission: "Those figures are not available through this connector." Users,
+      and there is a limit per hour; for bulk changes use the bulk actions in #{app}." #{cost_answer} Users,
       roles, permissions, company settings, invoices, payments and loans: "That is not available here;
       use #{app}." If a tool refuses something, repeat its reason to the user rather than guessing.
       Write customer-facing copy plainly and never use em dashes or en dashes.
