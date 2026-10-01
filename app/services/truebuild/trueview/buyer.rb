@@ -19,8 +19,8 @@ module Truebuild
       }.freeze
       # A choice of nothing ("Accent wall: None") is the photo as built.
       NOTHING = /\A\s*(none|no\b.*|n\/?a|omit.*)\s*\z/i
-      PREDRAW_EVERY = 6.hours
-      STALE_AFTER = 15.minutes # a job this old was lost (a deploy restarted its worker)   # a model's missing layers are queued at most this often
+      PREDRAW_EVERY = 6.hours # a model's missing layers are queued at most this often
+      STALE_AFTER = 15.minutes # without Solid Queue to ask, a job this old was lost
       DAILY_LIMIT_DEFAULT = 300 # layers a day across the platform; TRUEVIEW_DAILY_LIMIT overrides
 
       def initialize(company, variant)
@@ -162,10 +162,8 @@ module Truebuild
       # Lost jobs go back on the queue, or the page would say "still drawing"
       # for ever. Only the row's own job is enqueued again; nothing is redrawn.
       def requeue_stale(plan)
-        rows(plan).where(status: %w[queued running]).where(updated_at: ...STALE_AFTER.ago).find_each do |row|
-          row.update!(status: 'queued', usage: row.usage.except('job_id'))
-          TruebuildRenderJob.set(queue: :low).perform_later(row.id)
-        end
+        TruebuildRenderJob.orphaned(rows(plan), stale_after: STALE_AFTER)
+                          .each { |row| TruebuildRenderJob.requeue(row, queue: :low) }
       end
 
       def rows(plan)

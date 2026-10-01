@@ -292,11 +292,9 @@ class Api::Admin::TrueviewLabController < ApplicationController
   # Drawings left 'queued' or 'running' for 15 minutes were lost (a deploy
   # restarted the worker); opening the review puts them back on the queue.
   def requeue_stale(source_urls)
-    TruebuildRender.where(source_url: source_urls, purpose: 'layer', status: %w[queued running])
-                   .where(updated_at: ...Truebuild::Trueview::Buyer::STALE_AFTER.ago).find_each do |row|
-      row.update!(status: 'queued', usage: row.usage.except('job_id'))
-      TruebuildRenderJob.perform_later(row.id)
-    end
+    scope = TruebuildRender.where(source_url: source_urls, purpose: 'layer')
+    TruebuildRenderJob.orphaned(scope, stale_after: Truebuild::Trueview::Buyer::STALE_AFTER)
+                      .each { |row| TruebuildRenderJob.requeue(row) }
   end
 
   def run_json(run, rows)
