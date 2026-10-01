@@ -1620,12 +1620,6 @@ Rails.application.routes.draw do
           end
         end
         
-        # Contact Nurture
-        get 'nurture', to: 'contact_nurture#index'
-        post 'nurture/enroll', to: 'contact_nurture#enroll'
-        post 'nurture/:enrollment_id/pause', to: 'contact_nurture#pause'
-        post 'nurture/:enrollment_id/resume', to: 'contact_nurture#resume'
-        post 'nurture/:enrollment_id/unenroll', to: 'contact_nurture#unenroll'
       end
       
       # ==================== REPORTS ====================

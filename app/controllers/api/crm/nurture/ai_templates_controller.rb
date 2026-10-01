@@ -9,7 +9,7 @@ module Api
     module Nurture
       class AiTemplatesController < ApplicationController
         include RbacAuthorization
-        rbac_resource :crm
+        rbac_resource :crm, create_actions: %i[generate save]
 
         before_action :set_company_scope
         before_action :check_ai_limit!

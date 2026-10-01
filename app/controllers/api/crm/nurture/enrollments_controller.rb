@@ -5,7 +5,9 @@ module Api
     module Nurture
       class EnrollmentsController < ApplicationController
         include RbacAuthorization
-        rbac_resource :crm
+        # Every action is mapped: unmapped ones used to fall through with no
+        # permission check at all (bulk, trigger_step).
+        rbac_resource :crm, create_actions: [:bulk], update_actions: [:trigger_step]
 
         before_action :set_company_scope
 
@@ -60,17 +62,29 @@ module Api
             return
           end
           
+          enrollment = NurtureEnrollment.new(enrollment_params)
+          enrollment.company_id = @company.id
+          # The entity the caller named is the one enrolled. It used to be read
+          # only for the ownership check, so a caller sending entity_type and
+          # entity_id got a validation error, and one sending only lead_id got
+          # an enrollment the job could never send for.
+          enrollment.enrollable_type = entity_type
+          enrollment.enrollable_id = entity_id
+          enrollment.lead_id ||= entity_id if entity_type == 'Lead'
+
+          if (problem = enrollment_problem(enrollment))
+            render json: { error: problem }, status: :unprocessable_entity
+            return
+          end
+
           # Pause any existing running enrollments for this entity
-          if entity_type && entity_id
+          if enrollment.status == 'running'
             NurtureEnrollment.for_company(@company.id)
               .for_entity(entity_type, entity_id)
               .where(status: 'running')
               .update_all(status: 'paused')
           end
-          
-          enrollment = NurtureEnrollment.new(enrollment_params)
-          enrollment.company_id = @company.id
-          
+
           if enrollment.save
             # Start processing if status is running
             if enrollment.status == 'running'
@@ -128,6 +142,7 @@ module Api
         def bulk
           upsert_data = params[:upsert] || []
           delete_ids = params[:delete] || []
+          return if delete_ids.present? && !authorize_action!('crm', 'delete')
           
           results = []
           
@@ -180,6 +195,11 @@ module Api
               enrollment.status = status
               enrollment.current_step_index = enr_data[:current_step_index] || enr_data[:currentStepIndex] || 0
               enrollment.company_id = @company.id
+
+              if (problem = enrollment_problem(enrollment))
+                Rails.logger.info "[Nurture::EnrollmentsController#bulk] skipped: #{problem}"
+                next
+              end
               
               # If setting to running, pause other enrollments for this entity
               if status == 'running'
@@ -250,6 +270,26 @@ module Api
         end
 
         private
+
+        # Why this enrollment must not be saved, or nil. Same rules the workflow
+        # engine's enroll step applies: the sequence is this company's and
+        # turned on (a running enrollment in a turned-off sequence sits there
+        # sending nothing), and the person is not already in it.
+        def enrollment_problem(enrollment)
+          sequence = @company.nurture_sequences.find_by(id: enrollment.nurture_sequence_id)
+          return 'Nurture sequence not found' unless sequence
+          return "#{sequence.name} is turned off. Turn it on before adding people." if enrollment.status == 'running' && !sequence.is_active
+
+          if enrollment.new_record? && enrollment.enrollable_type.present? && enrollment.enrollable_id.present?
+            already = NurtureEnrollment.for_company(@company.id)
+                                       .for_entity(enrollment.enrollable_type, enrollment.enrollable_id)
+                                       .where(nurture_sequence_id: sequence.id, status: %w[idle running paused])
+                                       .exists?
+            return "Already enrolled in #{sequence.name}" if already
+          end
+
+          nil
+        end
 
         def set_company_scope
           unless current_user

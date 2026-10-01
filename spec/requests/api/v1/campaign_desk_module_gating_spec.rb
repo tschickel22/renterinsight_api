@@ -30,12 +30,17 @@ RSpec.describe 'Campaign Desk module gating', type: :request do
     expect(response.status == 403 ? body['required_any_of'] : nil).to be_nil
   end
 
-  it 'only logs, and does not deny, the newly gated campaign endpoints' do
-    allow(Rails.logger).to receive(:warn)
-
+  # Was log only until plan data granted these modules everywhere (v3 plan
+  # 18). Checked 2026-10-01 on staging and production: every tenant using
+  # campaigns has one of them, so the gate now denies like the workflow one.
+  it 'denies the campaign endpoints without Email Campaigns or Campaign Desk, and opens them with either' do
     get '/api/v1/campaigns', headers: headers
+    expect(response).to have_http_status(:forbidden)
+    expect(body['required_any_of']).to eq(%w[marketing.campaigns marketing.automation])
 
-    expect(Rails.logger).to have_received(:warn).with(/WOULD DENY marketing\.campaigns or marketing\.automation .*\(log only\)/)
+    company.tenant_module_overrides.create!(module_key: 'marketing.automation', is_enabled: true)
+    get '/api/v1/campaigns', headers: headers
+    # Past the module gate; any remaining 403 is the role's own permission.
     expect(response.status == 403 ? body['required_any_of'] : nil).to be_nil
   end
 end

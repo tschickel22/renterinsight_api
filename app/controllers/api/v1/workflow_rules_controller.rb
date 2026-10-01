@@ -49,8 +49,25 @@ module Api
         end
       end
 
+      # Edits to an active rule take effect at once (the editor saves only on
+      # Save, and pausing first would change how dealers work), so a save that
+      # would leave a live workflow broken is refused with the same errors
+      # activate shows. Drafts and paused rules can still be saved mid-edit.
       def update
-        if @rule.update(rule_params)
+        @rule.assign_attributes(rule_params)
+        if @rule.status == 'active'
+          validation = WorkflowRuleValidator.new(@rule).validate
+          unless validation.valid?
+            return render json: {
+              error: 'This workflow is live, so the change was not saved: it would stop the workflow working. ' \
+                     'Fix these, or pause the workflow to keep editing.',
+              validation_errors: validation.structured_errors,
+              errors: validation.errors
+            }, status: :unprocessable_entity
+          end
+        end
+
+        if @rule.save
           render json: rule_json(@rule, full: true)
         else
           render json: { errors: @rule.errors.full_messages }, status: :unprocessable_entity
@@ -84,7 +101,17 @@ module Api
         render json: rule_json(@rule)
       end
 
+      # Same check as activate: a rule edited while paused must not go live broken.
       def resume
+        validation = WorkflowRuleValidator.new(@rule).validate
+        unless validation.valid?
+          return render json: {
+            error: 'Workflow cannot be resumed',
+            validation_errors: validation.structured_errors,
+            errors: validation.errors
+          }, status: :unprocessable_entity
+        end
+
         @rule.update!(status: 'active')
         render json: rule_json(@rule)
       end
