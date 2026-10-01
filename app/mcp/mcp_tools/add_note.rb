@@ -16,7 +16,7 @@ module McpTools
       },
       required: %w[id text]
     )
-    writes!
+    writes!(destructive: false)
 
     def self.perform(ctx, id:, text:)
       raise UserError, 'The note is empty.' if text.to_s.strip.empty?

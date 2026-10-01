@@ -15,7 +15,7 @@ module McpTools
       },
       required: %w[id user_id]
     )
-    writes!
+    writes!(destructive: true)
 
     def self.perform(ctx, id:, user_id:)
       records = Records.new(ctx)

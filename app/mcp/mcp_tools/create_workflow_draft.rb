@@ -12,7 +12,7 @@ module McpTools
                 'get_reference_data for status and stage keys, and list_nurture_sequences for sequence ids. If it ' \
                 'is not valid yet, you get the list of fixes and nothing is saved.'
     input_schema(properties: WorkflowDraftSupport::SCHEMA_PROPERTIES, required: %w[name record_type trigger steps])
-    writes!
+    writes!(destructive: false)
 
     def self.perform(ctx, name:, record_type:, trigger:, steps:, description: nil, conditions: nil, halt_on_reply: 'false')
       MarketingAccess.require_workflows!(ctx, 'create')

@@ -17,7 +17,7 @@ module McpTools
       },
       required: %w[first_name]
     )
-    writes!
+    writes!(destructive: false)
 
     def self.perform(ctx, first_name:, last_name: nil, email: nil, phone: nil, status: nil, owner_user_id: nil,
                      location_id: nil, notes: nil)

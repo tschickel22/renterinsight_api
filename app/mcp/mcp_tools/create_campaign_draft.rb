@@ -35,7 +35,7 @@ module McpTools
       },
       required: %w[name channel audience steps]
     )
-    writes!
+    writes!(destructive: false)
 
     def self.perform(ctx, name:, channel:, audience:, steps:, description: nil, sender: 'me')
       MarketingAccess.require_campaigns!(ctx, 'create')

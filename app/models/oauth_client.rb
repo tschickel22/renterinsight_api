@@ -24,14 +24,15 @@ class OauthClient < ApplicationRecord
 
   # RFC 8252 section 7.3: a native app's loopback redirect may use any port,
   # so a registered http://127.0.0.1/callback also accepts :53682/callback.
+  # localhost, 127.0.0.1 and [::1] are treated as the same machine, as
+  # Claude's connector docs ask (Claude Code may register one and use another).
   def loopback_match?(uri)
     candidate = Oauth::RedirectPolicy.parse(uri)
     return false unless candidate && Oauth::RedirectPolicy.loopback?(candidate)
 
     redirect_uris.any? do |registered|
       reg = Oauth::RedirectPolicy.parse(registered)
-      reg && Oauth::RedirectPolicy.loopback?(reg) &&
-        reg.host == candidate.host && reg.path == candidate.path && reg.scheme == candidate.scheme
+      reg && Oauth::RedirectPolicy.loopback?(reg) && reg.path == candidate.path && reg.scheme == candidate.scheme
     end
   end
 

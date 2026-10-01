@@ -17,7 +17,7 @@ module McpTools
       },
       required: %w[title]
     )
-    writes!
+    writes!(destructive: false)
 
     TASKABLE = { 'lead' => 'Lead', 'contact' => 'Contact', 'account' => 'Account', 'deal' => 'Deal',
                  'ticket' => 'ServiceTicket' }.freeze
