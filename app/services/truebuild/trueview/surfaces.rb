@@ -71,7 +71,23 @@ module Truebuild
       # Paints, measures and checks the outline; a rejected outline of a
       # surface that is there is painted once more with Claude's note on what
       # was wrong ("it included the microwave").
-      def find!(source_url, source_bytes, key)
+      # A reviewer flagged this outline: outline it again with their note,
+      # then cut every drawing of that surface in the photo again (free).
+      def redo!(mask, note)
+        source = Trueview.fetch_source(mask.source_url)
+        mask.destroy!
+        fresh = find!(mask.source_url, source[:bytes], mask.surface, correction: note)
+        TruebuildRender.where(source_url: mask.source_url, purpose: 'layer', status: 'done').where.not(image_url: nil)
+                       .select { |r| category(r.selection.first&.dig('surface')) == mask.surface }.each do |old|
+          old.update!(status: 'superseded')
+          TruebuildRender.create!(old.attributes.except('id', 'created_at', 'updated_at', 'layer_url', 'mask_coverage', 'lab_run')
+                                     .merge('status' => 'queued', 'usage' => old.usage.merge('recut_from' => old.id).except('mask_version')))
+                         .tap { |r| TruebuildRenderJob.set(queue: :low).perform_later(r.id) }
+        end
+        fresh
+      end
+
+      def find!(source_url, source_bytes, key, correction: nil)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
         aspect = image.width.to_f / image.height
@@ -81,7 +97,7 @@ module Truebuild
         mask = verdict = result = nil
         OUTLINE_ATTEMPTS.times do
           result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' },
-                                          paint_prompt(description, attempts.last&.dig('note')), aspect: aspect)
+                                          paint_prompt(description, attempts.last&.dig('note') || correction), aspect: aspect)
           spent += Trueview.cost(spec, result[:usage])
           raise Trueview::Error, 'The model changed the framing while outlining' if Trueview.reframed_by(result, aspect) > Trueview::FRAMING_TOLERANCE
 

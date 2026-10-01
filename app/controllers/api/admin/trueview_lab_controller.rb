@@ -46,6 +46,64 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { sets: samples + colors.reject { |c| samples.any? { |s| s[:name].casecmp?(c[:name]) } } }
   end
 
+  # GET /api/admin/trueview_lab/review?variant_id=
+  # What buyers see for a model, to check: each photo's surface outlines
+  # (with Claude's score and note) and every layer drawn on it.
+  def review
+    variant = CatalogPlanVariant.find_by(id: params[:variant_id])
+    return render json: { error: 'Choose a model' }, status: :unprocessable_entity unless variant
+
+    photos = Array(variant.media['photos']).select { |p| Truebuild::Trueview::Buyer::ROOMS.key?(p['room']) }
+                                          .uniq { |p| p['room'] }
+    render json: {
+      variant: { id: variant.id, name: variant.media['name'].presence || variant.model_number },
+      photos: photos.map do |p|
+        masks = TruebuildSurfaceMask.where(source_url: p['url'], version: Truebuild::Trueview::Surfaces::VERSION).order(:surface)
+        layers = TruebuildRender.where(source_url: p['url'], purpose: 'layer', model_key: Truebuild::Trueview::Buyer::MODEL)
+                                .where.not(status: 'superseded').order(:id)
+                                .select { |r| r.status != 'done' || r.usage['mask_version'].to_i >= Truebuild::Trueview::Layer::VERSION }
+                                .group_by(&:selection_key).map { |_, rs| rs.last }
+        { room: p['room'], url: Truebuild::Trueview.sized(p['url']),
+          outlines: masks.map do |m|
+            last = Array(m.usage['attempts']).last || {}
+            { id: m.id, surface: m.surface, status: m.status, used: m.present?, coverage: m.coverage&.to_f, mask_url: m.mask_url,
+              fit: last['fit'], present: last['present'], note: m.error, cost_usd: m.usage['cost_usd'] }
+          end,
+          layers: layers.map do |r|
+            { id: r.id, surface: r.selection.first&.dig('surface'), value: r.selection.first&.dig('value'), status: r.status,
+              layer_url: r.layer_url, image_url: r.image_url, coverage: r.mask_coverage&.to_f, error: r.error,
+              reviewer_note: r.usage['reviewer_note'], cost_usd: r.cost_usd&.to_f }
+          end }
+      end
+    }
+  end
+
+  # POST /api/admin/trueview_lab/layers/:id/flag { note }
+  # Buyers stop seeing the layer at once; it is drawn again with the note.
+  def flag_layer
+    row = TruebuildRender.find_by(id: params[:id], purpose: 'layer')
+    return render json: { error: 'Not found' }, status: :not_found unless row
+
+    note = params[:note].to_s.strip.first(500)
+    row.update!(status: 'flagged', error: note.presence || 'Flagged by a reviewer')
+    again = TruebuildRender.create!(row.attributes.except('id', 'created_at', 'updated_at', 'layer_url', 'mask_coverage', 'image_url',
+                                                         'cost_usd', 'latency_ms', 'error', 'lab_run')
+                                      .merge('status' => 'queued',
+                                             'usage' => row.usage.slice('swatch_ids', 'predraw').merge('reviewer_note' => note, 'flagged_from' => row.id)))
+    TruebuildRenderJob.perform_later(again.id)
+    render json: { flagged: row.id, redraw: again.id }
+  end
+
+  # POST /api/admin/trueview_lab/outlines/:id/flag { note }
+  # Outlines the surface again with the note, then cuts its layers again.
+  def flag_outline
+    mask = TruebuildSurfaceMask.find_by(id: params[:id])
+    return render json: { error: 'Not found' }, status: :not_found unless mask
+
+    TruebuildOutlineRedoJob.perform_later(mask.id, params[:note].to_s.strip.first(500))
+    render json: { queued: mask.id }
+  end
+
   # GET /api/admin/trueview_lab/runs
   def runs
     rows = TruebuildRender.where.not(lab_run: nil).order(created_at: :desc).limit(400)

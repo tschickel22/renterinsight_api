@@ -3026,6 +3026,9 @@ Rails.application.routes.draw do
       get  'trueview_lab/runs', to: 'trueview_lab#runs'
       post 'trueview_lab/runs', to: 'trueview_lab#create_run'
       get  'trueview_lab/runs/:id', to: 'trueview_lab#show_run'
+      get  'trueview_lab/review', to: 'trueview_lab#review'
+      post 'trueview_lab/layers/:id/flag', to: 'trueview_lab#flag_layer'
+      post 'trueview_lab/outlines/:id/flag', to: 'trueview_lab#flag_outline'
 
       # ==================== TRUEBUILD PRICE BOOKS (Platform Admin Only) ====================
       # Factory price packages imported once for every dealer. See CatalogPriceBooksController.

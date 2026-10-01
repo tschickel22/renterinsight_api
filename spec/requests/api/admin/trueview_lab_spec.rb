@@ -179,4 +179,65 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
   end
+
+  describe 'review and flag' do
+    let!(:layer) do
+      TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
+                              selection: [{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }], selection_key: 'k1', model_key: 'nb2-lite',
+                              provider: 'gemini', model: 'lite', prompt: 'p', status: 'done', image_url: 'https://b/i.png',
+                              layer_url: 'https://b/l.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION, 'swatch_ids' => [] })
+    end
+    let!(:outline) do
+      TruebuildSurfaceMask.create!(source_url: kitchen_photo, surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION,
+                                   mask_url: 'https://b/m.png', coverage: 0.12, error: 'Covers the stools a little.',
+                                   usage: { 'attempts' => [{ 'present' => true, 'fit' => 4 }], 'cost_usd' => 0.05 })
+    end
+
+    it "shows a model's outlines and layers per photo" do
+      get '/api/admin/trueview_lab/review', headers: admin, params: { variant_id: variant.id }
+      photo = JSON.parse(response.body)['photos'].first
+      expect(photo['outlines'].first).to include('surface' => 'cabinets', 'fit' => 4, 'used' => true, 'note' => 'Covers the stools a little.')
+      expect(photo['layers'].first).to include('value' => 'Timberwolf', 'layer_url' => 'https://b/l.webp')
+    end
+
+    it 'takes a flagged layer away from buyers and draws it again with the note' do
+      expect do
+        post "/api/admin/trueview_lab/layers/#{layer.id}/flag", headers: admin, params: { note: 'Paint ran onto the floor.' }.to_json
+      end.to have_enqueued_job(TruebuildRenderJob)
+      expect(layer.reload).to have_attributes(status: 'flagged', error: 'Paint ran onto the floor.')
+      again = TruebuildRender.last
+      expect(again).to have_attributes(status: 'queued', prompt: 'p', image_url: nil)
+      expect(again.usage).to include('reviewer_note' => 'Paint ran onto the floor.', 'flagged_from' => layer.id)
+
+      image = (Vips::Image.black(300, 200, bands: 3) + 120).cast(:uchar)
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: image.jpegsave_buffer, mime: 'image/jpeg')
+      allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil)
+      allow(Truebuild::Trueview).to receive(:store).and_return('https://b/new.webp')
+      sent = nil
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |_s, _src, prompt, **|
+        sent = prompt
+        { bytes: image.pngsave_buffer, mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
+      end
+      TruebuildRenderJob.perform_now(again.id)
+      expect(sent).to end_with('A reviewer rejected an earlier drawing: Paint ran onto the floor. Fix that.')
+      expect(again.reload.status).to eq('done')
+    end
+
+    it 'outlines a flagged surface again and cuts its layers again for free' do
+      expect do
+        post "/api/admin/trueview_lab/outlines/#{outline.id}/flag", headers: admin, params: { note: 'Leave the stools out.' }.to_json
+      end.to have_enqueued_job(TruebuildOutlineRedoJob).with(outline.id, 'Leave the stools out.')
+
+      image = (Vips::Image.black(300, 200, bands: 3) + 120).cast(:uchar)
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: image.jpegsave_buffer, mime: 'image/jpeg')
+      allow(Truebuild::Trueview::Surfaces).to receive(:find!) do |*_, correction:|
+        expect(correction).to eq('Leave the stools out.')
+        TruebuildSurfaceMask.create!(source_url: kitchen_photo, surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION,
+                                     mask_url: 'https://b/m2.png', coverage: 0.11)
+      end
+      expect { TruebuildOutlineRedoJob.perform_now(outline.id, 'Leave the stools out.') }.to have_enqueued_job(TruebuildRenderJob)
+      expect(layer.reload.status).to eq('superseded')
+      expect(TruebuildRender.last.usage).to include('recut_from' => layer.id)
+    end
+  end
 end

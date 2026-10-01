@@ -115,6 +115,10 @@ module Truebuild
       # The samples named when the row was made, in prompt order.
       ids = Array(render.usage['swatch_ids'])
       samples = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact.map { |sw| fetch_source(sw.image_url) }
+      prompt = render.prompt
+      # A reviewer's note on what was wrong with the last drawing. Added at
+      # draw time, not stored in the prompt, so buyers still find the layer.
+      prompt = "#{prompt}\n\nA reviewer rejected an earlier drawing: #{render.usage['reviewer_note']} Fix that." if render.usage['reviewer_note'].present?
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # A layer cut by an older Layer::VERSION is cut again from its saved
       # drawing: no call to the image model, no charge.
@@ -125,9 +129,9 @@ module Truebuild
       result = nil
       DRAW_ATTEMPTS.times do |attempt|
         result = if spec[:provider] == 'gemini'
-                   Providers::Gemini.edit(spec, source, render.prompt, samples: samples, aspect: aspect)
+                   Providers::Gemini.edit(spec, source, prompt, samples: samples, aspect: aspect)
                  else
-                   Providers::OpenAi.edit(spec, source, render.prompt, samples: samples)
+                   Providers::OpenAi.edit(spec, source, prompt, samples: samples)
                  end
         spent += cost(spec, result[:usage])
         break if reframed_by(result, aspect) <= FRAMING_TOLERANCE
