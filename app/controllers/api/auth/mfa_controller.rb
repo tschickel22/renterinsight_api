@@ -101,7 +101,7 @@ module Api
         end
 
         # Decode temp token to get user info
-        decoded = JsonWebToken.decode(temp_token)
+        decoded = JsonWebToken.decode(temp_token, allow_mfa_pending: true)
         
         unless decoded && (decoded[:type] == 'mfa_temp' || decoded[:type] == 'mfa_temp_portal')
           render json: {

@@ -12,9 +12,6 @@ class ApplicationController < ActionController::API
   after_action :record_user_activity
   after_action :record_watched_request
 
-  # Tokens that prove a password but not yet the MFA code. See #authenticate.
-  MFA_PENDING_TOKEN_TYPES = %w[mfa_temp mfa_temp_portal].freeze
-
   private
 
   # How long a user stays "active" between writes.
@@ -218,15 +215,7 @@ class ApplicationController < ActionController::API
       token = header.split(' ').last
       decoded = JsonWebToken.decode(token)
 
-      # The MFA temp token is signed with the same secret and carries user_id,
-      # and login hands it out BEFORE the code is checked. Accepting it here
-      # let a password alone open every endpoint, skipping MFA entirely. It is
-      # only good for the MFA endpoints, which skip this filter.
-      if decoded && MFA_PENDING_TOKEN_TYPES.include?(decoded[:type])
-        render json: { error: 'Unauthorized - Invalid or expired token' }, status: :unauthorized
-        return
-      end
-
+      # MFA temp tokens decode to nil here; see JsonWebToken::MFA_PENDING_TYPES.
       if decoded
         # Valid JWT token found
         @current_user_id = decoded[:user_id]

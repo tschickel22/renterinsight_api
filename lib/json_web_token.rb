@@ -53,8 +53,20 @@ class JsonWebToken
   # Decode a JWT token
   # @param token [String] The JWT token to decode
   # @return [HashWithIndifferentAccess, nil] The decoded payload or nil if invalid
-  def self.decode(token)
+  #
+  # MFA temp tokens prove a password but not yet the code, and login hands them
+  # out before the code is checked. They carry user_id (or
+  # buyer_portal_access_id) like a real token, so every caller that decoded
+  # them as a session (ApplicationController, user settings, the portal base
+  # controller and others) let a password alone skip MFA, including the user
+  # settings call that turns MFA off. They are refused here, once, for every
+  # caller; only the MFA verify step opts in.
+  MFA_PENDING_TYPES = %w[mfa_temp mfa_temp_portal].freeze
+
+  def self.decode(token, allow_mfa_pending: false)
     body = JWT.decode(token, secret_key, true, { algorithm: 'HS256' })[0]
+    return nil if !allow_mfa_pending && MFA_PENDING_TYPES.include?(body['type'])
+
     HashWithIndifferentAccess.new(body)
   rescue JWT::ExpiredSignature => e
     Rails.logger.info("[JsonWebToken] Token expired: #{e.message}")
