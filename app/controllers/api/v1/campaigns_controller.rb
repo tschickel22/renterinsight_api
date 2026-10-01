@@ -13,7 +13,11 @@ class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
   include ModuleAccessRequired
   # Log only until plan data grants these modules everywhere (v3 plan §18).
-  require_any_module! 'marketing.campaigns', 'marketing.automation', log_only: true
+  # Enforced (was log only). Checked 2026-10-01: every production tenant with
+  # campaigns has one of these through its plan or an override, except
+  # "Pete Test Account" (company 16, Professional, last campaign May 2026).
+  # The campaigns menu item was already hidden without the module.
+  require_any_module! 'marketing.campaigns', 'marketing.automation'
   before_action :set_campaign, only: %i[show update destroy duplicate start pause resume reopen archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai consent_coverage confirm_audience_consent sender_coverage]
 
   def index

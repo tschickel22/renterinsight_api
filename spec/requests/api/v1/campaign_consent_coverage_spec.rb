@@ -4,6 +4,10 @@ require 'rails_helper'
 
 RSpec.describe 'Campaign consent coverage', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
+
+  # The campaign endpoints require Email Campaigns (or Campaign Desk), as every
+  # tenant that uses them has.
+  before { TenantModuleOverride.create!(company_id: company.id, module_key: 'marketing.campaigns', is_enabled: true) }
   let(:admin) do
     User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'A', last_name: 'D',
                  password: 'Pass1234!', company_id: company.id, role: 'company_admin')
@@ -91,6 +95,10 @@ end
 # start and then send nothing because its reps are on Gmail or have no mailbox.
 RSpec.describe 'Campaign sender coverage', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
+
+  # The campaign endpoints require Email Campaigns (or Campaign Desk), as every
+  # tenant that uses them has.
+  before { TenantModuleOverride.create!(company_id: company.id, module_key: 'marketing.campaigns', is_enabled: true) }
   let(:admin) do
     User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'A', last_name: 'D',
                  password: 'Pass1234!', company_id: company.id, role: 'company_admin')

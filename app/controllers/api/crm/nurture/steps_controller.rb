@@ -3,7 +3,8 @@ module Api
     module Nurture
       class StepsController < ApplicationController
         include RbacAuthorization
-        rbac_resource :crm
+        # These were unmapped and so unchecked; send_test sends a real message.
+        rbac_resource :crm, update_actions: %i[upload_attachment send_test remove_attachment]
 
         MAX_ATTACHMENT_SIZE = 25.megabytes
 

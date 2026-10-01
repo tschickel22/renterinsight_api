@@ -5,7 +5,8 @@ module Api
     module Nurture
       class SequencesController < ApplicationController
         include RbacAuthorization
-        rbac_resource :crm
+        # bulk was unmapped and so unchecked; it can also delete (see #bulk).
+        rbac_resource :crm, update_actions: [:bulk]
 
         before_action :set_company_scope
 
@@ -119,6 +120,7 @@ module Api
         def bulk
           upsert_data = params[:upsert] || []
           delete_ids = params[:delete] || []
+          return if delete_ids.present? && !authorize_action!('crm', 'delete')
           
           results = []
           

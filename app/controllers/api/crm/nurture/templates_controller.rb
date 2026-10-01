@@ -5,7 +5,8 @@ module Api
     module Nurture
       class TemplatesController < ApplicationController
         include RbacAuthorization
-        rbac_resource :crm
+        # delete_attachment and bulk were unmapped and so unchecked.
+        rbac_resource :crm, update_actions: %i[delete_attachment bulk]
 
         before_action :set_company_scope
 
