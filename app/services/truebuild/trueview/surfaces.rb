@@ -4,21 +4,27 @@ require 'vips'
 
 module Truebuild
   module Trueview
-    # Finds each surface in the original photo, once, with Gemini's
-    # segmentation. A layer is then the drawing inside that outline only.
+    # Finds each surface in the original photo, once, and a layer is then
+    # the drawing inside that outline only.
     #
     # Cutting by what the drawing changed kept everything the model touched
     # along the way: bar stools it removed, lawn and floor it redrew, so
-    # layers bled and stacked layers seamed. The outline comes from the
-    # untouched photo, is the same for every color of a surface, and leaves
-    # whatever stands in front of the surface (a stool before the island) as
-    # it is. A surface the photo does not show gets no layer at all.
+    # layers bled and stacked layers seamed. The outline is the same for
+    # every color of a surface, and a surface the photo does not show gets
+    # no layer at all.
+    #
+    # The outline is found by having the image model paint the surface pure
+    # magenta and keeping the magenta pixels: recoloring a named surface is
+    # what it does best. Gemini's text segmentation was tried first; the
+    # model Google now offers for it answered with garbled text and empty
+    # outlines, which hid real surfaces.
     module Surfaces
       module_function
 
-      VERSION = 1
-      # gemini-2.5-flash was retired for new accounts; Google pointed to this.
-      MODEL_DEFAULT = 'gemini-3.8-flash'
+      VERSION = 2       # 1 was text segmentation; its outlines are not used
+      PAINTER = 'nb2-lite'
+      MAGENTA = [255, 0, 255]
+      MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
       RETRY_FAILED_AFTER = 30.minutes
       MIN_PRESENT = 0.003 # share of the photo; less is not really in it
 
@@ -57,48 +63,38 @@ module Truebuild
       def find!(source_url, source_bytes, key)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
-        result = Providers::Gemini.segment({ bytes: source_bytes, mime: 'image/jpeg' }, description,
-                                           model: ENV['TRUEVIEW_SEGMENT_MODEL'].presence || MODEL_DEFAULT)
-        # Boxes with no outlines is a model that cannot segment, not an
-        # absent surface: fail, so the layer falls back instead of vanishing.
-        if result[:masks].any? && result[:masks].none? { |m| m['mask'].present? }
-          raise Trueview::Error, "#{result[:model]} returned boxes but no outlines"
+        spec = MODELS.fetch(PAINTER)
+        result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' }, paint_prompt(description),
+                                        aspect: image.width.to_f / image.height)
+        if Trueview.reframed_by(result, image.width.to_f / image.height) > Trueview::FRAMING_TOLERANCE
+          raise Trueview::Error, 'The model changed the framing while outlining'
         end
 
-        mask = paint(result[:masks], image.width, image.height)
+        mask = magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height)
         coverage = (mask.avg / 255.0).round(4)
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
                                    "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
-                                     model: result[:model], usage: result[:usage])
-      rescue Trueview::Error, Vips::Error, JSON::ParserError => e
+                                     model: result[:model], usage: result[:usage].merge('cost_usd' => Trueview.cost(spec, result[:usage])))
+      rescue Trueview::Error, Vips::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
 
-      # Gemini answers with boxes on a 0..1000 grid and a probability map for
-      # each box; together they make one full-size 0/255 mask.
-      def paint(masks, width, height)
-        canvas = Vips::Image.black(width, height).cast(:uchar)
-        Array(masks).each do |m|
-          y0, x0, y1, x1 = Array(m['box_2d']).map(&:to_f)
-          next unless y1 && x1
+      def paint_prompt(description)
+        <<~TEXT.strip
+          This is a real photograph. Paint #{description} solid, flat, pure magenta (#FF00FF): no shading, texture or
+          reflections on it. Change nothing else at all: every other pixel, the framing, the camera and the objects in
+          front of it stay exactly as they are. If the photo does not show any, return the photo unchanged.
+        TEXT
+      end
 
-          left = (x0 / 1000 * width).floor.clamp(0, width - 1)
-          top = (y0 / 1000 * height).floor.clamp(0, height - 1)
-          w = ((x1 - x0) / 1000 * width).ceil.clamp(1, width - left)
-          h = ((y1 - y0) / 1000 * height).ceil.clamp(1, height - top)
-          png = m['mask'].to_s.sub(%r{\Adata:image/\w+;base64,}, '')
-          next if png.empty?
-
-          prob = Vips::Image.new_from_buffer(Base64.decode64(png), '')
-          prob = prob.extract_band(0) if prob.bands > 1
-          prob = prob.resize(w.to_f / prob.width, vscale: h.to_f / prob.height)
-          prob = prob.crop(0, 0, [w, prob.width].min, [h, prob.height].min).embed(0, 0, w, h)
-          piece = (prob > 127).ifthenelse(255, 0).cast(:uchar)
-          region = canvas.crop(left, top, w, h)
-          canvas = canvas.insert((region | piece).cast(:uchar), left, top)
-        end
-        canvas
+      # The painted pixels, cleaned of specks and pinholes, at the photo's size.
+      def magenta(painted, width, height)
+        painted = Layer.fit(rgb(painted), width, height)
+        target = painted.new_from_image(MAGENTA).cast(:uchar).copy(interpretation: :srgb)
+        delta = painted.colourspace(:lab).dE76(target.colourspace(:lab))
+        mask = (delta < MAGENTA_DE).ifthenelse(255, 0).cast(:uchar)
+        mask.median(5).morph(Layer.disc(2), :dilate).morph(Layer.disc(2), :erode)
       end
 
       def rgb(image)

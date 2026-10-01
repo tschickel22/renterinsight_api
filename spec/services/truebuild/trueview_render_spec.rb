@@ -19,43 +19,55 @@ RSpec.describe 'TrueView rendering' do
   end
 
   describe 'surface outlines' do
-    it "paints Gemini's boxes and probability maps into one full-size mask" do
-      box_mask = Base64.strict_encode64(png(Vips::Image.black(10, 10) + 255))
-      masks = [{ 'box_2d' => [0, 0, 500, 500], 'mask' => "data:image/png;base64,#{box_mask}" }]
-      mask = Truebuild::Trueview::Surfaces.paint(masks, 300, 200)
-      expect(mask.avg / 255.0).to be_within(0.01).of(0.25)
+    let(:painted) { photo.draw_rect([255, 0, 255], 0, 0, 150, 100, fill: true).cast(:uchar) }
+
+    def paints(image)
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |spec, _src, prompt, **|
+        if prompt.include?('pure magenta')
+          expect(spec[:model]).to eq('gemini-3.1-flash-lite-image')
+          { bytes: png(image), mime: 'image/png', model: 'lite', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
+        else
+          { bytes: png((photo + 60).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 10, 'output_tokens' => 1300 } }
+        end
+      end
     end
 
-    it 'falls back rather than skipping when the model gives boxes without outlines, and tries again later' do
-      allow(Truebuild::Trueview::Providers::Gemini).to receive(:segment)
-        .and_return(masks: [{ 'box_2d' => [0, 0, 500, 500] }], model: 'gemini-x', usage: {})
+    it 'outlines a surface by having the model paint it magenta, once per photo' do
+      paints(painted)
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(status: 'failed', error: 'gemini-x returned boxes but no outlines')
-      expect(mask.present?).to be(false)
-
-      mask.update_columns(updated_at: 1.hour.ago)
-      allow(Truebuild::Trueview::Providers::Gemini).to receive(:segment).and_return(masks: [], model: 'gemini-x', usage: {})
-      expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets').status).to eq('done')
+      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 2)
+      expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
+      expect(mask.usage['cost_usd']).to eq(0.03)
+      expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Kitchen cabinets')).to eq(mask)
     end
 
-    it 'skips a surface the photo does not show, without paying for a drawing' do
-      allow(Truebuild::Trueview::Providers::Gemini).to receive(:segment).and_return(masks: [], model: 'gemini-2.5-flash', usage: {})
-      expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)
+    it 'skips a surface the photo does not show, without paying for a finish drawing' do
+      paints(photo)
       Truebuild::Trueview.perform!(render)
       expect(render.reload).to have_attributes(status: 'skipped', error: 'Not in this photo')
-      expect(TruebuildSurfaceMask.last).to have_attributes(surface: 'cabinets', coverage: 0)
+      expect(Truebuild::Trueview::Providers::Gemini).to have_received(:edit).once
     end
 
     it 'keeps only the drawing inside the outline, whatever else the model changed' do
-      # The outline is the left half; the model also changed the right half.
-      @mask_png = png((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 150, 200, fill: true))
-      TruebuildSurfaceMask.create!(source_url: render.source_url, surface: 'cabinets', mask_url: 'https://b/mask.png', coverage: 0.5)
-      drawn = (photo + 60).cast(:uchar)
-      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
-        .and_return(bytes: png(drawn), mime: 'image/png', usage: { 'prompt_tokens' => 10, 'output_tokens' => 1300 })
+      paints(painted)
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_call_original
+      allow(Truebuild::Trueview).to receive(:fetch_source) do |url|
+        url.include?('masks/') ? { bytes: @stored_mask, mime: 'image/png' } : { bytes: photo.jpegsave_buffer, mime: 'image/jpeg' }
+      end
+      allow(Truebuild::Trueview).to receive(:store_bytes) { |b, _m, key| @stored_mask = b; "https://b/#{key}" }
       Truebuild::Trueview.perform!(render)
       expect(render.reload.status).to eq('done')
-      expect(render.mask_coverage.to_f).to be_within(0.01).of(0.5)
+      expect(render.mask_coverage.to_f).to be_within(0.01).of(0.25)
+    end
+
+    it 'falls back to the change cut when outlining fails, and tries again later' do
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit).and_raise(Truebuild::Trueview::Error, 'Gemini 503')
+      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
+      expect(mask).to have_attributes(status: 'failed', error: 'Gemini 503')
+      expect(mask.present?).to be(false)
+      mask.update_columns(updated_at: 1.hour.ago)
+      paints(painted)
+      expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets').status).to eq('done')
     end
   end
 

@@ -42,33 +42,6 @@ module Truebuild
                      'total_tokens' => meta['totalTokenCount'].to_i } }
         end
 
-        # Outlines of what `description` names in the image, from Gemini's
-        # segmentation: [{ 'box_2d' => [y0, x0, y1, x1] on 0..1000, 'mask' => png }].
-        def segment(source, description, model:)
-          model = resolve(model)
-          prompt = "Give the segmentation masks for #{description}. Output a JSON list of segmentation masks where each " \
-                   'entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the ' \
-                   'text label in the key "label". Output an empty list if there are none.'
-          body = { contents: [{ role: 'user', parts: [{ inline_data: { mime_type: source[:mime], data: Base64.strict_encode64(source[:bytes]) } },
-                                                     { text: prompt }] }],
-                   generationConfig: { responseMimeType: 'application/json', temperature: 0 }.merge(thinking_off(model)) }
-          res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 120)
-          raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
-
-          text = Array(res.parsed_response.dig('candidates', 0, 'content', 'parts')).filter_map { |p| p['text'] }.join
-          text = text.strip.sub(/\A```(?:json)?\s*/, '').sub(/\s*```\z/, '')
-          masks = JSON.parse(text.presence || '[]')
-          masks = masks['masks'] || masks.values.first if masks.is_a?(Hash)
-          meta = res.parsed_response['usageMetadata'] || {}
-          { masks: Array(masks), model: model,
-            usage: { 'prompt_tokens' => meta['promptTokenCount'].to_i, 'output_tokens' => meta['candidatesTokenCount'].to_i } }
-        end
-
-        # Gemini 2.5 turns thinking off with a budget; later models take a level.
-        def thinking_off(model)
-          { thinkingConfig: model.start_with?('gemini-2.') ? { thinkingBudget: 0 } : { thinkingLevel: 'low' } }
-        end
-
         # "gemini-3.1-flash-image" may be published as "...-preview"; take the
         # exact id when it exists, else the shortest id that starts with it.
         def resolve(base)

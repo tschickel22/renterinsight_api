@@ -21,7 +21,7 @@ module Truebuild
       MIN_REGION = 0.001 # share of the photo; smaller regions are noise
       MAX_HOLE = 0.02  # share of the photo; enclosed gaps up to this are filled
       FEATHER = 2.5
-      VERSION = 4      # bump when the cut changes, so old layers can be re-cut
+      VERSION = 5      # bump when the cut changes, so old layers can be re-cut
       EDGE_FEATHER = 1.2
 
       # => { bytes:, mime:, coverage: } coverage is the share of the photo kept.
