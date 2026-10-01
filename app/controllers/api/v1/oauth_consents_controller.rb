@@ -17,6 +17,7 @@ module Api
           company: { id: @company.id, name: @company.name },
           user: { name: current_user.full_name, email: current_user.email },
           can_connect: blocking_reason.nil?,
+          can_allow_changes: blocking_reason.nil? && Oauth::AccessPolicy.changes_permitted?(current_user, @company),
           blocking_reason: blocking_reason,
           existing_connection: existing_grant.present?
         }
@@ -37,7 +38,9 @@ module Api
           return render json: { error: reason }, status: :forbidden
         end
 
-        scopes = ActiveModel::Type::Boolean.new.cast(params[:allow_write]) ? @auth.scopes : (@auth.scopes - ['mcp:write'])
+        allow_write = ActiveModel::Type::Boolean.new.cast(params[:allow_write]) &&
+                      Oauth::AccessPolicy.changes_permitted?(current_user, @company)
+        scopes = allow_write ? @auth.scopes : (@auth.scopes - ['mcp:write'])
         scopes = ['mcp:read'] if scopes.empty?
 
         grant = existing_grant || OauthGrant.new(oauth_client: @auth.client, user: current_user, company: @company)
@@ -78,6 +81,8 @@ module Api
             'You can only connect AI apps to your own company.'
           elsif !Oauth::AccessPolicy.module_enabled?(@company)
             'The AI connector is not part of your plan. Ask us to turn it on.'
+          elsif !Oauth::AccessPolicy.permitted?(current_user, @company)
+            'Your role does not include the AI connector. Ask your admin to turn it on for your role under Users, Roles & Permissions.'
           end
       end
 

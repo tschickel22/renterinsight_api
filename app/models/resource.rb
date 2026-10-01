@@ -85,6 +85,7 @@ public
       { key: 'users', name: 'Users & Teams', category: 'admin', description: 'Manage users, roles, and team assignments', position: 2 },
       { key: 'locations', name: 'Locations', category: 'admin', description: 'Manage company locations and their settings', position: 3 },
       { key: 'branding', name: 'Branding & White Label', category: 'admin', description: 'Manage branding, logos, and appearance', position: 4 },
+      { key: 'ai_connector', name: 'AI Connector (Claude, ChatGPT)', category: 'admin', description: 'Read: connect Claude or ChatGPT, which then sees only what this role can see. Update: also let it make changes. Create and Delete do nothing here.', position: 12 },
       { key: 'activity_logs', name: 'Activity Log', category: 'admin', description: 'View platform activity and user actions', position: 5 },
       
       # Operations Resources (position 100-200)

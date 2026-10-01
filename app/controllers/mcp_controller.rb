@@ -50,8 +50,13 @@ class McpController < ActionController::API
                     status: :too_many_requests
     end
 
+    # Writing needs the token's scope AND, today, ai_connector:update on the
+    # person's role, so taking Update off a role makes their app read only
+    # without disconnecting it.
+    scopes = access.scope_list & grant.scope_list
+    scopes -= ['mcp:write'] unless Oauth::AccessPolicy.changes_permitted?(grant.user, grant.company)
     ctx = McpTools::Context.new(user: grant.user, company: grant.company, grant: grant,
-                                scopes: access.scope_list & grant.scope_list, ip_address: request.remote_ip)
+                                scopes: scopes, ip_address: request.remote_ip)
     result = build_server(ctx).handle_json(request.raw_post)
 
     # A notification (no id) has nothing to answer.
