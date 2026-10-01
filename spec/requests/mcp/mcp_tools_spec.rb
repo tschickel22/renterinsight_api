@@ -158,6 +158,41 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
     end
   end
 
+  describe 'dealer cost when the dealer allows it' do
+    let!(:unit) do
+      company.vehicles.create!(stock_number: 'S-200', vin: 'CHAMP999', year: 2026, make: 'Champion', model: 'Vista',
+                               status: 'available', sale_price: 120_000, dealer_cost: 80_000, freight_cost: 2_500,
+                               location_id: denver.id)
+    end
+    let!(:deal) do
+      company.deals.create!(name: 'Margin deal', stage: 'proposal', contact_id: buyer.id, selling_price: 120_000,
+                            unit_cost: 80_000, front_gross: 40_000, commission_amount: 3_000, location_id: denver.id)
+    end
+
+    it 'shows deal and inventory cost to someone who sees it in the app, never commission' do
+      admin = connector_user(company, {}, role: 'company_admin')
+      put '/api/v1/connected-apps/settings', params: { show_costs: true }, headers: app_headers(admin)
+      expect(response.parsed_body['show_costs']).to be(true)
+
+      deal_doc, = call_tool(token, 'fetch', id: "deal:#{deal.id}")
+      unit_list, = call_tool(token, 'list_inventory')
+
+      expect(deal_doc['text']).to include('"unit_cost": 80000.0', '"front_gross": 40000.0')
+      expect(deal_doc['text']).not_to include('commission')
+      expect(unit_list['items'].find { |i| i['id'] == "unit:#{unit.id}" }['costs'])
+        .to include('dealer_cost' => 80_000.0, 'freight_cost' => 2_500.0)
+    end
+
+    it 'tells the AI cost is internal when on, and how to turn it on when off' do
+      off = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } })
+      expect(off.dig('result', 'instructions')).to include('your', 'admin can allow it under Settings, AI Apps')
+
+      Setting.set('Company', company.id, 'mcp_settings', { 'show_costs' => true })
+      on = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } })
+      expect(on.dig('result', 'instructions')).to include('never put it in anything written for a customer')
+    end
+  end
+
   describe 'export limits' do
     it 'caps rows per call and stops at the daily record budget' do
       3.times { lead! }

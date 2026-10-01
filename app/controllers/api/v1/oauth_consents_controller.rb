@@ -19,7 +19,8 @@ module Api
           can_connect: blocking_reason.nil?,
           can_allow_changes: blocking_reason.nil? && Oauth::AccessPolicy.changes_permitted?(current_user, @company),
           blocking_reason: blocking_reason,
-          existing_connection: existing_grant.present?
+          existing_connection: existing_grant.present?,
+          shows_costs: McpTools::Context.new(user: current_user, company: @company, grant: nil).show_costs?
         }
       end
 

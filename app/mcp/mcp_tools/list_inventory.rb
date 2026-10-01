@@ -6,7 +6,7 @@ module McpTools
     title 'List inventory'
     description 'List inventory units (homes, RVs, vehicles). Filter by status, bedrooms, price range, or how ' \
                 'long they have been in stock; sort=aging lists the oldest stock first. Prices are retail; ' \
-                'dealer cost is never included.'
+                'dealer cost appears under costs only when the dealer allows AI apps to see it.'
     input_schema(
       properties: {
         status: { type: 'string', enum: Vehicle::STATUSES },

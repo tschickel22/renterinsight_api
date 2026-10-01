@@ -7,10 +7,11 @@ module McpTools
   # Ids are typed ("lead:42") so search and fetch can hand them back and forth
   # without the AI having to know which table a record lives in.
   #
-  # Serializers name every field. Nothing here returns dealer cost, freight,
-  # holdback, pack, reserve, gross, margin, commission or profit, whatever the
-  # user's role: the app's own cost gate is unreliable (see backlog), and an AI
-  # transcript is an easy place for a number to travel further than intended.
+  # Serializers name every field. Cost fields (unit cost, gross, margin,
+  # dealer cost, freight, holdback...) appear only when the dealer has turned
+  # on "AI apps can see dealer cost" and the person could see them in the app
+  # (Context#deal_costs_visible?, #unit_costs_visible?). Commission never
+  # appears; the app's deal view does not show it either.
   class Records
     TYPES = {
       'lead' => { resource: 'leads', path: '/crm/leads/%d', label: 'Lead' },
@@ -23,6 +24,8 @@ module McpTools
     }.freeze
 
     QUOTE_ITEM_FIELDS = %w[name description quantity unit_price total].freeze
+    DEAL_COST_FIELDS = %w[unit_cost pack_amount finance_reserve product_margin front_gross back_gross total_gross].freeze
+    UNIT_COST_FIELDS = %w[dealer_cost freight_cost pdi_cost total_cost holdback_amount target_gross minimum_price].freeze
 
     attr_reader :ctx
 
@@ -226,8 +229,13 @@ module McpTools
         expected_close_date: iso(deal.expected_close_date), customer: deal_customer(deal),
         salesperson: user_name(deal.primary_salesperson_id || deal.owner_id || deal.user_id),
         unit: deal.vehicle_id && ctx.company.vehicles.where(id: deal.vehicle_id).pick(:stock_number),
-        location: location_name(deal.location_id), updated_at: iso(deal.updated_at)
+        location: location_name(deal.location_id), updated_at: iso(deal.updated_at),
+        costs: (cost_fields(deal, DEAL_COST_FIELDS) if ctx.deal_costs_visible?)
       }
+    end
+
+    def cost_fields(record, fields)
+      fields.to_h { |f| [f, record.public_send(f)&.to_f] }.compact
     end
 
     def deal_detail(deal)
@@ -251,7 +259,8 @@ module McpTools
         square_feet: unit.square_feet, condition: unit.condition, status: unit.status,
         sale_price: unit.sale_price&.to_f, msrp: unit.msrp&.to_f,
         days_in_stock: unit.date_in_stock && (Date.current - unit.date_in_stock.to_date).to_i,
-        location: location_name(unit.location_id)
+        location: location_name(unit.location_id),
+        costs: (cost_fields(unit, UNIT_COST_FIELDS) if ctx.unit_costs_visible?)
       }
     end
 

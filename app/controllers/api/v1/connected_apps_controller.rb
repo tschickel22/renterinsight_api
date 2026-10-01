@@ -91,11 +91,14 @@ module Api
       end
 
       # PUT /api/v1/connected-apps/settings
-      # { daily_record_limit, hourly_change_limit, daily_change_limit }, any subset.
+      # { daily_record_limit, hourly_change_limit, daily_change_limit, show_costs }, any subset.
       def update_settings
         return unless authorize_action!('company_settings', 'update')
 
         updates = {}
+        if params.key?(:show_costs)
+          updates['show_costs'] = ActiveModel::Type::Boolean.new.cast(params[:show_costs]) == true
+        end
         SETTING_BOUNDS.each do |key, max|
           next unless params.key?(key)
 
@@ -134,7 +137,7 @@ module Api
       def limits
         ctx = McpTools::Context.new(user: current_user, company: @company, grant: nil)
         { daily_record_limit: ctx.daily_record_limit, hourly_change_limit: ctx.hourly_change_limit,
-          daily_change_limit: ctx.daily_change_limit }
+          daily_change_limit: ctx.daily_change_limit, show_costs: ctx.show_costs? }
       end
 
       def change_json(change)

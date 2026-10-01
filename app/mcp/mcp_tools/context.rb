@@ -122,6 +122,24 @@ module McpTools
       (mcp_settings['daily_record_limit'] || DEFAULT_DAILY_RECORD_LIMIT).to_i
     end
 
+    # Dealer cost through the connector (Tom, 2026-10-01: dealers want reps to
+    # understand margin). Off unless the dealer turns it on under Settings, AI
+    # Apps; when on, a person sees through the AI exactly what they see in the
+    # app: deal costs by the same permission call the deals screen makes (its
+    # quirks included), inventory costs for anyone who can read inventory, as
+    # the inventory screen does.
+    def show_costs?
+      mcp_settings['show_costs'] == true
+    end
+
+    def deal_costs_visible?
+      show_costs? && user.has_permission?('deals', 'read', scope: 'view_cost_details')
+    end
+
+    def unit_costs_visible?
+      show_costs?
+    end
+
     def hourly_change_limit
       (mcp_settings['hourly_change_limit'] || DEFAULT_HOURLY_CHANGE_LIMIT).to_i
     end
