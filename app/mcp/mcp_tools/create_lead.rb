@@ -26,10 +26,16 @@ module McpTools
 
       company = ctx.company
       if email.present?
-        existing = company.leads.where(is_converted: [false, nil]).where('LOWER(email) = ?', email.strip.downcase).first
-        if existing
-          raise UserError, "A lead with that email already exists: lead:#{existing.id} " \
-                           "(#{[existing.first_name, existing.last_name].compact_blank.join(' ')})."
+        # Same company-wide block as the app, but only name the existing lead
+        # when this user can see it, so the check cannot reveal who is a lead
+        # at a location they have no access to.
+        dup = company.leads.where(is_converted: [false, nil]).where('LOWER(email) = ?', email.strip.downcase)
+        if dup.exists?
+          visible = ctx.can?('leads', 'read') ? Records.new(ctx).scope('lead').merge(dup).first : nil
+          raise UserError, 'A lead with that email already exists.' unless visible
+
+          raise UserError, "A lead with that email already exists: lead:#{visible.id} " \
+                           "(#{[visible.first_name, visible.last_name].compact_blank.join(' ')})."
         end
       end
 

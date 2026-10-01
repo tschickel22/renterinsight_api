@@ -24,7 +24,8 @@ module McpTools
         text: JSON.pretty_generate(detail.except(:id, :title, :url)),
         metadata: { type: type }
       }
-      Base::Result.new(payload: payload, count: 1)
+      # Nested people count too: an account's contact list is records handed out.
+      Base::Result.new(payload: payload, count: 1 + Array(detail[:contacts]).size)
     end
   end
 end

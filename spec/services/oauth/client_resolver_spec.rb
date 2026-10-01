@@ -35,7 +35,7 @@ RSpec.describe Oauth::ClientResolver do
 
   it 'refuses a document that names a different client_id' do
     stub_document(client_id: 'https://chatgpt.com/oauth/other/client.json', client_name: 'X',
-                  redirect_uris: ['https://chatgpt.com/cb'])
+                  redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'])
 
     expect { described_class.find!(url) }.to raise_error(Oauth::Error, /does not name itself/)
   end
@@ -47,7 +47,7 @@ RSpec.describe Oauth::ClientResolver do
   end
 
   it 'reuses a fresh copy instead of fetching every time' do
-    stub_document(client_id: url, client_name: 'ChatGPT', redirect_uris: ['https://chatgpt.com/cb'])
+    stub_document(client_id: url, client_name: 'ChatGPT', redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'])
     described_class.find!(url)
 
     expect(Net::HTTP).not_to receive(:start)
