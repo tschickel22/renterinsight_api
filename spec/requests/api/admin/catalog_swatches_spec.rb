@@ -90,6 +90,21 @@ RSpec.describe 'Api::Admin::CatalogSwatches', type: :request do
     end
   end
 
+  it 'lists colors whose name and dot disagree, have no dot, or were guessed far from their sample' do
+    group = CatalogOptionGroup.create!(manufacturer: mfr, key: 'exterior', name: 'Exterior')
+    color = ->(name, set) { CatalogOption.create!(group: group, manufacturer: mfr, key: "c-#{name.parameterize}", name: name, kind: 'color', metadata: { 'color_set' => set }) }
+    color.('Black', 'Shutters')
+    color.('Lisola', 'Countertop')
+    color.('Mystery Mist', 'Siding')
+    swatch('Shutters', 'Black', hex: '#cdbd9f')
+    swatch('High Pressure Laminate Countertop', 'Lisola', hex: '#2e2d29')
+    get '/api/admin/catalog_swatches/color_checks', headers: headers_for('platform_admin'), params: { manufacturer_id: mfr.id }
+    notes = JSON.parse(response.body)['items'].to_h { |i| [i['name'], i['note']] }
+    expect(notes['Black']).to eq('is named black but its dot is light')
+    expect(notes['Lisola']).to include('the decor sample is #2e2d29, which is used now')
+    expect(notes['Mystery Mist']).to start_with('has no dot')
+  end
+
   it 'lets TrueView show the model the sample' do
     sample = swatch('Shaker Style Cabinets', 'Timberwolf')
     prompt = Truebuild::Trueview.prompt(room: 'kitchen', selection: [{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }], swatches: [sample])

@@ -34,12 +34,13 @@ class CatalogSwatch < ApplicationRecord
   # The sample for a finish on a home: same manufacturer, the plant's own
   # sheet first, matched by name; when a name sits in several sets (White
   # siding, White shutters) the surface decides, and a tie is no match.
-  def self.for_finish(manufacturer_id:, factory_id:, surface:, value:)
+  # pool: the manufacturer's samples, already loaded, when matching many.
+  def self.for_finish(manufacturer_id:, factory_id:, surface:, value:, pool: nil)
     want = key(value)
     return nil if want.empty?
 
-    found = where(manufacturer_id: manufacturer_id, factory_id: [factory_id, nil].uniq).to_a
-              .select { |s| names_match?(key(s.name), want) }
+    pool ||= where(manufacturer_id: manufacturer_id, factory_id: [factory_id, nil].uniq).to_a
+    found = pool.select { |s| names_match?(key(s.name), want) }
     return nil if found.empty?
 
     words = surface.to_s.downcase.scan(/[a-z]{4,}/).map { |w| w.sub(/s\z/, '') }

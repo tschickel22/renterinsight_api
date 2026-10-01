@@ -127,8 +127,9 @@ module Truebuild
                @company.truebuild_addons.maximum(:updated_at),
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
+               CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v5:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v6:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -163,7 +164,7 @@ module Truebuild
                 CatalogOptionGroup.find_by(manufacturer_id: @variant.manufacturer_id, name: name) || op.option.group
         by_group[group] ||= []
         extra_sets[group.id] << [Catalog::PriceBooks::ColorSets.normalize(set_title),
-                                 option_json(op, retail).merge(name: value.strip, kind: 'color', hex: ColorSwatches.hex(value))]
+                                 color_json(op, retail, set_title, value.strip)]
       end
 
       # Families span groups: order forms file a fireplace under Fireplaces
@@ -172,7 +173,7 @@ module Truebuild
       by_group.sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
         colors, others = ops.partition { |op| op.option.kind == 'color' }
         sets = colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
-                     .transform_values { |cs| cs.map { |op| option_json(op, retail) } }
+                     .to_h { |set, cs| [set, cs.map { |op| color_json(op, retail, set) }] }
         extra_sets[group.id].each { |set, json| (sets[set] ||= []) << json }
         {
           id: group.id, name: group.name,
@@ -183,6 +184,21 @@ module Truebuild
                          .sort_by { |o| [o[:standard] ? 0 : 1, (o[:family] || o[:name]).downcase, o[:name].downcase] }
         }
       end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
+    end
+
+    # A color chip: the factory's own sample picture and measured color when a
+    # decor sheet has one, else a color guessed from the name.
+    def color_json(op, retail, set, value = nil)
+      name = value || op.option.name
+      sample = CatalogSwatch.for_finish(manufacturer_id: @variant.manufacturer_id, factory_id: @variant.catalog_plan&.factory_id,
+                                        surface: set, value: name, pool: samples)
+      option_json(op, retail).merge(name: name, kind: 'color', hex: sample&.hex || ColorSwatches.hex(name),
+                                    swatch_url: op.option.swatch_url.presence || sample&.image_url)
+    end
+
+    def samples
+      @samples ||= CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id,
+                                       factory_id: [@variant.catalog_plan&.factory_id, nil].uniq).to_a
     end
 
     def option_json(op, retail)

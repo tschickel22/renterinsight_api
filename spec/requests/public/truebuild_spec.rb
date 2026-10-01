@@ -172,6 +172,15 @@ RSpec.describe 'Public TrueBuild', type: :request do
                             'tour_url' => 'https://my.matterport.com/show/?m=x')
   end
 
+  it "shows the factory's own sample on a color chip when a decor sheet has one" do
+    CatalogSwatch.create!(manufacturer: mfr, set_name: 'Standard Vinyl Siding', name: 'Clay', hex: '#8c887d', image_url: 'https://b/clay.jpg')
+    get "/public/truebuild/models/#{variant.id}", params: { token: token }
+    siding = JSON.parse(response.body)['groups'].find { |g| g['name'] == 'Exterior' }['color_sets'].find { |c| c['name'] == 'Siding' }
+    clay = siding['options'].find { |o| o['name'] == 'Clay' }
+    expect(clay).to include('hex' => '#8c887d', 'swatch_url' => 'https://b/clay.jpg')
+    expect(siding['options'].find { |o| o['name'] == 'White' }['swatch_url']).to be_nil
+  end
+
   describe 'buyer view' do
     let(:terms) { company.dealer_catalog_terms.first }
     let(:other) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'other', name: 'Other Options', position: 9) }

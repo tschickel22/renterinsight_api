@@ -4,7 +4,7 @@
 # admins only; platform data, so no company scope.
 class Api::Admin::CatalogSwatchesController < ApplicationController
   before_action :require_platform_admin!
-  before_action :set_manufacturer, only: %i[index upload]
+  before_action :set_manufacturer, only: %i[index upload color_checks]
   before_action :set_swatch, only: %i[update destroy]
 
   MAX_BYTES = 40.megabytes
@@ -37,6 +37,35 @@ class Api::Admin::CatalogSwatchesController < ApplicationController
     render json: sheet_json(sheet), status: :created
   end
 
+  # GET /api/admin/catalog_swatches/color_checks?manufacturer_id=
+  # Every color a buyer can pick for this manufacturer and the dot they see:
+  # from a decor sample, guessed from the name, or none. Lists the ones to
+  # look at: a name and dot that disagree, no dot at all, or a guess the
+  # sample shows was far off (the sample is used now).
+  def color_checks
+    pool = CatalogSwatch.where(manufacturer: @manufacturer).to_a
+    colors = CatalogOption.where(manufacturer: @manufacturer, status: 'active', kind: 'color')
+                          .pluck(:name, Arel.sql("metadata->>'color_set'")).map { |n, set| [set.presence || 'Colors', n] }
+    named = CatalogOption.where(manufacturer: @manufacturer, status: 'active').where.not(kind: 'color')
+                         .where("name ~ '^[A-Za-z0-9][A-Za-z0-9 ]{2,30}:'").pluck(:name)
+                         .filter_map { |n| (m = n.match(Truebuild::BuyerCatalog::NAMED_CHOICE)) && [m[1].strip, m[2].strip] }
+    items = (colors + named).uniq { |set, n| [set.downcase, n.downcase] }.map do |set, name|
+      sample = CatalogSwatch.for_finish(manufacturer_id: @manufacturer.id, factory_id: nil, surface: set, value: name, pool: pool)
+      guess = Truebuild::ColorSwatches.hex(name)
+      hex = sample&.hex || guess
+      note = if hex.nil?
+               'has no dot: no decor sample matches and the name gives no color'
+             elsif (problem = Truebuild::ColorCheck.problem(name, hex))
+               problem
+             elsif sample && guess && far_apart?(guess, sample.hex)
+               "was guessed #{guess} from its name; the decor sample is #{sample.hex}, which is used now"
+             end
+      { set: set, name: name, hex: hex, source: sample ? 'sample' : (guess ? 'guess' : 'none'), sample_url: sample&.image_url, note: note }
+    end
+    render json: { total: items.size, from_samples: items.count { |i| i[:source] == 'sample' },
+                   items: items.select { |i| i[:note] }.sort_by { |i| [i[:source] == 'sample' ? 1 : 0, i[:set], i[:name]] } }
+  end
+
   # PATCH /api/admin/catalog_swatches/:id { name, set_name }
   def update
     if @swatch.update(params.permit(:name, :set_name).to_h.transform_values { |v| v.to_s.strip })
@@ -67,6 +96,12 @@ class Api::Admin::CatalogSwatchesController < ApplicationController
   end
 
   private
+
+  def far_apart?(a, b)
+    la = Truebuild::ColorCheck.lch(a)
+    lb = Truebuild::ColorCheck.lch(b)
+    (la[0] - lb[0]).abs > 25
+  end
 
   def set_manufacturer
     @manufacturer = Manufacturer.where(company_id: nil).find_by(id: params[:manufacturer_id])

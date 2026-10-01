@@ -3014,6 +3014,7 @@ Rails.application.routes.draw do
 
       # Factory decor sheets and the finish samples read from them.
       get    'catalog_swatches', to: 'catalog_swatches#index'
+      get    'catalog_swatches/color_checks', to: 'catalog_swatches#color_checks'
       post   'catalog_swatches/upload', to: 'catalog_swatches#upload'
       patch  'catalog_swatches/:id', to: 'catalog_swatches#update'
       delete 'catalog_swatches/sheets/:id', to: 'catalog_swatches#destroy_sheet'
