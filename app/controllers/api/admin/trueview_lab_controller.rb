@@ -62,10 +62,14 @@ class Api::Admin::TrueviewLabController < ApplicationController
       # Which photos TrueView uses per room, how they were chosen, and every
       # photo that could be used instead (the room's own first).
       rooms: choice::ROOMS.map do |room|
-        labelled = choice.candidate_urls(media, room)
-        others = choice.candidate_urls(media, room, all: true) - labelled
+        # Hidden photos stay in their place, marked, to show again.
+        everything = media.except('hidden_photos')
+        labelled = choice.candidate_urls(everything, room)
+        others = choice.candidate_urls(everything, room, all: true) - labelled
         { room: room, chosen: choice.chosen(media, room), source: choice.source(media, room),
-          candidates: (labelled + others).map { |u| { url: u, thumb: Truebuild::Trueview.sized(u), labelled: labelled.include?(u) } } }
+          candidates: (labelled + others).map do |u|
+            { url: u, thumb: Truebuild::Trueview.sized(u), labelled: labelled.include?(u), hidden: variant.hidden_photo_urls.include?(u) }
+          end }
       end,
       # Every photo and elevation on the model, hidden ones included, to hide
       # or bring back.

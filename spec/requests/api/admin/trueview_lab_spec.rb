@@ -304,7 +304,11 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(Truebuild::Trueview::PhotoChoice.candidate_urls(media, 'kitchen', all: true)).not_to include(k1)
 
       get '/api/admin/trueview_lab/review', headers: admin, params: { variant_id: variant.id }
-      gallery = JSON.parse(response.body)['gallery']
+      body = JSON.parse(response.body)
+      gallery = body['gallery']
+      kitchen = body['rooms'].find { |r| r['room'] == 'kitchen' }
+      expect(kitchen['candidates'].find { |c| c['url'] == k1 }).to include('hidden' => true) # stays in place, marked
+      expect(kitchen['chosen']).not_to include(k1)
       expect(gallery.find { |g| g['url'] == k1 }).to include('hidden' => true, 'room' => 'kitchen')
       expect(gallery.last).to include('url' => 'https://s7d9.scene7.com/elev', 'room' => nil)
 
