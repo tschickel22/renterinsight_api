@@ -56,6 +56,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
     choice = Truebuild::Trueview::PhotoChoice
     media = variant.media || {}
     photos = choice.photos(variant).map { |room, url| { 'room' => room, 'url' => url } }
+    requeue_stale(photos.map { |p| p['url'] })
     render json: {
       variant: { id: variant.id, name: variant.media['name'].presence || variant.model_number },
       # Which photos TrueView uses per room, how they were chosen, and every
@@ -285,6 +286,16 @@ class Api::Admin::TrueviewLabController < ApplicationController
       TruebuildRender.create!(attrs.merge(status: 'failed', error: "#{spec[:provider] == 'gemini' ? 'GEMINI' : 'OPENAI'}_API_KEY is not set"))
     else
       TruebuildRender.create!(attrs).tap { |r| TruebuildRenderJob.perform_later(r.id) }
+    end
+  end
+
+  # Drawings left 'queued' or 'running' for 15 minutes were lost (a deploy
+  # restarted the worker); opening the review puts them back on the queue.
+  def requeue_stale(source_urls)
+    TruebuildRender.where(source_url: source_urls, purpose: 'layer', status: %w[queued running])
+                   .where(updated_at: ...Truebuild::Trueview::Buyer::STALE_AFTER.ago).find_each do |row|
+      row.update!(status: 'queued', usage: row.usage.except('job_id'))
+      TruebuildRenderJob.perform_later(row.id)
     end
   end
 

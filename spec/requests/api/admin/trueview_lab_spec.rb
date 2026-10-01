@@ -223,6 +223,24 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(again.reload.status).to eq('done')
     end
 
+    it "finishes a drawing whose worker a deploy stopped, and requeues one left behind" do
+      layer.update!(status: 'running', usage: layer.usage.merge('job_id' => 'job-1'))
+      job = TruebuildRenderJob.new(layer.id)
+      allow(job).to receive(:job_id).and_return('job-1')
+      expect(Truebuild::Trueview).to receive(:perform!).with(layer)
+      job.perform(layer.id)
+
+      other = TruebuildRenderJob.new(layer.id)
+      allow(other).to receive(:job_id).and_return('job-2')
+      expect(Truebuild::Trueview).not_to receive(:perform!)
+      other.perform(layer.id)
+
+      layer.update_columns(updated_at: 1.hour.ago)
+      expect { get '/api/admin/trueview_lab/review', headers: admin, params: { variant_id: variant.id } }
+        .to have_enqueued_job(TruebuildRenderJob).with(layer.id)
+      expect(layer.reload.status).to eq('queued')
+    end
+
     it 'outlines a flagged surface again and cuts its layers again for free' do
       expect do
         post "/api/admin/trueview_lab/outlines/#{outline.id}/flag", headers: admin, params: { note: 'Leave the stools out.' }.to_json

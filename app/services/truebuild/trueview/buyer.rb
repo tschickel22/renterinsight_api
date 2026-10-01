@@ -163,7 +163,7 @@ module Truebuild
       # for ever. Only the row's own job is enqueued again; nothing is redrawn.
       def requeue_stale(plan)
         rows(plan).where(status: %w[queued running]).where(updated_at: ...STALE_AFTER.ago).find_each do |row|
-          row.update!(status: 'queued')
+          row.update!(status: 'queued', usage: row.usage.except('job_id'))
           TruebuildRenderJob.set(queue: :low).perform_later(row.id)
         end
       end
