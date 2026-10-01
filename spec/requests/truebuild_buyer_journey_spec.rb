@@ -216,6 +216,29 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(JSON.parse(response.body)).to eq('signed_in' => false)
   end
 
+  it 'saves another version without asking again, and without a second lead or intake entry' do
+    post '/public/truebuild/designs', params: {
+      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
+      contact: { first_name: 'Sam', last_name: 'May', email: 'sam@example.com' }
+    }
+    first = TruebuildDesign.last
+    pass = JSON.parse(response.body)['pass']
+    expect(pass).to be_present
+
+    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: pass }
+    expect(JSON.parse(response.body)).to include('signed_in' => true, 'first_name' => 'Sam', 'email' => 'sam@example.com')
+
+    leads = Lead.count
+    submissions = IntakeSubmission.count
+    post '/public/truebuild/designs', params: {
+      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [], as: pass, copied_from: first.public_token
+    }
+    expect(response).to have_http_status(:created)
+    expect(JSON.parse(response.body)['pass']).to eq(pass)
+    expect(TruebuildDesign.last).to have_attributes(lead_id: first.lead_id, buyer_email: 'sam@example.com')
+    expect([Lead.count, IntakeSubmission.count]).to eq([leads, submissions])
+  end
+
   describe 'follow up on a shared design' do
     def events(type) = WorkflowEvent.where(event_type: type)
 

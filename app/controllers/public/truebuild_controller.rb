@@ -78,7 +78,10 @@ class Public::TruebuildController < ApplicationController
       request: request, copied_from: params[:copied_from],
       buyer_access: Truebuild::BuyerPass.resolve(params[:as], @company)
     ).call
-    render json: design_json(design), status: :created
+    # Saving another version asks for nothing again: the pass the buyer came
+    # with, or one naming who just saved.
+    pass = params[:as].presence if Truebuild::BuyerPass.resolve(params[:as], @company)
+    render json: design_json(design).merge(pass: pass || Truebuild::BuyerPass.issue_for_design(design)), status: :created
   rescue Truebuild::DesignSaver::Invalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
