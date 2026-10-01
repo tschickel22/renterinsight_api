@@ -130,7 +130,14 @@ module Truebuild
     # otherwise names the source after utm_source. The UTMs still reach the lead.
     def submission_data(design, price, form)
       options = CatalogOption.where(id: design.option_ids).pluck(:name)
-      message = ["Designed a #{design.name} on the website."]
+      message = []
+      # Saved from someone else's shared design: say whose, so the rep knows
+      # this buyer came through a family member or friend.
+      if shared_copy?(design)
+        message << "Shared with them by #{@copied_from.buyer_name.presence || 'another buyer'}, from their #{@copied_from.name} " \
+                   "design (#{design_url(@copied_from)})."
+      end
+      message << "Designed a #{design.name} on the website."
       message << "Options: #{options.join(', ')}." if options.any?
       message << "Price shown: #{ActiveSupport::NumberHelper.number_to_currency(price[:total], precision: 0)}." if price[:show_prices]
       message << @contact['message'].to_s.strip if @contact['message'].present?
@@ -142,11 +149,23 @@ module Truebuild
         'truebuild_design_token' => design.public_token,
         'vehicle_id' => @vehicle&.id, 'vehicle_location_id' => @vehicle&.location_id,
         'source' => 'truebuild_design', 'source_id' => form.source_id
-      }.merge(@context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term])).compact
+      }.merge(share_utms(design)).merge(@context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term]).compact_blank).compact
     end
 
     def design_url(design)
       self.class.design_url(design)
+    end
+
+    def shared_copy?(design)
+      @copied_from.present? && @copied_from.buyer_email != design.buyer_email
+    end
+
+    # A shared design's copies report as their own channel. The source stays
+    # TrueBuild: it is what starts the dealer's Saved home design play.
+    def share_utms(design)
+      return {} unless shared_copy?(design)
+
+      { 'utm_source' => 'truebuild', 'utm_medium' => 'share', 'utm_campaign' => 'design_share' }
     end
 
     # Where the buyer designed it, with the design reopened.

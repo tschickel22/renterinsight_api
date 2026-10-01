@@ -84,9 +84,22 @@ class Api::V1::TruebuildDesignsController < ApplicationController
       quote_id: d.quote_id, quote_number: d.quote&.quote_number, vehicle_id: d.vehicle_id, stock_number: d.vehicle&.stock_number,
       options: d.option_ids.filter_map { |id| names[id] },
       price_shown: shown, price_today: price_today(d),
-      view_count: d.view_count, last_viewed_at: d.last_viewed_at,
-      link: Truebuild::DesignSaver.design_url(d)
+      view_count: d.view_count, last_viewed_at: d.last_viewed_at, share_count: d.share_count,
+      link: Truebuild::DesignSaver.design_url(d),
+      # Who shared it with this buyer, and who saved their own copy of it.
+      shared_from: (src = shared_from(d)) && { design_id: src.id, buyer_name: src.buyer_name, lead_id: src.lead_id, contact_id: src.contact_id },
+      copies: copies_of(d).map { |c| { design_id: c.id, buyer_name: c.buyer_name, lead_id: c.lead_id, contact_id: c.contact_id, saved_at: c.created_at } }
     }
+  end
+
+  def shared_from(d)
+    id = d.metadata['copied_from']
+    src = id && @company.truebuild_designs.find_by(id: id)
+    src if src && src.buyer_email != d.buyer_email
+  end
+
+  def copies_of(d)
+    @company.truebuild_designs.where("metadata->>'copied_from' = ?", d.id.to_s).where.not(buyer_email: d.buyer_email).order(:created_at).limit(10)
   end
 
   # The same home and options at today's prices, so a rep sees an increase

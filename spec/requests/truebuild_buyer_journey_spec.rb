@@ -243,6 +243,18 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
       expect(design.reload.metadata['copies']).to eq(1)
       expect(events('lead.design_copied').first).to have_attributes(entity_id: design.lead_id)
       expect(events('lead.design_copied').first.payload).to include('copied_by' => 'Sam May')
+
+      # Sam's lead says it came from Tia's share, and reports as a share.
+      sam = Lead.find(copy.lead_id)
+      expect(sam).to have_attributes(utm_medium: 'share', utm_campaign: 'design_share')
+      expect(sam.source&.name).to eq(Truebuild::DesignSaver::SOURCE)
+      expect(copy.intake_submission.data['Message']).to start_with('Shared with them by Tia May, from their Belvidere')
+
+      # Each design links to the other in the CRM.
+      get '/api/v1/truebuild_designs', headers: rep_headers, params: { lead_id: sam.id }
+      expect(JSON.parse(response.body)['designs'].first['shared_from']).to include('buyer_name' => 'Tia May', 'lead_id' => design.lead_id)
+      get '/api/v1/truebuild_designs', headers: rep_headers, params: { lead_id: design.lead_id }
+      expect(JSON.parse(response.body)['designs'].first['copies'].map { |c| c['buyer_name'] }).to eq(['Sam May'])
     end
 
     it 'does not count the buyer saving a new version of their own design as a copy' do
