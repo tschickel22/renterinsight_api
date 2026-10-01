@@ -71,7 +71,7 @@ module Truebuild
 
     # The home on the lot first, then the manufacturer's photos of the model.
     def media
-      m = @variant.media || {}
+      m = @variant.shown_media
       lot = Array(@vehicle&.public_image_urls).compact.map { |url| { url: url, room: nil, lot: true } }
       photos = lot + Array(m['photos']).map { |p| { url: p['url'], room: p['room'] } }
       { photos: photos.uniq { |p| p[:url] }.first(60), floor_plans: Array(m['floor_plans']).first(4),

@@ -46,4 +46,15 @@ RSpec.describe Truebuild::ModelMedia do
     expect(barkley.reload.media['slug']).to eq('prime-barkley-043')
     expect(belvidere.reload.media).to eq({}) # a Genesis home's photo named an Aspire number: not trusted
   end
+
+  it "keeps a platform admin's hidden photos and TrueView choices through a rescan" do
+    winston = variant('Aspire', 'Winston', '3272H32186')
+    kept = { 'hidden_photos' => ['https://x/old'], 'trueview_photos' => { 'kitchen' => ['https://x/k'] }, 'trueview_auto' => { 'bath' => 'https://x/b' } }
+    winston.update_columns(media: { 'photos' => [{ 'url' => 'https://x/stale' }] }.merge(kept))
+
+    described_class.refresh!(mfr, client_class: client)
+    media = winston.reload.media
+    expect(media).to include(kept)
+    expect(media['photos'].map { |p| p['url'] }).not_to include('https://x/stale')
+  end
 end

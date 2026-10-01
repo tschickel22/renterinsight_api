@@ -52,7 +52,7 @@ module Api
           beds: d.variant.beds, baths: d.variant.baths&.to_f, width_ft: d.variant.width_ft, length_ft: d.variant.length_ft,
           options: CatalogOption.where(id: d.option_ids).pluck(:name),
           price: snap['show_prices'] ? snap['total'] : nil, saved_at: d.created_at,
-          image: Array(d.vehicle&.public_image_urls).first || d.variant.media.dig('photos', 0, 'url') || d.variant.media.dig('elevations', 0),
+          image: Array(d.vehicle&.public_image_urls).first || d.variant.shown_media.dig('photos', 0, 'url') || d.variant.shown_media.dig('elevations', 0),
           # Opened from here, the designer knows the buyer and saves to their account.
           link: "#{Truebuild::DesignSaver.design_url(d)}&as=#{CGI.escape(buyer_pass)}",
           # What a share sends: never the pass, or whoever got it could save

@@ -614,7 +614,7 @@ class Public::InventoryController < ApplicationController
   end
 
   def catalog_media(vehicle)
-    vehicle.catalog_plan_variant_id ? (vehicle.catalog_plan_variant&.media || {}) : {}
+    vehicle.catalog_plan_variant_id ? (vehicle.catalog_plan_variant&.shown_media || {}) : {}
   end
 
   # Extract plain URL strings from images array

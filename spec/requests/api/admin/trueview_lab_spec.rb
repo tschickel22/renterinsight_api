@@ -292,6 +292,33 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(room['candidates'].last['labelled']).to be(false)
     end
 
+    it 'hides a photo from buyers and TrueView, and brings it back' do
+      variant.update_columns(media: variant.media.merge('elevations' => ['https://s7d9.scene7.com/elev'],
+                                                        'trueview_photos' => { 'kitchen' => [k1, k2] }, 'trueview_auto' => { 'kitchen' => k1 }))
+
+      post '/api/admin/trueview_lab/photos/hide', headers: admin, params: { variant_id: variant.id, url: k1, hidden: true }.to_json
+      expect(response).to have_http_status(:ok)
+      media = variant.reload.media
+      expect(media).to include('hidden_photos' => [k1], 'trueview_photos' => { 'kitchen' => [k2] }, 'trueview_auto' => {})
+      expect(variant.shown_media['photos'].map { |p| p['url'] }).not_to include(k1)
+      expect(Truebuild::Trueview::PhotoChoice.candidate_urls(media, 'kitchen', all: true)).not_to include(k1)
+
+      get '/api/admin/trueview_lab/review', headers: admin, params: { variant_id: variant.id }
+      gallery = JSON.parse(response.body)['gallery']
+      expect(gallery.find { |g| g['url'] == k1 }).to include('hidden' => true, 'room' => 'kitchen')
+      expect(gallery.last).to include('url' => 'https://s7d9.scene7.com/elev', 'room' => nil)
+
+      post '/api/admin/trueview_lab/photos/hide', headers: admin, params: { variant_id: variant.id, url: 'https://s7d9.scene7.com/elev', hidden: true }.to_json
+      expect(variant.reload.shown_media['elevations']).to eq([])
+
+      post '/api/admin/trueview_lab/photos/hide', headers: admin, params: { variant_id: variant.id, url: k1, hidden: false }.to_json
+      expect(variant.reload.hidden_photo_urls).to eq(['https://s7d9.scene7.com/elev'])
+      expect(variant.shown_media['photos'].map { |p| p['url'] }).to include(k1)
+
+      post '/api/admin/trueview_lab/photos/hide', headers: admin, params: { variant_id: variant.id, url: 'https://evil.example/x.jpg', hidden: true }.to_json
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
     it 'lets a reviewer show a held back layer, and lists models needing review worst first' do
       row = TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
                                     selection: [{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }], selection_key: 'k9',

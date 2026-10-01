@@ -41,9 +41,10 @@ module Truebuild
       end
 
       # The room's labelled photos; all: every photo, for an admin who knows
-      # an unlabelled one is the kitchen.
+      # an unlabelled one is the kitchen. Hidden photos are never drawn on.
       def candidate_urls(media, room, all: false)
-        list = Array(media['photos']).select { |p| p['url'].present? }
+        hidden = Array(media['hidden_photos'])
+        list = Array(media['photos']).select { |p| p['url'].present? && hidden.exclude?(p['url']) }
         list = list.select { |p| p['room'] == room } unless all
         list.map { |p| p['url'] }.uniq
       end

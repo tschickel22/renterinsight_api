@@ -19,7 +19,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
       models: Truebuild::Trueview::MODELS.map { |key, s| { key: key, label: s[:label], provider: s[:provider], configured: Truebuild::Trueview.configured?(key) } },
       variants: variants.map do |v|
         { id: v.id, name: v.media['name'].presence || v.model_number, model_number: v.model_number, manufacturer_id: v.manufacturer_id,
-          photos: Array(v.media['photos']).select { |p| p['url'].present? }.map { |p| p.slice('url', 'room') } }
+          photos: Array(v.shown_media['photos']).select { |p| p['url'].present? }.map { |p| p.slice('url', 'room') } }
       end
     }
   end
@@ -67,6 +67,11 @@ class Api::Admin::TrueviewLabController < ApplicationController
         { room: room, chosen: choice.chosen(media, room), source: choice.source(media, room),
           candidates: (labelled + others).map { |u| { url: u, thumb: Truebuild::Trueview.sized(u), labelled: labelled.include?(u) } } }
       end,
+      # Every photo and elevation on the model, hidden ones included, to hide
+      # or bring back.
+      gallery: gallery_urls(media).map do |url, room|
+        { url: url, thumb: Truebuild::Trueview.sized(url), room: room, hidden: variant.hidden_photo_urls.include?(url) }
+      end,
       photos: photos.map do |p|
         masks = TruebuildSurfaceMask.where(source_url: p['url'], version: Truebuild::Trueview::Surfaces::VERSION).order(:surface)
         layers = TruebuildRender.where(source_url: p['url'], purpose: 'layer', model_key: Truebuild::Trueview::Buyer::MODEL)
@@ -108,6 +113,33 @@ class Api::Admin::TrueviewLabController < ApplicationController
     # The next buyer visit draws for the new photos.
     Rails.cache.delete("truebuild:trueview:predraw:#{variant.id}:v#{Truebuild::Trueview::Layer::VERSION}")
     render json: { room: room, chosen: choice.chosen(variant.reload.media, room), source: choice.source(variant.media, room) }
+  end
+
+  # POST /api/admin/trueview_lab/photos/hide { variant_id, url, hidden }
+  # A photo hidden from buyers everywhere: the designer, the model list,
+  # inventory cards and TrueView. Kept by URL, so a rescan does not bring it
+  # back but a new photo from the factory still shows.
+  def hide_photo
+    variant = CatalogPlanVariant.find_by(id: params[:variant_id])
+    return render json: { error: 'Choose a model' }, status: :unprocessable_entity unless variant
+
+    media = variant.media || {}
+    url = params[:url].to_s
+    return render json: { error: 'Not a photo of this model' }, status: :unprocessable_entity unless gallery_urls(media).key?(url)
+
+    hide = ActiveModel::Type::Boolean.new.cast(params[:hidden])
+    hidden = variant.hidden_photo_urls - [url]
+    hidden << url if hide
+    media = media.merge('hidden_photos' => hidden)
+    if hide
+      # A hidden photo stops being drawn on; Claude picks the room again.
+      media['trueview_photos'] = (media['trueview_photos'] || {}).transform_values { |urls| Array(urls) - [url] }.reject { |_, v| v.blank? }
+      media['trueview_auto'] = (media['trueview_auto'] || {}).reject { |_, v| v == url }
+    end
+    # updated_at moves the model list's cache key.
+    variant.update_columns(media: media, updated_at: Time.current)
+    Rails.cache.delete("truebuild:trueview:predraw:#{variant.id}:v#{Truebuild::Trueview::Layer::VERSION}")
+    render json: { url: url, hidden: hide }
   end
 
   # POST /api/admin/trueview_lab/layers/:id/approve
@@ -291,6 +323,13 @@ class Api::Admin::TrueviewLabController < ApplicationController
 
   # Drawings left 'queued' or 'running' for 15 minutes were lost (a deploy
   # restarted the worker); opening the review puts them back on the queue.
+  # url => room (nil for elevations), photos first.
+  def gallery_urls(media)
+    photos = Array(media['photos']).select { |p| p['url'].present? }.to_h { |p| [p['url'], p['room']] }
+    Array(media['elevations']).compact.each { |u| photos[u] ||= nil }
+    photos
+  end
+
   def requeue_stale(source_urls)
     scope = TruebuildRender.where(source_url: source_urls, purpose: 'layer')
     TruebuildRenderJob.orphaned(scope, stale_after: Truebuild::Trueview::Buyer::STALE_AFTER)

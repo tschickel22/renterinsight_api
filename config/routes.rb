@@ -3032,6 +3032,7 @@ Rails.application.routes.draw do
       post 'trueview_lab/layers/:id/flag', to: 'trueview_lab#flag_layer'
       post 'trueview_lab/outlines/:id/flag', to: 'trueview_lab#flag_outline'
       post 'trueview_lab/photos', to: 'trueview_lab#choose_photos'
+      post 'trueview_lab/photos/hide', to: 'trueview_lab#hide_photo'
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
 

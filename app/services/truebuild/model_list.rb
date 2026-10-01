@@ -35,7 +35,7 @@ module Truebuild
         next if priced.empty? # no retail for any size: nothing a buyer can price
 
         cheapest = priced.min_by { |_, r| r }
-        media = vs.map(&:media).find { |m| m.present? && (Array(m['photos']).any? || Array(m['elevations']).any?) } || {}
+        media = vs.map(&:shown_media).find { |m| m.present? && (Array(m['photos']).any? || Array(m['elevations']).any?) } || {}
         {
           plan_id: plan.id, name: plan.name, series: plan.series, manufacturer: vs.first.manufacturer&.name,
           image: Array(media['elevations']).first || media.dig('photos', 0, 'url'),

@@ -44,7 +44,7 @@ module Truebuild
 
         media = media_for(home, client_class)
         matches.each do |v|
-          v.update_columns(media: media, external_ids: v.external_ids.merge('champion_model_id' => v.external_ids['champion_model_id'] || home['id'],
+          v.update_columns(media: v.media_from_feed(media), external_ids: v.external_ids.merge('champion_model_id' => v.external_ids['champion_model_id'] || home['id'],
                                                                             'champion_slug' => v.external_ids['champion_slug'] || home['slug']),
                            updated_at: Time.current)
         end

@@ -22,6 +22,30 @@ class CatalogPlanVariant < ApplicationRecord
 
   scope :active, -> { where(status: 'active') }
 
+  # Media keys people set (a platform admin's hidden photos and TrueView
+  # photos) or made once per model (Claude's photo pick). A rescan of the
+  # factory feed replaces the rest of media and keeps these.
+  CURATED_MEDIA_KEYS = %w[hidden_photos trueview_photos trueview_auto].freeze
+
+  def hidden_photo_urls
+    Array((media || {})['hidden_photos'])
+  end
+
+  # Media as buyers and dealers see it: hidden photos and elevations left out.
+  def shown_media
+    m = media || {}
+    hidden = hidden_photo_urls
+    return m if hidden.empty?
+
+    m.merge('photos' => Array(m['photos']).reject { |p| hidden.include?(p['url']) },
+            'elevations' => Array(m['elevations']).reject { |u| hidden.include?(u) })
+  end
+
+  # Fresh media from a feed, keeping what people chose.
+  def media_from_feed(fresh)
+    fresh.merge((media || {}).slice(*CURATED_MEDIA_KEYS))
+  end
+
   def parsed_model_number
     Catalog::ModelNumber.parse(model_number)
   end
