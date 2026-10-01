@@ -11,7 +11,10 @@ class PlatformModule
     'crm.contacts' => { name: 'Contact Management', category: 'CRM & Sales', icon: 'UserCircle', description: 'Contact database and communication' },
     'crm.deals' => { name: 'Sales Pipeline', category: 'CRM & Sales', icon: 'TrendingUp', description: 'Deal tracking and sales process' },
     'crm.quotes' => { name: 'Quote Builder', category: 'CRM & Sales', icon: 'FileText', description: 'Professional quote generation' },
-    'sales.configurator' => { name: 'Home Configurator', category: 'CRM & Sales', icon: 'Home', description: 'Configure and quote manufactured homes' },
+    # TrueBuild. The key predates it (the retired March 2026 configurator) and
+    # is kept because plans and overrides already carry it.
+    'sales.configurator' => { name: 'TrueBuild Home Designer', category: 'CRM & Sales', icon: 'Home',
+                              description: 'Buyers design and price homes on your website with factory pricing and TrueView renderings' },
     'sales.deal_desk' => { name: 'Deal Desk', category: 'CRM & Sales', icon: 'Calculator', description: 'Point-of-sale deal structuring: solve for payment, compare units, present a pencil' },
     
     # Inventory & Operations

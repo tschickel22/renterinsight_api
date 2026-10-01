@@ -3,7 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
-  let(:company) { Company.create!(name: "Dealer #{SecureRandom.hex(3)}") }
+  let(:company) { Company.create!(name: "Dealer #{SecureRandom.hex(3)}").tap { |c| c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) } }
   let(:other) { Company.create!(name: "Other #{SecureRandom.hex(3)}") }
   let(:admin) do
     User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'A', last_name: 'D', password: 'Pass1234!',
@@ -23,6 +23,12 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
   end
 
   before { CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 57_995) }
+
+  it 'refuses a dealer whose plan does not include TrueBuild' do
+    company.tenant_module_overrides.update_all(is_enabled: false)
+    get '/api/v1/truebuild_pricing', headers: headers
+    expect(response).to have_http_status(:forbidden)
+  end
 
   it 'refuses someone without company settings access' do
     rep = User.create!(email: "r-#{SecureRandom.hex(4)}@example.com", first_name: 'R', last_name: 'P', password: 'Pass1234!',

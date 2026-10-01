@@ -3,7 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe 'Api::V1::TruebuildDesigns', type: :request do
-  let(:company) { Company.create!(name: "Dealer #{SecureRandom.hex(3)}") }
+  let(:company) { Company.create!(name: "Dealer #{SecureRandom.hex(3)}").tap { |c| c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) } }
   let(:admin) do
     User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'A', last_name: 'D', password: 'Pass1234!',
                  company_id: company.id, role: 'company_admin')

@@ -4,6 +4,8 @@
 # they were shown, what it would cost today, and whether the share link is
 # being opened.
 class Api::V1::TruebuildDesignsController < ApplicationController
+  include ModuleAccessRequired
+  require_module! Truebuild::BuyerCatalog::MODULE
   before_action :set_company_scope
 
   # GET /api/v1/truebuild_designs?lead_id= | deal_id= | contact_id=

@@ -4,7 +4,7 @@ require 'rails_helper'
 
 # Buyers who designed and saved a home on the website this week.
 RSpec.describe 'Designed a Home work queue', type: :model do
-  let(:company) { create(:company, use_rbac_system: false) }
+  let(:company) { create(:company, use_rbac_system: false).tap { |c| c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) } }
   let(:user) do
     User.create!(email: "wqd-#{SecureRandom.hex(4)}@example.com", password: 'Password123!',
                  company: company, first_name: 'Reid', last_name: 'Tester', role: 'admin')

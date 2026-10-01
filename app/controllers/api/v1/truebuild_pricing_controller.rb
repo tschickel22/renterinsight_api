@@ -6,6 +6,8 @@
 # The catalog itself is platform data (Api::Admin::CatalogPriceBooksController);
 # everything here is this company's own layer on top of it.
 class Api::V1::TruebuildPricingController < ApplicationController
+  include ModuleAccessRequired
+  require_module! Truebuild::BuyerCatalog::MODULE
   before_action :set_company_scope
   before_action :set_rule, only: %i[update_rule destroy_rule]
   before_action :set_update, only: %i[show_update accept_update decline_update]

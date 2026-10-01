@@ -392,8 +392,9 @@ class WorkqueueService
   def truebuild_dealer?
     return @truebuild_dealer if defined?(@truebuild_dealer)
 
-    @truebuild_dealer = @company.truebuild_designs.exists? ||
-                        @company.dealer_markup_rules.active.exists? || @company.dealer_catalog_terms.exists?
+    @truebuild_dealer = @company.has_module?(Truebuild::BuyerCatalog::MODULE) &&
+                        (@company.truebuild_designs.exists? ||
+                         @company.dealer_markup_rules.active.exists? || @company.dealer_catalog_terms.exists?)
   end
 
   def summary_cache_key

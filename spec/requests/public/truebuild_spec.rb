@@ -5,6 +5,7 @@ require 'rails_helper'
 RSpec.describe 'Public TrueBuild', type: :request do
   let(:company) do
     create(:company, name: 'Summit Homes').tap do |c|
+      c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) # TrueBuild on the plan
       c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true })
     end
   end
@@ -179,6 +180,14 @@ RSpec.describe 'Public TrueBuild', type: :request do
     clay = siding['options'].find { |o| o['name'] == 'Clay' }
     expect(clay).to include('hex' => '#8c887d', 'swatch_url' => 'https://b/clay.jpg')
     expect(siding['options'].find { |o| o['name'] == 'White' }['swatch_url']).to be_nil
+  end
+
+  it 'shows no designer for a dealer whose plan does not include TrueBuild' do
+    company.tenant_module_overrides.update_all(is_enabled: false)
+    get "/public/truebuild/models/#{variant.id}", params: { token: token }
+    expect(response).to have_http_status(:not_found)
+    get '/public/truebuild/models', params: { token: token }
+    expect(JSON.parse(response.body)['models']).to eq([])
   end
 
   describe 'buyer view' do

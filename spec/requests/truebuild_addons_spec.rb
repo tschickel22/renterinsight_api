@@ -7,6 +7,7 @@ require 'rails_helper'
 RSpec.describe 'TrueBuild dealer add-ons', type: :request do
   let(:company) do
     create(:company, name: 'Summit Homes').tap do |c|
+      c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) # TrueBuild on the plan
       c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true })
     end
   end

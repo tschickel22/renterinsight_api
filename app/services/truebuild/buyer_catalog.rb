@@ -10,8 +10,11 @@ module Truebuild
 
     # A dealer offers TrueBuild once they have set up pricing, and only on
     # models a published book covers.
+    MODULE = 'sales.configurator' # TrueBuild Home Designer on the dealer's plan
+
     def self.available?(company, variant)
       return false unless variant && BookResolver.current_for(variant)
+      return false unless company.has_module?(MODULE)
 
       company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
     end

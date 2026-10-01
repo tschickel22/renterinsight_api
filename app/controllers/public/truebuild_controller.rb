@@ -29,6 +29,8 @@ class Public::TruebuildController < ApplicationController
 
   # GET /public/truebuild/models   Every model this dealer offers, for a site block.
   def models
+    return render json: { models: [] } unless @company.has_module?(Truebuild::BuyerCatalog::MODULE)
+
     render json: { models: Truebuild::ModelList.new(@company).call(manufacturer_id: params[:manufacturer_id].presence) }
   end
 
