@@ -21,7 +21,7 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 6       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks
+      VERSION = 7       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -85,7 +85,8 @@ module Truebuild
           spent += Trueview.cost(spec, result[:usage])
           raise Trueview::Error, 'The model changed the framing while outlining' if Trueview.reframed_by(result, aspect) > Trueview::FRAMING_TOLERANCE
 
-          mask = magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height)
+          mask = without_others(magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height),
+                                source_url, key)
           verdict = (mask.avg / 255.0).positive? ? check(image, mask, key, description) : { 'present' => false, 'fit' => 0 }
           spent += verdict['cost_usd'].to_f
           attempts << verdict
@@ -101,6 +102,18 @@ module Truebuild
                                      usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') } })
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
+      end
+
+      # Surfaces never overlap, so whatever another accepted outline of this
+      # photo already covers is not this one. Bay Port's backsplash took in
+      # the cabinets' edges and the accent wall ran onto the cabinets.
+      def without_others(mask, source_url, key)
+        TruebuildSurfaceMask.where(source_url: source_url, version: VERSION, status: 'done').where.not(surface: key)
+                            .select(&:present?).reduce(mask) do |m, other|
+          o = Vips::Image.new_from_buffer(Trueview.fetch_source(other.mask_url)[:bytes], '')
+          o = o.extract_band(0) if o.bands > 1
+          (Layer.fit(o, m.width, m.height) > 127).ifthenelse(0, m).cast(:uchar)
+        end
       end
 
       CHECK_TOOL = {
