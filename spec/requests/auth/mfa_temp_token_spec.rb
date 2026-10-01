@@ -36,3 +36,39 @@ RSpec.describe 'MFA temp token', type: :request do
     expect(response).to have_http_status(:ok)
   end
 end
+
+# The first fix only covered ApplicationController#authenticate. Several
+# controllers decode the JWT themselves, and one of them can turn MFA off.
+RSpec.describe 'MFA temp token outside ApplicationController', type: :request do
+  let(:company) { create(:company) }
+  let(:user) do
+    User.create!(email: "m-#{SecureRandom.hex(4)}@example.com", first_name: 'M', last_name: 'F',
+                 password: 'Pass1234!', company_id: company.id, role: 'company_admin', status: 'active')
+  end
+
+  it 'cannot turn MFA off through user settings' do
+    temp = JsonWebToken.generate_mfa_temp_token(user)
+
+    patch '/api/v1/user_settings/security', params: { mfa_enabled: false },
+                                             headers: { 'Authorization' => "Bearer #{temp}" }
+
+    expect(response).to have_http_status(:unauthorized)
+  end
+
+  it 'cannot open the buyer portal with only the portal password' do
+    access = create(:buyer_portal_access)
+    temp = JsonWebToken.generate_mfa_temp_token_portal(access)
+
+    get '/api/portal/truebuild_designs', headers: { 'Authorization' => "Bearer #{temp}" }
+
+    expect(response).to have_http_status(:unauthorized)
+  end
+
+  it 'is still accepted by the MFA verify step it exists for' do
+    temp = JsonWebToken.generate_mfa_temp_token(user)
+
+    post '/api/auth/mfa/verify_code', params: { temp_token: temp, code: '000000' }
+
+    expect(response.body).not_to include('Invalid or expired temporary token')
+  end
+end
