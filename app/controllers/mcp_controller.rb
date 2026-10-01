@@ -120,18 +120,39 @@ class McpController < ActionController::API
       return challenge('The access token was not issued for this server.')
     end
     if (reason = Oauth::AccessPolicy.denial_reason(grant))
-      return challenge(reason)
+      # A revoked connection is a dead token: sign in again. Anything else
+      # (role, add-on, suspended account, inactive user) is a permission the
+      # person does not have right now, and signing in again cannot fix it.
+      # 401 there made Claude report "Authentication failed" and loop through
+      # sign-in; 403 with the reason in the body lets it say what is wrong.
+      return grant.active? ? forbidden(reason) : challenge(reason)
     end
 
     [grant, access]
   end
 
+  # Both scopes, so Claude and ChatGPT ask for both and the consent screen can
+  # offer "allow changes". Advertising read alone (as before) meant the apps
+  # never requested write, so a user could never turn it on. The consent
+  # screen and the role's AI Connector Update permission still decide.
+  def advertised_scope
+    OauthGrant::SCOPES.join(' ')
+  end
+
   def challenge(description)
     parts = ["Bearer resource_metadata=\"#{Oauth::Config.resource_metadata_url(request)}\"",
-             "scope=\"#{OauthGrant::SCOPES.first}\""]
+             "scope=\"#{advertised_scope}\""]
     parts << "error=\"invalid_token\", error_description=\"#{description.delete('"')}\"" if description
     response.set_header('WWW-Authenticate', parts.join(', '))
     render json: { error: 'unauthorized', error_description: description || 'Sign in to connect.' }, status: :unauthorized
+    nil
+  end
+
+  def forbidden(reason)
+    response.set_header('WWW-Authenticate',
+                        "Bearer error=\"insufficient_scope\", error_description=\"#{reason.delete('"')}\", " \
+                        "resource_metadata=\"#{Oauth::Config.resource_metadata_url(request)}\"")
+    render json: jsonrpc_error(reason), status: :forbidden
     nil
   end
 

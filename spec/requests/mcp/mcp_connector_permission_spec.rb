@@ -58,9 +58,10 @@ RSpec.describe 'AI connector permission', :mcp, type: :request do
     RolePermission.where(resource: Resource.find_by!(key: 'ai_connector')).delete_all
     Rails.cache.clear
 
-    mcp_post(tokens['access_token'], 'ping')
-    expect(response).to have_http_status(:unauthorized)
-    expect(response.headers['WWW-Authenticate']).to include('no longer allows the AI connector')
+    body = mcp_post(tokens['access_token'], 'ping')
+    expect(response).to have_http_status(:forbidden)
+    expect(body.dig('error', 'message')).to include('no longer allows the AI connector')
+    expect(response.headers['WWW-Authenticate']).to include('insufficient_scope')
   end
 
   it 'makes a connected app read only when the role loses Update, without disconnecting it' do

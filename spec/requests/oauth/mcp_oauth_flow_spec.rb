@@ -41,6 +41,8 @@ RSpec.describe 'MCP connector OAuth', :mcp, type: :request do
       expect(response).to have_http_status(:unauthorized)
       expect(response.headers['WWW-Authenticate'])
         .to include(%(resource_metadata="#{base_url}/.well-known/oauth-protected-resource"))
+      # Both scopes, or Claude only ever asks for read and changes can never be allowed.
+      expect(response.headers['WWW-Authenticate']).to include('scope="mcp:read mcp:write"')
     end
   end
 
@@ -247,16 +249,32 @@ RSpec.describe 'MCP connector OAuth', :mcp, type: :request do
   describe 'cutting a connection off' do
     let!(:tokens) { connect!(user) }
 
-    it 'stops working as soon as the add-on is removed' do
+    # A permission the person lacks right now is 403 with the reason, not 401:
+    # signing in again cannot fix it, and 401 made Claude say "Authentication
+    # failed" and loop through sign-in.
+    it 'stops working as soon as the add-on is removed, and says why' do
       TenantModuleOverride.where(company_id: company.id).delete_all
-      mcp_post(tokens['access_token'], 'ping')
-      expect(response).to have_http_status(:unauthorized)
+      body = mcp_post(tokens['access_token'], 'ping')
+      expect(response).to have_http_status(:forbidden)
+      expect(body.dig('error', 'message')).to include('not enabled for this company')
     end
 
     it 'stops working when the company is suspended' do
       company.update_columns(status: 'suspended')
       mcp_post(tokens['access_token'], 'ping')
-      expect(response).to have_http_status(:unauthorized)
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'keeps the refresh token through a refusal, so it works again once access is back' do
+      TenantModuleOverride.where(company_id: company.id).delete_all
+      refresh = { grant_type: 'refresh_token', refresh_token: tokens['refresh_token'], client_id: tokens['client_id'] }
+      post '/oauth/token', params: refresh
+      expect(response.parsed_body['error']).to eq('invalid_grant')
+
+      TenantModuleOverride.create!(company_id: company.id, module_key: Oauth::AccessPolicy::MODULE_KEY, is_enabled: true)
+      post '/oauth/token', params: refresh
+      expect(response).to have_http_status(:ok)
+      expect(mcp_post(response.parsed_body['access_token'], 'ping')).to include('result' => {})
     end
 
     it 'stops working when the app revokes its refresh token' do
