@@ -20,6 +20,11 @@ class McpController < ActionController::API
     McpTools::ListInventory, McpTools::ListServiceTickets, McpTools::ListQuotes, McpTools::ListMyTasks
   ].freeze
 
+  PROMPTS = [
+    McpPrompts::MorningBriefing, McpPrompts::LeadTriage, McpPrompts::AgingInventory,
+    McpPrompts::StalledDeals, McpPrompts::CustomerFollowUp, McpPrompts::ServiceBacklog
+  ].freeze
+
   WRITE_TOOLS = [
     McpTools::CreateLead, McpTools::AddNote, McpTools::CreateTask, McpTools::UpdateLeadStatus,
     McpTools::AssignLead, McpTools::UpdateDealStage, McpTools::CreateServiceTicket
@@ -73,6 +78,7 @@ class McpController < ActionController::API
       website_url: brand.website_url,
       instructions: instructions(ctx, brand),
       tools: tools,
+      prompts: PROMPTS,
       server_context: ctx,
       configuration: MCP::Configuration.new(
         validate_tool_call_arguments: true,

@@ -107,6 +107,13 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       expect(ids).not_to include("lead:#{theirs.id}")
     end
 
+    it 'shows a company-wide role the whole company, records with no location included' do
+      unlocated = lead!(location_id: nil)
+      listed, = call_tool(connect!(connector_user(company, { 'leads' => %w[read] }))['access_token'], 'list_leads')
+
+      expect(listed['items'].map { |i| i['id'] }).to include("lead:#{unlocated.id}")
+    end
+
     it 'shows a non-admin with no locations nothing, rather than the whole company' do
       lead!
       nowhere = company.users.create!(email: "n-#{SecureRandom.hex(3)}@example.com", first_name: 'N', last_name: 'L',
