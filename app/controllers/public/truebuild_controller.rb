@@ -46,9 +46,14 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
-    buyer = Truebuild::Trueview::Buyer.new(@company, variant)
-    buyer.predraw!
-    render json: buyer.call
+    # Asked every 20 seconds while layers draw, from every open designer:
+    # answered from a 15 second cache so drawing and serving do not compete.
+    body = Rails.cache.fetch("truebuild:trueview:buyer:#{@company.id}:#{variant.id}", expires_in: 15.seconds) do
+      buyer = Truebuild::Trueview::Buyer.new(@company, variant)
+      buyer.predraw!
+      buyer.call
+    end
+    render json: body
   end
 
   def price
