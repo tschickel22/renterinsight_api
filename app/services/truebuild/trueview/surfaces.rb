@@ -21,7 +21,8 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 4       # 1 text segmentation, 2 unchecked, 3 checked against a filled overlay
+      VERSION = 5       # 1 text segmentation, 2 unchecked, 3 and 4 earlier checks
+      MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
@@ -74,10 +75,10 @@ module Truebuild
 
         mask = magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height)
         coverage = (mask.avg / 255.0).round(4)
-        verdict = coverage.positive? ? check(image, mask, key, description) : { 'right' => true, 'present' => false }
+        verdict = coverage.positive? ? check(image, mask, key, description) : { 'present' => false, 'fit' => 0 }
         # A wrong outline would paint the wrong thing in every color: no
         # layer for that surface is better. An absent surface is no layer too.
-        coverage = 0 unless verdict['right'] && verdict['present']
+        coverage = 0 unless verdict['present'] && verdict['fit'].to_i >= MIN_FIT
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
                                    "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
@@ -95,37 +96,36 @@ module Truebuild
           type: 'object',
           properties: {
             present: { type: 'boolean', description: 'Looking ONLY at the first image (the untouched photo): it really shows this surface.' },
-            right: { type: 'boolean', description: 'The magenta covers this surface and essentially nothing else.' },
+            fit: { type: 'integer', minimum: 1, maximum: 5,
+                   description: '5 exact; 4 the surface with only small overspill onto neighbors (a few pixels of a stool, a sliver ' \
+                                'of trim); 3 mostly the surface but a clearly visible extra area; 2 a large part is something else; ' \
+                                '1 the wrong thing' },
             note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
           },
-          required: %w[present right]
+          required: %w[present fit]
         }
       }.freeze
 
       # Claude looks at the photo and the outline over it and says whether
       # the outline is the surface, and whether the photo shows it at all.
       # Asked for shutters on a house with none, Lite painted shutter-shaped
-      # strips beside the windows; filled in magenta they looked like
-      # shutters and passed. So presence is judged on the untouched photo,
-      # and the outline is drawn as a border over a light tint, leaving what
-      # is really inside it visible.
+      # strips beside the windows, and filled in magenta they looked like
+      # shutters; presence is judged on the untouched photo alone. A yes or
+      # no on the outline was either too lenient or, asked to be strict,
+      # rejected cabinets over a few pixels of stool, so it is a 1 to 5 fit.
       def check(image, mask, key, description)
         look = ->(img) { Base64.strict_encode64(img.thumbnail_image(1000).jpegsave_buffer(Q: 80)) }
-        inside = mask > 127
-        edge = inside.morph(Layer.disc(3), :dilate) ^ inside.morph(Layer.disc(3), :erode)
-        tinted = inside.ifthenelse((image * 0.8 + [51, 0, 51]).cast(:uchar), image)
-        tinted = edge.ifthenelse([255, 0, 255], tinted).cast(:uchar).copy(interpretation: :srgb)
+        tinted = (mask > 127).ifthenelse((image * 0.4 + [153, 0, 153]).cast(:uchar), image).cast(:uchar).copy(interpretation: :srgb)
         result = Catalog::PriceBooks::ClaudeClient.call(
-          system: 'You check outlines of home surfaces for a home configurator. Be strict: an outline that also covers ' \
-                  'other things (windows, posts, walls, floor, furniture) is wrong.',
+          system: 'You check outlines of home surfaces for a home configurator. A finish will be painted inside the ' \
+                  'outline, so what matters is whether it would paint the right thing.',
           tool: CHECK_TOOL, max_tokens: 400, temperature: 0,
           content: [{ type: 'text', text: 'Photo:' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(image) } },
-                    { type: 'text', text: "First, from that photo alone: does it show #{key}? Then the same photo with an " \
-                                          "outline drawn as a magenta border with a light tint inside. It should be #{key}: " \
-                                          "#{description}. Judge what is really inside the border." },
+                    { type: 'text', text: "First, from that photo alone: does it show #{key}? Then the same photo with the " \
+                                          "outline filled in magenta. It should be #{key}: #{description}." },
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(tinted) } }]
         )
-        result[:input].slice('present', 'right', 'note')
+        result[:input].slice('present', 'fit', 'note')
                       .merge('cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
       end
 
