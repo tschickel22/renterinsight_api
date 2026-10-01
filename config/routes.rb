@@ -1935,6 +1935,8 @@ Rails.application.routes.draw do
       post 'oauth/consent', to: 'oauth_consents#create'
       get 'connected-apps/activity', to: 'connected_apps#activity'
       put 'connected-apps/settings', to: 'connected_apps#update_settings'
+      post 'connected-apps/changes/:change_id/undo', to: 'connected_apps#undo_change'
+      post 'connected-apps/:id/undo_recent', to: 'connected_apps#undo_recent'
       resources :connected_apps, only: [:index, :destroy], path: 'connected-apps'
 
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do

@@ -50,6 +50,7 @@ module McpTools
         status: status_key, owner_id: owner_id, location_id: location_id.presence || ctx.default_location_id,
         notes: notes, origin: 'ai_connector'
       )
+      ctx.record_change(action: 'created', record: lead, after: Undo.lead_snapshot(lead))
       records = Records.new(ctx)
       Base::Result.new(payload: { created: records.summary('lead', lead) }, count: 1)
     end

@@ -15,11 +15,17 @@ module McpTools
     module_function
 
     def after_call(ctx, status:, limit_reached:)
-      if limit_reached
+      case limit_reached
+      when :records
         notify(ctx, 'limit_reached',
                "#{ctx.user.full_name}'s AI app (#{app_name(ctx)}) reached the daily limit of " \
                "#{ctx.daily_record_limit} records. Review the activity and disconnect it if that was not expected.")
-      elsif status == 'denied' && recent_refusals(ctx) >= REFUSALS_PER_HOUR
+      when :changes
+        notify(ctx, 'change_limit_reached',
+               "#{ctx.user.full_name}'s AI app (#{app_name(ctx)}) reached its limit on changes. Review what it " \
+               'changed under Settings, AI Apps, and undo it there if that was not expected.')
+      end
+      if limit_reached.nil? && status == 'denied' && recent_refusals(ctx) >= REFUSALS_PER_HOUR
         notify(ctx, 'repeated_refusals',
                "#{ctx.user.full_name}'s AI app (#{app_name(ctx)}) was refused #{REFUSALS_PER_HOUR} or more times " \
                'in the last hour. It may be reaching for records this person cannot see.')

@@ -29,6 +29,7 @@ module McpTools
         entity_type: WriteHelpers.note_entity_type(type), entity_id: record.id.to_s,
         content: text.to_s.strip.first(10_000), user_id: ctx.user.id, created_by_name: ctx.user.full_name
       )
+      ctx.record_change(action: 'created', record: note, after: { content: note.content })
       Base::Result.new(payload: { added: { note_id: note.id, on: "#{type}:#{record.id}", url: records.url(type, record) } }, count: 1)
     end
   end

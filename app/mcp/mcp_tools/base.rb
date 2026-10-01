@@ -20,7 +20,12 @@ module McpTools
         security_schemes!('mcp:read')
       end
 
+      def write_tool?
+        @write_tool == true
+      end
+
       def writes!(destructive: false)
+        @write_tool = true
         required_scope 'mcp:write'
         annotations(read_only_hint: false, destructive_hint: destructive, idempotent_hint: false, open_world_hint: false)
         security_schemes!('mcp:write')
@@ -38,10 +43,11 @@ module McpTools
         status = 'error'
         count = nil
         message = nil
-        limit_reached = false
+        limit_reached = nil
 
         begin
           ctx.require_scope!(required_scope)
+          ctx.check_change_limit! if write_tool?
           result = with_current(ctx) { perform(ctx, **args) }
           result = Result.new(payload: result, count: 0) unless result.is_a?(Result)
           status = 'ok'
@@ -49,7 +55,7 @@ module McpTools
           MCP::Tool::Response.new([{ type: 'text', text: JSON.generate(result.payload) }],
                                   structured_content: result.payload)
         rescue Denied => e
-          limit_reached = e.is_a?(LimitReached)
+          limit_reached = { LimitReached => :records, ChangeLimitReached => :changes }[e.class]
           status = 'denied'
           message = e.message
           error(e.message)

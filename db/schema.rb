@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_01_000400) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4614,6 +4614,26 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000400) do
     t.index ["knowledge_module_id"], name: "index_marketing_content_on_knowledge_module_id"
     t.index ["published_at"], name: "index_marketing_content_on_published_at"
     t.index ["status"], name: "index_marketing_content_on_status"
+  end
+
+  create_table "mcp_changes", force: :cascade do |t|
+    t.bigint "mcp_tool_call_id"
+    t.bigint "oauth_grant_id"
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "action", null: false
+    t.string "record_type", null: false
+    t.bigint "record_id", null: false
+    t.jsonb "before", default: {}, null: false
+    t.jsonb "after", default: {}, null: false
+    t.datetime "undone_at"
+    t.bigint "undone_by_user_id"
+    t.string "undo_note"
+    t.datetime "created_at", null: false
+    t.index ["company_id", "created_at"], name: "index_mcp_changes_on_company_id_and_created_at"
+    t.index ["mcp_tool_call_id"], name: "index_mcp_changes_on_mcp_tool_call_id"
+    t.index ["oauth_grant_id", "created_at"], name: "index_mcp_changes_on_oauth_grant_id_and_created_at"
+    t.index ["user_id", "created_at"], name: "index_mcp_changes_on_user_id_and_created_at"
   end
 
   create_table "mcp_tool_calls", force: :cascade do |t|

@@ -31,11 +31,15 @@ module McpTools
       end
 
       from = deal.stage
+      closed_before = deal.actual_close_date
       Deal.transaction do
         deal.update!(stage: key)
         deal.deal_stage_histories.create!(stage: key, previous_stage: from, changed_by_id: ctx.user.id, notes: note)
       end
       deal.update_column(:actual_close_date, Date.current) if deal.stage_is_won? && deal.actual_close_date.blank?
+      ctx.record_change(action: 'updated', record: deal,
+                        before: { stage: from, actual_close_date: closed_before&.iso8601 },
+                        after: { stage: key, actual_close_date: deal.actual_close_date&.iso8601 })
 
       Base::Result.new(payload: { updated: records.summary('deal', deal.reload), from: from, to: key }, count: 1)
     end
