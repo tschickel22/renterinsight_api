@@ -94,6 +94,13 @@ class McpController < ActionController::API
     )
   end
 
+  # Said in so many words because an AI on a read-only connection otherwise
+  # concludes the server cannot write at all and tells the user so.
+  READ_ONLY_NOTE = 'This connection is read only, so the tools that add notes, tasks and leads or change ' \
+                   'statuses and deal stages are hidden. If the user wants those, tell them to disconnect ' \
+                   'and reconnect this connector and tick "Also let it make changes" on the sign-in screen. ' \
+                   'Their role also needs AI Connector Update, which an admin sets under Users, Roles & Permissions.'
+
   def instructions(ctx, brand)
     <<~TEXT.squish
       You are connected to #{brand.name}, a dealer management system, as #{ctx.user.full_name}
@@ -101,7 +108,7 @@ class McpController < ActionController::API
       Record ids are typed, like lead:42, deal:7 or unit:118; search and the list tools return
       them and fetch reads one. Call get_reference_data before filtering by a status or stage
       or assigning work to someone. Dealer cost and profit figures are never available here.
-      #{ctx.write_allowed? ? 'Before any tool that changes data, confirm the change with the user.' : 'This connection is read only.'}
+      #{ctx.write_allowed? ? 'Before any tool that changes data, confirm the change with the user.' : READ_ONLY_NOTE}
     TEXT
   end
 
