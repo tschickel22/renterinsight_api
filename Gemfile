@@ -75,6 +75,7 @@ gem 'groupdate'
 # Phase 4A - Portal Authentication
 gem 'bcrypt', '~> 3.1.7'
 gem 'jwt'
+gem 'mcp', '~> 1.6'  # Model Context Protocol server (Claude and ChatGPT connectors)
 
 # SMS/Twilio for password reset
 gem 'twilio-ruby', '~> 7.3'

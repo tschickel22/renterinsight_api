@@ -21,6 +21,21 @@ Rails.application.routes.draw do
   # Health check
   get 'up', to: 'rails/health#show', as: :rails_health_check
 
+  # MCP connector for Claude and ChatGPT (backlog E53): OAuth 2.1 authorization
+  # server, its discovery documents, and the MCP endpoint itself. Root level
+  # because MCP clients look for /.well-known at the host root.
+  get '/.well-known/oauth-protected-resource', to: 'oauth/metadata#protected_resource', format: false
+  get '/.well-known/oauth-protected-resource/mcp', to: 'oauth/metadata#protected_resource', format: false
+  get '/.well-known/oauth-authorization-server', to: 'oauth/metadata#authorization_server', format: false
+  get '/.well-known/oauth-authorization-server/mcp', to: 'oauth/metadata#authorization_server', format: false
+  get '/.well-known/openid-configuration', to: 'oauth/metadata#authorization_server', format: false
+  get '/oauth/authorize', to: 'oauth/authorizations#show'
+  post '/oauth/register', to: 'oauth/registrations#create'
+  post '/oauth/token', to: 'oauth/tokens#create'
+  post '/oauth/revoke', to: 'oauth/revocations#create'
+  post '/mcp', to: 'mcp#create', format: false
+  match '/mcp', to: 'mcp#method_not_allowed', via: [:get, :delete], format: false
+
   # Root
   #
   # A tenant hostname only reaches this line when it resolved to nothing: no
@@ -1911,6 +1926,11 @@ Rails.application.routes.draw do
       get 'integration/field_map', to: 'integration_fields#field_map'
 
       # ==================== PARTNER API KEY MANAGEMENT ====================
+      # MCP connector: consent screen and connected AI apps (backlog E53)
+      get 'oauth/consent', to: 'oauth_consents#show'
+      post 'oauth/consent', to: 'oauth_consents#create'
+      resources :connected_apps, only: [:index, :destroy], path: 'connected-apps'
+
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
         collection do
           get :available_resources
