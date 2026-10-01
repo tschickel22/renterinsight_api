@@ -105,6 +105,11 @@ class PlatformModule
     'admin.roles' => { name: 'Role Management', category: 'Administration', icon: 'Shield', description: 'Custom roles and permissions' },
     'admin.api_keys' => { name: 'API Keys', category: 'Administration', icon: 'Key', description: 'External API key management for integrations' },
     'admin.webhooks' => { name: 'Webhooks', category: 'Administration', icon: 'Webhook', description: 'Webhook endpoint management for event notifications' },
+    # Paid add-on, same shape as marketing.text_us: absent from every
+    # PLAN_TEMPLATE so no tier grants it free. Attach per tenant with a
+    # TenantModuleOverride. Unlike text_us it is enforced server side, on every
+    # OAuth token issue and every MCP call (Oauth::AccessPolicy).
+    'admin.ai_connector' => { name: 'AI Connector', category: 'Administration', icon: 'Bot', description: 'Connect Claude and ChatGPT to this account. Each person signs in as themselves and the AI can only see and do what they can' },
     'admin.platform' => { name: 'Platform Admin', category: 'Administration', icon: 'Crown', description: 'Platform-level administration (Enterprise only)' }
   }.freeze
   
