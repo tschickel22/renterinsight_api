@@ -21,8 +21,8 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 10      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
-                        # 9 presence judged beside the overlay
+      VERSION = 11      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
+                        # 9 presence judged beside the overlay, 10 presence asked too strictly
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -206,7 +206,10 @@ module Truebuild
           system: 'You look at photos of manufactured homes for a home configurator. Answer only from what is visible.',
           tool: PRESENCE_TOOL, max_tokens: 200, temperature: 0,
           content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(image) } },
-                    { type: 'text', text: "Does this photo clearly show #{key} (#{description})? Answer no if you would have to guess." }]
+                    { type: 'text', text: "A buyer is choosing a new finish for the #{key} (#{description}). Can you see at least " \
+                                          "part of the #{key} in this photo, so it could be shown in a new finish? It does not " \
+                                          'need to be complete or look special already: an accent wall is any large plain wall, ' \
+                                          'appliances are any of them that are visible. Answer no only if none of it is visible.' }]
         )
         result[:input].slice('present', 'note')
                       .merge('cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
