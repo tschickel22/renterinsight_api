@@ -54,7 +54,11 @@ module Api
           price: snap['show_prices'] ? snap['total'] : nil, saved_at: d.created_at,
           image: Array(d.vehicle&.public_image_urls).first || d.variant.media.dig('photos', 0, 'url') || d.variant.media.dig('elevations', 0),
           # Opened from here, the designer knows the buyer and saves to their account.
-          link: "#{Truebuild::DesignSaver.design_url(d)}&as=#{CGI.escape(buyer_pass)}"
+          link: "#{Truebuild::DesignSaver.design_url(d)}&as=#{CGI.escape(buyer_pass)}",
+          # What a share sends: never the pass, or whoever got it could save
+          # to this buyer's account.
+          share_link: Truebuild::DesignSaver.design_url(d),
+          dealer_name: @company.name
         }
       end
     end

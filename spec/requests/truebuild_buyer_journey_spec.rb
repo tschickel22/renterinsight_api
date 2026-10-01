@@ -191,6 +191,9 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     get '/api/portal/truebuild_designs', headers: portal
     link = JSON.parse(response.body)['designs'].first['link']
     pass = CGI.unescape(link[/[?&]as=([^&]+)/, 1])
+    # The link a buyer shares never carries their pass.
+    expect(JSON.parse(response.body)['designs'].first['share_link']).not_to include('as=')
+    expect(JSON.parse(response.body)['designs'].first['dealer_name']).to eq(company.name)
 
     get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: pass }
     expect(JSON.parse(response.body)).to include('signed_in' => true, 'first_name' => 'Tia', 'email' => 'tia@example.com')
