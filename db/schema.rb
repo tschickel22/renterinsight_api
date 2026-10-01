@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_01_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7216,6 +7216,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["vehicle_id"], name: "index_truebuild_designs_on_vehicle_id"
   end
 
+  create_table "truebuild_factory_runs", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "series"
+    t.string "status", default: "running", null: false
+    t.decimal "budget_usd", precision: 10, scale: 2, null: false
+    t.jsonb "variant_ids", default: [], null: false
+    t.jsonb "estimate", default: {}, null: false
+    t.jsonb "progress", default: {}, null: false
+    t.bigint "created_by_id"
+    t.datetime "stopped_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["manufacturer_id"], name: "index_truebuild_factory_runs_on_manufacturer_id"
+  end
+
   create_table "truebuild_renders", force: :cascade do |t|
     t.bigint "catalog_plan_variant_id"
     t.string "room"
@@ -8846,6 +8862,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "truebuild_designs", "leads", on_delete: :nullify
   add_foreign_key "truebuild_designs", "quotes", on_delete: :nullify
   add_foreign_key "truebuild_designs", "vehicles", on_delete: :nullify
+  add_foreign_key "truebuild_factory_runs", "manufacturers"
   add_foreign_key "truebuild_renders", "catalog_plan_variants", on_delete: :nullify
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"

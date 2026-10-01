@@ -82,9 +82,16 @@ module Truebuild
           urls = candidate_urls(media, room).first(CANDIDATES)
           next if urls.empty?
 
-          auto[room] = urls.size == 1 ? urls.first : ask(room, urls)
+          auto[room] = urls.size == 1 ? urls.first : picked_elsewhere(variant, room, urls) || ask(room, urls)
         end
         variant.update_columns(media: media.merge('trueview_auto' => auto.merge('picked_at' => Time.current.iso8601)))
+      end
+
+      # Two factories often carry the same model with the same photos: use the
+      # pick already made for those photos rather than asking (and paying) again.
+      def picked_elsewhere(variant, room, urls)
+        CatalogPlanVariant.where.not(id: variant.id).where("media->'trueview_auto'->>? IN (?)", room, urls)
+                          .first&.media&.dig('trueview_auto', room)
       end
 
       def ask(room, urls)

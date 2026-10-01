@@ -7,7 +7,8 @@ class TruebuildRender < ApplicationRecord
   # flagged: a reviewer marked it wrong; buyers stop seeing it and a redraw
   # with their note replaces it. superseded: replaced after a re-outline.
   # rejected: failed its automatic check twice; kept for review, not shown.
-  STATUSES = %w[queued running done failed skipped flagged superseded rejected].freeze
+  # cancelled: a stopped factory run's drawing that never started.
+  STATUSES = %w[queued running done failed skipped flagged superseded rejected cancelled].freeze
 
   belongs_to :catalog_plan_variant, optional: true
 

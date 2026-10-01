@@ -146,6 +146,66 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { url: url, hidden: hide }
   end
 
+  # GET /api/admin/trueview_lab/factory_runs/scopes
+  # Manufacturers with a published price book, and the factories and series
+  # of the models it prices, to choose what a factory run covers.
+  def factory_run_scopes
+    priced = CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id)).select(:catalog_plan_variant_id)
+    rows = CatalogPlanVariant.active.where(id: priced).joins(:catalog_plan)
+                             .distinct.pluck(:manufacturer_id, 'catalog_plans.factory_id', 'catalog_plans.series')
+    factories = Factory.where(id: rows.map { |r| r[1] }.compact.uniq).pluck(:id, :name).to_h
+    render json: Manufacturer.where(id: rows.map(&:first).uniq).order(:name).map { |m|
+      mine = rows.select { |r| r[0] == m.id }
+      { id: m.id, name: m.name,
+        factories: mine.map { |r| r[1] }.compact.uniq.map { |id| { id: id, name: factories[id] } }.sort_by { |f| f[:name].to_s },
+        series: mine.map { |r| { factory_id: r[1], series: r[2] } }.uniq.select { |s| s[:series].present? }.sort_by { |s| s[:series] } }
+    }
+  end
+
+  # GET /api/admin/trueview_lab/factory_runs/estimate?manufacturer_id=&factory_id=&series=
+  def factory_run_estimate
+    variants = factory_run_variants
+    return render json: { error: 'Choose a manufacturer' }, status: :unprocessable_entity unless variants
+
+    render json: Truebuild::Trueview::FactoryRun.estimate(variants)
+  end
+
+  # GET /api/admin/trueview_lab/factory_runs
+  def factory_runs
+    runs = TruebuildFactoryRun.includes(:manufacturer).order(id: :desc).limit(20)
+    render json: runs.map { |r| Truebuild::Trueview::FactoryRun.progress(r) }
+  end
+
+  # POST /api/admin/trueview_lab/factory_runs { manufacturer_id, factory_id, series, budget_usd }
+  def create_factory_run
+    return render json: { error: 'TrueView is not set up (no Gemini key)' }, status: :unprocessable_entity unless Truebuild::Trueview.configured?(Truebuild::Trueview::Buyer::MODEL)
+
+    variants = factory_run_variants
+    return render json: { error: 'Choose a manufacturer' }, status: :unprocessable_entity unless variants
+    return render json: { error: 'No priced models there' }, status: :unprocessable_entity if variants.empty?
+
+    budget = params[:budget_usd].to_f
+    return render json: { error: 'Set a budget' }, status: :unprocessable_entity unless budget.positive?
+
+    scope = { manufacturer_id: params[:manufacturer_id].to_i, factory_id: params[:factory_id].presence&.to_i, series: params[:series].presence }
+    if TruebuildFactoryRun.where(status: 'running', manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id], series: scope[:series]).exists?
+      return render json: { error: 'A run for this is already going' }, status: :unprocessable_entity
+    end
+
+    run = Truebuild::Trueview::FactoryRun.start!(variants, budget_usd: budget, scope: scope, by: current_user)
+    render json: Truebuild::Trueview::FactoryRun.progress(run), status: :created
+  end
+
+  # POST /api/admin/trueview_lab/factory_runs/:id/stop
+  # Drawings already started finish; the rest are cancelled.
+  def stop_factory_run
+    run = TruebuildFactoryRun.find_by(id: params[:id])
+    return render json: { error: 'Not found' }, status: :not_found unless run
+
+    run.stop! if run.status == 'running'
+    render json: Truebuild::Trueview::FactoryRun.progress(run)
+  end
+
   # POST /api/admin/trueview_lab/layers/:id/approve
   # A layer its check held back, shown to buyers after all.
   def approve_layer
@@ -327,6 +387,13 @@ class Api::Admin::TrueviewLabController < ApplicationController
 
   # Drawings left 'queued' or 'running' for 15 minutes were lost (a deploy
   # restarted the worker); opening the review puts them back on the queue.
+  def factory_run_variants
+    return nil if params[:manufacturer_id].blank?
+
+    Truebuild::Trueview::FactoryRun.variants(manufacturer_id: params[:manufacturer_id], factory_id: params[:factory_id].presence,
+                                             series: params[:series].presence)
+  end
+
   # url => room (nil for elevations), photos first.
   def gallery_urls(media)
     photos = Array(media['photos']).select { |p| p['url'].present? }.to_h { |p| [p['url'], p['room']] }

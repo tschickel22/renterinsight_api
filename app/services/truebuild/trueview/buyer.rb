@@ -67,31 +67,47 @@ module Truebuild
         return 0 unless Rails.cache.write("truebuild:trueview:predraw:#{@variant.id}:v#{Layer::VERSION}", true,
                                           expires_in: PREDRAW_EVERY, unless_exist: true)
 
-        plan = self.plan
+        queue_missing!
+      end
+
+      # Plan entries not drawn under the current cut, and not being drawn now,
+      # as [entry, older drawing to cut again or nil]. A drawing is stored by
+      # photo and finish, so one already made for another model with the same
+      # photo (another factory's copy of it) counts as drawn.
+      def missing(plan = self.plan)
         done = done_layers(plan)
         skipped = skipped_layers(plan) | hidden_layers(plan)
         drawn_before = older_drawings(plan)
         busy = TruebuildRender.where(status: %w[queued running], purpose: 'layer', model_key: MODEL,
                                      source_url: plan.map { |p| p[:photo] }.uniq).pluck(:source_url, :selection_key).to_set
-        spec = MODELS.fetch(MODEL)
-        queued = 0
-        plan.each do |p|
+        plan.filter_map do |p|
           id = [p[:photo], p[:key], p[:prompt]]
           next if done.key?(id) || skipped.include?(id) || busy.include?([p[:photo], p[:key]])
 
+          busy << [p[:photo], p[:key]]
+          [p, drawn_before[id]]
+        end
+      end
+
+      # Queues what is missing. A buyer's visit is held to the daily limit; a
+      # factory run (run:) pays from its own budget, checked before it gets
+      # here, and waits behind buyers in the queue. Returns the number queued.
+      def queue_missing!(run: nil)
+        spec = MODELS.fetch(MODEL)
+        queued = 0
+        missing.each do |p, old|
           # Drawn already under an older cut: cut it again, free, and the
           # daily limit is not spent on it.
-          old = drawn_before[id]
-          next unless old || within_daily_limit?
+          next unless old || run || within_daily_limit?
 
           usage = { 'swatch_ids' => p[:swatch_ids], 'predraw' => true }
           usage['recut_from'] = old.id if old
+          usage['factory_run_id'] = run.id if run
           row = TruebuildRender.create!(catalog_plan_variant_id: @variant.id, room: p[:room], source_url: p[:photo],
                                         selection: p[:selection], selection_key: p[:key], model_key: MODEL,
                                         provider: spec[:provider], model: old&.model || spec[:model], purpose: 'layer',
                                         prompt: p[:prompt], image_url: old&.image_url, usage: usage)
-          TruebuildRenderJob.set(queue: :low).perform_later(row.id)
-          busy << [p[:photo], p[:key]]
+          TruebuildRenderJob.set(queue: :low, priority: run ? FactoryRun::PRIORITY : 0).perform_later(row.id)
           queued += 1
         end
         queued
@@ -100,7 +116,9 @@ module Truebuild
       # One entry per photo and offered finish that shows in that photo's room.
       def plan
         @plan ||= begin
-          groups = BuyerCatalog.new(@company, @variant).call[:groups]
+          # The whole price book, whatever this dealer shows buyers: drawings are
+          # shared by every dealer, and a dealer may show more later.
+          groups = BuyerCatalog.finish_groups(@variant)
           finishes = finish_choices(groups)
           photos.flat_map do |room, photo|
             finishes.select { |f| f[:surface].match?(ROOMS[room]) }.map do |f|

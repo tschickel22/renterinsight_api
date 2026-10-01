@@ -43,6 +43,26 @@ module Truebuild
       full.merge(groups: BuyerView.apply(full[:groups], @terms))
     end
 
+    # Every option group a model's price book offers, with no dealer and no
+    # prices: what TrueView draws, once for every dealer who sells the model.
+    def self.finish_groups(variant)
+      book = BookResolver.current_for(variant)
+      return [] unless book
+
+      stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
+               CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at), variant.updated_at].map { |t| t.try(:to_i) || t }
+      Rails.cache.fetch("truebuild:finish_groups:v1:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+        catalog = allocate
+        catalog.instance_variable_set(:@variant, variant)
+        catalog.instance_variable_set(:@book, book)
+        catalog.finish_groups
+      end
+    end
+
+    def finish_groups
+      groups(offered_prices, {})
+    end
+
     def build
       offered = offered_prices
       engine = PricingEngine.new(company: @company, variant: @variant, location: @location,

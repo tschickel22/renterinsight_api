@@ -3033,6 +3033,11 @@ Rails.application.routes.draw do
       post 'trueview_lab/outlines/:id/flag', to: 'trueview_lab#flag_outline'
       post 'trueview_lab/photos', to: 'trueview_lab#choose_photos'
       post 'trueview_lab/photos/hide', to: 'trueview_lab#hide_photo'
+      get  'trueview_lab/factory_runs/scopes', to: 'trueview_lab#factory_run_scopes'
+      get  'trueview_lab/factory_runs/estimate', to: 'trueview_lab#factory_run_estimate'
+      get  'trueview_lab/factory_runs', to: 'trueview_lab#factory_runs'
+      post 'trueview_lab/factory_runs', to: 'trueview_lab#create_factory_run'
+      post 'trueview_lab/factory_runs/:id/stop', to: 'trueview_lab#stop_factory_run'
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
 

@@ -337,4 +337,39 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(row.usage['approved']).to be_present
     end
   end
+
+  describe 'factory runs' do
+    let(:book) { CatalogPriceBook.create!(manufacturer: mfr, factory: factory, name: 'Topeka 2026', status: 'published') }
+    before { CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 90_000) }
+
+    it 'lists what can be run, estimates it, starts, shows and stops a run' do
+      get '/api/admin/trueview_lab/factory_runs/scopes', headers: admin
+      scope = JSON.parse(response.body).find { |m| m['id'] == mfr.id }
+      expect(scope['factories']).to eq([{ 'id' => factory.id, 'name' => 'Topeka' }])
+      expect(scope['series']).to eq([{ 'factory_id' => factory.id, 'series' => 'Aspire' }])
+
+      get '/api/admin/trueview_lab/factory_runs/estimate', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id }
+      expect(JSON.parse(response.body)['models'].map { |m| m['id'] }).to eq([variant.id])
+
+      post '/api/admin/trueview_lab/factory_runs', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id }.to_json
+      expect(response).to have_http_status(:unprocessable_entity) # no budget
+
+      post '/api/admin/trueview_lab/factory_runs', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id, budget_usd: 20 }.to_json
+      expect(response).to have_http_status(:created)
+      run_id = JSON.parse(response.body)['id']
+      post '/api/admin/trueview_lab/factory_runs', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id, budget_usd: 20 }.to_json
+      expect(JSON.parse(response.body)['error']).to eq('A run for this is already going')
+
+      get '/api/admin/trueview_lab/factory_runs', headers: admin
+      expect(JSON.parse(response.body).first).to include('id' => run_id, 'phase' => 'queuing', 'budget_usd' => 20.0)
+
+      post "/api/admin/trueview_lab/factory_runs/#{run_id}/stop", headers: admin
+      expect(JSON.parse(response.body)['phase']).to eq('stopped')
+    end
+
+    it 'is for platform admins only' do
+      get '/api/admin/trueview_lab/factory_runs', headers: headers_for('company_admin')
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
 end
