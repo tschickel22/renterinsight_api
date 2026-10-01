@@ -44,6 +44,7 @@ module Truebuild
       [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets. Countertops, walls and appliances stay exactly as they are.'],
       # These homes use a matching 4 inch laminate lip along the wall; left
       # alone it kept the old counter's pattern under a new counter.
+      [/appliance/i, 'Appliances means the refrigerator, range, range hood or microwave and dishwasher: give them the finish and style the package names (stainless, black stainless, black, French door refrigerator), keeping their positions and sizes. Cabinets and countertops stay exactly as they are.'],
       [/counter/i, 'Countertops means every countertop surface, including the island top and the short matching backsplash lip of the same material along the wall. Cabinets, tile backsplash and walls stay exactly as they are.'],
       [/backsplash/i, 'Backsplash means only the wall surface between the countertop and the upper cabinets.'],
       [/floor|carpet/i, 'Flooring means only the visible floor.'],

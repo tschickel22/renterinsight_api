@@ -13,7 +13,7 @@ module Truebuild
     class Buyer
       MODEL = 'nb2-lite' # chosen in the lab bake-off: cheapest, fastest, looked best
       ROOMS = {
-        'kitchen' => /cabinet|counter|backsplash|floor|accent|wall ?board|hw /i,
+        'kitchen' => /cabinet|counter|backsplash|floor|accent|wall ?board|hw |appliance/i,
         'bath' => /cabinet|counter|lav|floor|accent|wall ?board/i,
         'exterior' => /siding|shutter|shingle|corner post|shake/i
       }.freeze
@@ -87,18 +87,45 @@ module Truebuild
       # One entry per photo and offered finish that shows in that photo's room.
       def plan
         @plan ||= begin
-          sets = BuyerCatalog.new(@company, @variant).call[:groups].flat_map { |g| g[:color_sets] }
+          groups = BuyerCatalog.new(@company, @variant).call[:groups]
+          finishes = finish_choices(groups)
           photos.flat_map do |room, photo|
-            sets.select { |s| s[:name].match?(ROOMS[room]) }.flat_map do |set|
-              set[:options].reject { |o| o[:name].to_s.match?(NOTHING) }.map do |o|
-                selection = TruebuildRender.normalize([{ 'surface' => set[:name], 'value' => o[:name] }])
-                swatches = Trueview.swatches_for(@variant, selection)
-                { photo: photo, room: room, option_id: o[:id], selection: selection, key: TruebuildRender.key_for(selection),
-                  prompt: Trueview.prompt(room: room, selection: selection, swatches: swatches), swatch_ids: swatches.compact.map(&:id) }
-              end
+            finishes.select { |f| f[:surface].match?(ROOMS[room]) }.map do |f|
+              selection = TruebuildRender.normalize([{ 'surface' => f[:surface], 'value' => f[:value] }])
+              swatches = Trueview.swatches_for(@variant, selection)
+              { photo: photo, room: room, option_id: f[:option_id], selection: selection, key: TruebuildRender.key_for(selection),
+                prompt: Trueview.prompt(room: room, selection: selection, swatches: swatches), swatch_ids: swatches.compact.map(&:id) }
             end
           end
         end
+      end
+
+      # Everything a buyer can pick that changes how a room looks, as
+      # [{ option_id:, surface:, value: }]: each color, plus the paid upgrades
+      # that are really a finish. "HW DestinWhite IPO Wrapped" is Destin White
+      # cabinets, the same drawing as the Destin White chip; an appliance
+      # package or refrigerator swap is the appliances.
+      def finish_choices(groups)
+        colors = groups.flat_map { |g| g[:color_sets] }.flat_map do |set|
+          set[:options].reject { |o| o[:name].to_s.match?(NOTHING) }.map { |o| { option_id: o[:id], surface: set[:name], value: o[:name] } }
+        end
+        upgrades = groups.flat_map { |g| g[:options] }.filter_map do |o|
+          if o[:family] == 'cabinet finish' && (color = cabinet_color(o[:name]))
+            { option_id: o[:id], surface: 'Cabinets', value: color }
+          elsif o[:family] == 'appliance package' || o[:family].to_s.start_with?('refrigerator')
+            { option_id: o[:id], surface: 'Appliances', value: o[:name].to_s.gsub(/\(.*?\)/, ' ').squish }
+          end
+        end
+        colors + upgrades
+      end
+
+      # "HW DestinWhite IPO Wrapped" => "Destin White"; "Mixed Cabinets IPO HW" => nil
+      # (two tones, no single color to draw).
+      def cabinet_color(name)
+        color = name.to_s.gsub(/\(.*?\)/, ' ').sub(/\bIPO\b.*\z/i, ' ')
+                    .gsub(/\b(HW|hardwood|cabs?|cabinets?|stiles?|colors?)\b|\//i, ' ')
+                    .gsub(/([a-z])([A-Z])/, '\\1 \\2').squish
+        color.presence unless color.match?(/mixed/i)
       end
 
       private

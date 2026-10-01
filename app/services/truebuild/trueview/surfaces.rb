@@ -33,6 +33,8 @@ module Truebuild
       CATEGORIES = [
         ['cabinets', /cabinet|vanit|lav|hw /i,
          'the cabinet doors, drawer fronts and cabinet boxes, including an island base and any vanity. Not countertops, appliances, sinks, stools, chairs or the floor'],
+        ['appliances', /appliance/i,
+         'the kitchen appliances: refrigerator, range or cooktop, range hood or over the range microwave, and dishwasher. Not cabinets or countertops'],
         ['countertop', /counter/i, 'the countertops, including an island top and any short backsplash lip of the same material. Not the sink'],
         ['backsplash', /backsplash/i,
          'the backsplash: the wall surface between the countertop and the upper cabinets. Not the range, microwave, hood, outlets, window or anything on the counter'],

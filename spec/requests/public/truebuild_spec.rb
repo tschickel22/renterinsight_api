@@ -252,6 +252,23 @@ RSpec.describe 'Public TrueBuild', type: :request do
       ENV.delete('TRUEVIEW_DAILY_LIMIT')
     end
 
+    it 'draws a paid cabinet upgrade with its color chip, once, and gives appliance packages a layer' do
+      cabinets = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 8)
+      chip = option(cabinets, 'Destin White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
+      hw_white = option(cabinets, 'HW DestinWhite IPO Wrapped', dealer_cost: 900)
+      option(cabinets, 'HW Timberwolf IPO Wrapped', dealer_cost: 900)
+      variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
+
+      plan = Truebuild::Trueview::Buyer.new(company, variant).plan
+      by_option = plan.to_h { |p| [p[:option_id], p] }
+      expect(by_option[hw_white.id][:key]).to eq(by_option[chip.id][:key])
+      expect(by_option[gas.id][:selection]).to eq([{ 'surface' => 'Appliances', 'value' => 'Stainless Package - Gas' }])
+      expect(by_option[gas.id][:prompt]).to include('Appliances means the refrigerator')
+
+      # One drawing for the chip and the upgrade.
+      expect { trueview }.to have_enqueued_job(TruebuildRenderJob).exactly(plan.map { |p| p[:key] }.uniq.size).times
+    end
+
     it 'puts a job lost in a restart back on the queue' do
       trueview
       lost = TruebuildRender.first
