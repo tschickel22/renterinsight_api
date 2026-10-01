@@ -26,6 +26,18 @@ RSpec.describe 'TrueView rendering' do
       expect(mask.avg / 255.0).to be_within(0.01).of(0.25)
     end
 
+    it 'falls back rather than skipping when the model gives boxes without outlines, and tries again later' do
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:segment)
+        .and_return(masks: [{ 'box_2d' => [0, 0, 500, 500] }], model: 'gemini-x', usage: {})
+      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
+      expect(mask).to have_attributes(status: 'failed', error: 'gemini-x returned boxes but no outlines')
+      expect(mask.present?).to be(false)
+
+      mask.update_columns(updated_at: 1.hour.ago)
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:segment).and_return(masks: [], model: 'gemini-x', usage: {})
+      expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets').status).to eq('done')
+    end
+
     it 'skips a surface the photo does not show, without paying for a drawing' do
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:segment).and_return(masks: [], model: 'gemini-2.5-flash', usage: {})
       expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)

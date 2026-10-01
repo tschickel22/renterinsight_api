@@ -17,7 +17,9 @@ module Truebuild
       module_function
 
       VERSION = 1
-      MODEL = 'gemini-2.5-flash'
+      # gemini-2.5-flash was retired for new accounts; Google pointed to this.
+      MODEL_DEFAULT = 'gemini-3.8-flash'
+      RETRY_FAILED_AFTER = 30.minutes
       MIN_PRESENT = 0.003 # share of the photo; less is not really in it
 
       # [key, matches a finish's surface name, what to outline]
@@ -43,7 +45,11 @@ module Truebuild
       # change-based cut).
       def mask_for(source_url, source_bytes, surface)
         key = category(surface) or return nil
-        TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION) || find!(source_url, source_bytes, key)
+        found = TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION)
+        return found if found && (found.status == 'done' || found.updated_at > RETRY_FAILED_AFTER.ago)
+
+        found&.destroy!
+        find!(source_url, source_bytes, key)
       rescue ActiveRecord::RecordNotUnique
         TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION)
       end
@@ -51,7 +57,14 @@ module Truebuild
       def find!(source_url, source_bytes, key)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
-        result = Providers::Gemini.segment({ bytes: source_bytes, mime: 'image/jpeg' }, description, model: MODEL)
+        result = Providers::Gemini.segment({ bytes: source_bytes, mime: 'image/jpeg' }, description,
+                                           model: ENV['TRUEVIEW_SEGMENT_MODEL'].presence || MODEL_DEFAULT)
+        # Boxes with no outlines is a model that cannot segment, not an
+        # absent surface: fail, so the layer falls back instead of vanishing.
+        if result[:masks].any? && result[:masks].none? { |m| m['mask'].present? }
+          raise Trueview::Error, "#{result[:model]} returned boxes but no outlines"
+        end
+
         mask = paint(result[:masks], image.width, image.height)
         coverage = (mask.avg / 255.0).round(4)
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',

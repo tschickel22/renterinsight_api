@@ -51,7 +51,7 @@ module Truebuild
                    'text label in the key "label". Output an empty list if there are none.'
           body = { contents: [{ role: 'user', parts: [{ inline_data: { mime_type: source[:mime], data: Base64.strict_encode64(source[:bytes]) } },
                                                      { text: prompt }] }],
-                   generationConfig: { responseMimeType: 'application/json', temperature: 0, thinkingConfig: { thinkingBudget: 0 } } }
+                   generationConfig: { responseMimeType: 'application/json', temperature: 0 }.merge(thinking_off(model)) }
           res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 120)
           raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
 
@@ -62,6 +62,11 @@ module Truebuild
           meta = res.parsed_response['usageMetadata'] || {}
           { masks: Array(masks), model: model,
             usage: { 'prompt_tokens' => meta['promptTokenCount'].to_i, 'output_tokens' => meta['candidatesTokenCount'].to_i } }
+        end
+
+        # Gemini 2.5 turns thinking off with a budget; later models take a level.
+        def thinking_off(model)
+          { thinkingConfig: model.start_with?('gemini-2.') ? { thinkingBudget: 0 } : { thinkingLevel: 'low' } }
         end
 
         # "gemini-3.1-flash-image" may be published as "...-preview"; take the
