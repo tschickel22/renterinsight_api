@@ -13,8 +13,15 @@ module McpTools
   #   deals moved to won or lost    not undone: that also posts accounting
   #                                 and marks the home sold, which a stage
   #                                 change alone would leave half reversed
+  #   draft workflows it created    deleted while still a draft as the AI left it
+  #   edits to a draft workflow     restored while still a draft
+  #   draft campaigns it created    archived while still a draft
+  #   nurture enrollments           paused; anything already sent stays sent
+  #   sequences it paused to make   left paused: resuming would send the next
+  #   room for a new one            step at once, so a person decides
   module Undo
     LEAD_FIELDS = %w[first_name last_name email phone status owner_id].freeze
+    WORKFLOW_FIELDS = %w[name description entity_type trigger conditions steps halt_on_reply].freeze
     UNDO_NOTE = 'Undo of an AI connector change'
 
     Result = Struct.new(:undone, :message, keyword_init: true) do
@@ -27,6 +34,25 @@ module McpTools
 
     def lead_snapshot(lead)
       lead.attributes.slice(*LEAD_FIELDS)
+    end
+
+    def workflow_snapshot(rule)
+      rule.attributes.slice(*WORKFLOW_FIELDS).merge('status' => rule.status)
+    end
+
+    # Compares stored JSON with live values: jsonb can come back with keys in
+    # another order, and numbers as strings, neither of which is a change.
+    def same_value?(a, b)
+      canonical(a) == canonical(b)
+    end
+
+    def canonical(value)
+      case value
+      when Hash then value.to_h { |k, v| [k.to_s, canonical(v)] }.sort.to_h
+      when Array then value.map { |v| canonical(v) }
+      when nil then ''
+      else value.to_s
+      end
     end
 
     def undo!(change, by:)
@@ -54,7 +80,9 @@ module McpTools
 
     def describe(change)
       label = { 'Lead' => 'lead', 'Deal' => 'deal', 'Note' => 'note', 'Task' => 'task',
-                'ServiceTicket' => 'service ticket' }[change.record_type] || change.record_type.downcase
+                'ServiceTicket' => 'service ticket', 'WorkflowRule' => 'draft workflow', 'Campaign' => 'draft campaign',
+                'NurtureEnrollment' => 'nurture enrollment' }[change.record_type] || change.record_type.downcase
+      return "Edited #{label} #{change.record_id}" if change.record_type == 'WorkflowRule' && change.action == 'updated'
       if change.action == 'created'
         "Created #{label} #{change.record_id}"
       else
@@ -83,6 +111,23 @@ module McpTools
 
         record.update!(status: 'cancelled')
         done('Service ticket cancelled.')
+      when WorkflowRule
+        unless record.status == 'draft' && same_value?(workflow_snapshot(record), change.after)
+          return skipped('The workflow was activated or edited since. Archive it in DealerTide if it should go.')
+        end
+
+        record.destroy!
+        done('Draft workflow deleted.')
+      when Campaign
+        return skipped('The campaign has been started since. Pause or archive it in DealerTide.') unless record.status == 'draft'
+
+        record.update!(is_deleted: true, status: 'archived')
+        done('Draft campaign archived.')
+      when NurtureEnrollment
+        return skipped('That enrollment had already stopped.') unless %w[running idle].include?(record.status)
+
+        record.update!(status: 'paused')
+        done('Enrollment paused. Messages already sent cannot be recalled.')
       when Lead
         if record.is_converted || lead_snapshot(record).transform_values(&:to_s) != change.after.transform_values(&:to_s)
           return skipped('Someone has worked this lead since it was created. Remove it by hand if it should go.')
@@ -98,8 +143,13 @@ module McpTools
     # --- updated records ---------------------------------------------------
 
     def undo_updated(change, record)
+      if record.is_a?(NurtureEnrollment)
+        return skipped('Left paused: resuming would send the next step straight away. Resume it on the record ' \
+                       'in DealerTide if it should continue.')
+      end
+
       fields = change.after.keys - ['actual_close_date']
-      moved = fields.find { |f| record.public_send(f).to_s != change.after[f].to_s }
+      moved = fields.find { |f| !same_value?(record.public_send(f), change.after[f]) }
       if moved
         return skipped("Changed again since: #{moved.tr('_', ' ').sub(/ id\z/, '')} is now " \
                        "#{record.public_send(moved).inspect}. Left as it is.")
@@ -110,6 +160,9 @@ module McpTools
         record.skip_notifications = true # moving it back is not news to anyone
         record.update!(change.before.slice(*fields))
         done("Lead #{fields.join(', ').tr('_', ' ').sub(' id', '')} restored.")
+      when WorkflowRule
+        record.update!(change.before.slice(*(fields - ['status'])))
+        done('Draft workflow restored to how it was before the edit.')
       when Deal
         company = change.company
         if (company.won_stage_keys + company.lost_stage_keys).include?(change.after['stage'].to_s)
