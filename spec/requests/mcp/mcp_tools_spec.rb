@@ -45,6 +45,15 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       expect(tools).to all(include('annotations' => include('readOnlyHint' => true)))
     end
 
+    it 'refuses JSON-RPC batches, which would slip past the hourly call limit' do
+      batch = Array.new(3) { |i| { jsonrpc: '2.0', id: i, method: 'tools/call', params: { name: 'get_reference_data', arguments: {} } } }
+      post '/mcp', params: batch.to_json,
+                   headers: { 'CONTENT_TYPE' => 'application/json', 'Authorization' => "Bearer #{token}" }
+
+      expect(response).to have_http_status(:bad_request)
+      expect(McpToolCall.count).to eq(0)
+    end
+
     it 'answers GET with 405, since there is no server stream' do
       get '/mcp', headers: { 'Authorization' => "Bearer #{token}" }
       expect(response).to have_http_status(:method_not_allowed)
@@ -169,6 +178,15 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       _r, is_error, text = call_tool(token, 'create_lead', first_name: 'Sam', email: 'SAM@example.com')
       expect(is_error).to be(true)
       expect(text).to include("lead:#{lead.id}")
+    end
+
+    it "does not name a duplicate lead the user cannot see" do
+      lead!(email: 'hidden@example.com', location_id: boulder.id)
+      local = connect!(connector_user(company, { 'leads' => %w[read create] }, location: denver))['access_token']
+
+      _r, is_error, text = call_tool(local, 'create_lead', first_name: 'X', email: 'hidden@example.com')
+      expect(is_error).to be(true)
+      expect(text).to eq('A lead with that email already exists.')
     end
 
     it 'adds a note to the notes timeline without touching the notes field' do

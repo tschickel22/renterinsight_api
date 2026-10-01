@@ -12,6 +12,7 @@
 # there is no Origin check: a page in a browser cannot ride a session here.
 class McpController < ActionController::API
   CALLS_PER_HOUR = 600
+  MAX_BODY_BYTES = 256.kilobytes
 
   READ_TOOLS = [
     McpTools::Search, McpTools::Fetch, McpTools::GetReferenceData, McpTools::PipelineSummary,
@@ -25,8 +26,18 @@ class McpController < ActionController::API
   ].freeze
 
   def create
-    grant = authenticate!
+    grant, access = authenticate!
     return unless grant
+
+    # JSON-RPC batches were removed from MCP in 2025-06-18. Allowing them would
+    # let one POST run thousands of tool calls past the hourly limit below.
+    if request.raw_post.bytesize > MAX_BODY_BYTES
+      return render json: jsonrpc_error('Request too large.'), status: :payload_too_large
+    end
+    if request.raw_post.lstrip.start_with?('[')
+      return render json: { jsonrpc: '2.0', id: nil, error: { code: -32_600, message: 'Batch requests are not supported.' } },
+                    status: :bad_request
+    end
 
     if McpToolCall.where(oauth_grant_id: grant.id, created_at: 1.hour.ago..).count >= CALLS_PER_HOUR
       response.set_header('Retry-After', '600')
@@ -34,8 +45,9 @@ class McpController < ActionController::API
                     status: :too_many_requests
     end
 
-    ctx = McpTools::Context.new(user: grant.user, company: grant.company, grant: grant, ip_address: request.remote_ip)
-    result = build_server(ctx, grant).handle_json(request.raw_post)
+    ctx = McpTools::Context.new(user: grant.user, company: grant.company, grant: grant,
+                                scopes: access.scope_list & grant.scope_list, ip_address: request.remote_ip)
+    result = build_server(ctx).handle_json(request.raw_post)
 
     # A notification (no id) has nothing to answer.
     return head :accepted if result.nil?
@@ -50,8 +62,8 @@ class McpController < ActionController::API
 
   private
 
-  def build_server(ctx, grant)
-    tools = grant.write_allowed? ? READ_TOOLS + WRITE_TOOLS : READ_TOOLS
+  def build_server(ctx)
+    tools = ctx.write_allowed? ? READ_TOOLS + WRITE_TOOLS : READ_TOOLS
     brand = Brand.current(company: ctx.company)
 
     MCP::Server.new(
@@ -59,7 +71,7 @@ class McpController < ActionController::API
       title: brand.name,
       version: '1.0.0',
       website_url: brand.website_url,
-      instructions: instructions(ctx, brand, grant),
+      instructions: instructions(ctx, brand),
       tools: tools,
       server_context: ctx,
       configuration: MCP::Configuration.new(
@@ -71,19 +83,19 @@ class McpController < ActionController::API
     )
   end
 
-  def instructions(ctx, brand, grant)
+  def instructions(ctx, brand)
     <<~TEXT.squish
       You are connected to #{brand.name}, a dealer management system, as #{ctx.user.full_name}
       at #{ctx.company.name}. Every tool runs with this person's own permissions and locations.
       Record ids are typed, like lead:42, deal:7 or unit:118; search and the list tools return
       them and fetch reads one. Call get_reference_data before filtering by a status or stage
       or assigning work to someone. Dealer cost and profit figures are never available here.
-      #{grant.write_allowed? ? 'Before any tool that changes data, confirm the change with the user.' : 'This connection is read only.'}
+      #{ctx.write_allowed? ? 'Before any tool that changes data, confirm the change with the user.' : 'This connection is read only.'}
     TEXT
   end
 
-  # Returns the grant, or renders 401 with the challenge MCP clients follow to
-  # find the authorization server.
+  # Returns [grant, access token], or renders 401 with the challenge MCP
+  # clients follow to find the authorization server.
   def authenticate!
     header = request.headers['Authorization'].to_s
     scheme, token = header.split(' ', 2)
@@ -100,7 +112,7 @@ class McpController < ActionController::API
       return challenge(reason)
     end
 
-    grant
+    [grant, access]
   end
 
   def challenge(description)

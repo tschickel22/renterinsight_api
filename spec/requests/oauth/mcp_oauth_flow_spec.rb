@@ -60,6 +60,14 @@ RSpec.describe 'MCP connector OAuth', :mcp, type: :request do
       expect(response.parsed_body['error']).to eq('invalid_redirect_uri')
     end
 
+    it "refuses other paths on the AI apps' own hosts, such as a stranger's Custom GPT callback" do
+      register_client(redirect: 'https://chatgpt.com/aip/g-attacker/oauth/callback')
+      expect(response).to have_http_status(:bad_request)
+
+      register_client(redirect: 'https://chatgpt.com/connector/oauth/abc123')
+      expect(response).to have_http_status(:created)
+    end
+
     it 'accepts a loopback redirect on any port, as desktop and CLI clients use' do
       client = register_client(redirect: 'http://127.0.0.1/callback')
       _verifier, challenge = pkce_pair
@@ -216,6 +224,16 @@ RSpec.describe 'MCP connector OAuth', :mcp, type: :request do
       post '/oauth/token', params: refresh
       expect(response.parsed_body['error']).to eq('invalid_grant')
       expect(OauthGrant.last.revoked_at).to be_present
+    end
+
+    it 'keeps a refresh narrowed to read only from writing, even though the grant allows it' do
+      tokens = connect!(user)
+      post '/oauth/token', params: { grant_type: 'refresh_token', refresh_token: tokens['refresh_token'],
+                                     client_id: tokens['client_id'], scope: 'mcp:read' }
+      narrowed = response.parsed_body['access_token']
+
+      names = mcp_post(narrowed, 'tools/list').dig('result', 'tools').map { |t| t['name'] }
+      expect(names).not_to include('create_lead')
     end
 
     it 'stores no plaintext token' do

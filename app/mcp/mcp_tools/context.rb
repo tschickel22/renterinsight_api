@@ -14,11 +14,18 @@ module McpTools
 
     attr_reader :user, :company, :grant, :ip_address
 
-    def initialize(user:, company:, grant:, ip_address: nil)
+    # scopes: what the access token carries, which a refresh may have narrowed
+    # below the grant. Defaults to the grant's for callers without a token.
+    def initialize(user:, company:, grant:, scopes: nil, ip_address: nil)
       @user = user
       @company = company
       @grant = grant
+      @scopes = scopes || grant&.scope_list || []
       @ip_address = ip_address
+    end
+
+    def write_allowed?
+      @scopes.include?('mcp:write')
     end
 
     # ServerContext forwards unknown methods to the object it wraps, so tools
@@ -63,7 +70,7 @@ module McpTools
     end
 
     def require_scope!(scope)
-      return if grant.scope_list.include?(scope)
+      return if @scopes.include?(scope)
 
       raise Denied, 'This connection was approved for reading only. Reconnect and allow changes to do this.'
     end
@@ -115,6 +122,9 @@ module McpTools
                  .sum(:result_count)
     end
 
+    # Reads the budget before this call's audit row exists, so calls made in
+    # parallel can each overshoot by up to one page (MAX_ROWS). Accepted: the
+    # budget is a brake on bulk export, not an exact quota.
     def row_limit(requested)
       remaining = daily_record_limit - records_used_today
       if remaining <= 0
