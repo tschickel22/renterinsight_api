@@ -82,13 +82,15 @@ module Api
           
           token = JsonWebToken.encode(buyer_portal_access_id: buyer_access.id)
           
-          # Format response to match frontend expectations (success + user)
-          user_data = buyer_profile(buyer_access).merge(user_type: 'client')
-          
+          # The portal sign in reads `buyer` (as claim_design sends it); the
+          # unified sign in reads `user`. Sending only `user` crashed the
+          # portal page on every magic link ("reading 'id'").
+          profile = buyer_profile(buyer_access)
           render json: {
             success: true,
             token: token,
-            user: user_data
+            user: profile.merge(user_type: 'client'),
+            buyer: profile
           }, status: :ok
         else
           render json: {

@@ -87,6 +87,16 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(response).to have_http_status(:unauthorized)
   end
 
+  it "signs a buyer in from the portal's own magic link page (the response names the buyer)" do
+    save_design
+    access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
+    access.generate_login_token
+    get '/api/portal/auth/verify_magic_link', params: { token: access.login_token }
+    body = JSON.parse(response.body)
+    expect(body['buyer']).to include('id' => access.id, 'email' => 'tia@example.com')
+    expect(body['token']).to be_present
+  end
+
   it 'lets a buyer with only a design login sign in from the main app sign in, by magic link' do
     design = save_design
     access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
