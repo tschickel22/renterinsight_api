@@ -59,7 +59,7 @@ RSpec.describe 'MFA temp token outside ApplicationController', type: :request do
     access = create(:buyer_portal_access)
     temp = JsonWebToken.generate_mfa_temp_token_portal(access)
 
-    get '/api/portal/truebuild_designs', headers: { 'Authorization' => "Bearer #{temp}" }
+    get '/api/portal/agreements', headers: { 'Authorization' => "Bearer #{temp}" }
 
     expect(response).to have_http_status(:unauthorized)
   end
