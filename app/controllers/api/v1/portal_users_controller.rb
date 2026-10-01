@@ -503,22 +503,31 @@ module Api
         
         # IMPORTANT: Set both portal_url and registration_url to registration page
         # This ensures templates using either variable work correctly
+        expires_in = '7 days' # BuyerPortalAccess#generate_invitation_token
         template_context = {
           recipient_name: recipient_name,
           portal_url: registration_url,
           registration_url: registration_url,
-          company_name: company.name
+          company_name: company.name,
+          expires_in: expires_in
         }
 
-        # Render the template
+        # Render the template. A plain text one (the default, and most dealers')
+        # is laid out as a branded email; HTML a dealer wrote goes as written.
         rendered = template.render(template_context)
+        body = rendered[:body].to_s
+        unless PortalInvitationEmail.html?(body)
+          # Older auto-generated templates promised 15 minutes; the link lasts a week.
+          text = body.gsub(/This link will expire in 15 minutes\.?/i, '').strip
+          body = PortalInvitationEmail.html(company: company, url: registration_url, text: text, expires_in: expires_in)
+        end
 
         # Send email via CommunicationService
         result = CommunicationService.send_email(
           communicable: contact,
           to: portal_user.email,
           subject: rendered[:subject],
-          body: rendered[:body],
+          body: body,
           category: 'transactional',
           portal_visible: false,
           skip_preference_check: true,
@@ -681,8 +690,6 @@ module Api
 
             Click here to create your account:
             {{registration_url}}
-
-            This link will expire in 15 minutes.
 
             Best regards,
             {{company_name}}
