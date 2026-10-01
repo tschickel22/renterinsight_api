@@ -34,13 +34,16 @@ module Truebuild
         plan = self.plan
         done = done_layers(plan)
         skipped = skipped_layers(plan)
+        hidden = hidden_layers(plan)
         requeue_stale(plan)
         drawing = rows(plan).where(status: %w[queued running]).count
         photos = plan.group_by { |p| p[:photo] }.map do |photo, items|
           layers = items.filter_map { |i| (url = done[[photo, i[:key], i[:prompt]]]) && [i[:option_id], url] }.to_h
           # Finishes this photo will show once drawn, so the page can say so.
           { room: items.first[:room], url: Trueview.sized(photo), layers: layers,
-            pending: items.reject { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
+            pending: items.reject { |i| (skipped | hidden).include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
+            # Drawn, but held back by its check until someone reviews it.
+            unavailable: items.select { |i| hidden.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
             # Picked but not in this photo (a house with no shutters), so the page can say so.
             not_shown: items.select { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq }
         end
@@ -56,7 +59,7 @@ module Truebuild
 
         plan = self.plan
         done = done_layers(plan)
-        skipped = skipped_layers(plan)
+        skipped = skipped_layers(plan) | hidden_layers(plan)
         drawn_before = older_drawings(plan)
         busy = TruebuildRender.where(status: %w[queued running], purpose: 'layer', model_key: MODEL,
                                      source_url: plan.map { |p| p[:photo] }.uniq).pluck(:source_url, :selection_key).to_set
@@ -166,6 +169,12 @@ module Truebuild
       # Surfaces the photo does not show, under the current cut.
       def skipped_layers(plan)
         rows(plan).where(status: 'skipped').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
+      end
+
+      # Failed their check under the current cut: not redrawn on every visit.
+      def hidden_layers(plan)
+        rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
       end
 

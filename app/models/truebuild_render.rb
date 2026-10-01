@@ -6,7 +6,8 @@ class TruebuildRender < ApplicationRecord
   # skipped: a layer for a surface the photo does not show; nothing drawn.
   # flagged: a reviewer marked it wrong; buyers stop seeing it and a redraw
   # with their note replaces it. superseded: replaced after a re-outline.
-  STATUSES = %w[queued running done failed skipped flagged superseded].freeze
+  # rejected: failed its automatic check twice; kept for review, not shown.
+  STATUSES = %w[queued running done failed skipped flagged superseded rejected].freeze
 
   belongs_to :catalog_plan_variant, optional: true
 

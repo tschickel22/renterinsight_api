@@ -97,7 +97,8 @@ module Truebuild
     end
 
     FRAMING_TOLERANCE = 0.04 # a drawing whose shape differs more than this was reframed
-    DRAW_ATTEMPTS = 2
+    DRAW_ATTEMPTS = 2        # per drawing, for framing
+    LAYER_ATTEMPTS = 2       # drawings per layer, for its check (LayerCheck)
 
     def perform!(render)
       spec = MODELS.fetch(render.model_key)
@@ -126,33 +127,53 @@ module Truebuild
 
       aspect = source_aspect(source)
       spent = 0.0
-      result = nil
-      DRAW_ATTEMPTS.times do |attempt|
-        result = if spec[:provider] == 'gemini'
-                   Providers::Gemini.edit(spec, source, prompt, samples: samples, aspect: aspect)
-                 else
-                   Providers::OpenAi.edit(spec, source, prompt, samples: samples)
-                 end
-        spent += cost(spec, result[:usage])
-        break if reframed_by(result, aspect) <= FRAMING_TOLERANCE
-
-        if attempt == DRAW_ATTEMPTS - 1
+      result = layer = verdict = nil
+      attempts = render.purpose == 'layer' ? LAYER_ATTEMPTS : 1
+      attempts.times do |attempt|
+        asked = verdict ? "#{prompt}\n\nA check of the last drawing found: #{verdict['note']} Fix that." : prompt
+        result, drawn_cost = draw(spec, source, asked, samples, aspect)
+        spent += drawn_cost
+        unless result
           return render.update!(status: 'failed', cost_usd: spent.round(4),
                                 error: "The model changed the photo's framing #{DRAW_ATTEMPTS} times")
         end
+        break unless render.purpose == 'layer'
+
+        layer = Layer.build(source[:bytes], result[:bytes], mask: mask_image(mask))
+        verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
+                                                                   value: render.selection.first&.dig('value'))
+        spent += verdict['cost_usd'].to_f
+        break if verdict['ok'] || attempt == attempts - 1
       end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
       attrs = { status: 'done', image_url: url, latency_ms: latency, usage: render.usage.merge(result[:usage]),
                 model: result[:model] || render.model, cost_usd: spent.round(4) }
       if render.purpose == 'layer'
-        layer = Layer.build(source[:bytes], result[:bytes], mask: mask_image(mask))
         attrs.merge!(layer_url: store(render, layer[:bytes], layer[:mime], suffix: 'layer'), mask_coverage: layer[:coverage])
-        attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION)
+        attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'))
+        # Failed its check twice: kept for review, never shown to buyers.
+        attrs.merge!(status: 'rejected', error: "Hidden: #{verdict['note'] || 'failed its check'}") unless verdict['ok']
       end
       render.update!(attrs)
     rescue StandardError => e
       render.update!(status: 'failed', error: e.message.to_s.first(1000))
+    end
+
+    # One drawing, redrawn if the model reframes the photo. [result, cost],
+    # or [nil, cost] when it reframed every time.
+    def draw(spec, source, prompt, samples, aspect)
+      spent = 0.0
+      DRAW_ATTEMPTS.times do
+        result = if spec[:provider] == 'gemini'
+                   Providers::Gemini.edit(spec, source, prompt, samples: samples, aspect: aspect)
+                 else
+                   Providers::OpenAi.edit(spec, source, prompt, samples: samples)
+                 end
+        spent += cost(spec, result[:usage])
+        return [result, spent] if reframed_by(result, aspect) <= FRAMING_TOLERANCE
+      end
+      [nil, spent]
     end
 
     def recut!(render, source, mask = nil)
@@ -163,9 +184,12 @@ module Truebuild
         return perform!(render)
       end
       layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask))
-      render.update!(status: 'done', cost_usd: 0, latency_ms: 0, mask_coverage: layer[:coverage],
+      verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
+                                                                 value: render.selection.first&.dig('value'))
+      render.update!(status: verdict['ok'] ? 'done' : 'rejected', cost_usd: verdict['cost_usd'], latency_ms: 0,
+                     mask_coverage: layer[:coverage], error: (verdict['ok'] ? nil : "Hidden: #{verdict['note'] || 'failed its check'}"),
                      layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
-                     usage: render.usage.merge('mask_version' => Layer::VERSION))
+                     usage: render.usage.merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd')))
     end
 
     def source_aspect(source)

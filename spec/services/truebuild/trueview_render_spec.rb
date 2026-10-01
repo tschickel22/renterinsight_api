@@ -25,7 +25,12 @@ RSpec.describe 'TrueView rendering' do
     before do
       # The presence question, then the outline score.
       allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
-        { input: tool[:name] == 'judge_presence' ? { 'present' => verdict['present'] } : verdict, input_tokens: 2000, output_tokens: 50 }
+        input = case tool[:name]
+                when 'judge_presence' then { 'present' => verdict['present'] }
+                when 'judge_layer' then { 'score' => 5 }
+                else verdict
+                end
+        { input: input, input_tokens: 2000, output_tokens: 50 }
       end
     end
 
@@ -136,6 +141,55 @@ RSpec.describe 'TrueView rendering' do
       mask.update_columns(updated_at: 1.hour.ago)
       paints(painted)
       expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets').status).to eq('done')
+    end
+  end
+
+  describe 'layer check' do
+    before { allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil) }
+
+    def draws(n_scores)
+      scores = n_scores.dup
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
+        .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        expect(tool[:name]).to eq('judge_layer')
+        { input: { 'score' => scores.shift, 'note' => 'The porch wall kept the old siding.' }, input_tokens: 2500, output_tokens: 40 }
+      end
+    end
+
+    it 'shows a layer that passes' do
+      draws([5])
+      Truebuild::Trueview.perform!(render)
+      expect(render.reload).to have_attributes(status: 'done')
+      expect(render.usage['check']).to include('score' => 5, 'ok' => true)
+    end
+
+    it "draws once more with the check's note, and shows it if that passes" do
+      draws([3, 4])
+      prompts = []
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |_s, _src, prompt, **|
+        prompts << prompt
+        { bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
+      end
+      Truebuild::Trueview.perform!(render)
+      expect(prompts.last).to end_with('A check of the last drawing found: The porch wall kept the old siding. Fix that.')
+      expect(render.reload.status).to eq('done')
+    end
+
+    it 'keeps a layer that fails twice for review, hidden from buyers' do
+      draws([2, 3])
+      Truebuild::Trueview.perform!(render)
+      expect(render.reload).to have_attributes(status: 'rejected', error: 'Hidden: The porch wall kept the old siding.')
+      expect(render.layer_url).to be_present
+    end
+
+    it 'shows the layer when the check itself cannot run' do
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
+        .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_raise(Catalog::PriceBooks::ClaudeClient::Error, 'out of credits')
+      Truebuild::Trueview.perform!(render)
+      expect(render.reload.status).to eq('done')
+      expect(render.usage.dig('check', 'note')).to start_with('Not checked')
     end
   end
 
