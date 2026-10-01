@@ -73,11 +73,24 @@ class Public::TruebuildController < ApplicationController
       company: @company, variant: variant, vehicle: vehicle, option_ids: params[:option_ids], addon_ids: params[:addon_ids],
       contact: params.fetch(:contact, {}).permit(:first_name, :last_name, :email, :phone, :message, :marketing_consent).to_h,
       context: params.fetch(:context, {}).permit(:page_url, :utm_source, :utm_medium, :utm_campaign, :utm_content, :utm_term).to_h,
-      request: request
+      request: request, copied_from: params[:copied_from]
     ).call
     render json: design_json(design), status: :created
   rescue Truebuild::DesignSaver::Invalid => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /public/truebuild/designs/:design_token/events { type: 'shared' }
+  # The buyer shared their design (share sheet or copied link). Counted and
+  # raised for follow up; a few per hour per address at most.
+  def design_event
+    design = @company.truebuild_designs.find_by(public_token: params[:design_token])
+    return render json: { error: 'Design not found' }, status: :not_found unless design
+    return head :no_content unless params[:type].to_s == 'shared'
+
+    key = "truebuild:design:shared:#{design.id}:#{request.remote_ip}"
+    design.track!('shared') if Rails.cache.write(key, true, expires_in: 10.minutes, unless_exist: true)
+    head :no_content
   end
 
   def show_design

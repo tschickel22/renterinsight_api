@@ -13,7 +13,11 @@ module Truebuild
 
     class Invalid < StandardError; end
 
-    def initialize(company:, variant:, vehicle: nil, option_ids: [], contact: {}, request: nil, context: {}, addon_ids: [])
+    # copied_from: the token of a shared design this one was saved from (a
+    # family member's own copy), so the original's owner hears about it.
+    def initialize(company:, variant:, vehicle: nil, option_ids: [], contact: {}, request: nil, context: {}, addon_ids: [],
+                   copied_from: nil)
+      @copied_from = copied_from.present? ? company.truebuild_designs.find_by(public_token: copied_from.to_s) : nil
       @company = company
       @variant = variant
       @vehicle = vehicle
@@ -36,7 +40,7 @@ module Truebuild
         buyer_name: [@contact['first_name'], @contact['last_name']].compact.join(' ').strip,
         price_snapshot: snapshot(price).deep_stringify_keys,
         metadata: { 'addon_ids' => price[:addon_ids], 'utm' => @context.slice(*%w[utm_source utm_medium utm_campaign utm_content utm_term]),
-                    'page_url' => @context['page_url'].presence }.compact.deep_stringify_keys
+                    'page_url' => @context['page_url'].presence, 'copied_from' => @copied_from&.id }.compact.deep_stringify_keys
       )
 
       form = self.class.form_for(@company)
@@ -51,6 +55,12 @@ module Truebuild
       )
       design.update!(intake_submission: submission, lead_id: submission.reload.lead_id)
       PortalAccess.call(design)
+      design.track!('saved')
+      # Someone else's copy: tell the original buyer's dealer too, unless the
+      # buyer saved a new version of their own.
+      if @copied_from && @copied_from.buyer_email != design.buyer_email
+        @copied_from.track!('copied', copy_id: design.id, copied_by: design.buyer_name.presence)
+      end
       design
     end
 

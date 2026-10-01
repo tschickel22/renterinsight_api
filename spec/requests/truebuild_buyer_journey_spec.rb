@@ -130,4 +130,43 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(design.reload.metadata['portal']).to eq('state' => 'exists_at_another_dealer')
     expect(BuyerPortalAccess.where(email: 'tia@example.com').count).to eq(1)
   end
+
+  describe 'follow up on a shared design' do
+    def events(type) = WorkflowEvent.where(event_type: type)
+
+    it 'raises saved, viewed (once an hour), shared and copied on the buyer, and counts them' do
+      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+      design = save_design
+      expect(events('lead.design_saved').pluck(:entity_id)).to eq([design.lead_id])
+
+      2.times { get "/public/truebuild/designs/#{design.public_token}", params: { token: company.public_inventory_token } }
+      expect(design.reload.view_count).to eq(2)
+      expect(events('lead.design_viewed').count).to eq(1)
+
+      post "/public/truebuild/designs/#{design.public_token}/events", params: { token: company.public_inventory_token, type: 'shared' }
+      expect(response).to have_http_status(:no_content)
+      expect(design.reload.share_count).to eq(1)
+      expect(events('lead.design_shared').first.payload).to include('design_id' => design.id)
+
+      # A family member saves their own copy from the link.
+      post '/public/truebuild/designs', params: {
+        token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
+        copied_from: design.public_token, contact: { first_name: 'Sam', last_name: 'May', email: 'sam@example.com' }
+      }
+      copy = TruebuildDesign.last
+      expect(copy.metadata['copied_from']).to eq(design.id)
+      expect(design.reload.metadata['copies']).to eq(1)
+      expect(events('lead.design_copied').first).to have_attributes(entity_id: design.lead_id)
+      expect(events('lead.design_copied').first.payload).to include('copied_by' => 'Sam May')
+    end
+
+    it 'does not count the buyer saving a new version of their own design as a copy' do
+      design = save_design
+      post '/public/truebuild/designs', params: {
+        token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [],
+        copied_from: design.public_token, contact: { first_name: 'Tia', last_name: 'May', email: 'tia@example.com' }
+      }
+      expect(events('lead.design_copied')).to be_empty
+    end
+  end
 end

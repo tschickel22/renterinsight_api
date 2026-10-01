@@ -27,6 +27,8 @@ module Workflows
 
     TRIGGER_EVENT_TYPES = %w[
       lead.created lead.updated lead.status_changed lead.deleted
+      lead.design_saved lead.design_viewed lead.design_shared lead.design_copied
+      contact.design_saved contact.design_viewed contact.design_shared contact.design_copied
       deal.created deal.updated deal.status_changed deal.won deal.lost deal.deleted
       contact.created contact.updated contact.status_changed contact.deleted
       account.created account.updated account.status_changed account.deleted
