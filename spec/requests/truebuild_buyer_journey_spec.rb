@@ -62,6 +62,9 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(mail.subject).to eq('Your Belvidere design is saved')
     expect(mail.body.encoded).to include('Stainless Fridge', '$101,250', 'magic-link?claim=', 'next=designs')
     expect(mail.body.encoded).not_to match(/\u2014|\u2013/)
+    # "Just reply" reaches the dealer: their name on it, the reply threaded onto the lead.
+    expect(mail[:from].display_names).to eq([company.name])
+    expect(mail.reply_to.first).to match(/\Areply\+lead-#{design.lead_id}@/)
 
     body = claim(design)
     expect(body).to include('success' => true)

@@ -64,7 +64,10 @@ class BuyerPortalMailer < ApplicationMailer
     @options = CatalogOption.where(id: design.option_ids).pluck(:name)
 
     configure_mailer_from_settings
-    mail(to: design.buyer_email, from: "#{get_from_name} <#{get_from_email}>",
+    # The email says "just reply": the dealer's name on it, and the reply
+    # threaded onto the buyer's lead (which notifies its owner) rather than
+    # into the platform's no-reply alerts box.
+    mail(to: design.buyer_email, from: "#{@company_name} <#{get_from_email}>", reply_to: truebuild_reply_to(design),
          subject: "Your #{design.variant.catalog_plan.name} design is saved")
   end
 
@@ -165,6 +168,14 @@ class BuyerPortalMailer < ApplicationMailer
   end
   
   private
+
+  def truebuild_reply_to(design)
+    if design.lead_id
+      "#{ReplyToAddressService::REPLY_PREFIX}+lead-#{design.lead_id}@#{ReplyToAddressService.mail_domain(company: design.company)}"
+    else
+      design.lead&.owner&.email.presence || design.company.try(:email).presence
+    end
+  end
 
   # The dealership's name, not the platform's. A buyer bought their home from a
   # specific dealer, so portal mail has to carry that dealer's brand. See the
