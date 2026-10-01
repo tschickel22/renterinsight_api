@@ -21,8 +21,11 @@ module McpConnectorHelpers
 
   # A user whose role grants exactly these permissions, e.g.
   # { 'leads' => %w[read update], 'deals' => %w[read] }. With location: the
-  # role is location tier, so the user only sees that location.
-  def connector_user(company, grants = {}, location: nil, role: 'user')
+  # role is location tier, so the user only sees that location. Any role
+  # given grants also carries the ai_connector permission (read and update)
+  # unless connector: says otherwise; connector: nil leaves it off.
+  def connector_user(company, grants = {}, location: nil, role: 'user', connector: %w[read update])
+    grants = grants.merge('ai_connector' => connector) if grants.any? && connector.present?
     user = company.users.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: 'Una', last_name: 'Ser',
                                  password: 'Pass1234!', role: role, status: 'active')
     if grants.any?

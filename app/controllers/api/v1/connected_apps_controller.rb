@@ -19,6 +19,8 @@ module Api
           module_enabled: Oauth::AccessPolicy.module_enabled?(@company),
           mcp_url: Oauth::Config.resource(request),
           can_manage_all: admin?,
+          can_connect: Oauth::AccessPolicy.permitted?(current_user, @company),
+          can_allow_changes: Oauth::AccessPolicy.changes_permitted?(current_user, @company),
           daily_record_limit: McpTools::Context.new(user: current_user, company: @company, grant: nil).daily_record_limit,
           connections: grants.map do |g|
             {

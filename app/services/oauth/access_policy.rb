@@ -17,8 +17,24 @@ module Oauth
       return 'This account is not active.' if grant.company.nil? || grant.company.access_blocked?
       return 'The AI connector is not enabled for this company.' unless module_enabled?(grant.company)
       return 'This user no longer belongs to the company that was connected.' unless grant.user.company_id == grant.company_id
+      return "This person's role no longer allows the AI connector." unless permitted?(grant.user, grant.company)
 
       nil
+    end
+
+    # The ai_connector permission: 'read' to connect at all, 'update' to let
+    # the AI make changes. A company without RBAC has no roles to grant it
+    # through, so there it is admins only. Checked on every request, so taking
+    # it off a role cuts those people's apps off on their next call.
+    def permitted?(user, company, action = 'read')
+      ctx = McpTools::Context.new(user: user, company: company, grant: nil)
+      return ctx.admin? unless company.use_rbac_system
+
+      ctx.can?('ai_connector', action)
+    end
+
+    def changes_permitted?(user, company)
+      permitted?(user, company, 'update')
     end
 
     def module_enabled?(company)

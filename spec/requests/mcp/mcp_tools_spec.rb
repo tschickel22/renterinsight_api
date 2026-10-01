@@ -119,8 +119,10 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       nowhere = company.users.create!(email: "n-#{SecureRandom.hex(3)}@example.com", first_name: 'N', last_name: 'L',
                                       password: 'Pass1234!', role: 'user', status: 'active')
       r = Role.create!(company_id: company.id, key: "loc-#{SecureRandom.hex(2)}", name: 'Loc', tier: 'location', active: true)
-      RolePermission.create!(role: r, resource: Resource.find_by!(key: 'leads'), action: Action.find_by!(key: 'read'),
-                             scope: Scope.find_by!(key: 'all'), granted: true)
+      %w[leads ai_connector].each do |key|
+        RolePermission.create!(role: r, resource: Resource.find_by!(key: key), action: Action.find_by!(key: 'read'),
+                               scope: Scope.find_by!(key: 'all'), granted: true)
+      end
       # A location-tier assignment pointing at a location this company does
       # not own (stale data after a move): no usable locations, and the
       # controllers would fall back to the whole company here.
