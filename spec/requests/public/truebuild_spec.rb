@@ -205,6 +205,22 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(body['drawing']).to eq(4)
     end
 
+    it 'cuts an older drawing again for free instead of paying for a new one' do
+      trueview
+      clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
+      clay_row.update!(status: 'done', image_url: 'https://b/clay.png', layer_url: 'https://b/clay-v2.webp', usage: { 'mask_version' => 2 })
+      TruebuildRender.where.not(id: clay_row.id).delete_all
+
+      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+      ENV['TRUEVIEW_DAILY_LIMIT'] = '0'
+      trueview
+      recut = TruebuildRender.where("usage ? 'recut_from'").sole
+      expect(recut).to have_attributes(image_url: 'https://b/clay.png', status: 'queued')
+      expect(recut.usage['recut_from']).to eq(clay_row.id)
+    ensure
+      ENV.delete('TRUEVIEW_DAILY_LIMIT')
+    end
+
     it 'stops drawing for the day at the platform limit' do
       allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
       ENV['TRUEVIEW_DAILY_LIMIT'] = '2'

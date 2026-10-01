@@ -3,7 +3,8 @@
 # A TrueView rendering: one source photo, redrawn by one image model in one
 # selection of finishes. Platform data, like the catalog it draws from.
 class TruebuildRender < ApplicationRecord
-  STATUSES = %w[queued running done failed].freeze
+  # skipped: a layer for a surface the photo does not show; nothing drawn.
+  STATUSES = %w[queued running done failed skipped].freeze
 
   belongs_to :catalog_plan_variant, optional: true
 

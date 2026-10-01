@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'vips'
+
 module Truebuild
   # TrueView: a model's real photo, redrawn by an image model in the finishes
   # the buyer picked. The room itself (walls, windows, cabinet runs, camera)
@@ -93,29 +95,53 @@ module Truebuild
       TEXT
     end
 
+    FRAMING_TOLERANCE = 0.04 # a drawing whose shape differs more than this was reframed
+    DRAW_ATTEMPTS = 2
+
     def perform!(render)
       spec = MODELS.fetch(render.model_key)
       render.update!(status: 'running', error: nil)
       source = fetch_source(render.source_url)
+      if render.purpose == 'layer'
+        mask = Surfaces.mask_for(render.source_url, source[:bytes], render.selection.first&.dig('surface'))
+        # The photo does not show this surface (no shutters on this home):
+        # nothing to paint, and no drawing paid for.
+        if mask && mask.status == 'done' && !mask.present?
+          return render.update!(status: 'skipped', error: 'Not in this photo', cost_usd: 0,
+                                usage: render.usage.merge('mask_version' => Layer::VERSION))
+        end
+      end
       # The samples named when the row was made, in prompt order.
       ids = Array(render.usage['swatch_ids'])
       samples = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact.map { |sw| fetch_source(sw.image_url) }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # A layer cut by an older Layer::VERSION is cut again from its saved
       # drawing: no call to the image model, no charge.
-      return recut!(render, source) if render.usage['recut_from'] && render.image_url.present?
+      return recut!(render, source, mask) if render.usage['recut_from'] && render.image_url.present?
 
-      result = if spec[:provider] == 'gemini'
-                 Providers::Gemini.edit(spec, source, render.prompt, samples: samples)
-               else
-                 Providers::OpenAi.edit(spec, source, render.prompt, samples: samples)
-               end
+      aspect = source_aspect(source)
+      spent = 0.0
+      result = nil
+      DRAW_ATTEMPTS.times do |attempt|
+        result = if spec[:provider] == 'gemini'
+                   Providers::Gemini.edit(spec, source, render.prompt, samples: samples, aspect: aspect)
+                 else
+                   Providers::OpenAi.edit(spec, source, render.prompt, samples: samples)
+                 end
+        spent += cost(spec, result[:usage])
+        break if reframed_by(result, aspect) <= FRAMING_TOLERANCE
+
+        if attempt == DRAW_ATTEMPTS - 1
+          return render.update!(status: 'failed', cost_usd: spent.round(4),
+                                error: "The model changed the photo's framing #{DRAW_ATTEMPTS} times")
+        end
+      end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
       attrs = { status: 'done', image_url: url, latency_ms: latency, usage: render.usage.merge(result[:usage]),
-                model: result[:model] || render.model, cost_usd: cost(spec, result[:usage]) }
+                model: result[:model] || render.model, cost_usd: spent.round(4) }
       if render.purpose == 'layer'
-        layer = Layer.build(source[:bytes], result[:bytes])
+        layer = Layer.build(source[:bytes], result[:bytes], mask: mask_image(mask))
         attrs.merge!(layer_url: store(render, layer[:bytes], layer[:mime], suffix: 'layer'), mask_coverage: layer[:coverage])
         attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION)
       end
@@ -124,12 +150,40 @@ module Truebuild
       render.update!(status: 'failed', error: e.message.to_s.first(1000))
     end
 
-    def recut!(render, source)
+    def recut!(render, source, mask = nil)
       drawn = fetch_source(render.image_url)
-      layer = Layer.build(source[:bytes], drawn[:bytes])
+      if reframed_by({ bytes: drawn[:bytes] }, source_aspect(source)) > FRAMING_TOLERANCE
+        # Drawn reframed before the check existed: draw it again instead.
+        render.update!(status: 'queued', image_url: nil, usage: render.usage.except('recut_from'))
+        return perform!(render)
+      end
+      layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask))
       render.update!(status: 'done', cost_usd: 0, latency_ms: 0, mask_coverage: layer[:coverage],
                      layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
                      usage: render.usage.merge('mask_version' => Layer::VERSION))
+    end
+
+    def source_aspect(source)
+      img = Vips::Image.new_from_buffer(source[:bytes], '')
+      img.width.to_f / img.height
+    end
+
+    # How far a drawing's shape is from the photo's, as a share.
+    def reframed_by(result, aspect)
+      img = Vips::Image.new_from_buffer(result[:bytes], '')
+      ((img.width.to_f / img.height) / aspect - 1).abs
+    end
+
+    def mask_image(mask)
+      return nil unless mask&.present?
+
+      Vips::Image.new_from_buffer(fetch_source(mask.mask_url)[:bytes], '')
+    end
+
+    def store_bytes(bytes, mime, key)
+      s3 = S3UploadService.new
+      s3.s3_client.put_object(bucket: s3.bucket_name, key: key, body: bytes, content_type: mime)
+      "https://#{s3.bucket_name}.s3.#{s3.region}.amazonaws.com/#{key}"
     end
 
     def cost(spec, usage)

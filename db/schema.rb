@@ -7142,6 +7142,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000200) do
     t.index ["source_url", "selection_key", "model_key"], name: "idx_on_source_url_selection_key_model_key_0cffdeaa5e"
   end
 
+  create_table "truebuild_surface_masks", force: :cascade do |t|
+    t.string "source_url", null: false
+    t.string "surface", null: false
+    t.integer "version", default: 1, null: false
+    t.string "status", default: "done", null: false
+    t.string "mask_url"
+    t.decimal "coverage", precision: 5, scale: 4
+    t.string "model"
+    t.text "error"
+    t.jsonb "usage", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["source_url", "surface", "version"], name: "idx_truebuild_surface_masks_unique", unique: true
+  end
+
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "sub_account_sid"

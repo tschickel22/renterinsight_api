@@ -32,13 +32,14 @@ module Truebuild
       def call
         plan = self.plan
         done = done_layers(plan)
+        skipped = skipped_layers(plan)
         drawing = TruebuildRender.where(status: %w[queued running], purpose: 'layer', model_key: MODEL,
                                         source_url: plan.map { |p| p[:photo] }.uniq).count
         photos = plan.group_by { |p| p[:photo] }.map do |photo, items|
           layers = items.filter_map { |i| (url = done[[photo, i[:key], i[:prompt]]]) && [i[:option_id], url] }.to_h
           # Finishes this photo will show once drawn, so the page can say so.
           { room: items.first[:room], url: Trueview.sized(photo), layers: layers,
-            pending: items.map { |i| i[:option_id] }.uniq - layers.keys }
+            pending: items.reject { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys }
         end
         { photos: photos, drawing: drawing }
       end
@@ -47,22 +48,32 @@ module Truebuild
       # limit. Returns the number queued.
       def predraw!
         return 0 unless Trueview.configured?(MODEL)
-        return 0 unless Rails.cache.write("truebuild:trueview:predraw:#{@variant.id}", true, expires_in: PREDRAW_EVERY, unless_exist: true)
+        return 0 unless Rails.cache.write("truebuild:trueview:predraw:#{@variant.id}:v#{Layer::VERSION}", true,
+                                          expires_in: PREDRAW_EVERY, unless_exist: true)
 
         plan = self.plan
         done = done_layers(plan)
+        skipped = skipped_layers(plan)
+        drawn_before = older_drawings(plan)
         busy = TruebuildRender.where(status: %w[queued running], purpose: 'layer', model_key: MODEL,
                                      source_url: plan.map { |p| p[:photo] }.uniq).pluck(:source_url, :selection_key).to_set
         spec = MODELS.fetch(MODEL)
         queued = 0
         plan.each do |p|
-          next if done.key?([p[:photo], p[:key], p[:prompt]]) || busy.include?([p[:photo], p[:key]])
-          break unless within_daily_limit?
+          id = [p[:photo], p[:key], p[:prompt]]
+          next if done.key?(id) || skipped.include?(id) || busy.include?([p[:photo], p[:key]])
 
+          # Drawn already under an older cut: cut it again, free, and the
+          # daily limit is not spent on it.
+          old = drawn_before[id]
+          next unless old || within_daily_limit?
+
+          usage = { 'swatch_ids' => p[:swatch_ids], 'predraw' => true }
+          usage['recut_from'] = old.id if old
           row = TruebuildRender.create!(catalog_plan_variant_id: @variant.id, room: p[:room], source_url: p[:photo],
                                         selection: p[:selection], selection_key: p[:key], model_key: MODEL,
-                                        provider: spec[:provider], model: spec[:model], purpose: 'layer', prompt: p[:prompt],
-                                        usage: { 'swatch_ids' => p[:swatch_ids], 'predraw' => true })
+                                        provider: spec[:provider], model: old&.model || spec[:model], purpose: 'layer',
+                                        prompt: p[:prompt], image_url: old&.image_url, usage: usage)
           TruebuildRenderJob.set(queue: :low).perform_later(row.id)
           busy << [p[:photo], p[:key]]
           queued += 1
@@ -104,6 +115,26 @@ module Truebuild
                        .where.not(layer_url: nil)
                        .select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                        .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
+      end
+
+      def rows(plan)
+        return TruebuildRender.none if plan.empty?
+
+        TruebuildRender.where(purpose: 'layer', model_key: MODEL, source_url: plan.map { |p| p[:photo] }.uniq,
+                              selection_key: plan.map { |p| p[:key] }.uniq)
+      end
+
+      # Surfaces the photo does not show, under the current cut.
+      def skipped_layers(plan)
+        rows(plan).where(status: 'skipped').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
+      end
+
+      # The newest drawing per finish made under an older cut.
+      def older_drawings(plan)
+        rows(plan).done.where.not(image_url: nil).order(:id)
+                  .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .index_by { |r| [r.source_url, r.selection_key, r.prompt] }
       end
 
       def within_daily_limit?

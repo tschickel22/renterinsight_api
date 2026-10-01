@@ -11,10 +11,18 @@ module Truebuild
 
         BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
-        def edit(spec, source, prompt, samples: [])
+        ASPECTS = { '1:1' => 1.0, '3:2' => 1.5, '2:3' => 2 / 3.0, '4:3' => 4 / 3.0, '3:4' => 0.75, '5:4' => 1.25,
+                    '4:5' => 0.8, '16:9' => 16 / 9.0, '9:16' => 9 / 16.0, '21:9' => 21 / 9.0 }.freeze
+
+        # aspect: the source photo's width / height. Asked for, because Lite
+        # left to itself once drew a wide exterior as a tall portrait.
+        def edit(spec, source, prompt, samples: [], aspect: nil)
           model = resolve(spec[:model])
           config = { responseModalities: ['IMAGE'] }
-          config[:imageConfig] = { imageSize: spec[:size] } if spec[:size]
+          image_config = {}
+          image_config[:imageSize] = spec[:size] if spec[:size]
+          image_config[:aspectRatio] = ASPECTS.min_by { |_, r| (Math.log(r) - Math.log(aspect)).abs }.first if aspect
+          config[:imageConfig] = image_config if image_config.any?
           images = [source, *samples].map { |img| { inline_data: { mime_type: img[:mime], data: Base64.strict_encode64(img[:bytes]) } } }
           body = { contents: [{ role: 'user', parts: [{ text: prompt }, *images] }], generationConfig: config }
           res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 180)
@@ -32,6 +40,28 @@ module Truebuild
           { bytes: Base64.decode64(data['data']), mime: data['mimeType'] || data['mime_type'] || 'image/png', model: model,
             usage: { 'prompt_tokens' => meta['promptTokenCount'].to_i, 'output_tokens' => meta['candidatesTokenCount'].to_i,
                      'total_tokens' => meta['totalTokenCount'].to_i } }
+        end
+
+        # Outlines of what `description` names in the image, from Gemini's
+        # segmentation: [{ 'box_2d' => [y0, x0, y1, x1] on 0..1000, 'mask' => png }].
+        def segment(source, description, model:)
+          model = resolve(model)
+          prompt = "Give the segmentation masks for #{description}. Output a JSON list of segmentation masks where each " \
+                   'entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the ' \
+                   'text label in the key "label". Output an empty list if there are none.'
+          body = { contents: [{ role: 'user', parts: [{ inline_data: { mime_type: source[:mime], data: Base64.strict_encode64(source[:bytes]) } },
+                                                     { text: prompt }] }],
+                   generationConfig: { responseMimeType: 'application/json', temperature: 0, thinkingConfig: { thinkingBudget: 0 } } }
+          res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 120)
+          raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
+
+          text = Array(res.parsed_response.dig('candidates', 0, 'content', 'parts')).filter_map { |p| p['text'] }.join
+          text = text.strip.sub(/\A```(?:json)?\s*/, '').sub(/\s*```\z/, '')
+          masks = JSON.parse(text.presence || '[]')
+          masks = masks['masks'] || masks.values.first if masks.is_a?(Hash)
+          meta = res.parsed_response['usageMetadata'] || {}
+          { masks: Array(masks), model: model,
+            usage: { 'prompt_tokens' => meta['promptTokenCount'].to_i, 'output_tokens' => meta['candidatesTokenCount'].to_i } }
         end
 
         # "gemini-3.1-flash-image" may be published as "...-preview"; take the

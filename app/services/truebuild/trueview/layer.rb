@@ -21,7 +21,8 @@ module Truebuild
       MIN_REGION = 0.001 # share of the photo; smaller regions are noise
       MAX_HOLE = 0.02  # share of the photo; enclosed gaps up to this are filled
       FEATHER = 2.5
-      VERSION = 2      # bump when the cut changes, so old layers can be re-cut
+      VERSION = 3      # bump when the cut changes, so old layers can be re-cut
+      EDGE_FEATHER = 1.2
 
       # => { bytes:, mime:, coverage: } coverage is the share of the photo kept.
       #
@@ -31,10 +32,15 @@ module Truebuild
       # to a certain one, and small gaps enclosed by the surface are filled.
       # Inside a gap the rendering matches the photo anyway, so filling costs
       # nothing where the model left something alone.
-      def build(original_bytes, render_bytes)
+      #
+      # mask: the surface's outline in the original photo (Surfaces). When
+      # given, the layer is the drawing inside it and nothing else; the
+      # change-based cut is only for surfaces without an outline.
+      def build(original_bytes, render_bytes, mask: nil)
         orig = rgb(Vips::Image.new_from_buffer(original_bytes, ''))
         edit = rgb(Vips::Image.new_from_buffer(render_bytes, ''))
         edit = fit(edit, orig.width, orig.height)
+        return outlined(edit, mask, orig.width, orig.height) if mask
 
         delta = orig.gaussblur(1.5).colourspace(:lab).dE76(edit.gaussblur(1.5).colourspace(:lab))
         drift = delta.percent(50)
@@ -46,6 +52,15 @@ module Truebuild
         mask = (mask > 127).ifthenelse(255, 0).cast(:uchar)
         alpha = mask.gaussblur(FEATHER).cast(:uchar)
 
+        { bytes: edit.bandjoin(alpha).webpsave_buffer(Q: 82, alpha_q: 90), mime: 'image/webp',
+          coverage: (mask.avg / 255.0).round(4) }
+      end
+
+      def outlined(edit, mask, width, height)
+        mask = mask.extract_band(0) if mask.bands > 1
+        mask = fit(mask, width, height)
+        mask = (mask > 127).ifthenelse(255, 0).cast(:uchar)
+        alpha = mask.gaussblur(EDGE_FEATHER).cast(:uchar)
         { bytes: edit.bandjoin(alpha).webpsave_buffer(Q: 82, alpha_q: 90), mime: 'image/webp',
           coverage: (mask.avg / 255.0).round(4) }
       end
@@ -116,7 +131,8 @@ module Truebuild
       def fit(image, width, height)
         return image if image.width == width && image.height == height
 
-        image.resize(width.to_f / image.width, vscale: height.to_f / image.height).crop(0, 0, width, height)
+        out = image.resize(width.to_f / image.width, vscale: height.to_f / image.height)
+        out.crop(0, 0, [width, out.width].min, [height, out.height].min).embed(0, 0, width, height, extend: :copy)
       end
 
       def disc(radius)

@@ -22,6 +22,9 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
 
   let(:admin) { headers_for('platform_admin') }
 
+  # Outlines are covered in trueview_render_spec; here layers use the change-based cut.
+  before { allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil) }
+
   around do |ex|
     old = ENV.values_at('GEMINI_API_KEY', 'OPENAI_API_KEY')
     ENV['GEMINI_API_KEY'] = 'test-gemini'
@@ -77,9 +80,10 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
   it 'renders, stores and prices a queued row' do
     run!(models: %w[nb2])
     row = TruebuildRender.last
-    allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: 'jpg', mime: 'image/jpeg')
+    image = (Vips::Image.black(300, 200, bands: 3) + 120).cast(:uchar)
+    allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: image.jpegsave_buffer, mime: 'image/jpeg')
     allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
-      .and_return(bytes: 'png', mime: 'image/png', model: 'gemini-3.1-flash-image-preview',
+      .and_return(bytes: image.pngsave_buffer, mime: 'image/png', model: 'gemini-3.1-flash-image-preview',
                   usage: { 'prompt_tokens' => 1500, 'output_tokens' => 1680 })
     allow(Truebuild::Trueview).to receive(:store).and_return('https://bucket/truebuild/trueview/a.png')
 
