@@ -44,6 +44,16 @@ RSpec.describe 'Designed a Home work queue', type: :model do
     expect(ids).to eq([fresh.id])
   end
 
+  it 'lists leads whose design was shared or copied by family this week' do
+    shared = create(:lead, company: company, owner_id: user.id, status: 'new')
+    quiet = create(:lead, company: company, owner_id: user.id, status: 'new')
+    designed(shared, at: 10.days.ago).track!('shared')
+    designed(quiet, at: 2.days.ago)
+
+    ids = WorkqueueService.new(company: company, user: user, queue_id: 'leads_design_shared').items[:items].map { |r| r[:entity_id] }
+    expect(ids).to eq([shared.id])
+  end
+
   # Checked on the rule itself: the full summary also counts the activity
   # queues, which read a database view the test schema does not load.
   it 'only appears for dealers who use TrueBuild' do

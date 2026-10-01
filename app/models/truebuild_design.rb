@@ -41,6 +41,10 @@ class TruebuildDesign < ApplicationRecord
     elsif event == 'copied'
       self.class.where(id: id).update_all(["metadata = jsonb_set(metadata, '{copies}', to_jsonb(COALESCE((metadata->>'copies')::int, 0) + 1))"])
     end
+    # For the Design Shared queue: a home passed round the family.
+    if %w[shared copied].include?(event)
+      self.class.where(id: id).update_all(["metadata = jsonb_set(metadata, '{last_shared_at}', to_jsonb(?::text))", Time.current.iso8601])
+    end
     buyer = contact || lead
     return unless buyer
 
