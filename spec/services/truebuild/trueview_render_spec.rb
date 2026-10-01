@@ -40,7 +40,7 @@ RSpec.describe 'TrueView rendering' do
     it 'outlines a surface by having the model paint it magenta, once per photo' do
       paints(painted)
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 8)
+      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 9)
       expect(mask.usage['attempts']).to eq([{ 'present' => true, 'fit' => 4 }])
       expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
       expect(mask.usage['cost_usd']).to eq(0.0368) # the painting, plus the check: 2,000 in and 50 out at Sonnet rates
@@ -71,9 +71,18 @@ RSpec.describe 'TrueView rendering' do
       expect(mask.usage['attempts'].map { |a| a['fit'] }).to eq([2, 5])
     end
 
+    it 'keeps an accepted outline across a version bump when its description has not changed' do
+      old = TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: 1, mask_url: 'https://b/m.png',
+                                         coverage: 0.2, usage: { 'digest' => Truebuild::Trueview::Surfaces.digest('cabinets') })
+      expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)
+      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
+      expect(mask).to have_attributes(version: 9, mask_url: 'https://b/m.png')
+      expect(mask.usage['carried_from']).to eq(old.id)
+    end
+
     it 'leaves out what another outline of the photo already covers' do
       cabinets = png((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 75, 100, fill: true))
-      TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: 8, mask_url: 'https://b/masks/cab.png', coverage: 0.125)
+      TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: 9, mask_url: 'https://b/masks/cab.png', coverage: 0.125)
       allow(Truebuild::Trueview).to receive(:fetch_source) do |url|
         url.include?('masks/') ? { bytes: cabinets, mime: 'image/png' } : { bytes: photo.jpegsave_buffer, mime: 'image/jpeg' }
       end

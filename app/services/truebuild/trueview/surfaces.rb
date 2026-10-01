@@ -21,7 +21,7 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 8       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable
+      VERSION = 9       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -65,16 +65,33 @@ module Truebuild
         return found if found && (found.status == 'done' || found.updated_at > RETRY_FAILED_AFTER.ago)
 
         found&.destroy!
-        find!(source_url, source_bytes, key)
+        carried_over(source_url, key) || find!(source_url, source_bytes, key)
       rescue ActiveRecord::RecordNotUnique
         TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION)
       end
 
-      OUTLINE_ATTEMPTS = 2
+      # Lite's painting and Claude's judging both vary run to run: Bay Port's
+      # backsplash scored 4 once and 2 twice. A third try costs about 5 cents.
+      OUTLINE_ATTEMPTS = 3
 
       # Paints, measures and checks the outline; a rejected outline of a
       # surface that is there is painted once more with Claude's note on what
       # was wrong ("it included the microwave").
+      # What an outline was made from: a version bump for one surface keeps
+      # the others' accepted outlines rather than drawing them again.
+      def digest(key)
+        Digest::SHA256.hexdigest(CATEGORIES.find { |k, _, _| k == key }.last + paint_prompt('x'))[0, 16]
+      end
+
+      def carried_over(source_url, key)
+        old = TruebuildSurfaceMask.where(source_url: source_url, surface: key, status: 'done').where('version < ?', VERSION)
+                                  .order(version: :desc).find { |m| m.present? && m.usage['digest'] == digest(key) }
+        return nil unless old
+
+        TruebuildSurfaceMask.create!(old.attributes.except('id', 'created_at', 'updated_at').merge('version' => VERSION,
+                                                                                                    'usage' => old.usage.merge('carried_from' => old.id)))
+      end
+
       # A reviewer flagged this outline: outline it again with their note,
       # then cut every drawing of that surface in the photo again (free).
       def redo!(mask, note)
@@ -119,7 +136,8 @@ module Truebuild
                                    "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
                                      model: result[:model], error: verdict['note'].presence,
-                                     usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') } })
+                                     usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') },
+                                              'digest' => (digest(key) unless correction) }.compact)
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
