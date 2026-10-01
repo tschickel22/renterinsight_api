@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -582,7 +582,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
   create_table "api_keys", force: :cascade do |t|
     t.bigint "company_id"
     t.string "name", null: false
-    t.string "key", null: false
+    t.string "key"
     t.string "secret_digest"
     t.jsonb "permissions", default: {}
     t.string "status", default: "active", null: false
@@ -593,10 +593,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "webhook_config", default: {}, null: false
+    t.string "key_digest"
+    t.string "key_preview"
     t.index ["company_id", "status"], name: "index_api_keys_on_company_id_and_status"
     t.index ["company_id"], name: "index_api_keys_on_company_id"
     t.index ["created_by_user_id"], name: "index_api_keys_on_created_by_user_id"
-    t.index ["key"], name: "index_api_keys_on_key", unique: true
+    t.index ["key_digest"], name: "index_api_keys_on_key_digest", unique: true
     t.index ["status"], name: "index_api_keys_on_status"
     t.index ["webhook_config"], name: "index_api_keys_on_webhook_config", using: :gin
   end
@@ -623,6 +625,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
     t.index ["provider", "action"], name: "index_api_logs_on_provider_and_action"
     t.index ["provider"], name: "index_api_logs_on_provider"
     t.index ["status"], name: "index_api_logs_on_status"
+  end
+
+  create_table "api_request_logs", force: :cascade do |t|
+    t.bigint "api_key_id"
+    t.bigint "company_id"
+    t.string "http_method", null: false
+    t.string "path", null: false
+    t.integer "status", null: false
+    t.integer "duration_ms"
+    t.string "ip_address"
+    t.string "user_agent"
+    t.datetime "created_at", null: false
+    t.index ["api_key_id", "created_at"], name: "index_api_request_logs_on_api_key_id_and_created_at"
+    t.index ["company_id", "created_at"], name: "index_api_request_logs_on_company_id_and_created_at"
   end
 
   create_table "approval_actions", force: :cascade do |t|
@@ -4435,6 +4451,43 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
     t.index ["status"], name: "index_marketing_content_on_status"
   end
 
+  create_table "mcp_changes", force: :cascade do |t|
+    t.bigint "mcp_tool_call_id"
+    t.bigint "oauth_grant_id"
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "action", null: false
+    t.string "record_type", null: false
+    t.bigint "record_id", null: false
+    t.jsonb "before", default: {}, null: false
+    t.jsonb "after", default: {}, null: false
+    t.datetime "undone_at"
+    t.bigint "undone_by_user_id"
+    t.string "undo_note"
+    t.datetime "created_at", null: false
+    t.index ["company_id", "created_at"], name: "index_mcp_changes_on_company_id_and_created_at"
+    t.index ["mcp_tool_call_id"], name: "index_mcp_changes_on_mcp_tool_call_id"
+    t.index ["oauth_grant_id", "created_at"], name: "index_mcp_changes_on_oauth_grant_id_and_created_at"
+    t.index ["user_id", "created_at"], name: "index_mcp_changes_on_user_id_and_created_at"
+  end
+
+  create_table "mcp_tool_calls", force: :cascade do |t|
+    t.bigint "oauth_grant_id"
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "client_name"
+    t.string "tool_name", null: false
+    t.jsonb "arguments", default: {}, null: false
+    t.string "status", null: false
+    t.integer "result_count"
+    t.integer "duration_ms"
+    t.string "error_message"
+    t.datetime "created_at", null: false
+    t.index ["company_id", "created_at"], name: "index_mcp_tool_calls_on_company_id_and_created_at"
+    t.index ["oauth_grant_id", "created_at"], name: "index_mcp_tool_calls_on_oauth_grant_id_and_created_at"
+    t.index ["user_id", "created_at"], name: "index_mcp_tool_calls_on_user_id_and_created_at"
+  end
+
   create_table "mfa_tokens", force: :cascade do |t|
     t.string "token_digest", null: false
     t.string "user_type", null: false
@@ -4578,6 +4631,66 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
+  end
+
+  create_table "oauth_authorization_codes", force: :cascade do |t|
+    t.bigint "oauth_grant_id", null: false
+    t.string "code_digest", null: false
+    t.string "redirect_uri", null: false
+    t.string "code_challenge", null: false
+    t.string "scopes", default: "", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "used_at"
+    t.datetime "created_at", null: false
+    t.index ["code_digest"], name: "index_oauth_authorization_codes_on_code_digest", unique: true
+    t.index ["oauth_grant_id"], name: "index_oauth_authorization_codes_on_oauth_grant_id"
+  end
+
+  create_table "oauth_clients", force: :cascade do |t|
+    t.string "client_id", null: false
+    t.string "client_name", null: false
+    t.jsonb "redirect_uris", default: [], null: false
+    t.string "registration_type", null: false
+    t.string "client_uri"
+    t.string "logo_uri"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "metadata_fetched_at"
+    t.string "registered_ip"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["client_id"], name: "index_oauth_clients_on_client_id", unique: true
+  end
+
+  create_table "oauth_grants", force: :cascade do |t|
+    t.bigint "oauth_client_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "scopes", default: "", null: false
+    t.string "resource", null: false
+    t.datetime "last_used_at"
+    t.datetime "revoked_at"
+    t.bigint "revoked_by_user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "revoked_at"], name: "index_oauth_grants_on_company_id_and_revoked_at"
+    t.index ["company_id"], name: "index_oauth_grants_on_company_id"
+    t.index ["oauth_client_id"], name: "index_oauth_grants_on_oauth_client_id"
+    t.index ["user_id", "oauth_client_id", "company_id"], name: "index_oauth_grants_on_user_client_company"
+    t.index ["user_id"], name: "index_oauth_grants_on_user_id"
+  end
+
+  create_table "oauth_tokens", force: :cascade do |t|
+    t.bigint "oauth_grant_id", null: false
+    t.string "kind", null: false
+    t.string "token_digest", null: false
+    t.string "scopes", default: "", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "used_at"
+    t.datetime "revoked_at"
+    t.datetime "created_at", null: false
+    t.index ["oauth_grant_id", "kind"], name: "index_oauth_tokens_on_oauth_grant_id_and_kind"
+    t.index ["oauth_grant_id"], name: "index_oauth_tokens_on_oauth_grant_id"
+    t.index ["token_digest"], name: "index_oauth_tokens_on_token_digest", unique: true
   end
 
   create_table "offline_sync_logs", force: :cascade do |t|
@@ -8259,6 +8372,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_09_29_150000) do
   add_foreign_key "nurture_sequences", "companies"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
+  add_foreign_key "oauth_authorization_codes", "oauth_grants"
+  add_foreign_key "oauth_grants", "companies"
+  add_foreign_key "oauth_grants", "oauth_clients"
+  add_foreign_key "oauth_grants", "users"
+  add_foreign_key "oauth_tokens", "oauth_grants"
   add_foreign_key "offline_sync_logs", "companies"
   add_foreign_key "offline_sync_logs", "users"
   add_foreign_key "option_categories", "factories"
