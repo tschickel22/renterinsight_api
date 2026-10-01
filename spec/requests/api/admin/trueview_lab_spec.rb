@@ -350,6 +350,8 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
 
       get '/api/admin/trueview_lab/factory_runs/estimate', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id }
       expect(JSON.parse(response.body)['models'].map { |m| m['id'] }).to eq([variant.id])
+      get '/api/admin/trueview_lab/factory_runs/estimate', headers: admin, params: { manufacturer_id: mfr.id, variant_ids: [0] }
+      expect(JSON.parse(response.body)['models']).to eq([]) # only the models ticked
 
       post '/api/admin/trueview_lab/factory_runs', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id }.to_json
       expect(response).to have_http_status(:unprocessable_entity) # no budget

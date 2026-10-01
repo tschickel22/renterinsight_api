@@ -162,7 +162,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
     }
   end
 
-  # GET /api/admin/trueview_lab/factory_runs/estimate?manufacturer_id=&factory_id=&series=
+  # GET /api/admin/trueview_lab/factory_runs/estimate?manufacturer_id=&factory_id=&series=&variant_ids[]=
   def factory_run_estimate
     variants = factory_run_variants
     return render json: { error: 'Choose a manufacturer' }, status: :unprocessable_entity unless variants
@@ -176,7 +176,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: runs.map { |r| Truebuild::Trueview::FactoryRun.progress(r) }
   end
 
-  # POST /api/admin/trueview_lab/factory_runs { manufacturer_id, factory_id, series, budget_usd }
+  # POST /api/admin/trueview_lab/factory_runs { manufacturer_id, factory_id, series, variant_ids, budget_usd }
   def create_factory_run
     return render json: { error: 'TrueView is not set up (no Gemini key)' }, status: :unprocessable_entity unless Truebuild::Trueview.configured?(Truebuild::Trueview::Buyer::MODEL)
 
@@ -390,8 +390,11 @@ class Api::Admin::TrueviewLabController < ApplicationController
   def factory_run_variants
     return nil if params[:manufacturer_id].blank?
 
-    Truebuild::Trueview::FactoryRun.variants(manufacturer_id: params[:manufacturer_id], factory_id: params[:factory_id].presence,
-                                             series: params[:series].presence)
+    variants = Truebuild::Trueview::FactoryRun.variants(manufacturer_id: params[:manufacturer_id], factory_id: params[:factory_id].presence,
+                                                        series: params[:series].presence)
+    # Only the models ticked, to try a few before paying for all of them.
+    picked = Array(params[:variant_ids]).map(&:to_i)
+    picked.any? ? variants.select { |v| picked.include?(v.id) } : variants
   end
 
   # url => room (nil for elevations), photos first.
