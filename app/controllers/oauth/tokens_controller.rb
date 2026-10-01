@@ -39,11 +39,12 @@ module Oauth
       raise Error.new('invalid_grant', 'PKCE verification failed') unless code.verifier_matches?(body[:code_verifier])
       raise Error.new('invalid_target', 'Tokens are only issued for this MCP server') unless Config.resource_matches?(body[:resource], request)
 
+      ensure_usable!(grant)
+
       # Single use even under a race: only one request can flip used_at.
       claimed = OauthAuthorizationCode.where(id: code.id, used_at: nil).update_all(used_at: Time.current)
       raise Error.new('invalid_grant', 'Authorization code was already used') if claimed.zero?
 
-      ensure_usable!(grant)
       OauthToken.issue_pair!(grant: grant, scopes: code.scopes.split)
     end
 
@@ -63,10 +64,15 @@ module Oauth
       end
       raise Error.new('invalid_grant', 'Refresh token expired or revoked') unless token.usable?
 
+      # Check access BEFORE spending the refresh token. Spending it first meant
+      # a refusal (role without AI Connector, add-on off) also burned it, so
+      # once access was restored the app could not refresh and had to make the
+      # person sign in again.
+      ensure_usable!(grant)
+
       claimed = OauthToken.where(id: token.id, used_at: nil).update_all(used_at: Time.current)
       raise Error.new('invalid_grant', 'Refresh token was already used') if claimed.zero?
 
-      ensure_usable!(grant)
       # A refresh can narrow scope but never widen it.
       scopes = body[:scope].present? ? (body[:scope].to_s.split & token.scope_list) : token.scope_list
       OauthToken.issue_pair!(grant: grant, scopes: scopes.presence || token.scope_list)
