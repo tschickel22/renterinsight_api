@@ -23,7 +23,7 @@ module McpTools
       },
       required: %w[id sequence_id]
     )
-    writes!
+    writes!(destructive: true, open_world: true)
 
     def self.perform(ctx, id:, sequence_id:)
       ctx.authorize!('crm', 'create')

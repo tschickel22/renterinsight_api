@@ -24,11 +24,27 @@ module McpTools
         @write_tool == true
       end
 
-      def writes!(destructive: false)
+      # destructive: true for anything that changes or replaces existing data
+      # (MCP: destructiveHint false promises the tool only ADDS). open_world:
+      # true when it reaches people outside the system (sends messages).
+      # Directory review checks these, so they must be honest.
+      def writes!(destructive:, open_world: false)
         @write_tool = true
         required_scope 'mcp:write'
-        annotations(read_only_hint: false, destructive_hint: destructive, idempotent_hint: false, open_world_hint: false)
+        annotations(read_only_hint: false, destructive_hint: destructive, idempotent_hint: false,
+                    open_world_hint: open_world)
         security_schemes!('mcp:write')
+      end
+
+      # Every tool's annotations carry its title too: the Claude directory
+      # checks for a title, and some clients only read the annotation's.
+      def annotations_value
+        base = super
+        return base if base.nil? || base.title.present? || title_value.blank?
+
+        MCP::Tool::Annotations.new(title: title_value, read_only_hint: base.read_only_hint,
+                                   destructive_hint: base.destructive_hint, idempotent_hint: base.idempotent_hint,
+                                   open_world_hint: base.open_world_hint)
       end
 
       # ChatGPT reads a per-tool securitySchemes declaration to know a tool

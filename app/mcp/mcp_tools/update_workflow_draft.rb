@@ -10,7 +10,7 @@ module McpTools
                 'the parts to change. A workflow that is already active or paused cannot be edited here, because that ' \
                 'would change what is running now; offer to create a new draft instead, or the user can edit it in DealerTide.'
     input_schema(properties: { id: { type: 'string' } }.merge(WorkflowDraftSupport::SCHEMA_PROPERTIES), required: %w[id])
-    writes!
+    writes!(destructive: true)
 
     FIELDS = { name: :name, description: :description, record_type: :entity_type, trigger: :trigger,
                conditions: :conditions, steps: :steps, halt_on_reply: :halt_on_reply }.freeze

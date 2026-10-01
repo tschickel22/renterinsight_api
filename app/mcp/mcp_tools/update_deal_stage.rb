@@ -17,7 +17,7 @@ module McpTools
       },
       required: %w[id stage]
     )
-    writes!
+    writes!(destructive: true)
 
     def self.perform(ctx, id:, stage:, note: nil)
       records = Records.new(ctx)

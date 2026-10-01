@@ -17,7 +17,7 @@ module McpTools
       },
       required: %w[title description]
     )
-    writes!
+    writes!(destructive: false)
 
     def self.perform(ctx, title:, description:, priority: 'medium', customer_id: nil, unit_id: nil,
                      assigned_to_user_id: nil)
