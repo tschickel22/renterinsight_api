@@ -40,7 +40,7 @@ RSpec.describe 'TrueView rendering' do
     it 'outlines a surface by having the model paint it magenta, once per photo' do
       paints(painted)
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 3)
+      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 4)
       expect(mask.usage['check']).to include('right' => true, 'present' => true)
       expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
       expect(mask.usage['cost_usd']).to eq(0.03)

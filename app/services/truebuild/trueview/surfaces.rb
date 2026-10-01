@@ -21,7 +21,7 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 3       # 1 was text segmentation, 2 was not checked
+      VERSION = 4       # 1 text segmentation, 2 unchecked, 3 checked against a filled overlay
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
@@ -94,7 +94,7 @@ module Truebuild
         input_schema: {
           type: 'object',
           properties: {
-            present: { type: 'boolean', description: 'The photo really shows this surface.' },
+            present: { type: 'boolean', description: 'Looking ONLY at the first image (the untouched photo): it really shows this surface.' },
             right: { type: 'boolean', description: 'The magenta covers this surface and essentially nothing else.' },
             note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
           },
@@ -103,18 +103,26 @@ module Truebuild
       }.freeze
 
       # Claude looks at the photo and the outline over it and says whether
-      # the outline is the surface, and whether the photo shows it at all
-      # (asked to paint shutters on a house with none, the model painted
-      # the window glass).
+      # the outline is the surface, and whether the photo shows it at all.
+      # Asked for shutters on a house with none, Lite painted shutter-shaped
+      # strips beside the windows; filled in magenta they looked like
+      # shutters and passed. So presence is judged on the untouched photo,
+      # and the outline is drawn as a border over a light tint, leaving what
+      # is really inside it visible.
       def check(image, mask, key, description)
         look = ->(img) { Base64.strict_encode64(img.thumbnail_image(1000).jpegsave_buffer(Q: 80)) }
-        tinted = (mask > 127).ifthenelse((image * 0.4 + [153, 0, 153]).cast(:uchar), image).cast(:uchar).copy(interpretation: :srgb)
+        inside = mask > 127
+        edge = inside.morph(Layer.disc(3), :dilate) ^ inside.morph(Layer.disc(3), :erode)
+        tinted = inside.ifthenelse((image * 0.8 + [51, 0, 51]).cast(:uchar), image)
+        tinted = edge.ifthenelse([255, 0, 255], tinted).cast(:uchar).copy(interpretation: :srgb)
         result = Catalog::PriceBooks::ClaudeClient.call(
           system: 'You check outlines of home surfaces for a home configurator. Be strict: an outline that also covers ' \
                   'other things (windows, posts, walls, floor, furniture) is wrong.',
           tool: CHECK_TOOL, max_tokens: 400, temperature: 0,
           content: [{ type: 'text', text: 'Photo:' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(image) } },
-                    { type: 'text', text: "The same photo with the outline in magenta. It should be #{key}: #{description}." },
+                    { type: 'text', text: "First, from that photo alone: does it show #{key}? Then the same photo with an " \
+                                          "outline drawn as a magenta border with a light tint inside. It should be #{key}: " \
+                                          "#{description}. Judge what is really inside the border." },
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(tinted) } }]
         )
         result[:input].slice('present', 'right', 'note')
