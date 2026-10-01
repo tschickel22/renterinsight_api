@@ -43,6 +43,16 @@ module McpTools
       raise UserError, 'due_date must look like 2026-10-02 or 2026-10-02T15:00.'
     end
 
+    # CLAUDE.md, WRITING STYLE: no em or en dashes in anything a dealer's
+    # customer reads. Refused rather than rewritten, so the AI rewrites it in
+    # its own words instead of us mangling punctuation.
+    def no_dashes!(*texts)
+      return unless texts.flatten.compact.any? { |t| t.to_s.match?(/[\u2013\u2014]/) }
+
+      raise UserError, 'Customer-facing text must not use em dashes or en dashes. Rewrite it with a period, ' \
+                       'comma, colon or parentheses and try again.'
+    end
+
     def entity_resource(type)
       { 'lead' => 'leads', 'contact' => 'crm', 'account' => 'crm', 'deal' => 'deals',
         'unit' => 'inventory', 'ticket' => 'service', 'quote' => 'finance' }.fetch(type)

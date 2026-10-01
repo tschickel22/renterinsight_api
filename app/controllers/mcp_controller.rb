@@ -17,7 +17,9 @@ class McpController < ActionController::API
   READ_TOOLS = [
     McpTools::Search, McpTools::Fetch, McpTools::GetReferenceData, McpTools::PipelineSummary,
     McpTools::ListLeads, McpTools::ListContacts, McpTools::ListAccounts, McpTools::ListDeals,
-    McpTools::ListInventory, McpTools::ListServiceTickets, McpTools::ListQuotes, McpTools::ListMyTasks
+    McpTools::ListInventory, McpTools::ListServiceTickets, McpTools::ListQuotes, McpTools::ListMyTasks,
+    McpTools::ListCampaigns, McpTools::GetCampaign, McpTools::ListWorkflows, McpTools::GetWorkflow,
+    McpTools::ListNurtureSequences
   ].freeze
 
   PROMPTS = [
@@ -27,7 +29,9 @@ class McpController < ActionController::API
 
   WRITE_TOOLS = [
     McpTools::CreateLead, McpTools::AddNote, McpTools::CreateTask, McpTools::UpdateLeadStatus,
-    McpTools::AssignLead, McpTools::UpdateDealStage, McpTools::CreateServiceTicket
+    McpTools::AssignLead, McpTools::UpdateDealStage, McpTools::CreateServiceTicket,
+    McpTools::EnrollInNurture, McpTools::CreateWorkflowDraft, McpTools::UpdateWorkflowDraft,
+    McpTools::CreateCampaignDraft
   ].freeze
 
   def create
@@ -107,8 +111,32 @@ class McpController < ActionController::API
       at #{ctx.company.name}. Every tool runs with this person's own permissions and locations.
       Record ids are typed, like lead:42, deal:7 or unit:118; search and the list tools return
       them and fetch reads one. Call get_reference_data before filtering by a status or stage
-      or assigning work to someone. Dealer cost and profit figures are never available here.
+      or assigning work to someone.
       #{ctx.write_allowed? ? 'Before any tool that changes data, confirm the change with the user.' : READ_ONLY_NOTE}
+      #{boundaries(brand)}
+    TEXT
+  end
+
+  # What the connector deliberately does not do, and what to tell the user
+  # instead. Without this an AI either claims it cannot help at all or invents
+  # a workaround; with it, it says what it did and where the person finishes.
+  def boundaries(brand)
+    app = brand.name
+    <<~TEXT.squish
+      Some things are deliberately not possible through this connector. When the user asks for one,
+      say plainly that you cannot do it here and tell them where to do it, using these answers:
+      Activating, pausing or deleting a workflow: "I can build it as a draft, but it has to be
+      activated in #{app}: open the link, review the steps and click Activate." Starting, scheduling,
+      sending or test sending a campaign: "I can draft the campaign, but sending is done in #{app}:
+      open it, check the audience and sender, then click Start." Sending an email or text directly:
+      "I cannot send messages, but I can draft it for you to send, add someone to an existing nurture
+      sequence, or draft a campaign." Deleting any record: "I cannot delete records; that is done in
+      #{app}." Changing many records at once (more than a handful): "I make changes one record at a time
+      and there is a limit per hour; for bulk changes use the bulk actions in #{app}." Dealer cost,
+      gross, margin or commission: "Those figures are not available through this connector." Users,
+      roles, permissions, company settings, invoices, payments and loans: "That is not available here;
+      use #{app}." If a tool refuses something, repeat its reason to the user rather than guessing.
+      Write customer-facing copy plainly and never use em dashes or en dashes.
     TEXT
   end
 
