@@ -40,7 +40,9 @@ module Truebuild
           layers = items.filter_map { |i| (url = done[[photo, i[:key], i[:prompt]]]) && [i[:option_id], url] }.to_h
           # Finishes this photo will show once drawn, so the page can say so.
           { room: items.first[:room], url: Trueview.sized(photo), layers: layers,
-            pending: items.reject { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys }
+            pending: items.reject { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
+            # Picked but not in this photo (a house with no shutters), so the page can say so.
+            not_shown: items.select { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq }
         end
         { photos: photos, drawing: drawing }
       end

@@ -21,7 +21,7 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 5       # 1 text segmentation, 2 unchecked, 3 and 4 earlier checks
+      VERSION = 6       # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -34,7 +34,8 @@ module Truebuild
         ['cabinets', /cabinet|vanit|lav|hw /i,
          'the cabinet doors, drawer fronts and cabinet boxes, including an island base and any vanity. Not countertops, appliances, sinks, stools, chairs or the floor'],
         ['countertop', /counter/i, 'the countertops, including an island top and any short backsplash lip of the same material. Not the sink'],
-        ['backsplash', /backsplash/i, 'the backsplash: the wall surface between the countertop and the upper cabinets'],
+        ['backsplash', /backsplash/i,
+         'the backsplash: the wall surface between the countertop and the upper cabinets. Not the range, microwave, hood, outlets, window or anything on the counter'],
         ['flooring', /floor|carpet/i, 'the floor. Not rugs, furniture legs or cabinets'],
         ['accent wall', /accent|wall ?board/i, 'the single largest interior wall facing the camera'],
         ['siding', /siding|shake/i, "the main house's exterior wall siding. Not trim, windows, doors, roof, skirting, porch or neighboring houses"],
@@ -63,28 +64,39 @@ module Truebuild
         TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION)
       end
 
+      OUTLINE_ATTEMPTS = 2
+
+      # Paints, measures and checks the outline; a rejected outline of a
+      # surface that is there is painted once more with Claude's note on what
+      # was wrong ("it included the microwave").
       def find!(source_url, source_bytes, key)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
+        aspect = image.width.to_f / image.height
         spec = MODELS.fetch(PAINTER)
-        result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' }, paint_prompt(description),
-                                        aspect: image.width.to_f / image.height)
-        if Trueview.reframed_by(result, image.width.to_f / image.height) > Trueview::FRAMING_TOLERANCE
-          raise Trueview::Error, 'The model changed the framing while outlining'
-        end
+        spent = 0.0
+        attempts = []
+        mask = verdict = result = nil
+        OUTLINE_ATTEMPTS.times do
+          result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' },
+                                          paint_prompt(description, attempts.last&.dig('note')), aspect: aspect)
+          spent += Trueview.cost(spec, result[:usage])
+          raise Trueview::Error, 'The model changed the framing while outlining' if Trueview.reframed_by(result, aspect) > Trueview::FRAMING_TOLERANCE
 
-        mask = magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height)
-        coverage = (mask.avg / 255.0).round(4)
-        verdict = coverage.positive? ? check(image, mask, key, description) : { 'present' => false, 'fit' => 0 }
+          mask = magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height)
+          verdict = (mask.avg / 255.0).positive? ? check(image, mask, key, description) : { 'present' => false, 'fit' => 0 }
+          spent += verdict['cost_usd'].to_f
+          attempts << verdict
+          break if !verdict['present'] || verdict['fit'].to_i >= MIN_FIT
+        end
         # A wrong outline would paint the wrong thing in every color: no
         # layer for that surface is better. An absent surface is no layer too.
-        coverage = 0 unless verdict['present'] && verdict['fit'].to_i >= MIN_FIT
+        coverage = verdict['present'] && verdict['fit'].to_i >= MIN_FIT ? (mask.avg / 255.0).round(4) : 0
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
                                    "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
                                      model: result[:model], error: verdict['note'].presence,
-                                     usage: result[:usage].merge('cost_usd' => Trueview.cost(spec, result[:usage]),
-                                                                 'check' => verdict.except('note')))
+                                     usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') } })
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
@@ -129,11 +141,12 @@ module Truebuild
                       .merge('cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
       end
 
-      def paint_prompt(description)
+      def paint_prompt(description, correction = nil)
+        fix = correction.present? ? "\nA previous attempt was wrong: #{correction} Do not repeat that." : ''
         <<~TEXT.strip
           This is a real photograph. Paint #{description} solid, flat, pure magenta (#FF00FF): no shading, texture or
           reflections on it. Change nothing else at all: every other pixel, the framing, the camera and the objects in
-          front of it stay exactly as they are. If the photo does not show any, return the photo unchanged.
+          front of it stay exactly as they are. If the photo does not show any, return the photo unchanged.#{fix}
         TEXT
       end
 

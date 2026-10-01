@@ -21,8 +21,9 @@ module Truebuild
       MIN_REGION = 0.001 # share of the photo; smaller regions are noise
       MAX_HOLE = 0.02  # share of the photo; enclosed gaps up to this are filled
       FEATHER = 2.5
-      VERSION = 8      # bump when the cut changes, so old layers can be re-cut
+      VERSION = 9      # bump when the cut changes, so old layers can be re-cut
       EDGE_FEATHER = 1.2
+      OUTLINE_GROW = 2 # pixels at the photo's 1600 width
 
       # => { bytes:, mime:, coverage: } coverage is the share of the photo kept.
       #
@@ -60,6 +61,9 @@ module Truebuild
         mask = mask.extract_band(0) if mask.bands > 1
         mask = fit(mask, width, height)
         mask = (mask > 127).ifthenelse(255, 0).cast(:uchar)
+        # The painted outline runs a pixel or two inside the real edge; grow
+        # it so no sliver of the old finish shows along cabinet edges.
+        mask = mask.morph(disc(OUTLINE_GROW), :dilate) if OUTLINE_GROW.positive?
         alpha = mask.gaussblur(EDGE_FEATHER).cast(:uchar)
         { bytes: edit.bandjoin(alpha).webpsave_buffer(Q: 82, alpha_q: 90), mime: 'image/webp',
           coverage: (mask.avg / 255.0).round(4) }

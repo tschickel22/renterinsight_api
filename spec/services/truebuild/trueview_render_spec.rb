@@ -40,10 +40,10 @@ RSpec.describe 'TrueView rendering' do
     it 'outlines a surface by having the model paint it magenta, once per photo' do
       paints(painted)
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 5)
-      expect(mask.usage['check']).to include('fit' => 4, 'present' => true)
+      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 6)
+      expect(mask.usage['attempts']).to eq([{ 'present' => true, 'fit' => 4 }])
       expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
-      expect(mask.usage['cost_usd']).to eq(0.03)
+      expect(mask.usage['cost_usd']).to eq(0.0368) # the painting, plus the check: 2,000 in and 50 out at Sonnet rates
       expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Kitchen cabinets')).to eq(mask)
     end
 
@@ -55,6 +55,20 @@ RSpec.describe 'TrueView rendering' do
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Shutters')
       expect(mask).to have_attributes(status: 'done', coverage: 0, error: 'The house has no shutters; this is window glass.')
       expect(mask.present?).to be(false)
+    end
+
+    it "paints a rejected outline again with Claude's note, and keeps the second if it passes" do
+      prompts = []
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |_spec, _src, prompt, **|
+        prompts << prompt
+        { bytes: png(painted), mime: 'image/png', model: 'lite', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
+      end
+      verdicts = [{ 'present' => true, 'fit' => 2, 'note' => 'It included the microwave.' }, { 'present' => true, 'fit' => 5 }]
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: verdicts.shift, input_tokens: 2000, output_tokens: 50 } }
+      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Backsplash')
+      expect(prompts.last).to include('A previous attempt was wrong: It included the microwave.')
+      expect(mask.coverage.to_f).to be > 0
+      expect(mask.usage['attempts'].map { |a| a['fit'] }).to eq([2, 5])
     end
 
     it 'skips a surface the photo does not show, without paying for a finish drawing' do
