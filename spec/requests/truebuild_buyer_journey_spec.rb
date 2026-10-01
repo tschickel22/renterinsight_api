@@ -132,6 +132,45 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(BuyerPortalAccess.where(email: 'tia@example.com').count).to eq(1)
   end
 
+  it "upgrades the buyer's design-only login to the whole portal when the dealer invites them" do
+    design = save_design
+    body = claim(design)
+    portal = { 'Authorization' => "Bearer #{body['token']}" }
+
+    # Converted under another email, so conversion did not carry the login.
+    account = company.accounts.create!(name: 'May Household')
+    contact = company.contacts.create!(first_name: 'Tia', last_name: 'May', email: 'tia.may@work.example', account: account)
+    design.update!(contact: contact, account: account)
+
+    allow_any_instance_of(Api::V1::PortalUsersController).to receive(:send_portal_invitation)
+    post '/api/v1/portal_users/invite', headers: rep_headers, params: { contact_id: contact.id }
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body)).to include('upgraded' => true)
+
+    access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
+    expect(access).to have_attributes(buyer_type: 'Contact', buyer_id: contact.id)
+    expect(BuyerPortalAccess.where(company_id: company.id).count).to eq(1)
+
+    get '/api/portal/quotes', headers: portal
+    expect(response).not_to have_http_status(:forbidden)
+    get '/api/portal/truebuild_designs', headers: portal
+    expect(JSON.parse(response.body)['designs'].size).to eq(1)
+
+    post "/api/portal/truebuild_designs/#{design.id}/shared", headers: portal
+    expect(response).to have_http_status(:no_content)
+    expect(design.reload.share_count).to eq(1)
+    expect(WorkflowEvent.where(event_type: 'contact.design_shared', entity_id: contact.id)).to exist
+  end
+
+  it "does not hand a stranger's design-only login to a contact" do
+    design = save_design
+    claim(design)
+    stranger = company.contacts.create!(first_name: 'Ana', last_name: 'Lee', email: 'tia@example.com')
+    allow_any_instance_of(Api::V1::PortalUsersController).to receive(:send_portal_invitation)
+    post '/api/v1/portal_users/invite', headers: rep_headers, params: { contact_id: stranger.id }
+    expect(BuyerPortalAccess.find_by!(email: 'tia@example.com')).to have_attributes(buyer_type: 'Lead', buyer_id: design.lead_id)
+  end
+
   describe 'follow up on a shared design' do
     def events(type) = WorkflowEvent.where(event_type: type)
 

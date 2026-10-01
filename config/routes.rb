@@ -3217,6 +3217,7 @@ Rails.application.routes.draw do
       
       # Phase 4B - Quote Management
       get 'truebuild_designs', to: 'truebuild_designs#index'
+      post 'truebuild_designs/:id/shared', to: 'truebuild_designs#shared'
       resources :quotes, only: [:index, :show] do
         member do
           patch :accept

@@ -185,6 +185,14 @@ module Api
           return render json: { error: 'Contact already has active portal access' }, status: :unprocessable_entity
         end
 
+        # A buyer who saved a TrueBuild design already has a design-only login
+        # on their lead. Inviting them upgrades that login to the whole portal
+        # (quotes, documents, projects) and keeps their saved homes, rather
+        # than failing because the email is taken.
+        if !existing_access && (lead_login = upgradeable_lead_login(contact))
+          return upgrade_lead_login(lead_login, contact)
+        end
+
         # Check if email is already used by another portal user (globally)
         email_to_use = (params[:email] || contact.email).downcase
         email_conflict = BuyerPortalAccess.find_by(email: email_to_use)
@@ -387,6 +395,33 @@ module Api
       end
 
       private
+
+      # The design-only login of a lead that became this contact: one whose
+      # saved design was carried onto the contact, or a converted lead into
+      # the contact's account under the same email. Never a stranger's login.
+      def upgradeable_lead_login(contact)
+        lead_ids = contact.company.truebuild_designs.where(contact_id: contact.id).where.not(lead_id: nil).pluck(:lead_id)
+        if contact.email.present? && contact.account_id
+          lead_ids |= contact.company.leads.where(is_converted: true, converted_account_id: contact.account_id)
+                             .where('LOWER(email) = ?', contact.email.downcase).pluck(:id)
+        end
+        return nil if lead_ids.empty?
+
+        BuyerPortalAccess.where(company_id: contact.company_id, buyer_type: 'Lead', buyer_id: lead_ids).order(:id).last
+      end
+
+      def upgrade_lead_login(access, contact)
+        access.update!(buyer_type: 'Contact', buyer_id: contact.id, permissions: params[:permissions] || access.permissions)
+        contact.company.truebuild_designs.where(lead_id: access.buyer_id_previously_was).where(contact_id: nil)
+               .update_all(contact_id: contact.id) if access.buyer_id_previously_was
+        begin
+          send_portal_invitation(access, contact)
+        rescue StandardError => e
+          Rails.logger.error("Portal upgrade email failed: #{e.message}")
+        end
+        render json: { message: 'Portal access upgraded: they keep their saved homes and now see the whole portal',
+                       upgraded: true, portal_user: { id: access.id, email: access.email, status: access.status } }
+      end
 
       # Helper to get the correct company_id for sensitive operations
       # Uses JWT company_id if set (from invite), otherwise current_company_id

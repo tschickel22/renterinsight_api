@@ -7,16 +7,30 @@ module Api
     class TruebuildDesignsController < BaseController
       # GET /api/portal/truebuild_designs
       def index
-        designs = @company.truebuild_designs.includes(variant: :catalog_plan).order(created_at: :desc)
-        # By the buyer record only. Matching on email too let anyone who
-        # changed their login email see designs saved under it.
-        designs = designs.where(lead_id: buyer_lead_ids).or(designs.where(contact_id: buyer_contact_ids))
-        render json: { designs: designs.limit(50).map { |d| design_json(d) } }
+        render json: { designs: mine.includes(variant: :catalog_plan).order(created_at: :desc).limit(50).map { |d| design_json(d) } }
+      end
+
+      # POST /api/portal/truebuild_designs/:id/shared
+      # Shared from My Homes: counted and raised for the dealer to follow up,
+      # as a share from the website is.
+      def shared
+        design = mine.find_by(id: params[:id])
+        return render json: { error: 'Not found' }, status: :not_found unless design
+
+        design.track!('shared')
+        head :no_content
       end
 
       private
 
       def lead_portal_allowed? = true
+
+      # By the buyer record only. Matching on email too let anyone who
+      # changed their login email see designs saved under it.
+      def mine
+        designs = @company.truebuild_designs
+        designs.where(lead_id: buyer_lead_ids).or(designs.where(contact_id: buyer_contact_ids))
+      end
 
       def buyer_lead_ids
         current_buyer_access.buyer_type == 'Lead' ? [current_buyer_access.buyer_id] : []
