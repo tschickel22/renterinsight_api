@@ -128,7 +128,7 @@ module McpTools
     def row_limit(requested)
       remaining = daily_record_limit - records_used_today
       if remaining <= 0
-        raise Denied, "Daily limit of #{daily_record_limit} records reached for this connection. It resets at midnight."
+        raise LimitReached, "Daily limit of #{daily_record_limit} records reached for this connection. It resets at midnight."
       end
 
       [[requested.to_i.positive? ? requested.to_i : 20, MAX_ROWS].min, remaining].min

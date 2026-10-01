@@ -38,6 +38,7 @@ module McpTools
         status = 'error'
         count = nil
         message = nil
+        limit_reached = false
 
         begin
           ctx.require_scope!(required_scope)
@@ -48,6 +49,7 @@ module McpTools
           MCP::Tool::Response.new([{ type: 'text', text: JSON.generate(result.payload) }],
                                   structured_content: result.payload)
         rescue Denied => e
+          limit_reached = e.is_a?(LimitReached)
           status = 'denied'
           message = e.message
           error(e.message)
@@ -62,6 +64,7 @@ module McpTools
                      duration_ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round,
                      error_message: message)
           ctx.grant&.touch_used!
+          Alerts.after_call(ctx, status: status, limit_reached: limit_reached) if status == 'denied'
         end
       end
 

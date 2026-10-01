@@ -99,7 +99,11 @@ class Notification < ApplicationRecord
     contractor_review_rejected: { category: 'service', priority: 'normal', title: 'Work Rejected' },
     contractor_task_assigned: { category: 'service', priority: 'high', title: 'New Task Assignment' },
     project_phase_completed: { category: 'service', priority: 'normal', title: 'Project Phase Completed' },
-    contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' }
+    contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' },
+
+    # AI connector oversight (backlog E53): an AI app hit the daily record
+    # limit, or kept being refused. In-app only; not push eligible.
+    ai_connector_alert: { category: 'ai', priority: 'high', title: 'AI app activity to review' }
   }.freeze
 
   # Types that are allowed to reach a phone at all.

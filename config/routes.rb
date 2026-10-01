@@ -2978,6 +2978,9 @@ Rails.application.routes.draw do
     namespace :admin do
       # Who is on a tenant site right now, and who has just left. Cross-tenant
       # on purpose: this is the platform operator's view.
+      # Which dealers have the AI connector and how much they use it (E53).
+      get 'ai_connector_usage', to: 'ai_connector_usage#index'
+
       resources :live_visitors, only: [:index] do
         collection do
           get :history
