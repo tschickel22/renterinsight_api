@@ -2992,6 +2992,7 @@ Rails.application.routes.draw do
       get    'catalog_swatches', to: 'catalog_swatches#index'
       post   'catalog_swatches/upload', to: 'catalog_swatches#upload'
       patch  'catalog_swatches/:id', to: 'catalog_swatches#update'
+      delete 'catalog_swatches/sheets/:id', to: 'catalog_swatches#destroy_sheet'
       delete 'catalog_swatches/:id', to: 'catalog_swatches#destroy'
 
       # TrueView lab: AI renderings of model photos, every image model side by side.

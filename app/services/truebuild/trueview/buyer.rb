@@ -17,6 +17,8 @@ module Truebuild
         'bath' => /cabinet|counter|lav|floor|accent|wall ?board/i,
         'exterior' => /siding|shutter|shingle|corner post|shake/i
       }.freeze
+      # A choice of nothing ("Accent wall: None") is the photo as built.
+      NOTHING = /\A\s*(none|no\b.*|n\/?a|omit.*)\s*\z/i
       PREDRAW_EVERY = 6.hours   # a model's missing layers are queued at most this often
       DAILY_LIMIT_DEFAULT = 300 # layers a day across the platform; TRUEVIEW_DAILY_LIMIT overrides
 
@@ -74,7 +76,7 @@ module Truebuild
           sets = BuyerCatalog.new(@company, @variant).call[:groups].flat_map { |g| g[:color_sets] }
           photos.flat_map do |room, photo|
             sets.select { |s| s[:name].match?(ROOMS[room]) }.flat_map do |set|
-              set[:options].map do |o|
+              set[:options].reject { |o| o[:name].to_s.match?(NOTHING) }.map do |o|
                 selection = TruebuildRender.normalize([{ 'surface' => set[:name], 'value' => o[:name] }])
                 swatches = Trueview.swatches_for(@variant, selection)
                 { photo: photo, room: room, option_id: o[:id], selection: selection, key: TruebuildRender.key_for(selection),

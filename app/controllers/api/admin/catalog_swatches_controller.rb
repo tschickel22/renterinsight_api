@@ -48,6 +48,18 @@ class Api::Admin::CatalogSwatchesController < ApplicationController
     render json: { error: 'Another sample already has that set and name' }, status: :unprocessable_entity
   end
 
+  # DELETE /api/admin/catalog_swatches/sheets/:id
+  # The sheet and every sample it holds, so a sheet uploaded to the wrong
+  # plant can be uploaded again.
+  def destroy_sheet
+    sheet = CatalogSwatchSheet.find_by(id: params[:id])
+    return render json: { error: 'Not found' }, status: :not_found unless sheet
+
+    CatalogSwatch.where(catalog_swatch_sheet_id: sheet.id).delete_all
+    sheet.destroy!
+    head :no_content
+  end
+
   # DELETE /api/admin/catalog_swatches/:id
   def destroy
     @swatch.destroy!

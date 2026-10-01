@@ -173,6 +173,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
 
   describe 'TrueView' do
     let(:front) { 'https://s7d9.scene7.com/is/image/championhomes/belvidere-exterior-1' }
+    # "None" is the photo as built, never drawn.
+    let!(:no_corner) { option(exterior, 'None', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Corner posts' }) }
 
     around do |ex|
       old = ENV['GEMINI_API_KEY']

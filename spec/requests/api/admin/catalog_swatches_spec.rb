@@ -29,6 +29,14 @@ RSpec.describe 'Api::Admin::CatalogSwatches', type: :request do
       expect(find('Cabinets', 'Chai Oak', factory: topeka)).to be_nil
     end
 
+    it 'sees a tile name through the catalog wording, but never a lone word inside a longer name' do
+      inhale = swatch('Ceramic Tile', 'Inhale Gris 4 x 12')
+      swatch('Shutters', 'White')
+      expect(find('Backsplash', '1 Row Ceramic Inhale Gris')).to eq(inhale)
+      expect(find('Backsplash', '1 Row Inhale Gris (ceramic)')).to eq(inhale)
+      expect(find('Backsplash', '1 Row Sunset Falls White (ceramic)')).to be_nil
+    end
+
     it 'uses the surface when a name sits in several sets, and gives up on a tie' do
       siding = swatch('Standard Vinyl Siding', 'White')
       shutter = swatch('Shutters', 'White')
@@ -48,6 +56,15 @@ RSpec.describe 'Api::Admin::CatalogSwatches', type: :request do
       end.to have_enqueued_job(CatalogSwatchSheetJob)
       expect(response).to have_http_status(:created)
       expect(CatalogSwatchSheet.last).to have_attributes(factory_id: decatur.id, filename: 'poster.pdf', status: 'queued')
+    end
+
+    it 'deletes a sheet with its samples, so it can be uploaded to the right plant' do
+      sheet = CatalogSwatchSheet.create!(manufacturer: mfr, filename: 'prime.pdf', storage_ref: 'private://b/p.pdf', status: 'done')
+      swatch('Cabinets', 'Chai Oak').update!(catalog_swatch_sheet: sheet)
+      keep = swatch('Shutters', 'Black')
+      delete "/api/admin/catalog_swatches/sheets/#{sheet.id}", headers: headers_for('platform_admin')
+      expect(response).to have_http_status(:no_content)
+      expect(CatalogSwatch.where(manufacturer: mfr)).to eq([keep])
     end
 
     it 'is for platform admins only' do

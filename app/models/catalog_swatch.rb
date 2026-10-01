@@ -13,10 +13,22 @@ class CatalogSwatch < ApplicationRecord
 
   # Caption words that are not part of the finish's name: "Casper Cashmere
   # Main Panel", "Chai Oak Shaker Door", "Fog Optional".
-  NOISE = /\b(main panel|accent|optional|standard|shaker door|door|panel)\b/i
+  # Catalog wording around a tile or board name: "1 Row Ceramic Inhale
+  # Gris", "2 Rows Catch Ice (subway)", "Inhale Gris 4 x 12".
+  NOISE = /\b(main panel|accent|optional|standard|shaker door|door|panel|ceramic|subway|tile|\d+ rows?)\b|\d+\s*x\s*\d+/i
 
   def self.key(name)
-    name.to_s.downcase.gsub(NOISE, ' ').gsub(/[^a-z0-9]+/, ' ').squish
+    name.to_s.downcase.gsub(/\(.*?\)/, ' ').gsub(NOISE, ' ').gsub(/[^a-z0-9]+/, ' ').squish
+  end
+
+  # Same name, or one name inside the other when the shorter has at least
+  # two words: "inhale gris" in "inhale gris ceramic", never "white" in
+  # "sunset falls white".
+  def self.names_match?(a, b)
+    return true if a == b
+
+    short, long = [a, b].minmax_by(&:length)
+    short.split.size >= 2 && " #{long} ".include?(" #{short} ")
   end
 
   # The sample for a finish on a home: same manufacturer, the plant's own
@@ -27,7 +39,7 @@ class CatalogSwatch < ApplicationRecord
     return nil if want.empty?
 
     found = where(manufacturer_id: manufacturer_id, factory_id: [factory_id, nil].uniq).to_a
-              .select { |s| (k = key(s.name)) == want || k.start_with?("#{want} ") || want.start_with?("#{k} ") }
+              .select { |s| names_match?(key(s.name), want) }
     return nil if found.empty?
 
     words = surface.to_s.downcase.scan(/[a-z]{4,}/).map { |w| w.sub(/s\z/, '') }

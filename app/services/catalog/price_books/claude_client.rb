@@ -18,17 +18,18 @@ module Catalog
       RETRYABLE = [429, 500, 502, 503, 529].freeze
 
       # @return [Hash] { input:, stop_reason:, input_tokens:, output_tokens: }
-      def self.call(content:, tool:, system:, max_tokens: 32_000)
-        new.call(content: content, tool: tool, system: system, max_tokens: max_tokens)
+      def self.call(content:, tool:, system:, max_tokens: 32_000, temperature: nil)
+        new.call(content: content, tool: tool, system: system, max_tokens: max_tokens, temperature: temperature)
       end
 
-      def call(content:, tool:, system:, max_tokens:)
+      # temperature: 0 for readings that should come out the same every time.
+      def call(content:, tool:, system:, max_tokens:, temperature: nil)
         api_key = ENV['ANTHROPIC_API_KEY'].presence || Rails.application.credentials.dig(:anthropic, :api_key)
         raise Error, 'Anthropic API key not configured' if api_key.blank?
 
         body = { model: AiModel.for(:vision), max_tokens: max_tokens, system: system,
                  tools: [tool], tool_choice: { type: 'tool', name: tool[:name] },
-                 messages: [{ role: 'user', content: content }] }.to_json
+                 messages: [{ role: 'user', content: content }] }.merge(temperature ? { temperature: temperature } : {}).to_json
 
         5.times do |attempt|
           response = post(api_key, body)

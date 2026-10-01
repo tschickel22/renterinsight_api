@@ -67,7 +67,7 @@ module Catalog
           boxes = find_boxes(small)
           next [] if boxes.empty?
 
-          result = @client.call(system: system_prompt, tool: TOOL, max_tokens: 8000, content: [
+          result = @client.call(system: system_prompt, tool: TOOL, max_tokens: 8000, temperature: 0, content: [
             { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Base64.strict_encode64(numbered(small, boxes).pngsave_buffer) } },
             { type: 'text', text: "#{boxes.size} samples are outlined in red and numbered 1 to #{boxes.size}. Name each one." }
           ])
