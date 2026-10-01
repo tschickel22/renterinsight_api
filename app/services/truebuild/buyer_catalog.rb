@@ -32,6 +32,14 @@ module Truebuild
       Rails.cache.fetch(cache_key, expires_in: 30.minutes) { build }.merge(media: media)
     end
 
+    # What the buyer's designer shows: the dealer's buyer view applied
+    # (BuyerView). Everything else (pricing, saving, TrueView) reads the
+    # full catalog.
+    def for_buyer
+      full = call
+      full.merge(groups: BuyerView.apply(full[:groups], @terms))
+    end
+
     def build
       offered = offered_prices
       engine = PricingEngine.new(company: @company, variant: @variant, location: @location,

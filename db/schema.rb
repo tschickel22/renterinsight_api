@@ -2906,6 +2906,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000300) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.integer "freight_miles"
+    t.string "buyer_view", default: "curated", null: false
+    t.jsonb "buyer_featured_option_ids", default: [], null: false
+    t.jsonb "buyer_hidden_option_ids", default: [], null: false
+    t.jsonb "buyer_hidden_groups", default: [], null: false
     t.index "company_id, COALESCE(manufacturer_id, (0)::bigint)", name: "idx_dealer_catalog_terms_unique", unique: true
     t.index ["company_id"], name: "index_dealer_catalog_terms_on_company_id"
     t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"

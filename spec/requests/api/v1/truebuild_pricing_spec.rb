@@ -117,4 +117,26 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
     expect(JSON.parse(response.body)).to include('status' => 'adopted', 'summary' => a_hash_including('homes'))
     expect(Truebuild::BookResolver.book_for(company, variant)).to eq(newer)
   end
+
+  describe 'buyer view' do
+    it 'saves the view and its lists company-wide, and finds options by name across homes' do
+      twin = CatalogOption.create!(group: group, manufacturer: mfr, key: 'cabinets--knobs-2', name: 'Cabinet Knobs ')
+      put '/api/v1/truebuild_pricing/terms', headers: headers,
+                                             params: { buyer_view: 'custom', buyer_hidden_groups: ['Other Options', ''],
+                                                       buyer_hidden_option_ids: [knobs.id.to_s, twin.id.to_s] }
+      expect(response).to have_http_status(:ok)
+      terms = company.dealer_catalog_terms.find_by(manufacturer_id: nil)
+      expect(terms).to have_attributes(buyer_view: 'custom', buyer_hidden_groups: ['Other Options'],
+                                       buyer_hidden_option_ids: [knobs.id, twin.id])
+
+      put '/api/v1/truebuild_pricing/terms', headers: headers, params: { buyer_view: 'everyone' }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      get '/api/v1/truebuild_pricing/option_search', headers: headers, params: { q: 'knob', manufacturer_id: mfr.id }
+      expect(JSON.parse(response.body)['items']).to eq([{ 'name' => 'Cabinet Knobs', 'group' => 'Cabinets', 'ids' => [knobs.id, twin.id] }])
+
+      get '/api/v1/truebuild_pricing/option_names', headers: headers, params: { ids: [twin.id] }
+      expect(JSON.parse(response.body)['items'].first['name']).to eq('Cabinet Knobs')
+    end
+  end
 end

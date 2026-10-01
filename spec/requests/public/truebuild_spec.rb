@@ -48,7 +48,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
     book.standard_features.create!(series: 'Dutch Aspire Singles', category: 'Kitchen', name: 'Not for a sectional')
     book.standard_features.create!(series: 'Genesis Homes', category: 'Kitchen', name: 'Not for Aspire')
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'percent', value: 25)
-    company.dealer_catalog_terms.create!(price_display: 'full')
+    # These examples read the full list; the buyer view has its own below.
+    company.dealer_catalog_terms.create!(price_display: 'full', buyer_view: 'everything')
   end
 
   it 'gives a buyer the options this home offers, at retail, with colors as one-of sets and no cost anywhere' do
@@ -169,6 +170,36 @@ RSpec.describe 'Public TrueBuild', type: :request do
     home = JSON.parse(response.body)['vehicle']
     expect(home).to include('image_urls' => ['https://img/kitchen-1'], 'floor_plan_images' => ['https://img/plan'],
                             'tour_url' => 'https://my.matterport.com/show/?m=x')
+  end
+
+  describe 'buyer view' do
+    let(:terms) { company.dealer_catalog_terms.first }
+    let(:other) { CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'other', name: 'Other Options', position: 9) }
+    let!(:shirt_rack) { option(other, 'Shirt/Skirt Rack Per Wall', dealer_cost: 75) }
+    let!(:fireplace) { option(other, '102 - Std FP', dealer_cost: 900) }
+    let!(:fireplace2) { option(other, '104 - Std FP w/ Full Stone', dealer_cost: 1400) }
+
+    def names(group) = JSON.parse(response.body)['groups'].find { |g| g['name'] == group }&.dig('options')&.map { |o| o['name'] }
+
+    it 'curates by default: finishes, pick-one choices buyers care about, and the dealer\'s popular upgrades' do
+      terms.update!(buyer_view: 'curated', buyer_featured_option_ids: [fridge.id])
+      get "/public/truebuild/models/#{variant.id}", params: { token: token }
+      expect(names('Kitchen & Appliances')).to contain_exactly('Stainless Package - Electric', 'Stainless Package - Gas', 'Stainless Fridge')
+      expect(names('Other Options')).to contain_exactly('102 - Std FP', '104 - Std FP w/ Full Stone')
+      expect(JSON.parse(response.body)['groups'].find { |g| g['name'] == 'Exterior' }['color_sets']).not_to be_empty
+
+      # Still offered: the rep can price it at quote time.
+      post '/public/truebuild/price', params: { token: token, variant_id: variant.id, option_ids: [shirt_rack.id] }.to_json,
+                                      headers: { 'Content-Type' => 'application/json' }
+      expect(JSON.parse(response.body)['option_ids']).to eq([shirt_rack.id])
+    end
+
+    it 'hides groups and options in custom' do
+      terms.update!(buyer_view: 'custom', buyer_hidden_groups: ['other options'], buyer_hidden_option_ids: [fridge.id])
+      get "/public/truebuild/models/#{variant.id}", params: { token: token }
+      expect(names('Other Options')).to be_nil
+      expect(names('Kitchen & Appliances')).not_to include('Stainless Fridge')
+    end
   end
 
   describe 'TrueView' do

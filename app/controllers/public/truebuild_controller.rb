@@ -24,7 +24,7 @@ class Public::TruebuildController < ApplicationController
     variant = vehicle.catalog_plan_variant
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).call.merge(vehicle_id: vehicle.id)
+    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).for_buyer.merge(vehicle_id: vehicle.id)
   end
 
   # GET /public/truebuild/models   Every model this dealer offers, for a site block.
@@ -36,7 +36,7 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant).call
+    render json: Truebuild::BuyerCatalog.new(@company, variant).for_buyer
   end
 
   # GET /public/truebuild/models/:variant_id/trueview

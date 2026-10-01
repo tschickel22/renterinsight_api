@@ -294,6 +294,8 @@ Rails.application.routes.draw do
       delete 'truebuild_pricing/rules/:id', to: 'truebuild_pricing#destroy_rule'
       get    'truebuild_pricing/plans', to: 'truebuild_pricing#plans'
       get    'truebuild_pricing/options', to: 'truebuild_pricing#options'
+      get    'truebuild_pricing/option_search', to: 'truebuild_pricing#option_search'
+      get    'truebuild_pricing/option_names', to: 'truebuild_pricing#option_names'
       post   'truebuild_pricing/preview', to: 'truebuild_pricing#preview'
       get    'truebuild_pricing/addons', to: 'truebuild_pricing#addons'
       post   'truebuild_pricing/addons', to: 'truebuild_pricing#create_addon'

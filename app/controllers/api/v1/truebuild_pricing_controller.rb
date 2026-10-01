@@ -14,7 +14,9 @@ class Api::V1::TruebuildPricingController < ApplicationController
                                           create_addon update_addon destroy_addon]
 
   TERM_FIELDS = %i[price_update_policy price_display program_discount_pct freight_per_mile freight_flat freight_miles
-                   margin_floor_pct round_retail_to].freeze
+                   margin_floor_pct round_retail_to buyer_view].freeze
+  # The buyer view's lists (BuyerView); company-wide like price_display.
+  BUYER_LISTS = %i[buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups].freeze
 
   # GET /api/v1/truebuild_pricing
   def show
@@ -127,7 +129,10 @@ class Api::V1::TruebuildPricingController < ApplicationController
     end
 
     terms = @company.dealer_catalog_terms.find_or_initialize_by(manufacturer_id: manufacturer_id)
-    if terms.update(params.permit(*TERM_FIELDS))
+    attrs = params.permit(*TERM_FIELDS, **BUYER_LISTS.index_with { [] }).to_h
+    attrs.slice(:buyer_featured_option_ids, :buyer_hidden_option_ids).each { |k, v| attrs[k] = Array(v).map(&:to_i).uniq.first(500) }
+    attrs[:buyer_hidden_groups] = Array(attrs[:buyer_hidden_groups]).map { |g| g.to_s.strip }.reject(&:empty?).uniq.first(100) if attrs.key?(:buyer_hidden_groups)
+    if terms.update(attrs)
       render json: term_json(terms)
     else
       render json: { errors: terms.errors.full_messages }, status: :unprocessable_entity
@@ -200,6 +205,36 @@ class Api::V1::TruebuildPricingController < ApplicationController
     render json: { book_id: book.id, groups: groups }
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Model not found' }, status: :not_found
+  end
+
+  # GET /api/v1/truebuild_pricing/option_search?q=&manufacturer_id=
+  # Options by name across a manufacturer's homes, for the buyer view's
+  # popular upgrades and hidden options. One name can be several catalog
+  # options (one per series or plant), so each result carries all their ids.
+  def option_search
+    return unless authorize_action!('company_settings', 'read')
+
+    q = params[:q].to_s.strip
+    return render json: { items: [] } if q.length < 2
+
+    scope = CatalogOption.where(status: 'active').where.not(kind: 'color').where('catalog_options.name ILIKE ?', "%#{q}%")
+    scope = scope.where(manufacturer_id: params[:manufacturer_id]) if params[:manufacturer_id].present?
+    items = scope.joins(:group).limit(400).pluck('catalog_options.id', 'catalog_options.name', 'catalog_option_groups.name')
+                 .group_by { |_, name, _| name.strip }
+                 .map { |name, rows| { name: name, group: rows.first[2], ids: rows.map(&:first).sort } }
+                 .sort_by { |i| i[:name] }.first(40)
+    render json: { items: items }
+  end
+
+  # GET /api/v1/truebuild_pricing/option_names?ids[]=
+  # Names for saved ids, so the settings can list what is featured or hidden.
+  def option_names
+    return unless authorize_action!('company_settings', 'read')
+
+    ids = Array(params[:ids]).map(&:to_i).first(1000)
+    rows = CatalogOption.where(id: ids).joins(:group).pluck('catalog_options.id', 'catalog_options.name', 'catalog_option_groups.name')
+    items = rows.group_by { |_, name, _| name.strip }.map { |name, rs| { name: name, group: rs.first[2], ids: rs.map(&:first).sort } }
+    render json: { items: items.sort_by { |i| i[:name] } }
   end
 
   # POST /api/v1/truebuild_pricing/preview   { variant_id, option_ids: [], location_id, update_id }
@@ -283,7 +318,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   def term_json(t)
-    t.slice(:id, :manufacturer_id, *TERM_FIELDS).transform_values { |v| v.is_a?(BigDecimal) ? v.to_f : v }
+    t.slice(:id, :manufacturer_id, *TERM_FIELDS, *BUYER_LISTS).transform_values { |v| v.is_a?(BigDecimal) ? v.to_f : v }
   end
 
   def rule_json(r)
