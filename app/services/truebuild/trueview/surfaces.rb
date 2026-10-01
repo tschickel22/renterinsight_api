@@ -21,7 +21,7 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 2       # 1 was text segmentation; its outlines are not used
+      VERSION = 3       # 1 was text segmentation, 2 was not checked
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
@@ -38,8 +38,10 @@ module Truebuild
         ['accent wall', /accent|wall ?board/i, 'the single largest interior wall facing the camera'],
         ['siding', /siding|shake/i, "the main house's exterior wall siding. Not trim, windows, doors, roof, skirting, porch or neighboring houses"],
         ['shutters', /shutter/i, 'the window shutters on the main house'],
-        ['shingles', /shingle|roof/i, "the main house's roof shingles"],
-        ['corner posts', /corner post/i, "the vertical corner trim posts at the corners of the main house"]
+        ['shingles', /shingle|roof/i,
+         "the sloped roof surfaces of the main house covered in shingles. Not the siding or shakes in the gable triangle, not the trim or gutters"],
+        ['corner posts', /corner post/i,
+         "the narrow vertical trim boards at the outside corners of the main house's walls. Not porch posts, columns or downspouts"]
       ].freeze
 
       def category(surface)
@@ -72,12 +74,51 @@ module Truebuild
 
         mask = magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height)
         coverage = (mask.avg / 255.0).round(4)
+        verdict = coverage.positive? ? check(image, mask, key, description) : { 'right' => true, 'present' => false }
+        # A wrong outline would paint the wrong thing in every color: no
+        # layer for that surface is better. An absent surface is no layer too.
+        coverage = 0 unless verdict['right'] && verdict['present']
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
                                    "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
-                                     model: result[:model], usage: result[:usage].merge('cost_usd' => Trueview.cost(spec, result[:usage])))
-      rescue Trueview::Error, Vips::Error => e
+                                     model: result[:model], error: verdict['note'].presence,
+                                     usage: result[:usage].merge('cost_usd' => Trueview.cost(spec, result[:usage]),
+                                                                 'check' => verdict.except('note')))
+      rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
+      end
+
+      CHECK_TOOL = {
+        name: 'judge_outline',
+        description: 'Judge whether the magenta area is exactly the named surface.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            present: { type: 'boolean', description: 'The photo really shows this surface.' },
+            right: { type: 'boolean', description: 'The magenta covers this surface and essentially nothing else.' },
+            note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
+          },
+          required: %w[present right]
+        }
+      }.freeze
+
+      # Claude looks at the photo and the outline over it and says whether
+      # the outline is the surface, and whether the photo shows it at all
+      # (asked to paint shutters on a house with none, the model painted
+      # the window glass).
+      def check(image, mask, key, description)
+        look = ->(img) { Base64.strict_encode64(img.thumbnail_image(1000).jpegsave_buffer(Q: 80)) }
+        tinted = (mask > 127).ifthenelse((image * 0.4 + [153, 0, 153]).cast(:uchar), image).cast(:uchar).copy(interpretation: :srgb)
+        result = Catalog::PriceBooks::ClaudeClient.call(
+          system: 'You check outlines of home surfaces for a home configurator. Be strict: an outline that also covers ' \
+                  'other things (windows, posts, walls, floor, furniture) is wrong.',
+          tool: CHECK_TOOL, max_tokens: 400, temperature: 0,
+          content: [{ type: 'text', text: 'Photo:' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(image) } },
+                    { type: 'text', text: "The same photo with the outline in magenta. It should be #{key}: #{description}." },
+                    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look.(tinted) } }]
+        )
+        result[:input].slice('present', 'right', 'note')
+                      .merge('cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
       end
 
       def paint_prompt(description)

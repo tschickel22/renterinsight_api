@@ -20,6 +20,11 @@ RSpec.describe 'TrueView rendering' do
 
   describe 'surface outlines' do
     let(:painted) { photo.draw_rect([255, 0, 255], 0, 0, 150, 100, fill: true).cast(:uchar) }
+    let(:verdict) { { 'present' => true, 'right' => true } }
+
+    before do
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: verdict, input_tokens: 2000, output_tokens: 50 } }
+    end
 
     def paints(image)
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |spec, _src, prompt, **|
@@ -35,10 +40,21 @@ RSpec.describe 'TrueView rendering' do
     it 'outlines a surface by having the model paint it magenta, once per photo' do
       paints(painted)
       mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
-      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 2)
+      expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: 3)
+      expect(mask.usage['check']).to include('right' => true, 'present' => true)
       expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
       expect(mask.usage['cost_usd']).to eq(0.03)
       expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Kitchen cabinets')).to eq(mask)
+    end
+
+    it 'drops an outline Claude judges wrong, so the surface gets no layer rather than a wrong one' do
+      paints(painted)
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call)
+        .and_return(input: { 'present' => false, 'right' => false, 'note' => 'The house has no shutters; this is window glass.' },
+                    input_tokens: 2000, output_tokens: 50)
+      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Shutters')
+      expect(mask).to have_attributes(status: 'done', coverage: 0, error: 'The house has no shutters; this is window glass.')
+      expect(mask.present?).to be(false)
     end
 
     it 'skips a surface the photo does not show, without paying for a finish drawing' do
