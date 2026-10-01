@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# My Homes in the buyer portal: the homes this buyer designed and saved on
+# My Designs in the buyer portal: the homes this buyer designed and saved on
 # the dealer's website. Retail only, as the buyer was shown.
 module Api
   module Portal
@@ -11,7 +11,7 @@ module Api
       end
 
       # POST /api/portal/truebuild_designs/:id/shared
-      # Shared from My Homes: counted and raised for the dealer to follow up,
+      # Shared from My Designs: counted and raised for the dealer to follow up,
       # as a share from the website is.
       def shared
         design = mine.find_by(id: params[:id])
@@ -24,6 +24,10 @@ module Api
       private
 
       def lead_portal_allowed? = true
+
+      def buyer_pass
+        @buyer_pass ||= Truebuild::BuyerPass.issue(current_buyer_access)
+      end
 
       # By the buyer record only. Matching on email too let anyone who
       # changed their login email see designs saved under it.
@@ -49,7 +53,8 @@ module Api
           options: CatalogOption.where(id: d.option_ids).pluck(:name),
           price: snap['show_prices'] ? snap['total'] : nil, saved_at: d.created_at,
           image: Array(d.vehicle&.public_image_urls).first || d.variant.media.dig('photos', 0, 'url') || d.variant.media.dig('elevations', 0),
-          link: Truebuild::DesignSaver.design_url(d)
+          # Opened from here, the designer knows the buyer and saves to their account.
+          link: "#{Truebuild::DesignSaver.design_url(d)}&as=#{CGI.escape(buyer_pass)}"
         }
       end
     end

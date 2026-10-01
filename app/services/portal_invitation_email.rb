@@ -10,23 +10,26 @@
 module PortalInvitationEmail
   module_function
 
-  def html(company:, url:, text:, expires_in:)
+  # button: the call to action ("Create your account", or "Sign in" for a
+  # buyer who already has one). expires_in: nil when the link does not expire.
+  def html(company:, url:, text:, expires_in:, button: 'Create your account')
     branding = company.resolve_branding_for_inventory.with_indifferent_access
     color = branding[:primary_color].to_s.match?(/\A#\h{3,8}\z/) ? branding[:primary_color] : '#2563eb'
     logo = branding[:logo].presence
     name = ERB::Util.h(company.name)
 
+    label = button
     paragraphs = text.to_s.strip.split(/\n\s*\n/).map(&:strip).reject(&:empty?)
     body = paragraphs.map do |p|
       if p.include?(url)
         before = p.sub(url, '').strip.sub(/:\z/, '')
         lead = before.empty? ? '' : %(<p style="margin:0 0 12px;">#{ERB::Util.h(before)}</p>)
-        lead + button(url, color)
+        lead + button(url, color, label)
       else
         %(<p style="margin:0 0 16px;">#{ERB::Util.h(p).gsub("\n", '<br>')}</p>)
       end
     end
-    body << button(url, color) unless text.to_s.include?(url)
+    body << button(url, color, label) unless text.to_s.include?(url)
 
     <<~HTML
       <!DOCTYPE html>
@@ -48,7 +51,7 @@ module PortalInvitationEmail
                   documents, follow your home's progress, and message #{name}.
                 </div>
                 <p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
-                  This link works for #{ERB::Util.h(expires_in)}. If the button does not work, paste this into your browser:<br>
+                  #{expires_in ? "This link works for #{ERB::Util.h(expires_in)}. " : ''}If the button does not work, paste this into your browser:<br>
                   <a href="#{ERB::Util.h(url)}" style="color:#{color};word-break:break-all;">#{ERB::Util.h(url)}</a>
                 </p>
               </td></tr>
@@ -59,8 +62,8 @@ module PortalInvitationEmail
     HTML
   end
 
-  def button(url, color)
-    %(<p style="margin:8px 0 24px;text-align:center;"><a href="#{ERB::Util.h(url)}" style="display:inline-block;background:#{color};color:#ffffff;text-decoration:none;font-weight:600;padding:14px 28px;border-radius:8px;">Create your account</a></p>)
+  def button(url, color, label = 'Create your account')
+    %(<p style="margin:8px 0 24px;text-align:center;"><a href="#{ERB::Util.h(url)}" style="display:inline-block;background:#{color};color:#ffffff;text-decoration:none;font-weight:600;padding:14px 28px;border-radius:8px;">#{ERB::Util.h(label)}</a></p>)
   end
 
   def html?(body)

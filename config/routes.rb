@@ -201,6 +201,7 @@ Rails.application.routes.draw do
     post 'truebuild/designs', to: 'truebuild#create_design'
     get  'truebuild/designs/:design_token', to: 'truebuild#show_design'
     post 'truebuild/designs/:design_token/events', to: 'truebuild#design_event'
+    get  'truebuild/buyer', to: 'truebuild#buyer'
 
     # ==================== PUBLIC LAND PARCELS ====================
     resources :land_parcels, only: [:index, :show], controller: 'land_parcels' do

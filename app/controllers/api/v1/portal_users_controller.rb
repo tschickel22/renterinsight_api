@@ -415,7 +415,7 @@ module Api
         contact.company.truebuild_designs.where(lead_id: access.buyer_id_previously_was).where(contact_id: nil)
                .update_all(contact_id: contact.id) if access.buyer_id_previously_was
         begin
-          send_portal_invitation(access, contact)
+          send_portal_upgrade(access, contact)
         rescue StandardError => e
           Rails.logger.error("Portal upgrade email failed: #{e.message}")
         end
@@ -472,6 +472,24 @@ module Api
           createdAt: portal_user.created_at,
           updatedAt: portal_user.updated_at
         }
+      end
+
+      # The buyer already has an account (made when they saved a home), so
+      # this says what is new and asks them to sign in, not to sign up.
+      def send_portal_upgrade(access, contact)
+        company = contact.company
+        name = [contact.first_name, contact.last_name].compact.join(' ').strip.presence || 'there'
+        login_url = "#{ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'}/client/login?email=#{CGI.escape(access.email)}"
+        text = "Hi #{name},\n\nYour #{company.name} portal now has everything for your home in one place: your quotes, " \
+               "documents and your home's progress, alongside the homes you designed.\n\nSign in with the account you " \
+               "already have:\n#{login_url}\n\nBest regards,\n#{company.name}"
+        result = CommunicationService.send_email(
+          communicable: contact, to: access.email, subject: "Your #{company.name} portal has more for you",
+          body: PortalInvitationEmail.html(company: company, url: login_url, text: text, expires_in: nil, button: 'Sign in'),
+          category: 'transactional', portal_visible: false, skip_preference_check: true,
+          metadata: { portal_user_id: access.id, invitation_type: 'portal_upgrade' }
+        )
+        raise StandardError, result[:error] unless result[:success]
       end
 
       def send_portal_invitation(portal_user, contact)

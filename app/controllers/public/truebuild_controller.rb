@@ -75,7 +75,8 @@ class Public::TruebuildController < ApplicationController
       company: @company, variant: variant, vehicle: vehicle, option_ids: params[:option_ids], addon_ids: params[:addon_ids],
       contact: params.fetch(:contact, {}).permit(:first_name, :last_name, :email, :phone, :message, :marketing_consent).to_h,
       context: params.fetch(:context, {}).permit(:page_url, :utm_source, :utm_medium, :utm_campaign, :utm_content, :utm_term).to_h,
-      request: request, copied_from: params[:copied_from]
+      request: request, copied_from: params[:copied_from],
+      buyer_access: Truebuild::BuyerPass.resolve(params[:as], @company)
     ).call
     render json: design_json(design), status: :created
   rescue Truebuild::DesignSaver::Invalid => e
@@ -93,6 +94,16 @@ class Public::TruebuildController < ApplicationController
     key = "truebuild:design:shared:#{design.id}:#{request.remote_ip}"
     design.track!('shared') if Rails.cache.write(key, true, expires_in: 10.minutes, unless_exist: true)
     head :no_content
+  end
+
+  # GET /public/truebuild/buyer?as=
+  # Who a My Designs link belongs to, so the designer can say "Saving to
+  # Tia's account" and skip the contact form.
+  def buyer
+    access = Truebuild::BuyerPass.resolve(params[:as], @company)
+    return render json: { signed_in: false } unless access
+
+    render json: { signed_in: true, first_name: access.buyer.try(:first_name), email: access.email }
   end
 
   def show_design

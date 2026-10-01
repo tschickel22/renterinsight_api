@@ -14,7 +14,7 @@ module Truebuild
   # Clicking proves the inbox is theirs; the email check proves the lead is.
   #
   # The login belongs to the lead until the rep converts it (it then moves to
-  # the contact, see ConversionCarry). A lead-level login sees My Homes and a
+  # the contact, see ConversionCarry). A lead-level login sees My Designs and a
   # few buyer-scoped pages only.
   module PortalAccess
     module_function

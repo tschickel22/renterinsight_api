@@ -142,9 +142,14 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     contact = company.contacts.create!(first_name: 'Tia', last_name: 'May', email: 'tia.may@work.example', account: account)
     design.update!(contact: contact, account: account)
 
-    allow_any_instance_of(Api::V1::PortalUsersController).to receive(:send_portal_invitation)
+    sent = nil
+    allow(CommunicationService).to receive(:send_email) { |**args| sent = args; { success: true } }
     post '/api/v1/portal_users/invite', headers: rep_headers, params: { contact_id: contact.id }
     expect(response).to have_http_status(:ok)
+    # She has an account already: the email asks her to sign in, not sign up.
+    expect(sent[:subject]).to include('portal has more for you')
+    expect(sent[:body]).to include('>Sign in</a>', '/client/login?email=tia%40example.com')
+    expect(sent[:body]).not_to include('Create your account')
     expect(JSON.parse(response.body)).to include('upgraded' => true)
 
     access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
@@ -162,6 +167,15 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(WorkflowEvent.where(event_type: 'contact.design_shared', entity_id: contact.id)).to exist
   end
 
+  it 'tells the registration page when the invited buyer already has an account' do
+    design = save_design
+    claim(design) # signed in by the emailed link: that is an account
+    access = BuyerPortalAccess.find_by!(email: 'tia@example.com')
+    access.generate_invitation_token
+    get '/api/portal/auth/verify_invitation', params: { token: access.invitation_token }
+    expect(JSON.parse(response.body)).to include('ok' => true, 'has_account' => true, 'email' => 'tia@example.com')
+  end
+
   it "does not hand a stranger's design-only login to a contact" do
     design = save_design
     claim(design)
@@ -169,6 +183,34 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     allow_any_instance_of(Api::V1::PortalUsersController).to receive(:send_portal_invitation)
     post '/api/v1/portal_users/invite', headers: rep_headers, params: { contact_id: stranger.id }
     expect(BuyerPortalAccess.find_by!(email: 'tia@example.com')).to have_attributes(buyer_type: 'Lead', buyer_id: design.lead_id)
+  end
+
+  it 'saves changes from a My Designs link to the signed-in buyer, with no form and no new lead' do
+    design = save_design
+    portal = { 'Authorization' => "Bearer #{claim(design)['token']}" }
+    get '/api/portal/truebuild_designs', headers: portal
+    link = JSON.parse(response.body)['designs'].first['link']
+    pass = CGI.unescape(link[/[?&]as=([^&]+)/, 1])
+
+    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: pass }
+    expect(JSON.parse(response.body)).to include('signed_in' => true, 'first_name' => 'Tia', 'email' => 'tia@example.com')
+
+    leads = Lead.count
+    submissions = IntakeSubmission.count
+    post '/public/truebuild/designs', params: {
+      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [], as: pass, copied_from: design.public_token
+    }
+    expect(response).to have_http_status(:created)
+    version = TruebuildDesign.last
+    expect(version).to have_attributes(lead_id: design.lead_id, buyer_email: 'tia@example.com', option_ids: [])
+    expect([Lead.count, IntakeSubmission.count]).to eq([leads, submissions])
+    expect(WorkflowEvent.where(event_type: 'lead.design_copied')).to be_empty # her own new version
+
+    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: 'forged' }
+    expect(JSON.parse(response.body)).to eq('signed_in' => false)
+    other = create(:company).tap { |c| c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true }) }
+    get '/public/truebuild/buyer', params: { token: other.public_inventory_token, as: pass }
+    expect(JSON.parse(response.body)).to eq('signed_in' => false)
   end
 
   describe 'follow up on a shared design' do

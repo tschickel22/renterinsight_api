@@ -15,8 +15,12 @@ module Truebuild
 
     # copied_from: the token of a shared design this one was saved from (a
     # family member's own copy), so the original's owner hears about it.
+    # buyer_access: the buyer is signed in (a Truebuild::BuyerPass from My
+    # Designs): the design goes to their lead or contact, with no contact
+    # form, intake submission or new portal login.
     def initialize(company:, variant:, vehicle: nil, option_ids: [], contact: {}, request: nil, context: {}, addon_ids: [],
-                   copied_from: nil)
+                   copied_from: nil, buyer_access: nil)
+      @buyer_access = buyer_access
       @copied_from = copied_from.present? ? company.truebuild_designs.find_by(public_token: copied_from.to_s) : nil
       @company = company
       @variant = variant
@@ -29,6 +33,8 @@ module Truebuild
     end
 
     def call
+      return save_for_signed_in_buyer if @buyer_access
+
       validate!
       catalog = BuyerCatalog.new(@company, @variant, location: @vehicle&.location)
       price = catalog.price(@option_ids, @addon_ids)
@@ -86,6 +92,27 @@ module Truebuild
     end
 
     private
+
+    def save_for_signed_in_buyer
+      buyer = @buyer_access.buyer
+      price = BuyerCatalog.new(@company, @variant, location: @vehicle&.location).price(@option_ids, @addon_ids)
+      contact = buyer.is_a?(Contact) ? buyer : nil
+      design = @company.truebuild_designs.create!(
+        variant: @variant, vehicle: @vehicle, option_ids: price[:option_ids], price_book: BookResolver.current_for(@variant),
+        name: "#{@variant.catalog_plan.name} (#{@variant.model_number})",
+        buyer_email: @buyer_access.email.to_s.downcase,
+        buyer_name: [buyer.try(:first_name), buyer.try(:last_name)].compact.join(' ').strip,
+        lead_id: buyer.is_a?(Lead) ? buyer.id : @copied_from&.lead_id, contact_id: contact&.id, account_id: contact&.account_id,
+        price_snapshot: snapshot(price).deep_stringify_keys,
+        metadata: { 'addon_ids' => price[:addon_ids], 'page_url' => @context['page_url'].presence, 'copied_from' => @copied_from&.id,
+                    'saved_signed_in' => true }.compact.deep_stringify_keys
+      )
+      design.track!('saved')
+      if @copied_from && @copied_from.buyer_email != design.buyer_email
+        @copied_from.track!('copied', copy_id: design.id, copied_by: design.buyer_name.presence)
+      end
+      design
+    end
 
     def validate!
       email = @contact['email'].to_s.strip

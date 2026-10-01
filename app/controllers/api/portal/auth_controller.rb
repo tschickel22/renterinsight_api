@@ -203,6 +203,9 @@ module Api
           render json: {
             ok: true,
             email: buyer_access.email,
+            # Already signed up (or signed in by email link): the page offers
+            # sign in and password reset instead of a second account.
+            has_account: buyer_access.password_digest.present? || buyer_access.last_login_at.present?,
             buyer_type: buyer_access.buyer_type,
             first_name: first_name,
             last_name: last_name,
