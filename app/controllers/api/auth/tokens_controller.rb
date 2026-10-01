@@ -18,7 +18,7 @@ module Api
         end
         
         # Decode and validate refresh token
-        decoded = JsonWebToken.decode(refresh_token)
+        decoded = JsonWebToken.decode(refresh_token, allow_refresh: true)
         
         unless decoded && decoded[:type] == 'refresh'
           return render json: {

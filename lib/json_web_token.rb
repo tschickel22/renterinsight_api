@@ -63,9 +63,13 @@ class JsonWebToken
   # caller; only the MFA verify step opts in.
   MFA_PENDING_TYPES = %w[mfa_temp mfa_temp_portal].freeze
 
-  def self.decode(token, allow_mfa_pending: false)
+  # Refresh tokens are for the refresh endpoints only. They were accepted as a
+  # session everywhere else too, so a 7 day refresh token worked as an access
+  # token. Only the refresh endpoints opt in.
+  def self.decode(token, allow_mfa_pending: false, allow_refresh: false)
     body = JWT.decode(token, secret_key, true, { algorithm: 'HS256' })[0]
     return nil if !allow_mfa_pending && MFA_PENDING_TYPES.include?(body['type'])
+    return nil if !allow_refresh && body['type'] == 'refresh'
 
     HashWithIndifferentAccess.new(body)
   rescue JWT::ExpiredSignature => e
@@ -187,7 +191,7 @@ class JsonWebToken
   # @param token [String] The token to verify
   # @return [Boolean] True if valid refresh token
   def self.valid_refresh_token?(token)
-    decoded = decode(token)
+    decoded = decode(token, allow_refresh: true)
     decoded && decoded[:type] == 'refresh'
   end
 end

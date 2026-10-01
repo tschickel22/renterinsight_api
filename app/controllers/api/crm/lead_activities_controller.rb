@@ -4,6 +4,7 @@ module Api
   module Crm
     class LeadActivitiesController < ApplicationController
       include RbacAuthorization
+      include RecordLocationAccess
       rbac_resource :crm, read_actions: [:index, :show, :reminders], update_actions: [:update, :complete, :cancel, :mark_reminder_sent]
 
       before_action :set_company_scope
@@ -175,6 +176,9 @@ module Api
       def set_lead
         # STRICT TENANT ISOLATION: Only access leads in same company
         @lead = @company.leads.find_by(id: params[:lead_id])
+        # ...and only a lead at a location this person can see, the same rule
+        # as the leads screen (RecordLocationAccess).
+        @lead = nil if @lead && !record_location_accessible?(@lead, 'leads')
         unless @lead
           Rails.logger.error "[LeadActivitiesController] Lead not found: #{params[:lead_id]} for company: #{@company&.id}"
           render json: { error: 'Lead not found or access denied' }, status: :not_found

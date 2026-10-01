@@ -4,6 +4,7 @@ module Api
   module V1
     class NotesController < ApplicationController
       include RbacAuthorization
+      include RecordLocationAccess
       rbac_resource :crm
 
       before_action :set_company
@@ -33,8 +34,11 @@ module Api
       end
 
       # PATCH/PUT /api/v1/notes/:id
+      # Only the text and category can change. entity_type and entity_id used
+      # to be accepted here while only the note's ORIGINAL record was checked,
+      # so a note could be moved onto another company's record.
       def update
-        if @note.update(note_params)
+        if @note.update(note_params.slice(:content, :category))
           render json: note_json(@note)
         else
           render json: { errors: @note.errors.full_messages }, status: :unprocessable_entity
@@ -67,12 +71,26 @@ module Api
           return
         end
 
-        # Verify the entity belongs to the current company
-        unless entity_belongs_to_company?(entity_type, entity_id)
+        # Verify the entity belongs to the current company, at a location this
+        # person can see (the same rule as opening the record itself)
+        unless entity_belongs_to_company?(entity_type, entity_id) && entity_location_visible?(entity_type, entity_id)
           Rails.logger.warn "[NotesController] Entity access denied: #{entity_type}##{entity_id} not in company #{@company.id}"
           render json: { error: 'Entity not found or access denied' }, status: :not_found
           return
         end
+      end
+
+      LOCATION_RESOURCES = { 'lead' => 'leads', 'vehicle' => 'inventory', 'deal' => 'deals',
+                             'service_ticket' => 'service', 'quote' => 'finance' }.freeze
+
+      def entity_location_visible?(entity_type, entity_id)
+        type = entity_type.to_s.downcase
+        model = { 'account' => Account, 'contact' => Contact, 'vehicle' => Vehicle, 'lead' => Lead, 'deal' => Deal,
+                  'quote' => Quote, 'service_ticket' => ServiceTicket }[type]
+        return true unless model
+
+        record = model.where(company_id: @company.id).find_by(id: entity_id)
+        record.nil? || record_location_accessible?(record, LOCATION_RESOURCES[type])
       end
 
       def set_note
@@ -83,8 +101,10 @@ module Api
           return
         end
 
-        # TENANT ISOLATION: Verify the note's entity belongs to this company
-        unless entity_belongs_to_company?(@note.entity_type, @note.entity_id)
+        # TENANT ISOLATION: Verify the note's entity belongs to this company, at
+        # a location this person can see
+        unless entity_belongs_to_company?(@note.entity_type, @note.entity_id) &&
+               entity_location_visible?(@note.entity_type, @note.entity_id)
           Rails.logger.warn "[NotesController] Note access denied: Note##{params[:id]} entity not in company #{@company.id}"
           render json: { error: 'Note not found or access denied' }, status: :not_found
           return

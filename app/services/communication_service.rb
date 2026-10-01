@@ -362,7 +362,7 @@ class CommunicationService
     return { success: false, error: "Communication already sent" } if communication.sent? || communication.delivered?
     
     begin
-      result = new(communication).send_via_provider(
+      result = new(communication).deliver_existing(
         provider: communication.provider,
         channel: communication.channel,
         communication: communication,
@@ -439,6 +439,15 @@ class CommunicationService
     end
   end
   
+
+  # Public door for send_existing_communication. It used to call the private
+  # send_via_provider directly from the class method, which raised before
+  # anything was sent, so SendCommunicationJob (scheduled and async sends)
+  # could never deliver a message. Nothing in production uses those paths yet.
+  def deliver_existing(provider:, channel:, communication:, options:)
+    send_via_provider(provider: provider, channel: channel, communication: communication, options: options)
+  end
+
   private
 
   def inject_tracking_pixel!(communication)

@@ -1,5 +1,17 @@
 class Api::V1::SearchController < ApplicationController
   include PersonNameSearch
+  include RecordLocationAccess
+
+  # The read permission each record type's own screen checks. Search returns a
+  # type only to someone who could open it there, and only at the locations
+  # they can see (RecordLocationAccess). It used to check only the company, so
+  # a rep limited to one location, or without a module, found everything.
+  SEARCH_RESOURCES = {
+    leads: 'leads', contacts: 'crm', accounts: 'crm', deals: 'deals', vehicles: 'inventory',
+    service_tickets: 'service', quotes: 'finance', invoices: 'finance', cash_receipts: 'accounting',
+    parts: 'inventory', purchase_orders: 'inventory', suppliers: 'inventory', agreements: 'agreements',
+    contractors: 'contractors', workflow_rules: 'workflow_automation'
+  }.freeze
 
   before_action :set_company_scope
 
@@ -19,8 +31,7 @@ class Api::V1::SearchController < ApplicationController
   MAX_PER_TYPE_LIMIT = 50
 
   def global
-    # Skip authorization - search is a fundamental feature available to all users
-    # Results are already scoped to @company and each module has its own RBAC
+    # No single permission: each record type is checked separately in #visible.
     
     query = params[:query]&.strip
     return render json: { results: [] } if query.blank? || query.length < 2
@@ -49,7 +60,7 @@ class Api::V1::SearchController < ApplicationController
     # Converted leads stay out: they exist as a contact, which this same search
     # covers, so including both would show every converted person twice.
     begin
-      leads_scope = @company.leads
+      leads_scope = visible(:leads)
                             .where(is_converted: [false, nil])
                             .where(person_name_where('leads', extra: %w[email phone company_name]),
                                    q: like)
@@ -79,7 +90,7 @@ class Api::V1::SearchController < ApplicationController
     # CRM - Contacts (has first_name, last_name - NOT name; NO is_deleted column)
     begin
       # No last_activity_at on contacts to tie-break with, so id DESC stands.
-      contacts_scope = @company.contacts
+      contacts_scope = visible(:contacts)
                                .where(person_name_where('contacts', extra: %w[email phone]), q: like)
       contacts = contacts_scope
                  .order(Arel.sql(person_name_order('contacts', query)))
@@ -104,7 +115,7 @@ class Api::V1::SearchController < ApplicationController
     
     # CRM - Accounts
     begin
-      accounts = @company.accounts
+      accounts = visible(:accounts)
                         .where(is_deleted: [false, nil])
                         .where("name ILIKE ? OR website ILIKE ?", like, like)
                         .limit(5)
@@ -131,13 +142,13 @@ class Api::V1::SearchController < ApplicationController
     # Deals with active scenarios are badged desked:true and deep-link to the desk tab.
     begin
       # Path 1 — name / deal number.
-      name_matches = @company.deals
+      name_matches = visible(:deals)
                             .where('deals.name ILIKE ? OR deals.deal_number ILIKE ?', like, like)
                             .limit(5).to_a
 
       # Path 2 — stock#/serial/VIN/inventory-id of a unit in an ACTIVE scenario.
-      # @company.deals JOIN scenarios JOIN vehicles — never an unscoped scenario query.
-      scenario_matches = @company.deals
+      # visible(:deals) JOIN scenarios JOIN vehicles — never an unscoped scenario query.
+      scenario_matches = visible(:deals)
                                 .joins(deal_desk_scenarios: :vehicle)
                                 .where(deal_desk_scenarios: { status: 'active' })
                                 .where(
@@ -182,7 +193,7 @@ class Api::V1::SearchController < ApplicationController
     # `SELECT DISTINCT vehicles.*` errors because the table has json (not jsonb) columns
     # with no equality operator. IN(...) dedupes and keeps the outer scope join-free.
     begin
-      match_scope = @company.vehicles
+      match_scope = visible(:vehicles)
                            .where(is_deleted: [false, nil])
                            .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
                            .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
@@ -193,7 +204,7 @@ class Api::V1::SearchController < ApplicationController
                              "OR #{person_name_where('contacts')} OR accounts.name ILIKE :q",
                              q: like
                            )
-      vehicles = @company.vehicles.where(id: match_scope.select("vehicles.id")).limit(5)
+      vehicles = visible(:vehicles).where(id: match_scope.select("vehicles.id")).limit(5)
 
       matched_buyers_by_vehicle = vehicle_buyer_matches(vehicles, query)
 
@@ -219,7 +230,7 @@ class Api::V1::SearchController < ApplicationController
       # surname returned nothing here while the same term found the account.
       # No .distinct: :account is a belongs_to, and this table's json columns
       # have no equality operator for SELECT DISTINCT anyway.
-      tickets = @company.service_tickets
+      tickets = visible(:service_tickets)
                        .left_joins(:account)
                        .where("service_tickets.ticket_number ILIKE :t OR service_tickets.title ILIKE :t " \
                               "OR service_tickets.description ILIKE :t OR accounts.name ILIKE :t " \
@@ -244,7 +255,7 @@ class Api::V1::SearchController < ApplicationController
     
     # Sales - Quotes (has notes NOT title)
     begin
-      quotes = @company.quotes
+      quotes = visible(:quotes)
                       .where(is_deleted: [false, nil])
                       .where("quote_number ILIKE ? OR notes ILIKE ?", like, like)
                       .limit(5)
@@ -266,7 +277,7 @@ class Api::V1::SearchController < ApplicationController
     
     # Finance - Invoices (NO description column - use notes)
     begin
-      invoices = @company.invoices
+      invoices = visible(:invoices)
                         .where(is_deleted: [false, nil])
                         .where("invoice_number ILIKE ? OR notes ILIKE ?", like, like)
                         .limit(5)
@@ -288,7 +299,7 @@ class Api::V1::SearchController < ApplicationController
     
     # Finance - Cash Receipts
     begin
-      cash_receipts = @company.cash_receipts
+      cash_receipts = visible(:cash_receipts)
         .not_deleted
         .left_joins(:account)
         .where("cash_receipts.receipt_number ILIKE ? OR cash_receipts.customer_name ILIKE ? OR accounts.name ILIKE ?",
@@ -312,7 +323,7 @@ class Api::V1::SearchController < ApplicationController
 
     # Inventory - Parts
     begin
-      parts = @company.parts
+      parts = visible(:parts)
                      .where(is_deleted: [false, nil])
                      .where("name ILIKE ? OR sku ILIKE ? OR manufacturer_name ILIKE ? OR manufacturer_part_no ILIKE ? OR barcode ILIKE ?", 
                             like, like, like, like, like)
@@ -335,7 +346,7 @@ class Api::V1::SearchController < ApplicationController
     
     # Operations - Purchase Orders (search PO number, supplier name, code, account number)
     begin
-      pos = @company.purchase_orders
+      pos = visible(:purchase_orders)
                    .left_joins(:supplier)
                    .where(is_deleted: [false, nil])
                    # Supplier is an alias subclass of Vendor, so the join lands
@@ -362,7 +373,7 @@ class Api::V1::SearchController < ApplicationController
     
     # Inventory - Suppliers (search name, code, account number)
     begin
-      suppliers = @company.suppliers
+      suppliers = visible(:suppliers)
                          .where(is_deleted: [false, nil])
                          .where("name ILIKE ? OR code ILIKE ? OR account_number ILIKE ?", 
                                 like, like, like)
@@ -384,7 +395,7 @@ class Api::V1::SearchController < ApplicationController
     
     # Operations - Agreements
     begin
-      agreements = @company.agreements
+      agreements = visible(:agreements)
                           .where(is_deleted: [false, nil])
                           .where("title ILIKE ? OR agreement_number ILIKE ? OR category ILIKE ?",
                                  like, like, like)
@@ -406,7 +417,7 @@ class Api::V1::SearchController < ApplicationController
 
     # Operations - Contractors
     begin
-      contractors = @company.contractors
+      contractors = visible(:contractors)
                            .where(is_deleted: [false, nil])
                            .where("name ILIKE ? OR contact_name ILIKE ? OR email ILIKE ? OR trade_type ILIKE ?",
                                   like, like, like, like)
@@ -428,7 +439,7 @@ class Api::V1::SearchController < ApplicationController
 
     # Workflow Rules
     begin
-      rules = @company.workflow_rules
+      rules = visible(:workflow_rules)
                       .where("name ILIKE ?", like)
                       .limit(5)
       results += rules.map do |r|
@@ -489,7 +500,7 @@ class Api::V1::SearchController < ApplicationController
 
     if types.include?('account')
       begin
-        accounts = @company.accounts
+        accounts = visible(:accounts)
                            .where(is_deleted: [false, nil])
                            .where('name ILIKE :q OR website ILIKE :q', q: like)
                            .limit(per_type).to_a
@@ -498,9 +509,9 @@ class Api::V1::SearchController < ApplicationController
         # and we'd be guessing, so we leave it for the user to pick.
         solo_contact_by_account = {}
         if accounts.any?
-          counts = @company.contacts.where(account_id: accounts.map(&:id)).group(:account_id).count
+          counts = visible(:contacts).where(account_id: accounts.map(&:id)).group(:account_id).count
           solo_ids = counts.select { |_, n| n == 1 }.keys
-          @company.contacts.where(account_id: solo_ids).each do |c|
+          visible(:contacts).where(account_id: solo_ids).each do |c|
             solo_contact_by_account[c.account_id] = c
           end
         end
@@ -527,7 +538,7 @@ class Api::V1::SearchController < ApplicationController
 
     if types.include?('contact')
       begin
-        contacts = @company.contacts
+        contacts = visible(:contacts)
                            .preload(:account)
                            .where(person_name_where('contacts', extra: %w[email phone]), q: like)
                            .order(Arel.sql(person_name_order('contacts', query)))
@@ -556,7 +567,7 @@ class Api::V1::SearchController < ApplicationController
       begin
         # belongs_to joins can't multiply rows, so no DISTINCT needed (and the
         # deals table's json columns have no equality operator for one anyway).
-        deals = @company.deals
+        deals = visible(:deals)
                         .left_joins(:account, :contact)
                         .preload(:account, :contact)
                         .where(
@@ -589,7 +600,7 @@ class Api::V1::SearchController < ApplicationController
 
     if types.include?('service_ticket')
       begin
-        tickets = @company.service_tickets
+        tickets = visible(:service_tickets)
                           .left_joins(:account, :contact)
                           .preload(:account, :contact)
                           .where(
@@ -622,7 +633,7 @@ class Api::V1::SearchController < ApplicationController
 
     if types.include?('lead')
       begin
-        leads = @company.leads
+        leads = visible(:leads)
                         .where(is_converted: [false, nil])
                         .where.not(status: %w[lost unqualified dead])
                         .where(person_name_where('leads', extra: %w[email phone company_name]), q: like)
@@ -654,6 +665,15 @@ class Api::V1::SearchController < ApplicationController
   end
 
   private
+  # Records of one type this person may find: none without that type's read
+  # permission, otherwise the company's records at the locations they can see.
+  def visible(association)
+    resource = SEARCH_RESOURCES.fetch(association)
+    relation = @company.public_send(association)
+    return relation.none unless can?(resource, 'read')
+
+    location_scope(relation, resource)
+  end
 
   # Rows per type to return. Defaults to the dropdown size; the caller raises it
   # when the user asks to see the rest. Clamped so a hand-edited URL cannot ask
@@ -683,7 +703,7 @@ class Api::V1::SearchController < ApplicationController
   def note_fallback_results(type, like)
     return [] if like.blank?
 
-    scope = type == 'lead' ? @company.leads.where(is_converted: [false, nil]) : @company.contacts
+    scope = type == 'lead' ? visible(:leads).where(is_converted: [false, nil]) : visible(:contacts)
 
     # Two places a note can live: the record's own notes column, and the
     # polymorphic notes table behind the Notes tab.
@@ -726,7 +746,7 @@ class Api::V1::SearchController < ApplicationController
     vehicle_ids = vehicles_scope.map(&:id)
     return {} if vehicle_ids.empty?
 
-    deals = @company.deals
+    deals = visible(:deals)
       .where(vehicle_id: vehicle_ids)
       .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
       .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
