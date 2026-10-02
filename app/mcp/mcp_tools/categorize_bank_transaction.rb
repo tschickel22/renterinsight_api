@@ -4,10 +4,8 @@ module McpTools
   # Categorizes one bank feed line exactly as the app's Categorize panel does
   # (create_je: true): the line is marked matched to the GL account and a
   # two-line journal entry is posted between the bank's GL account and that
-  # account. One difference, deliberate: when the entry cannot be posted (no
-  # GL account on the bank, or a closed period), the app still marks the line
-  # categorized with nothing in the books; here nothing is saved and the AI is
-  # told why.
+  # account, all or nothing (BankTransaction#categorize!). A line whose money
+  # is already in the books is refused, pointing at match_bank_transaction.
   class CategorizeBankTransaction < Base
     tool_name 'categorize_bank_transaction'
     title 'Categorize a bank transaction'
@@ -51,13 +49,14 @@ module McpTools
       end
       before = { status: txn.status, category_account_id: nil, matched_journal_entry_id: nil, memo: txn.memo, contact_id: txn.contact_id }
 
-      BankTransaction.transaction do
+      begin
         txn.categorize!(account: account, contact: contact, memo: memo.presence, create_je: true, source: 'manual')
-        unless txn.reload.matched_journal_entry_id
-          raise UserError, 'The journal entry could not be posted, most often because the transaction date is in a ' \
-                           'closed period. Nothing was changed.'
-        end
+      rescue BankTransaction::AlreadyBooked => e
+        raise UserError, "#{e.message} Use match_bank_transaction with journal_entry:#{e.entries.first.id}. Nothing was changed."
+      rescue BankTransaction::PostingError => e
+        raise UserError, "#{e.message} Nothing was changed."
       end
+      txn.reload
 
       ctx.record_change(action: 'updated', record: txn, before: before,
                         after: { status: txn.status, category_account_id: account.id,

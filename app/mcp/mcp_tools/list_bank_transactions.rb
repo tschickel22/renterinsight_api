@@ -9,7 +9,8 @@ module McpTools
     description 'Bank feed lines, newest first. Defaults to the ones still to be categorized (status unmatched). ' \
                 'Each unmatched line carries suggested_account (the GL account this dealer used most for the same ' \
                 'payee before, with how often and a confidence) or suggested_action exclude (when that payee was ' \
-                'excluded before), any bank rule that matches, and looks_like (transfer, ' \
+                'excluded before), any bank rule that matches, already_booked (an entry already in the books for ' \
+                'exactly this line: match it with match_bank_transaction, never categorize it), and looks_like (transfer, ' \
                 'card payment, floor plan, check, fee, deposit). Suggestions are hints: confirm with the user before ' \
                 'categorize_bank_transaction. Filter by bank_account_id, dates, direction or a description search.'
     input_schema(
@@ -52,11 +53,22 @@ module McpTools
       suggestions = suggestions_for(ctx, all, unmatched)
       matcher = BankTransactionMatchingService.new(ctx.company) if include_journal_matches && unmatched.size <= 15
 
+      booking = BankTransactionMatchingService.new(ctx.company)
       items = rows.map do |txn|
         row = AccountingAccess.bank_txn(ctx, txn)
         next row unless suggestions[txn.id]
 
         row = row.merge(suggestions[txn.id])
+        booked = booking.booked_entries(txn)
+        if booked.any?
+          # Already in the books: match it, never categorize it.
+          row[:already_booked] = booked.first(3).map do |je|
+            { entry_id: "journal_entry:#{je.id}", entry_number: je.entry_number, date: je.entry_date&.iso8601,
+              memo: je.memo.to_s.first(120) }
+          end
+          row.delete(:suggested_account)
+          row[:suggested_action] = 'match'
+        end
         row[:journal_matches] = journal_matches(matcher, txn) if matcher
         row
       end

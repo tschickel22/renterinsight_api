@@ -9,7 +9,7 @@ module McpTools
       AccountingSummary, ListChartOfAccounts, ListBankTransactions, ListBills, ListInvoices
     ].freeze
 
-    WRITE_TOOLS = [CategorizeBankTransaction, ExcludeBankTransaction].freeze
+    WRITE_TOOLS = [CategorizeBankTransaction, MatchBankTransaction, ExcludeBankTransaction].freeze
 
     PROMPTS = [McpPrompts::CategorizeBankFeed, McpPrompts::BillsDue, McpPrompts::MoneySnapshot].freeze
 
@@ -36,6 +36,15 @@ module McpTools
       return Undo.skipped('The transaction has been reconciled since. Undo the reconciliation in DealerTide first.') if txn.status == 'reconciled'
 
       after = change.after
+      if after['matched_by'] == 'match'
+        unless txn.status == 'matched' && txn.matched_journal_entry_id.to_s == after['matched_journal_entry_id'].to_s
+          return Undo.skipped("Changed since: it is now #{txn.status}. Left as it is.")
+        end
+
+        txn.update!(status: 'unmatched', matched_journal_entry: nil, matched_at: nil, matched_by: nil)
+        return Undo.done('Bank transaction unmatched from the entry. The entry itself was not touched.')
+      end
+
       if after['status'] == 'excluded'
         return Undo.skipped("Changed since: it is now #{txn.status}. Left as it is.") unless txn.status == 'excluded'
 

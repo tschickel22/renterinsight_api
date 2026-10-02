@@ -10,9 +10,11 @@ class BankTransactionMatchingService
   def auto_match(bank_transaction)
     return if bank_transaction.matched?
 
-    rule_result = apply_rules(bank_transaction)
-    if rule_result
-      handle_rule_match(bank_transaction, rule_result)
+    # An entry already in the books for this exact line wins over any rule:
+    # a rule that categorizes it would post the money a second time.
+    exact_matches = find_exact_matches(bank_transaction)
+    if exact_matches.count == 1
+      bank_transaction.match_to_journal_entry!(exact_matches.first.journal_entry, source: 'auto')
       return
     end
 
@@ -24,9 +26,9 @@ class BankTransactionMatchingService
       end
     end
 
-    exact_matches = find_exact_matches(bank_transaction)
-    if exact_matches.count == 1
-      bank_transaction.match_to_journal_entry!(exact_matches.first.journal_entry, source: 'auto')
+    rule_result = apply_rules(bank_transaction)
+    if rule_result
+      handle_rule_match(bank_transaction, rule_result) if exact_matches.none?
       return
     end
 
@@ -43,6 +45,13 @@ class BankTransactionMatchingService
       matched_count += 1 if txn.reload.matched?
     end
     matched_count
+  end
+
+  # Entries already in the books for exactly this line (same date, amount and
+  # side on the bank's GL account) that no feed line is matched to yet.
+  # Categorizing a line that has one would post the money a second time.
+  def booked_entries(bank_transaction)
+    JournalEntry.where(id: find_exact_matches(bank_transaction).select(:journal_entry_id)).order(:id).to_a
   end
 
   def suggest_matches(bank_transaction, limit: 5)
@@ -117,17 +126,21 @@ class BankTransactionMatchingService
       category_account_id: rule.assign_account_id,
       contact_id: rule.assign_contact_id,
       memo: rule.assign_memo.presence || bank_transaction.memo,
-      rule_id: rule.id,
-      matched_at: Time.current,
-      matched_by: 'rule'
+      rule_id: rule.id
     )
 
-    if rule.auto_confirm
+    # Without auto-confirm the rule only fills in the category for a person
+    # to confirm: the line stays unmatched, because "matched" with no entry
+    # behind it reads as booked when it is not (Heartland had 28 like that).
+    # Auto-confirm posts, and a line that cannot post stays for review.
+    return unless rule.auto_confirm
+
+    BankTransaction.transaction do
+      bank_transaction.update!(status: 'matched', matched_at: Time.current, matched_by: 'rule')
       bank_transaction.create_journal_entry_from_categorization!
-      bank_transaction.update!(status: 'matched')
-    else
-      bank_transaction.update!(status: 'matched')
     end
+  rescue BankTransaction::PostingError => e
+    Rails.logger.warn("[BankMatching] rule #{rule.id} could not post txn #{bank_transaction.id}: #{e.message}")
   end
 
   def find_by_check_number(bank_transaction)
