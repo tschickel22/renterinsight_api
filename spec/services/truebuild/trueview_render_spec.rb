@@ -183,6 +183,23 @@ RSpec.describe 'TrueView rendering' do
       expect(render.layer_url).to be_present
     end
 
+    it "checks the layer against the factory's sample, so a wrong color fails" do
+      mfr = Manufacturer.create!(name: "Champion #{SecureRandom.hex(3)}", industry_type: 'manufactured_home')
+      swatch = CatalogSwatch.create!(manufacturer: mfr, set_name: 'Cabinets', name: 'Destin White', hex: '#f2f0ea', image_url: 'https://b/destin.jpg')
+      render.update!(usage: { 'swatch_ids' => [swatch.id] })
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
+        .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
+      asked = []
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |content:, **|
+        asked << content
+        { input: { 'score' => 2, 'note' => 'The cabinets are cream, the sample is bright white.' }, input_tokens: 3000, output_tokens: 40 }
+      end
+      Truebuild::Trueview.perform!(render)
+      expect(asked.first.count { |c| c[:type] == 'image' }).to eq(3)
+      expect(asked.first.map { |c| c[:text] }.join).to include("factory's own sample of Destin White (measured color #f2f0ea)", 'score 2')
+      expect(render.reload).to have_attributes(status: 'rejected', error: 'Hidden: The cabinets are cream, the sample is bright white.')
+    end
+
     it 'shows the layer when the check itself cannot run' do
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
         .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
@@ -194,7 +211,11 @@ RSpec.describe 'TrueView rendering' do
   end
 
   describe 'framing' do
-    before { allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil) }
+    before do
+      allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil)
+      # The layer check passes; without this it calls Claude for real wherever a key is set.
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(input: { 'score' => 5 }, input_tokens: 0, output_tokens: 0)
+    end
 
     it 'asks for the photo shape and draws again when the model reframes, paying for both' do
       tall = png(Vips::Image.black(100, 300, bands: 3) + 90)

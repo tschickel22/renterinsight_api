@@ -103,6 +103,22 @@ RSpec.describe 'Public TrueBuild', type: :request do
       .to eq(['1 Row Ceramic Inhale Gris', '2 Row Ceramic Subway Catch Ice', '2 Rows Inhale Gris (ceramic)', 'Glass', 'Subway'])
   end
 
+  it 'asks for the cabinet color once, under Cabinets, before anything else' do
+    packages = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'packages', name: 'Packages', position: 2)
+    cabinets = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 10)
+    %w[Destin\ White Timberwolf].each do |c|
+      option(packages, c, kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
+      option(cabinets, c, kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
+    end
+    option(packages, 'Liberty Package', dealer_cost: 500)
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    groups = JSON.parse(response.body)['groups']
+    expect(groups.first['name']).to eq('Cabinets')
+    expect(groups.first['color_sets']).to match([a_hash_including('name' => 'Cabinets')])
+    expect(groups.first['color_sets'].first['options'].map { |o| o['name'] }).to eq(['Destin White', 'Timberwolf'])
+    expect(groups.find { |g| g['name'] == 'Packages' }['color_sets']).to eq([])
+  end
+
   it 'shows a family of options in one place, however the price book filed it' do
     tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
     stray = option(tile, 'Black Stainless Steel Package - Gas', dealer_cost: 3000)
@@ -369,6 +385,31 @@ RSpec.describe 'Public TrueBuild', type: :request do
       recut = TruebuildRender.where("usage ? 'recut_from'").sole
       expect(recut).to have_attributes(image_url: 'https://b/clay.png', status: 'queued')
       expect(recut.usage['recut_from']).to eq(clay_row.id)
+    ensure
+      ENV.delete('TRUEVIEW_DAILY_LIMIT')
+    end
+
+    it 'does not offer a finish whose drawing failed its check, unless it is the last in its set' do
+      trueview
+      TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
+                     .update!(status: 'rejected', layer_url: 'https://b/clay.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      TruebuildRender.find_by("selection->0->>'value' = 'Black'")
+                     .update!(status: 'rejected', layer_url: 'https://b/black.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+      sets = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
+      expect(sets['Siding']).to contain_exactly('White', 'Olive')
+      expect(sets['Shutters']).to eq(['Black'])
+    end
+
+    it 'checks a held-back drawing again, cut again for free, rather than paying for a new one' do
+      trueview
+      clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
+      clay_row.update!(status: 'rejected', image_url: 'https://b/clay.png', layer_url: 'https://b/clay.webp', usage: { 'mask_version' => 2 })
+      TruebuildRender.where.not(id: clay_row.id).delete_all
+      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+      ENV['TRUEVIEW_DAILY_LIMIT'] = '0'
+      trueview
+      expect(TruebuildRender.where("usage ? 'recut_from'").sole.usage['recut_from']).to eq(clay_row.id)
     ensure
       ENV.delete('TRUEVIEW_DAILY_LIMIT')
     end

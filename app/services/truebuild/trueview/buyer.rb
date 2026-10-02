@@ -50,6 +50,21 @@ module Truebuild
         { photos: photos, drawing: drawing }
       end
 
+      # Option ids whose drawing failed its check on any photo, under the
+      # current cut: BuyerCatalog does not offer them. Cached briefly, as the
+      # designer asks on every load.
+      def self.held_back(company, variant)
+        Rails.cache.fetch("truebuild:trueview:held:v#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
+          new(company, variant).held_back
+        end
+      end
+
+      def held_back
+        plan = self.plan
+        failed = hidden_layers(plan) - done_layers(plan).keys
+        plan.select { |p| failed.include?([p[:photo], p[:key], p[:prompt]]) }.map { |p| p[:option_id] }.uniq.to_set
+      end
+
       # Queues every missing layer, once per PREDRAW_EVERY, within the daily
       # limit. Returns the number queued.
       # force: draw now (after the photos were picked), not once per PREDRAW_EVERY.
@@ -205,9 +220,11 @@ module Truebuild
                   .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
       end
 
-      # The newest drawing per finish made under an older cut.
+      # The newest drawing per finish made under an older cut. A rejected one
+      # counts: cut again, it is checked again (now against the factory's
+      # sample) for the price of the check, not a new drawing.
       def older_drawings(plan)
-        rows(plan).done.where.not(image_url: nil).order(:id)
+        rows(plan).where(status: %w[done rejected]).where.not(image_url: nil).order(:id)
                   .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .index_by { |r| [r.source_url, r.selection_key, r.prompt] }
       end

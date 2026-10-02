@@ -21,7 +21,7 @@ RSpec.describe Truebuild::OptionFamilies do
 
     fridges = families('20.5CF O/U Refer w/o Ice IPO 18.2', '24.7CF SS FrenchDoorRef IPO 18.2', '21.2 CF Black SxS Refer IPO 18.2CF',
                        '24.7CF SS FrenchDrRef IPO 20.5 O/U', 'Carpet IPO lino (per bdrm)', 'Carpet IPO lino (per LR)')
-    expect(fridges.keys).to eq([0, 1, 2])
+    expect(fridges).to eq(0 => 'refrigerator', 1 => 'refrigerator', 2 => 'refrigerator', 3 => 'refrigerator')
   end
 
   it 'gives a home one of each thing it can only have one of' do

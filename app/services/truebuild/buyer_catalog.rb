@@ -66,7 +66,24 @@ module Truebuild
     # full catalog.
     def for_buyer
       full = call
-      full.merge(groups: BuyerView.apply(full[:groups], @terms))
+      full.merge(groups: without_failed_drawings(BuyerView.apply(full[:groups], @terms)))
+    end
+
+    # A finish whose TrueView drawing failed its check is not offered: a
+    # buyer shown Destin White in the wrong color, or a note that it cannot
+    # be shown, has been shown something wrong. A rep still quotes it. A set
+    # is never emptied this way; the buyer still needs a color to pick.
+    def without_failed_drawings(groups)
+      held = Trueview::Buyer.held_back(@company, @variant)
+      return groups if held.empty?
+
+      groups.map do |g|
+        sets = g[:color_sets].map do |st|
+          kept = st[:options].reject { |o| held.include?(o[:id]) }
+          kept.empty? ? st : st.merge(options: kept)
+        end
+        g.merge(color_sets: sets, options: g[:options].reject { |o| held.include?(o[:id]) })
+      end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
     end
 
     # Every option group a model's price book offers, with no dealer and no
@@ -77,7 +94,7 @@ module Truebuild
 
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at), variant.updated_at].map { |t| t.try(:to_i) || t }
-      Rails.cache.fetch("truebuild:finish_groups:v4:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+      Rails.cache.fetch("truebuild:finish_groups:v5:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
         catalog.instance_variable_set(:@book, book)
@@ -178,7 +195,7 @@ module Truebuild
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v9:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v10:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -232,11 +249,14 @@ module Truebuild
       # in one series and Interior Walls & Trim in another.
       families = OptionFamilies.for(rest.reject { |op| op.option.kind == 'color' }.map(&:option))
       by_group = one_place_per_family(by_group, families)
-      by_group.sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
+      built = by_group.sort_by { |g, _| [g.name == FIRST_GROUP ? 0 : 1, g.position.to_i, g.name] }.map do |group, ops|
         colors, others = ops.partition { |op| op.option.kind == 'color' }
         sets = colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
                      .to_h { |set, cs| [set, cs.map { |op| color_json(op, retail, set) }] }
         extra_sets[group.id].each { |set, json| (sets[set] ||= []) << json }
+        [group, sets, others]
+      end
+      one_place_per_color_set(built).map do |group, sets, others|
         {
           id: group.id, name: group.name,
           color_sets: sets.map { |set, os| { name: set, options: one_per_finish(os).sort_by { |o| o[:name] } } }
@@ -246,6 +266,33 @@ module Truebuild
                          .sort_by { |o| [o[:standard] ? 0 : 1, (o[:family] || o[:name]).downcase, o[:name].downcase] }
         }
       end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
+    end
+
+    # Cabinets lead the designer: the choice that sets the look of the
+    # kitchen and baths.
+    FIRST_GROUP = 'Cabinets'
+
+    # A color set is one choice, so it is shown in one place: the group named
+    # for it (Cabinets under Cabinets), else the first group holding it. Bay
+    # Port's book lists Destin White and Timberwolf under Packages and under
+    # Cabinets, and the buyer picked a cabinet color twice.
+    # built: [[group, { set name => [chip] }, other ops]] in display order.
+    def one_place_per_color_set(built)
+      holders = Hash.new { |h, k| h[k] = [] }
+      built.each { |group, sets, _| sets.each_key { |set| holders[set] << group } }
+      built.each do |group, sets, _|
+        sets.keys.each do |set|
+          next if holders[set].size < 2
+
+          named = Catalog::PriceBooks::Sections.group_for(set).last
+          home = holders[set].find { |g| g.name == named } || holders[set].first
+          next if home == group
+
+          home_sets = built.find { |g, _, _| g == home }[1]
+          home_sets[set] = Array(home_sets[set]) + sets.delete(set)
+        end
+      end
+      built
     end
 
     # A family is one choice, so it is shown in one place: the group holding

@@ -120,7 +120,10 @@ module Truebuild
       end
       # The samples named when the row was made, in prompt order.
       ids = Array(render.usage['swatch_ids'])
-      samples = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact.map { |sw| fetch_source(sw.image_url) }
+      swatches = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact
+      samples = swatches.map { |sw| fetch_source(sw.image_url) }
+      # A layer changes one finish; its check compares against that sample.
+      check_with = { sample: samples.first&.dig(:bytes), hex: swatches.first&.hex }
       prompt = render.prompt
       # A reviewer's note on what was wrong with the last drawing. Added at
       # draw time, not stored in the prompt, so buyers still find the layer.
@@ -128,7 +131,7 @@ module Truebuild
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # A layer cut by an older Layer::VERSION is cut again from its saved
       # drawing: no call to the image model, no charge.
-      return recut!(render, source, mask) if render.usage['recut_from'] && render.image_url.present?
+      return recut!(render, source, mask, check_with) if render.usage['recut_from'] && render.image_url.present?
 
       aspect = source_aspect(source)
       spent = 0.0
@@ -146,7 +149,7 @@ module Truebuild
 
         layer = Layer.build(source[:bytes], result[:bytes], mask: mask_image(mask))
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
-                                                                   value: render.selection.first&.dig('value'))
+                                                                   value: render.selection.first&.dig('value'), **check_with)
         spent += verdict['cost_usd'].to_f
         break if verdict['ok'] || attempt == attempts - 1
       end
@@ -181,7 +184,7 @@ module Truebuild
       [nil, spent]
     end
 
-    def recut!(render, source, mask = nil)
+    def recut!(render, source, mask = nil, check_with = {})
       drawn = fetch_source(render.image_url)
       if reframed_by({ bytes: drawn[:bytes] }, source_aspect(source)) > FRAMING_TOLERANCE
         # Drawn reframed before the check existed: draw it again instead.
@@ -190,7 +193,7 @@ module Truebuild
       end
       layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask))
       verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
-                                                                 value: render.selection.first&.dig('value'))
+                                                                 value: render.selection.first&.dig('value'), **check_with)
       render.update!(status: verdict['ok'] ? 'done' : 'rejected', cost_usd: verdict['cost_usd'], latency_ms: 0,
                      mask_coverage: layer[:coverage], error: (verdict['ok'] ? nil : "Hidden: #{verdict['note'] || 'failed its check'}"),
                      layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),

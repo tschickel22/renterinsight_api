@@ -21,9 +21,10 @@ module Truebuild
     # Appliance Package 1 - Black, Stainless Steel Package - Gas, Black
     # Appliance Package, Ultimate Kitchen 2 - Package 1.
     APPLIANCE_PACKAGE = /\b(appliance|stainless|ultimate kitchen)\b.*\b(package|pkg)\b|\bultimate kitchen\b/
-    # And one refrigerator: upgrades that each replace the same standard
-    # fridge ("... Refer IPO 18.2", "... French Door Ref IPO 18.2CF").
-    FRIDGE_SWAP = /\b(refer|ref|refrigerator|frenchdoorref|frenchdrref)\b.*\bipo\s+([0-9.]+)/
+    # And one refrigerator, whichever fridge an upgrade replaces: Bay Port's
+    # book swaps out an 18.2, a 20.5 and a 21, and keyed by those a buyer
+    # could put three refrigerators in one kitchen.
+    FRIDGE_SWAP = /\b(refer|ref|refrigerator|frenchdoorref|frenchdrref)\b.*\bipo\s+[0-9.]+/
 
     # Things a home has exactly one of, so every upgrade of it replaces the
     # others. Each rule is written against real order-form names, and
@@ -55,9 +56,7 @@ module Truebuild
         return single.first if single
       end
       return 'appliance package' if text.match?(APPLIANCE_PACKAGE) && !text.match?(/discount|omit/)
-      if (m = text.match(FRIDGE_SWAP))
-        return "refrigerator in place of #{m[2].sub(/\.?0+\z/, '')}"
-      end
+      return 'refrigerator' if text.match?(FRIDGE_SWAP)
 
       keyed = text.gsub(FUEL, '{fuel}').gsub(PACKAGE, '\\1 {pkg}')
       return nil if keyed == text

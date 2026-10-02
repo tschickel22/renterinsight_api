@@ -23,7 +23,11 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
   let(:admin) { headers_for('platform_admin') }
 
   # Outlines are covered in trueview_render_spec; here layers use the change-based cut.
-  before { allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil) }
+  # The layer check passes; without this it calls Claude for real wherever a key is set.
+  before do
+    allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(nil)
+    allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(input: { 'score' => 5 }, input_tokens: 0, output_tokens: 0)
+  end
 
   around do |ex|
     old = ENV.values_at('GEMINI_API_KEY', 'OPENAI_API_KEY')
