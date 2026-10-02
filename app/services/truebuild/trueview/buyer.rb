@@ -126,6 +126,9 @@ module Truebuild
           # daily limit is not spent on it.
           next unless old || run || within_daily_limit?
 
+          # A skip from an outline since turned down and tried again gives way to this attempt.
+          TruebuildRender.where(source_url: p[:photo], selection_key: p[:key], prompt: p[:prompt], purpose: 'layer', status: 'skipped')
+                         .update_all(status: 'superseded', updated_at: Time.current)
           usage = { 'swatch_ids' => p[:swatch_ids], 'predraw' => true }
           usage['recut_from'] = old.id if old
           if held
@@ -225,9 +228,14 @@ module Truebuild
                               selection_key: plan.map { |p| p[:key] }.uniq)
       end
 
-      # Surfaces the photo does not show, under the current cut.
+      # Surfaces the photo does not show, under the current cut. Not one whose
+      # outline Claude turned down and is due another try (Surfaces.retry_due?):
+      # drawing it again outlines it again first.
       def skipped_layers(plan)
+        due = TruebuildSurfaceMask.where(source_url: plan.map { |p| p[:photo] }.uniq, version: Surfaces::VERSION).to_a
+                                  .select { |m| Surfaces.retry_due?(m) }.to_set { |m| [m.source_url, m.surface] }
         rows(plan).where(status: 'skipped').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .reject { |r| due.include?([r.source_url, Surfaces.category(r.selection.first&.dig('surface'))]) }
                   .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
       end
 

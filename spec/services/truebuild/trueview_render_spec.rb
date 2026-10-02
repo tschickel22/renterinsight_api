@@ -120,9 +120,30 @@ RSpec.describe 'TrueView rendering' do
     it 'rejects an outline that spills onto a neighbor, or an accent wall over more than one wall' do
       fit = ->(key, verdict) { Truebuild::Trueview::Surfaces.strict_fit(key, verdict) }
       expect(fit.call('cabinets', 'fit' => 5)).to eq(5)
-      expect(fit.call('cabinets', 'fit' => 4, 'spills' => true)).to eq(3)
+      expect(fit.call('countertop', 'fit' => 4, 'spills_onto' => 'cabinets')).to eq(3)
+      expect(fit.call('accent wall', 'fit' => 4, 'spills_onto' => 'tub or shower surround')).to eq(3)
+      # The hood is the appliances', which outrank cabinets: the cut keeps it theirs.
+      expect(fit.call('cabinets', 'fit' => 4, 'spills_onto' => 'appliances')).to eq(4)
+      expect(fit.call('cabinets', 'fit' => 4, 'spills_onto' => 'none')).to eq(4)
       expect(fit.call('accent wall', 'fit' => 4, 'walls' => 3)).to eq(2)
       expect(fit.call('accent wall', 'fit' => 5, 'walls' => 1)).to eq(5)
+    end
+
+    it 'outlines again, told why, a surface whose outline Claude turned down, a few times' do
+      turned_down = TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION,
+                                                 status: 'done', coverage: 0, mask_url: 'https://b/m.png', error: 'It took the counter edge.',
+                                                 usage: { 'attempts' => [{ 'present' => true, 'fit' => 3 }] })
+      expect(Truebuild::Trueview::Surfaces.retry_due?(turned_down)).to be(false) # too soon
+      turned_down.update_columns(updated_at: 1.hour.ago)
+      expect(Truebuild::Trueview::Surfaces.retry_due?(turned_down)).to be(true)
+      expect(Truebuild::Trueview::Surfaces).to receive(:find!)
+        .with('https://x/k.jpg', 'bytes', 'cabinets', correction: 'It took the counter edge.', tries: 1).and_return(:fresh)
+      expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', 'bytes', 'Cabinets')).to eq(:fresh)
+
+      last_try = TruebuildSurfaceMask.create!(source_url: 'https://x/k2.jpg', surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION,
+                                              status: 'done', coverage: 0, mask_url: 'https://b/m.png', updated_at: 1.hour.ago,
+                                              usage: { 'attempts' => [{ 'present' => true, 'fit' => 3 }], 'tries' => 2 })
+      expect(Truebuild::Trueview::Surfaces.retry_due?(last_try)).to be(false)
     end
 
     it 'never cuts a layer, grown edge included, onto a surface that outranks it' do

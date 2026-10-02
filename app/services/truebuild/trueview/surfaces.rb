@@ -81,8 +81,14 @@ module Truebuild
       def mask_for(source_url, source_bytes, surface)
         key = category(surface) or return nil
         found = TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION)
-        return found if found && (found.status == 'done' || found.updated_at > RETRY_FAILED_AFTER.ago)
+        return found if found && !retry_due?(found)
 
+        if found && rejected?(found)
+          # Claude found the surface but turned the outline down: outline it
+          # again, told why, a few times before taking it as not drawable.
+          found.destroy!
+          return find!(source_url, source_bytes, key, correction: found.error, tries: found.usage['tries'].to_i + 1)
+        end
         found&.destroy!
         carried_over(source_url, key) || find!(source_url, source_bytes, key)
       rescue ActiveRecord::RecordNotUnique
@@ -132,7 +138,25 @@ module Truebuild
         fresh
       end
 
-      def find!(source_url, source_bytes, key, correction: nil)
+      OUTLINE_TRIES = 3 # outlines Claude rejects before a surface is left undrawn on a photo
+
+      # The surface is in the photo, but every attempt at its outline was
+      # turned down: stored as no outline, so every color was skipped as "not
+      # in this photo" and nothing tried again outside a factory run.
+      def rejected?(mask)
+        mask.status == 'done' && mask.coverage.to_f.zero? && Array(mask.usage['attempts']).last.to_h['present'] == true
+      end
+
+      # Worth another outline now: an error (not framing) or a rejection,
+      # half an hour on, within OUTLINE_TRIES.
+      def retry_due?(mask)
+        return false if mask.updated_at > RETRY_FAILED_AFTER.ago
+        return !mask.error.to_s.include?('framing') if mask.status == 'failed'
+
+        rejected?(mask) && mask.usage['tries'].to_i + 1 < OUTLINE_TRIES
+      end
+
+      def find!(source_url, source_bytes, key, correction: nil, tries: 0)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
         aspect = image.width.to_f / image.height
@@ -161,7 +185,7 @@ module Truebuild
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
                                      model: result[:model], error: verdict['note'].presence,
                                      usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') },
-                                              'digest' => (digest(key) unless correction) }.compact)
+                                              'digest' => (digest(key) unless correction), 'tries' => (tries if tries.positive?) }.compact)
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
@@ -206,6 +230,13 @@ module Truebuild
         end.reduce { |a, b| (a > 127) | (b > 127) }.ifthenelse(255, 0).cast(:uchar)
       end
 
+      # What an outline may spill onto, for the check to name. Spill onto a
+      # surface that outranks this one is harmless (the cut leaves it to
+      # that surface); spill onto anything else turns the outline down.
+      SPILL_TARGETS = ['none', 'countertop', 'backsplash', 'refrigerator', 'appliances', 'cabinets', 'flooring', 'accent wall',
+                       'tub or shower surround', 'another wall', 'ceiling', 'trim, door or window frame', 'sink or faucet',
+                       'furniture or decor', 'siding', 'shutters', 'shingles', 'other'].freeze
+
       CHECK_TOOL = {
         name: 'judge_outline',
         description: 'Judge whether the magenta area is exactly the named surface.',
@@ -217,10 +248,9 @@ module Truebuild
                    description: '5 exact; 4 the surface with only small overspill onto neighbors (a few pixels of a stool, a sliver ' \
                                 'of trim); 3 mostly the surface but a clearly visible extra area; 2 a large part is something else; ' \
                                 '1 the wrong thing' },
-            spills: { type: 'boolean',
-                      description: 'The magenta covers a clearly visible part of a neighboring surface: a countertop edge on ' \
-                                   'cabinets, cabinet doors on a countertop, a tub or shower surround or its edge, another wall, ' \
-                                   'a door or window frame.' },
+            spills_onto: { type: 'string', enum: SPILL_TARGETS,
+                           description: 'If the magenta covers a clearly visible part of a neighboring surface, which one ' \
+                                        '(the largest); "none" if it does not.' },
             walls: { type: 'integer', description: 'For an accent wall only: how many separate walls the magenta covers.' },
             note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
           },
@@ -283,16 +313,19 @@ module Truebuild
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
         cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
-        verdict = result[:input].slice('fit', 'note', 'spills', 'walls')
+        verdict = result[:input].slice('fit', 'note', 'spills_onto', 'walls')
         verdict['fit'] = strict_fit(key, verdict)
         verdict.merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
       end
 
       # A 4 allows a few stray pixels, not a neighbor: Aspire 082's bath accent
-      # wall took three walls and the shower surround's edge and scored 4.
+      # wall took three walls and the shower surround's edge and scored 4. But
+      # kitchen cabinets that touched the range hood are fine: the appliances
+      # outrank them, and the cut keeps the hood theirs.
       def strict_fit(key, verdict)
         fit = verdict['fit'].to_i
-        fit = [fit, MIN_FIT - 1].min if verdict['spills']
+        onto = verdict['spills_onto'].to_s
+        fit = [fit, MIN_FIT - 1].min unless onto.blank? || onto == 'none' || outranks?(onto, key)
         fit = [fit, 2].min if key == 'accent wall' && verdict['walls'].to_i > 1
         fit
       end
