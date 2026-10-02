@@ -21,21 +21,30 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 12      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
+      VERSION = 13      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
                         # 9 presence judged beside the overlay, 10 presence asked too strictly, 11 carried outlines,
                         # 12 edges by precedence and a check for spill onto neighbors (an outline whose description
-                        # did not change is carried over, free)
+                        # did not change is carried over, free), 13 cabinets up to the ceiling, spill sized,
+                        # thin surfaces kept
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
       RETRY_FAILED_AFTER = 30.minutes
       MIN_PRESENT = 0.003 # share of the photo; less is not really in it
+      # Thin surfaces are thin: Brighton's corner posts scored 5 on 0.09% of
+      # the photo and were thrown out as not there.
+      MIN_PRESENT_BY_SURFACE = { 'corner posts' => 0.0003, 'shutters' => 0.001 }.freeze
+
+      def min_present(key)
+        MIN_PRESENT_BY_SURFACE.fetch(key.to_s, MIN_PRESENT)
+      end
 
       # [key, matches a finish's surface name, what to outline]
       CATEGORIES = [
         ['cabinets', /cabinet|vanit|lav|hw /i,
-         'the cabinet doors, drawer fronts and cabinet boxes, including an island base and any vanity, up to the underside ' \
+         'the cabinet doors, drawer fronts and cabinet boxes: every upper and lower cabinet, including the one above the ' \
+         'range hood or microwave and any that rise to the ceiling, an island base and any vanity, down to the underside ' \
          'of the countertop. Not the countertop or its front edge (the band of countertop material facing the camera above ' \
          'the doors), appliances, sinks, stools, chairs or the floor'],
         # A refrigerator option on a photo with no refrigerator is skipped
@@ -279,8 +288,14 @@ module Truebuild
                                 'of trim); 3 mostly the surface but a clearly visible extra area; 2 a large part is something else; ' \
                                 '1 the wrong thing' },
             spills_onto: { type: 'string', enum: SPILL_TARGETS,
-                           description: 'If the magenta covers a clearly visible part of a neighboring surface, which one ' \
-                                        '(the largest); "none" if it does not.' },
+                           description: 'If the magenta covers part of a neighboring surface, which one (the largest); "none" ' \
+                                        'if it does not.' },
+            spill_size: { type: 'string', enum: %w[none slight clear],
+                          description: 'slight: a thin sliver or a few small spots a buyer would not notice; clear: an area a buyer ' \
+                                       'would see painted wrong.' },
+            misses: { type: 'string',
+                      description: 'A clearly visible part of the surface left out of the magenta, in a few words ("the ' \
+                                   'cabinet above the microwave", "the floor left of the vanity"), or "none".' },
             walls: { type: 'integer', description: 'For an accent wall only: how many separate walls the magenta covers.' },
             note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
           },
@@ -339,13 +354,21 @@ module Truebuild
                     { type: 'text', text: "The same photo with an outline filled in magenta. It should be #{key}: #{description}. " \
                                           'The surface is in the photo; judge only the outline (answer present: true). Look ' \
                                           'closely where light colors meet (white doors under a white counter edge, a pale wall ' \
-                                          'beside a white tub surround): that is where outlines go wrong.' },
+                                          'beside a white tub surround) and at the top of the cabinets (one above the microwave ' \
+                                          "or hood, ones reaching the ceiling): that is where outlines go wrong.#{fine_overlap(key)}" },
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
         cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
-        verdict = result[:input].slice('fit', 'note', 'spills_onto', 'walls')
+        verdict = result[:input].slice('fit', 'note', 'spills_onto', 'spill_size', 'misses', 'walls')
         verdict['fit'] = strict_fit(key, verdict)
         verdict.merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
+      end
+
+      # Surfaces this one may overlap without harm: each keeps its own pixels
+      # when layers are cut, so Claude should not mark the outline down for it.
+      def fine_overlap(key)
+        above = PRECEDENCE.select { |o| o != key && outranks?(o, key) }
+        above.empty? ? '' : " Overlap with the #{above.join(', ')} does not matter (each keeps its own pixels): do not mark it down."
       end
 
       # A 4 allows a few stray pixels, not a neighbor: Aspire 082's bath accent
@@ -355,7 +378,14 @@ module Truebuild
       def strict_fit(key, verdict)
         fit = verdict['fit'].to_i
         onto = verdict['spills_onto'].to_s
-        fit = [fit, MIN_FIT - 1].min unless onto.blank? || onto == 'none' || outranks?(onto, key)
+        harmless = onto.blank? || onto == 'none' || outranks?(onto, key) || verdict['spill_size'] == 'slight'
+        missed = verdict['misses'].present? && !verdict['misses'].to_s.strip.match?(/\Anone\.?\z/i)
+        # Marked down for nothing but a slight or harmless spill: Brighton's
+        # roof and Woodward's counter scored 3 for "slightly" touching trim.
+        fit = MIN_FIT if harmless && !missed && fit == MIN_FIT - 1 && verdict['spill_size'].present?
+        fit = [fit, MIN_FIT - 1].min unless harmless
+        # Woodward's kitchen cabinets left out the one above the microwave.
+        fit = [fit, MIN_FIT - 1].min if missed
         fit = [fit, 2].min if key == 'accent wall' && verdict['walls'].to_i > 1
         fit
       end

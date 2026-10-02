@@ -7,6 +7,6 @@ class TruebuildSurfaceMask < ApplicationRecord
 
   # The photo shows this surface: enough of it to paint.
   def present?
-    status == 'done' && mask_url.present? && coverage.to_f >= Truebuild::Trueview::Surfaces::MIN_PRESENT
+    status == 'done' && mask_url.present? && coverage.to_f >= Truebuild::Trueview::Surfaces.min_present(surface)
   end
 end

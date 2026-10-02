@@ -125,6 +125,13 @@ RSpec.describe 'TrueView rendering' do
       # The hood is the appliances', which outrank cabinets: the cut keeps it theirs.
       expect(fit.call('cabinets', 'fit' => 4, 'spills_onto' => 'appliances')).to eq(4)
       expect(fit.call('cabinets', 'fit' => 4, 'spills_onto' => 'none')).to eq(4)
+      # Marked down only for a slight or harmless spill: kept.
+      expect(fit.call('shingles', 'fit' => 3, 'spills_onto' => 'trim, door or window frame', 'spill_size' => 'slight', 'misses' => 'none')).to eq(4)
+      expect(fit.call('accent wall', 'fit' => 3, 'spills_onto' => 'backsplash', 'spill_size' => 'clear', 'misses' => 'none', 'walls' => 1)).to eq(4)
+      # Something visible left out turns it down, however clean the edges.
+      expect(fit.call('cabinets', 'fit' => 4, 'spills_onto' => 'none', 'misses' => 'the cabinet above the microwave')).to eq(3)
+      # A clear spill onto something lower still turns it down.
+      expect(fit.call('countertop', 'fit' => 4, 'spills_onto' => 'cabinets', 'spill_size' => 'clear')).to eq(3)
       expect(fit.call('accent wall', 'fit' => 4, 'walls' => 3)).to eq(2)
       expect(fit.call('accent wall', 'fit' => 5, 'walls' => 1)).to eq(5)
     end
@@ -153,6 +160,13 @@ RSpec.describe 'TrueView rendering' do
       stale = TruebuildSurfaceMask.find(due.id)
       expect(Truebuild::Trueview::Surfaces.claim(due)).to be(true)
       expect(Truebuild::Trueview::Surfaces.claim(stale)).to be(false)
+    end
+
+    it 'keeps a thin surface that covers little of the photo' do
+      posts = TruebuildSurfaceMask.new(surface: 'corner posts', status: 'done', mask_url: 'https://b/m.png', coverage: 0.0009)
+      wall = TruebuildSurfaceMask.new(surface: 'accent wall', status: 'done', mask_url: 'https://b/m.png', coverage: 0.0009)
+      expect(posts.present?).to be(true)
+      expect(wall.present?).to be(false)
     end
 
     it 'never cuts a layer, grown edge included, onto a surface that outranks it' do
