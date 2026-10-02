@@ -6,7 +6,10 @@ module McpTools
     title 'List customer invoices'
     description 'Customer invoices (accounts receivable), oldest due first. Defaults to open invoices (sent, viewed, ' \
                 'partly paid or overdue; drafts are not owed yet). overdue_only lists past due ones. Filter by status ' \
-                'or an invoice number/customer search. Totals and aging buckets cover every matching invoice.'
+                'or an invoice number/customer search. totals.matching_invoices counts every invoice the filter ' \
+                'matched; totals.open_invoices, open_balance and the aging buckets cover the matching invoices that ' \
+                'are open with a balance due (the same set accounting_summary counts), with a count per bucket and ' \
+                'the oldest past due invoice. Each open item carries its aging_bucket.'
     input_schema(
       properties: {
         status: { type: 'string', enum: %w[open draft finalized sent viewed partial overdue paid cancelled any] },
@@ -32,28 +35,56 @@ module McpTools
           "(contacts.first_name || ' ' || contacts.last_name) ILIKE :t", t: term
         )
       end
-      payload = { totals: aging(rel) }
+      # matching_invoices is everything the filter matched (a status filter
+      # of paid or any includes invoices that owe nothing); the aging block
+      # always counts open invoices with a balance, the same set
+      # accounting_summary counts.
+      payload = { totals: { matching_invoices: rel.count }.merge(aging(rel)) }
       rows = rel.order(Arel.sql('invoices.due_date ASC NULLS LAST'), :id).limit(ctx.row_limit(limit)).to_a
       items = rows.map { |i| AccountingAccess.invoice(ctx, i) }
       Base::Result.new(payload: { count: items.size, items: items }.merge(payload), count: items.size)
     end
 
-    # Same buckets as the AR aging report.
-    def self.aging(rel)
-      buckets = { current: 0.to_d, days_1_30: 0.to_d, days_31_60: 0.to_d, days_61_90: 0.to_d, days_90_plus: 0.to_d }
-      rel.where(status: AccountingAccess::OPEN_INVOICE_STATUSES).where('invoices.amount_due > 0')
-         .pluck(:due_date, :invoice_date, :amount_due).each do |due, issued, owed|
-        days = (Date.current - (due || issued || Date.current)).to_i
-        bucket = if days <= 0 then :current
-                 elsif days <= 30 then :days_1_30
-                 elsif days <= 60 then :days_31_60
-                 elsif days <= 90 then :days_61_90
-                 else :days_90_plus
-                 end
-        buckets[bucket] += owed.to_d
+    COUNTED = 'Open invoices with a balance due: status finalized, sent, viewed, partial or overdue, and amount due ' \
+              'above zero. Drafts, paid and cancelled invoices are left out, as are future loan payments not yet due.'
+    BUCKETS = %i[current days_1_30 days_31_60 days_61_90 days_90_plus].freeze
+
+    # Days past the due date (the invoice date when there is none), as the
+    # AR aging report ages them. Zero or less is current.
+    def self.days_past_due(due, issued)
+      (Date.current - (due || issued || Date.current)).to_i
+    end
+
+    def self.bucket(days)
+      if days <= 0 then :current
+      elsif days <= 30 then :days_1_30
+      elsif days <= 60 then :days_31_60
+      elsif days <= 90 then :days_61_90
+      else :days_90_plus
       end
-      { invoices: rel.count, open_balance: AccountingAccess.money(buckets.values.sum),
-        aging: buckets.transform_values { |v| AccountingAccess.money(v) } }
+    end
+
+    def self.open_with_balance(rel)
+      rel.where(status: AccountingAccess::OPEN_INVOICE_STATUSES).where('invoices.amount_due > 0')
+    end
+
+    # Same buckets as the AR aging report, with how many invoices sit in each
+    # and the oldest past due one named, so a bucket can be checked rather
+    # than guessed from amounts (several loan invoices share one amount).
+    def self.aging(rel)
+      amounts = BUCKETS.index_with { 0.to_d }
+      counts = BUCKETS.index_with { 0 }
+      oldest = nil
+      open_with_balance(rel).pluck(:invoice_number, :due_date, :invoice_date, :amount_due).each do |number, due, issued, owed|
+        days = days_past_due(due, issued)
+        key = bucket(days)
+        amounts[key] += owed.to_d
+        counts[key] += 1
+        oldest = { invoice_number: number, due_date: (due || issued)&.iso8601, days_past_due: days, amount_due: AccountingAccess.money(owed) } if days.positive? && (oldest.nil? || days > oldest[:days_past_due])
+      end
+      { counted: COUNTED, open_invoices: counts.values.sum, open_balance: AccountingAccess.money(amounts.values.sum),
+        aging: amounts.transform_values { |v| AccountingAccess.money(v) }, aging_counts: counts,
+        oldest_past_due: oldest }.compact
     end
   end
 end

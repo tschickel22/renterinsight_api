@@ -11,8 +11,10 @@ module McpTools
     title 'Accounting summary'
     description 'Profit and loss for a period (default this month) and fiscal year to date, from posted journal ' \
                 'entries as the P&L report shows them; book cash per bank account; bank feed lines still to be ' \
-                'categorized; unpaid vendor bills; and open customer invoices with aging. Sections the user cannot ' \
-                'see are listed under skipped. Note: profit only reflects what has been booked, so a large ' \
+                'categorized; unpaid vendor bills; and open customer invoices with a balance due, with aging (the ' \
+                'same count list_invoices gives). Sections the user cannot see are listed under skipped (always ' \
+                'present, empty when nothing was skipped). profit_and_loss.notes says when invoices are not set ' \
+                'to post to the books. Note: profit only reflects what has been booked, so a large ' \
                 'uncategorized bank feed means the P&L is incomplete.'
     input_schema(
       properties: {
@@ -35,7 +37,6 @@ module McpTools
       section(ctx, payload, 'bank_accounts_accounting', :bank_feed) { bank_feed(ctx) }
       section(ctx, payload, 'bills', :bills) { bills(ctx) }
       section(ctx, payload, 'finance', :customer_invoices) { ListInvoices.aging(AccountingAccess.invoices(ctx)) }
-      payload.delete(:skipped) if payload[:skipped].empty?
       payload[:url] = ctx.app_url('/accounting')
       Base::Result.new(payload: payload, count: 1)
     end
@@ -75,7 +76,24 @@ module McpTools
       { basis: basis(ctx),
         period: pnl(ctx, from, to),
         fiscal_year_to_date: pnl(ctx, ytd_from, to),
-        url: ctx.app_url('/accounting/reports/profit-and-loss') }
+        notes: posting_notes(ctx).presence,
+        url: ctx.app_url('/accounting/reports/profit-and-loss') }.compact
+    end
+
+    # Invoices and payments reach the P&L only when Accounting Settings says
+    # to post them, and both are off unless the dealer turned them on. Said
+    # out loud so a P&L of zero next to open invoices is not read as a bug
+    # or as no sales.
+    def self.posting_notes(ctx)
+      s = settings(ctx)
+      notes = []
+      unless s&.auto_post_invoices
+        notes << 'Customer invoices are not set to post to the books (Accounting Settings, auto post invoices is off), ' \
+                 'so invoice revenue is not in this P&L. Turning it on posts invoices from then on; it does not ' \
+                 'back-post earlier ones.'
+      end
+      notes << 'Customer payments are not set to post to the books (auto post payments is off).' unless s&.auto_post_payments
+      notes
     end
 
     def self.pnl(ctx, from, to)
@@ -109,11 +127,18 @@ module McpTools
       accounts = AccountingAccess.bank_accounts(ctx).includes(:chart_of_account).filter_map do |ba|
         next unless ba.chart_of_account
 
+        warning = AccountingAccess.bank_gl_warning(ba)
         { bank_account: AccountingAccess.bank_account_label(ba), gl_account: AccountingAccess.gl_account(ba.chart_of_account),
-          book_balance: AccountingAccess.money(balances.balance_as_of(ba.chart_of_account, Date.current)) }
+          book_balance: AccountingAccess.money(balances.balance_as_of(ba.chart_of_account, Date.current)),
+          gl_account_warning: warning, in_total: warning ? false : nil }.compact
       end
-      { accounts: accounts, total: AccountingAccess.money(accounts.sum { |a| a[:book_balance].to_d }),
-        note: 'Book balances from the general ledger. They match the bank only once the feed is categorized.' }
+      # A bank account linked to, say, Customer Receivables would add every
+      # receivable to cash. Those are shown with a warning and left out of
+      # the total.
+      counted = accounts.reject { |a| a[:in_total] == false }
+      { accounts: accounts, total: AccountingAccess.money(counted.sum { |a| a[:book_balance].to_d }),
+        note: 'Book balances from the general ledger. They match the bank only once the feed is categorized.' \
+              "#{' A bank account linked to a GL account that is not a bank or cash account is left out of the total.' if counted.size < accounts.size}" }
     end
 
     def self.bank_feed(ctx)

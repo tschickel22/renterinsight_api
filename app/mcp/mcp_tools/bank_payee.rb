@@ -77,32 +77,71 @@ module McpTools
       payee.split.first(2).join(' ')
     end
 
-    # What kind of line this looks like, from the wording alone. Said as a
-    # hint for the person, never acted on by itself.
-    KIND_HINTS = [
-      [/\b(transfer|xfer)\b/, 'transfer between accounts: usually already booked on the other side, so exclude it or match it, do not book it as income or expense'],
-      [/payment to .*card|card ending|epay|credit crd|mobile payment|autopay/, 'credit card payment: books against the card liability account, not an expense'],
-      [/floor ?plan|flooring|curtail/, 'floor plan payment: principal reduces the floor plan liability; only interest and fees are expense'],
-      [/\A\s*(check|chk)\b/, 'check: the bank line does not say who it paid; find the payee in the check register or the bill it paid'],
-      [/overdraft|service fee|wire fee|\bfee\b|service charge/, 'bank fee'],
-      [/\bdeposit\b|remote dep|mobile dep/, 'deposit: often a customer down payment or a cash receipt already recorded, so look for a match before booking it as income']
+    # What kind of line this looks like: one short kind plus a note for the
+    # person. A hint, never acted on by itself. Checked in order; the first
+    # match wins. Every line gets a kind: when the wording says nothing (most
+    # card and ACH payees), the direction still does, so looks_like is never
+    # missing. It used to be left out whenever no word matched, which on a
+    # feed of plain payee names was every line.
+    KINDS = [
+      [/\b(transfer|xfer)\b/, 'transfer',
+       'Transfer between accounts: usually already booked on the other side, so exclude it or match it. ' \
+       'Do not book it as income or expense.'],
+      [/payment to .*card|card ending|epay|credit crd|mobile payment|autopay/, 'card payment',
+       'Credit card payment: books against the card liability account, not an expense.'],
+      [/floor ?plan|flooring|curtail/, 'floor plan',
+       'Floor plan payment: principal reduces the floor plan liability; only interest and fees are expense.'],
+      [/\A\s*(check|chk)\b/, 'check',
+       'Check: the bank line does not say who it paid. Find the payee in the check register or the bill it paid.'],
+      [/overdraft|service fee|wire fee|\bfee\b|service charge/, 'fee', 'Bank fee.'],
+      [/\bdeposit\b|remote dep|mobile dep/, 'deposit',
+       'Deposit: often a customer down payment or a cash receipt already recorded, so look for a match ' \
+       'before booking it as income.']
     ].freeze
+    DEPOSIT_KIND = KINDS.last.drop(1).freeze
+    PAYMENT_KIND = ['payment', 'Money out, and nothing in the wording says more. Book it to what it paid for.'].freeze
+    TRANSFER_NOTE = 'The account history or a rule points to is a bank or cash account, so booking it there records a transfer ' \
+                    "between bank accounts, not income or expense. That is only right if the money moved between the " \
+                    "dealer's own accounts, and then the other side is usually booked already: look for that entry " \
+                    'and match it instead.'
 
-    def kind_hint(description)
+    # [kind, note] for one line.
+    def kind(description, amount)
       text = description.to_s.downcase
-      KIND_HINTS.find { |pattern, _hint| text.match?(pattern) }&.last
+      found = KINDS.find { |pattern, _kind, _note| text.match?(pattern) }
+      return found.drop(1) if found
+
+      amount.to_d.negative? ? PAYMENT_KIND : DEPOSIT_KIND
+    end
+
+    # One or two earlier bookings are not a habit: below this many uses the
+    # confidence is low however consistent they were.
+    MIN_USES = 3
+
+    def confidence(used, total, exact)
+      level = if used < MIN_USES then 'low'
+              elsif used == total then 'high'
+              elsif used.to_f / total >= 0.75 then 'medium'
+              else 'low'
+              end
+      # A similar payee (first two words) is a weaker signal than the same one.
+      exact ? level : { 'high' => 'medium' }.fetch(level, 'low')
     end
 
     # What history and rules say about one transaction. Direction is part of the key:
     # money in from a payee is rarely booked like money out to them.
-    def suggest(txn, history, accounts_by_id, rules)
+    # cash_account_ids: GL accounts that are bank or cash accounts. Booking a
+    # line to one of those is a transfer, and is said so plainly.
+    def suggest(txn, history, accounts_by_id, rules, cash_account_ids: Set.new)
       payee = key(txn.description)
-      out = { payee_key: payee, looks_like: kind_hint(txn.description) }.compact
+      looks_like, note = kind(txn.description, txn.amount)
+      out = { payee_key: payee, looks_like: looks_like, looks_like_note: note }
 
       rule = rules.find { |r| r.matches?(txn) }
       if rule
         out[:rule] = { name: rule.name, action: rule.action_type,
                        account: AccountingAccess.gl_account(accounts_by_id[rule.assign_account_id]) }.compact
+        mark_transfer!(out, out[:rule]) if rule.assign_account_id && cash_account_ids.include?(rule.assign_account_id)
       end
 
       out_flow = txn.amount.to_d.negative?
@@ -116,18 +155,14 @@ module McpTools
       if counts.present?
         total = counts.values.sum
         account_id, used = counts.max_by { |_id, n| n }
-        confidence = if used == total && used >= 3 then 'high'
-                     elsif used.to_f / total >= 0.75 then 'medium'
-                     else 'low'
-                     end
-        # A similar payee (first two words) is a weaker signal than the same one.
-        confidence = { 'high' => 'medium', 'medium' => 'low' }.fetch(confidence, 'low') unless exact
-        basis = { times_used: used, out_of: total, confidence: confidence, based_on: exact ? 'same payee' : 'similar payee' }
+        basis = { times_used: used, out_of: total, confidence: confidence(used, total, exact),
+                  based_on: exact ? 'same payee' : 'similar payee' }
         if account_id == :excluded
           out[:suggested_action] = basis.merge(action: 'exclude',
                                                why: 'Lines from this payee were excluded before (usually transfers or duplicates).')
         elsif (account = accounts_by_id[account_id])
           out[:suggested_account] = AccountingAccess.gl_account(account).merge(basis)
+          mark_transfer!(out, out[:suggested_account]) if cash_account_ids.include?(account_id)
         end
         others = counts.except(account_id).sort_by { |_id, n| -n }.first(2).filter_map do |id, n|
           if id == :excluded then { action: 'exclude', times_used: n }
@@ -137,6 +172,12 @@ module McpTools
         out[:also_used] = others if others.any?
       end
       out
+    end
+
+    def mark_transfer!(out, suggestion)
+      out[:looks_like] = 'transfer'
+      out[:looks_like_note] = TRANSFER_NOTE
+      suggestion[:books_as] = 'transfer between bank accounts'
     end
   end
 end

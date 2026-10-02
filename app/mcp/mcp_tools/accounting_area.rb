@@ -6,7 +6,7 @@ module McpTools
   # sends an invoice, edits or voids a journal entry, or reconciles.
   module AccountingArea
     READ_TOOLS = [
-      AccountingSummary, ListChartOfAccounts, ListBankTransactions, ListBills, ListInvoices
+      AccountingSummary, ListChartOfAccounts, ListBankTransactions, ListBills, ListInvoices, GetJournalEntry
     ].freeze
 
     WRITE_TOOLS = [CategorizeBankTransaction, MatchBankTransaction, ExcludeBankTransaction].freeze

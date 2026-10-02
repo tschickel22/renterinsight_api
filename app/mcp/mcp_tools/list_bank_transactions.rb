@@ -11,7 +11,12 @@ module McpTools
                 'payee before, with how often and a confidence) or suggested_action exclude (when that payee was ' \
                 'excluded before), any bank rule that matches, already_booked (an entry already in the books for ' \
                 'exactly this line: match it with match_bank_transaction, never categorize it), and looks_like (transfer, ' \
-                'card payment, floor plan, check, fee, deposit). Suggestions are hints: confirm with the user before ' \
+                'card payment, floor plan, check, fee, deposit, payment) with looks_like_note. Confidence is low below ' \
+                '3 earlier uses. A suggested account that is a bank or cash account says books_as "transfer between ' \
+                'bank accounts": booking it records a transfer, not income or expense. Matched lines say booked_by: ' \
+                'posted (categorizing posted a new entry), linked (matched to an entry that already existed) or ' \
+                'not_posted (no entry behind it). A bank account whose GL account is not a bank or cash account ' \
+                'carries gl_account_warning. Suggestions are hints: confirm with the user before ' \
                 'categorize_bank_transaction. Filter by bank_account_id, dates, direction or a description search.'
     input_schema(
       properties: {
@@ -79,8 +84,9 @@ module McpTools
         totals: { unmatched: counts['unmatched'].to_i, matched: counts['matched'].to_i,
                   excluded: counts['excluded'].to_i, reconciled: counts['reconciled'].to_i,
                   oldest_unmatched: all.where(status: 'unmatched').minimum(:transaction_date)&.iso8601 },
-        bank_accounts: AccountingAccess.bank_accounts(ctx).map do |ba|
-          { id: ba.id, name: AccountingAccess.bank_account_label(ba), gl_account: AccountingAccess.gl_account(ba.chart_of_account) }.compact
+        bank_accounts: AccountingAccess.bank_accounts(ctx).includes(:chart_of_account).map do |ba|
+          { id: ba.id, name: AccountingAccess.bank_account_label(ba), gl_account: AccountingAccess.gl_account(ba.chart_of_account),
+            gl_account_warning: AccountingAccess.bank_gl_warning(ba) }.compact
         end
       }, count: items.size)
     end
@@ -91,8 +97,10 @@ module McpTools
       history = BankPayee.history(all)
       rules = ctx.company.bank_rules.active.by_priority.to_a
       accounts = ctx.company.chart_of_accounts.where(is_active: true, is_header: false).index_by(&:id)
+      cash_ids = AccountingAccess.cash_account_ids(ctx, accounts)
       unmatched.to_h do |txn|
-        [txn.id, BankPayee.suggest(txn, history, accounts, rules.select { |r| r.bank_account_id.nil? || r.bank_account_id == txn.bank_account_id })]
+        [txn.id, BankPayee.suggest(txn, history, accounts, rules.select { |r| r.bank_account_id.nil? || r.bank_account_id == txn.bank_account_id },
+                                   cash_account_ids: cash_ids)]
       end
     end
 

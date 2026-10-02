@@ -81,6 +81,39 @@ module McpTools
         type: account.account_type, sub_type: account.sub_type.presence }.compact
     end
 
+    # A bank or cash account on the balance sheet: sub type bank, or an asset
+    # with no sub type whose name says cash or a bank account (older charts
+    # left the sub type blank).
+    CASH_NAME = /\b(cash|checking|chk|savings|money market|bank)\b/i
+
+    def cash_account?(account)
+      return false unless account&.account_type == 'asset'
+
+      account.sub_type == 'bank' || (account.sub_type.blank? && account.name.to_s.match?(CASH_NAME))
+    end
+
+    # GL accounts a bank feed line can be booked to only as a transfer: every
+    # bank or cash account, plus whatever GL account a bank account is linked
+    # to (even a mislinked one, since that is where its money is booked).
+    def cash_account_ids(ctx, accounts)
+      ids = accounts.each_value.select { |a| cash_account?(a) }.map(&:id)
+      ids.concat(ctx.company.bank_accounts.where(is_deleted: [false, nil]).where.not(chart_of_account_id: nil).pluck(:chart_of_account_id))
+      ids.to_set
+    end
+
+    # Said when a bank account's GL account is not a bank or cash account, as
+    # when a checking account is linked to Customer Receivables. Every line
+    # categorized from that feed would post to the wrong account.
+    def bank_gl_warning(bank_account)
+      gl = bank_account.chart_of_account
+      return 'Not linked to a GL account, so lines cannot be categorized. Link it under Accounting, Bank Accounts.' unless gl
+      return nil if cash_account?(gl)
+
+      "Linked to GL #{[gl.account_number, gl.name].compact_blank.join(' ')}, which is a " \
+        "#{gl.sub_type.presence&.tr('_', ' ') || gl.account_type} account, not a bank or cash account. Everything " \
+        'categorized from this feed posts there. Check the link under Accounting, Bank Accounts before categorizing.'
+    end
+
     def bank_account_label(bank_account)
       [bank_account.bank_name, bank_account.try(:account_name).presence,
        bank_account.display_last_four.present? ? "x#{bank_account.display_last_four}" : nil].compact_blank.join(' ')
@@ -92,10 +125,52 @@ module McpTools
         amount: money(txn.amount), direction: txn.amount.to_d.negative? ? 'withdrawal' : 'deposit',
         reference: txn.reference_number.presence, type: txn.transaction_type.presence, status: txn.status,
         bank_account: bank_account_label(txn.bank_account), category: gl_account(txn.category_account),
-        memo: txn.memo.presence, excluded_reason: txn.excluded_reason.presence,
-        journal_entry: txn.matched_journal_entry && { number: txn.matched_journal_entry.entry_number,
+        memo: txn.memo.presence,
+        # Un-excluding a line in the app leaves the old reason behind, so a
+        # reason on a line that is not excluded is stale, not a fact.
+        excluded_reason: (txn.excluded_reason.presence if txn.status == 'excluded'),
+        booked_by: booked_by(txn),
+        journal_entry: txn.matched_journal_entry && { id: "journal_entry:#{txn.matched_journal_entry.id}",
+                                                      number: txn.matched_journal_entry.entry_number,
                                                       date: txn.matched_journal_entry.entry_date&.iso8601 },
         url: ctx.app_url('/accounting/bank-transactions')
+      }.compact
+    end
+
+    # For a matched or reconciled line, how it got into the books:
+    #   posted     categorizing it posted a new entry for it (the entry's source is this line)
+    #   linked     it was matched to an entry that already existed (an invoice payment, a bill, a manual entry)
+    #   not_posted it was categorized with no entry behind it, so the money is not in the books
+    def booked_by(txn)
+      return nil unless %w[matched reconciled].include?(txn.status)
+
+      je = txn.matched_journal_entry
+      return 'not_posted' unless je
+
+      txn.posted_by_categorization?(je) ? 'posted' : 'linked'
+    end
+
+    # One journal entry with its lines, as the journal entry screen shows it.
+    def journal_entry(ctx, je)
+      lines = je.journal_entry_lines.sort_by(&:id).map do |line|
+        account = line.chart_of_account
+        { account_number: account&.account_number, account_name: account&.name,
+          debit: money(line.debit_amount.to_d.positive? ? line.debit_amount : nil),
+          credit: money(line.credit_amount.to_d.positive? ? line.credit_amount : nil),
+          memo: line.memo.presence, location: ctx.location_names[line.location_id],
+          contact: line.contact_id && "contact:#{line.contact_id}", deal: line.deal_id && "deal:#{line.deal_id}" }.compact
+      end
+      reverses = je.company.journal_entries.find_by(reversed_by_id: je.id)
+      source_record = "#{je.source_entity_type}:#{je.source_entity_id}" if je.source_entity_type.present? && je.source_entity_id
+      {
+        id: "journal_entry:#{je.id}", entry_number: je.entry_number, date: je.entry_date&.iso8601, memo: je.memo.presence,
+        source: je.source_type.presence, source_record: source_record,
+        is_void: je.is_void ? true : false, voided_at: je.voided_at&.iso8601,
+        reversed_by: je.reversed_by && { id: "journal_entry:#{je.reversed_by.id}", entry_number: je.reversed_by.entry_number },
+        reverses: reverses && { id: "journal_entry:#{reverses.id}", entry_number: reverses.entry_number },
+        adjusting: je.is_adjusting ? true : nil, closing: je.is_closing ? true : nil,
+        total_debits: money(lines.sum { |l| l[:debit].to_d }), total_credits: money(lines.sum { |l| l[:credit].to_d }),
+        lines: lines, url: ctx.app_url('/accounting/journal-entries')
       }.compact
     end
 
@@ -112,14 +187,16 @@ module McpTools
     end
 
     def invoice(ctx, invoice)
-      days = invoice.due_date && OPEN_INVOICE_STATUSES.include?(invoice.status) ? (Date.current - invoice.due_date).to_i : nil
+      open = OPEN_INVOICE_STATUSES.include?(invoice.status) && invoice.amount_due.to_d.positive?
+      # Aged exactly as the aging totals age it, so the two always agree.
+      days = ListInvoices.days_past_due(invoice.due_date, invoice.invoice_date) if open
       customer = invoice.contact ? [invoice.contact.first_name, invoice.contact.last_name].compact_blank.join(' ') : nil
       {
         id: "invoice:#{invoice.id}", invoice_number: invoice.invoice_number, status: invoice.status,
         customer: customer.presence, category: invoice.billing_category.presence,
         invoice_date: invoice.invoice_date&.iso8601, due_date: invoice.due_date&.iso8601,
         total: money(invoice.total), paid: money(invoice.amount_paid), amount_due: money(invoice.amount_due),
-        days_past_due: days&.positive? ? days : nil, sent_at: invoice.sent_at&.iso8601,
+        days_past_due: days&.positive? ? days : nil, aging_bucket: days && ListInvoices.bucket(days), sent_at: invoice.sent_at&.iso8601,
         deal: invoice.deal_id && "deal:#{invoice.deal_id}", location: ctx.location_names[invoice.location_id],
         url: ctx.app_url("/finance/invoices/#{invoice.id}")
       }.compact

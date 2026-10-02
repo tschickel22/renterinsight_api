@@ -91,7 +91,76 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
 
       items = call_tool(token, 'list_bank_transactions').first['items']
       expect(items.find { |i| i['id'] == "bank_txn:#{check.id}" }).not_to have_key('suggested_account')
-      expect(items.find { |i| i['id'] == "bank_txn:#{transfer.id}" }['looks_like']).to start_with('transfer')
+      expect(items.find { |i| i['id'] == "bank_txn:#{transfer.id}" }['looks_like']).to eq('transfer')
+      expect(items.find { |i| i['id'] == "bank_txn:#{check.id}" }['looks_like']).to eq('check')
+    end
+
+    # Staging Summit Park: plain payee names ("Typographic", "Rocket Rides")
+    # matched no wording, and looks_like was missing from every line.
+    it 'gives every line a looks_like, from the direction when the wording says nothing' do
+      deposit = txn!('Typographic', 1000)
+      payment = txn!('Rocket Rides', -100)
+
+      items = call_tool(token, 'list_bank_transactions').first['items']
+      expect(items.find { |i| i['id'] == "bank_txn:#{deposit.id}" }).to include('looks_like' => 'deposit', 'looks_like_note' => a_string_including('match'))
+      expect(items.find { |i| i['id'] == "bank_txn:#{payment.id}" }).to include('looks_like' => 'payment')
+      expect(items).to all(include('looks_like'))
+    end
+
+    # Staging: a deposit was suggested to 1030 Savings / Reserve at medium
+    # confidence from one earlier booking.
+    it 'says plainly that a bank account suggestion books a transfer, at low confidence from one use' do
+      savings = gl!('1993', 'Savings / Reserve', 'asset', 'bank')
+      txn!('Typographic', 1000, status: 'matched', account: savings)
+      line = txn!('Typographic', 1000)
+
+      row = call_tool(token, 'list_bank_transactions').first['items'].find { |i| i['id'] == "bank_txn:#{line.id}" }
+      expect(row['suggested_account']).to include('id' => "gl_account:#{savings.id}", 'times_used' => 1, 'out_of' => 1,
+                                                  'confidence' => 'low', 'books_as' => 'transfer between bank accounts')
+      expect(row['looks_like']).to eq('transfer')
+      expect(row['looks_like_note']).to include('transfer between bank accounts', 'not income or expense')
+    end
+
+    it 'keeps confidence low below three uses, however consistent' do
+      2.times { |i| txn!("SHERWIN WILLIAMS #{i}", -40, status: 'matched', account: supplies) }
+      line = txn!('SHERWIN WILLIAMS', -41)
+      row = call_tool(token, 'list_bank_transactions').first['items'].find { |i| i['id'] == "bank_txn:#{line.id}" }
+      expect(row['suggested_account']).to include('times_used' => 2, 'confidence' => 'low')
+      expect(row['suggested_account']).not_to have_key('books_as')
+      expect(row['looks_like']).to eq('payment')
+    end
+
+    it 'says whether a matched line posted its own entry or was linked to an existing one' do
+      posted = txn!('POS DEBIT HOME DEPOT', -60)
+      call_tool(token, 'categorize_bank_transaction', id: "bank_txn:#{posted.id}", account_id: "gl_account:#{supplies.id}")
+      existing = Accounting::ManualPostingService.new(company).post_simple!(debit_account: cash_gl, credit_account: sales, amount: 250,
+                                                                            memo: 'Down payment', entry_date: Date.current - 2)
+      linked = txn!('REMOTE DEPOSIT', 250, date: Date.current - 2)
+      linked.match_to_journal_entry!(existing, source: 'manual')
+      bare = txn!('OLD CATEGORIZED', -5, status: 'matched', account: supplies)
+
+      items = call_tool(token, 'list_bank_transactions', status: 'matched').first['items'].index_by { |i| i['id'] }
+      expect(items["bank_txn:#{posted.id}"]).to include('booked_by' => 'posted')
+      expect(items["bank_txn:#{posted.id}"]['journal_entry']['id']).to eq("journal_entry:#{posted.reload.matched_journal_entry_id}")
+      expect(items["bank_txn:#{linked.id}"]).to include('booked_by' => 'linked')
+      expect(items["bank_txn:#{bare.id}"]).to include('booked_by' => 'not_posted')
+    end
+
+    # Staging bank_txn:1: un-excluded in the app, which leaves the reason.
+    it 'drops a stale excluded_reason from a line that is no longer excluded' do
+      line = txn!('ROCKET RIDES', -10)
+      line.update_columns(excluded_reason: 'Excluded by rule')
+      row = call_tool(token, 'list_bank_transactions').first['items'].find { |i| i['id'] == "bank_txn:#{line.id}" }
+      expect(row).not_to have_key('excluded_reason')
+    end
+
+    it 'warns about a bank account linked to a GL account that is not a bank or cash account' do
+      receivables = gl!('1994', 'Customer Receivables', 'asset', 'accounts_receivable')
+      bank!(gl: receivables)
+      accounts = call_tool(token, 'list_bank_transactions').first['bank_accounts']
+      mislinked = accounts.find { |a| a.dig('gl_account', 'id') == "gl_account:#{receivables.id}" }
+      expect(mislinked['gl_account_warning']).to include('1994 Customer Receivables', 'accounts receivable', 'not a bank or cash account')
+      expect(accounts.find { |a| a['id'] == bank.id }).not_to have_key('gl_account_warning')
     end
 
     it "keeps to the person's locations and company" do
@@ -190,7 +259,8 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
   describe 'read-only connection' do
     it 'hides the bank feed writes but keeps the reads' do
       names = mcp_post(connect!(user, allow_write: false)['access_token'], 'tools/list').dig('result', 'tools').map { |t| t['name'] }
-      expect(names).to include('accounting_summary', 'list_bank_transactions', 'list_bills', 'list_invoices', 'list_chart_of_accounts')
+      expect(names).to include('accounting_summary', 'list_bank_transactions', 'list_bills', 'list_invoices', 'list_chart_of_accounts',
+                               'get_journal_entry')
       expect(names).not_to include('categorize_bank_transaction', 'exclude_bank_transaction')
     end
   end
@@ -214,13 +284,61 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       expect(summary.dig('bank_feed', 'unmatched')).to eq(1)
       expect(summary.dig('customer_invoices', 'aging', 'days_1_30')).to eq(300.0)
       expect(summary.dig('bills', 'drafts_not_entered')).to eq(1)
-      expect(summary).not_to have_key('skipped')
+      expect(summary['skipped']).to eq([])
 
       invoices = call_tool(token, 'list_invoices', overdue_only: true).first
-      expect(invoices['items'].first).to include('customer' => 'Ana Diaz', 'days_past_due' => 15)
+      expect(invoices['items'].first).to include('customer' => 'Ana Diaz', 'days_past_due' => 15, 'aging_bucket' => 'days_1_30')
 
       bills = call_tool(token, 'list_bills', status: 'any').first
       expect(bills['items'].first).to include('vendor' => 'Clayton')
+    end
+
+    def invoice!(number, status:, due:, owed:)
+      company.invoices.create!(invoice_number: number, status: status, invoice_date: due - 15, due_date: due, location: denver)
+             .tap { |i| i.update_columns(status: status, total: owed, amount_due: owed) } # callbacks move status; pin it
+    end
+
+    # Staging Summit Park: the summary said 144 invoices and list_invoices
+    # 104 with the same balance, because the summary counted drafts and paid
+    # ones too. And a 301 day old loan invoice was thought to be in current
+    # because a newer one of the same amount was.
+    it 'ages and counts the same open invoices in the summary and the list' do
+      old = invoice!('LN-3002-P01', status: 'overdue', due: Date.current - 301, owed: 2309.14)
+      invoice!('LN-3002-P11', status: 'sent', due: Date.current + 3, owed: 2309.14)
+      invoice!('INV-PAID', status: 'sent', due: Date.current - 5, owed: 100).update_columns(status: 'paid', amount_due: 0)
+      invoice!('INV-DRAFT', status: 'draft', due: Date.current - 5, owed: 400)
+
+      summary = call_tool(token, 'accounting_summary').first['customer_invoices']
+      list = call_tool(token, 'list_invoices').first
+      expect(summary).to include('open_invoices' => 2, 'open_balance' => 4618.28, 'counted' => a_string_including('balance due'))
+      expect(summary['aging']).to include('current' => 2309.14, 'days_90_plus' => 2309.14, 'days_1_30' => 0.0)
+      expect(summary['aging_counts']).to include('current' => 1, 'days_90_plus' => 1)
+      expect(summary['oldest_past_due']).to include('invoice_number' => 'LN-3002-P01', 'days_past_due' => 301)
+      expect(list['totals'].except('matching_invoices')).to eq(summary)
+      expect(list['totals']['matching_invoices']).to eq(2)
+      expect(list['items'].find { |i| i['id'] == "invoice:#{old.id}" }).to include('days_past_due' => 301, 'aging_bucket' => 'days_90_plus')
+
+      any = call_tool(token, 'list_invoices', status: 'any').first['totals']
+      expect(any).to include('matching_invoices' => 4, 'open_invoices' => 2)
+    end
+
+    it 'says when invoices and payments are not set to post, so a zero P&L is explained' do
+      notes = call_tool(token, 'accounting_summary').first.dig('profit_and_loss', 'notes')
+      expect(notes.join).to include('auto post invoices is off', 'auto post payments is off')
+
+      AccountingSettings.for_company(company).update!(auto_post_invoices: true, auto_post_payments: true)
+      expect(call_tool(token, 'accounting_summary').first['profit_and_loss']).not_to have_key('notes')
+    end
+
+    it 'leaves a bank account linked to a non cash GL account out of the cash total, with a warning' do
+      receivables = gl!('1994', 'Customer Receivables', 'asset', 'accounts_receivable')
+      bank!(gl: receivables)
+      Accounting::ManualPostingService.new(company).post_simple!(debit_account: receivables, credit_account: sales, amount: 700,
+                                                                 memo: 'Invoice', entry_date: Date.current)
+      cash = call_tool(token, 'accounting_summary').first['cash']
+      expect(cash['total']).to eq(0.0)
+      flagged = cash['accounts'].find { |a| a.dig('gl_account', 'number') == '1994' }
+      expect(flagged).to include('book_balance' => 700.0, 'in_total' => false, 'gl_account_warning' => a_string_including('not a bank or cash account'))
     end
 
     it 'names the sections a person cannot see instead of reporting zero' do
@@ -229,6 +347,62 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       expect(summary.keys).to include('bank_feed')
       expect(summary.keys).not_to include('profit_and_loss', 'bills', 'customer_invoices')
       expect(summary['skipped'].join).to include('profit and loss', 'bills')
+    end
+  end
+
+  describe 'get_journal_entry' do
+    let(:je_grants) { grants.merge('journal_entries' => %w[read]) }
+    let(:je_token) { connect!(connector_user(company, je_grants))['access_token'] }
+
+    it 'returns an entry by id or number with its lines, and the reversal links once voided' do
+      je = Accounting::ManualPostingService.new(company).post_simple!(debit_account: supplies, credit_account: cash_gl, amount: 42.5,
+                                                                      memo: 'Shop rags', entry_date: Date.current - 1, location_id: denver.id)
+      je.void!(user)
+      reversal = je.reload.reversed_by
+
+      result, error, text = call_tool(je_token, 'get_journal_entry', id: "journal_entry:#{je.id}")
+      expect(error).to be_falsey, text
+      expect(result).to include('entry_number' => je.entry_number, 'date' => (Date.current - 1).iso8601, 'memo' => 'Shop rags',
+                                'is_void' => true, 'total_debits' => 42.5, 'total_credits' => 42.5,
+                                'reversed_by' => { 'id' => "journal_entry:#{reversal.id}", 'entry_number' => reversal.entry_number })
+      expect(result['lines']).to contain_exactly(
+        a_hash_including('account_number' => '6991', 'account_name' => 'Shop Supplies', 'debit' => 42.5, 'location' => 'Denver'),
+        a_hash_including('account_number' => '1991', 'account_name' => 'Operating Checking', 'credit' => 42.5)
+      )
+      expect(result['lines'].first.keys & %w[debit credit]).to be_one
+
+      by_number, = call_tool(je_token, 'get_journal_entry', entry_number: reversal.entry_number)
+      expect(by_number).to include('id' => "journal_entry:#{reversal.id}", 'is_void' => false,
+                                   'reverses' => { 'id' => "journal_entry:#{je.id}", 'entry_number' => je.entry_number })
+    end
+
+    it 'is read only, company scoped, and needs journal entries read' do
+      tool = McpTools::GetJournalEntry.to_h
+      expect(tool[:title]).to be_present
+      expect(tool.dig(:annotations, :readOnlyHint)).to be(true)
+
+      other = connector_company
+      theirs_gl = other.chart_of_accounts.create!(account_number: '1', name: 'A', account_type: 'asset', normal_balance: 'debit')
+      theirs_rev = other.chart_of_accounts.create!(account_number: '2', name: 'B', account_type: 'revenue', normal_balance: 'credit')
+      theirs = Accounting::ManualPostingService.new(other).post_simple!(debit_account: theirs_gl, credit_account: theirs_rev,
+                                                                        amount: 1, memo: 'Theirs')
+      _, error, text = call_tool(je_token, 'get_journal_entry', id: "journal_entry:#{theirs.id}")
+      expect(error).to be(true)
+      expect(text).to include('No record')
+
+      _, error, text = call_tool(token, 'get_journal_entry', id: "journal_entry:#{theirs.id}")
+      expect(error).to be(true)
+      expect(text).to include('journal entries')
+    end
+
+    it 'shows a location tier person only entries touching their locations or none' do
+      mine = Accounting::ManualPostingService.new(company).post_simple!(debit_account: supplies, credit_account: cash_gl, amount: 5,
+                                                                        memo: 'Denver', location_id: denver.id)
+      elsewhere = Accounting::ManualPostingService.new(company).post_simple!(debit_account: supplies, credit_account: cash_gl, amount: 6,
+                                                                             memo: 'Boulder', location_id: boulder.id)
+      denver_token = connect!(connector_user(company, je_grants, location: denver))['access_token']
+      expect(call_tool(denver_token, 'get_journal_entry', id: "journal_entry:#{mine.id}")[1]).to be_falsey
+      expect(call_tool(denver_token, 'get_journal_entry', id: "journal_entry:#{elsewhere.id}")[1]).to be(true)
     end
   end
 end
