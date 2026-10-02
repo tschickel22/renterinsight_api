@@ -77,7 +77,7 @@ module Truebuild
 
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at), variant.updated_at].map { |t| t.try(:to_i) || t }
-      Rails.cache.fetch("truebuild:finish_groups:v3:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+      Rails.cache.fetch("truebuild:finish_groups:v4:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
         catalog.instance_variable_set(:@book, book)
@@ -178,7 +178,7 @@ module Truebuild
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v8:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v9:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -239,7 +239,7 @@ module Truebuild
         extra_sets[group.id].each { |set, json| (sets[set] ||= []) << json }
         {
           id: group.id, name: group.name,
-          color_sets: sets.map { |set, os| { name: set, options: os.uniq { |o| o[:name].downcase }.sort_by { |o| o[:name] } } }
+          color_sets: sets.map { |set, os| { name: set, options: one_per_finish(os).sort_by { |o| o[:name] } } }
                           .sort_by { |st| st[:name] },
           # A family's members sit together, under the first one's name.
           options: others.map { |op| option_json(op, retail).merge(family: families[op.catalog_option_id]) }
@@ -262,6 +262,25 @@ module Truebuild
         moved[g] # a group keeps its place even when all it held moved away
       end
       moved
+    end
+
+    # The same finish under two spellings is one chip. Bay Port's book names
+    # each backsplash tile twice ("1 Row Ceramic Inhale Gris" and "1 Row
+    # Inhale Gris (ceramic)", "2 Rows Catch Ice (subway)"), so the buyer saw
+    # ten tiles for five. Same words in any order, with the tile's material
+    # left out, is the same finish. Kept: an included one, then one with the
+    # factory's sample, then the spelling without brackets.
+    FINISH_MATERIAL = %w[ceramic porcelain glass subway tile].freeze
+
+    def one_per_finish(chips)
+      chips.group_by { |c| finish_words(c[:name]) }.values.map do |same|
+        same.min_by { |c| [c[:standard] ? 0 : 1, c[:swatch_url].present? ? 0 : 1, c[:name].include?('(') ? 1 : 0, c[:name].length] }
+      end
+    end
+
+    def finish_words(name)
+      words = name.downcase.scan(/[a-z0-9]+/).map { |w| w == 'rows' ? 'row' : w }.uniq.sort
+      (words - FINISH_MATERIAL).presence || words # "Glass" and "Subway" alone stay two
     end
 
     # A color chip: the factory's own sample picture and measured color when a

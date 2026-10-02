@@ -91,6 +91,18 @@ RSpec.describe 'Public TrueBuild', type: :request do
                                      .map { |f| f[:surface] }).to include('Flooring')
   end
 
+  it 'shows a tile the price book spells two ways as one chip' do
+    tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
+    { 'Backsplash' => ['1 Row Ceramic Inhale Gris', '1 Row Inhale Gris (ceramic)', '2 Row Ceramic Subway Catch Ice',
+                       '2 Rows Catch Ice (subway)', '2 Rows Inhale Gris (ceramic)', 'Glass', 'Subway'] }.each do |set, names|
+      names.each { |n| option(tile, n, kind: 'color', is_standard: true, metadata: { 'color_set' => set }) }
+    end
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    set = JSON.parse(response.body)['groups'].find { |g| g['name'] == 'Backsplash & Tile' }['color_sets'].first
+    expect(set['options'].map { |o| o['name'] })
+      .to eq(['1 Row Ceramic Inhale Gris', '2 Row Ceramic Subway Catch Ice', '2 Rows Inhale Gris (ceramic)', 'Glass', 'Subway'])
+  end
+
   it 'shows a family of options in one place, however the price book filed it' do
     tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
     stray = option(tile, 'Black Stainless Steel Package - Gas', dealer_cost: 3000)
