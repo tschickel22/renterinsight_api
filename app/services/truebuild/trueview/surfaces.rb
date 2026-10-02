@@ -21,11 +21,11 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 13      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
+      VERSION = 14      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
                         # 9 presence judged beside the overlay, 10 presence asked too strictly, 11 carried outlines,
                         # 12 edges by precedence and a check for spill onto neighbors (an outline whose description
                         # did not change is carried over, free), 13 cabinets up to the ceiling, spill sized,
-                        # thin surfaces kept
+                        # thin surfaces kept, 14 the crown molding on top of cabinets is the cabinets'
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -44,8 +44,9 @@ module Truebuild
       CATEGORIES = [
         ['cabinets', /cabinet|vanit|lav|hw /i,
          'the cabinet doors, drawer fronts and cabinet boxes: every upper and lower cabinet, including the one above the ' \
-         'range hood or microwave and any that rise to the ceiling, an island base and any vanity, down to the underside ' \
-         'of the countertop. Not the countertop or its front edge (the band of countertop material facing the camera above ' \
+         'range hood or microwave and any that rise to the ceiling, the crown molding and trim fitted on top of the ' \
+         'cabinets (finished to match them), an island base and any vanity, down to the underside of the countertop. Not ' \
+         'the crown molding where the walls meet the ceiling away from the cabinets. Not the countertop or its front edge (the band of countertop material facing the camera above ' \
          'the doors), appliances, sinks, stools, chairs or the floor'],
         # A refrigerator option on a photo with no refrigerator is skipped
         # rather than drawn and rejected (a side-by-side on a kitchen photo
@@ -355,7 +356,8 @@ module Truebuild
                                           'The surface is in the photo; judge only the outline (answer present: true). Look ' \
                                           'closely where light colors meet (white doors under a white counter edge, a pale wall ' \
                                           'beside a white tub surround) and at the top of the cabinets (one above the microwave ' \
-                                          "or hood, ones reaching the ceiling): that is where outlines go wrong.#{fine_overlap(key)}" },
+                                          'or hood, ones reaching the ceiling, crown molding fitted on top of them): that is ' \
+                                          "where outlines go wrong.#{fine_overlap(key)}" },
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
         cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])

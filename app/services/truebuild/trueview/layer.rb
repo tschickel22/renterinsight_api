@@ -21,7 +21,7 @@ module Truebuild
       MIN_REGION = 0.001 # share of the photo; smaller regions are noise
       MAX_HOLE = 0.02  # share of the photo; enclosed gaps up to this are filled
       FEATHER = 2.5
-      VERSION = 19     # bump when the cut or its check changes, so old layers are re-cut (16: checked against the sample, 17: never cut without an outline, 18: edges by surface precedence, 19: outlines v13)
+      VERSION = 20     # bump when the cut or its check changes, so old layers are re-cut (16: checked against the sample, 17: never cut without an outline, 18: edges by surface precedence, 19: outlines v13, 20: outlines v14)
       EDGE_FEATHER = 1.2
       OUTLINE_GROW = 2 # pixels at the photo's 1600 width
 

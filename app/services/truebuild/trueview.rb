@@ -41,7 +41,7 @@ module Truebuild
     # wall each time (or every wall), which breaks layers that must line up.
     SURFACE_SCOPE = [
       [/accent/i, 'An accent wall is ONE wall only: the single largest wall section facing the camera. Every other wall keeps its current color.'],
-      [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets. Countertops, walls and appliances stay exactly as they are. Keep every knob, pull, handle and hinge exactly as it is, the same number in the same places: never add hardware (a bath door drawn with a pull on each side).'],
+      [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets, and the crown molding fitted on top of the cabinets, which matches them (not the crown molding where the walls meet the ceiling elsewhere). Countertops, walls and appliances stay exactly as they are. Keep every knob, pull, handle and hinge exactly as it is, the same number in the same places: never add hardware (a bath door drawn with a pull on each side).'],
       # These homes use a matching 4 inch laminate lip along the wall; left
       # alone it kept the old counter's pattern under a new counter.
       [/appliance/i, 'Appliances means the refrigerator, range, range hood or microwave and dishwasher: give them the finish and style the package names (stainless, black stainless, black, French door refrigerator), keeping their positions and sizes. Cabinets and countertops stay exactly as they are.'],
