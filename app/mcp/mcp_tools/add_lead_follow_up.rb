@@ -10,7 +10,10 @@ module McpTools
     title 'Add a lead follow-up'
     description "Schedule the next step on a lead: a task, a call to make or a reminder, due at a date in the " \
                 "dealer's local time, assigned to the lead's owner (or the signed-in user when it has none) " \
-                'unless assigned_to_user_id is given. The assignee gets the usual reminder when it is due.'
+                'unless assigned_to_user_id is given. The assignee gets the usual reminder when it is due. ' \
+                "Local time means the time zone of the lead's location, else the signed-in user's location, " \
+                "else the company's setting. The reply names the zone it used (time_zone) and gives the due " \
+                'time with its offset. Tell the person which zone was used, and pass on any time_zone_warning.'
     input_schema(
       properties: {
         id: { type: 'string', description: 'lead:42' },
@@ -38,7 +41,7 @@ module McpTools
         elsif lead.owner_id && ctx.company.users.active.exists?(id: lead.owner_id) then lead.owner_id
         else ctx.user.id
         end
-      due = WriteHelpers.parse_due!(ctx, due_date, location_id: lead.location_id)
+      due, zone = LocalTime.parse!(ctx, due_date, location_id: lead.location_id)
       kind = kind.presence || 'task'
 
       activity = lead.lead_activities.new(
@@ -52,7 +55,8 @@ module McpTools
       ctx.record_change(action: 'created', record: activity, after: { status: activity.status })
 
       Base::Result.new(payload: { scheduled: {
-        id: "lead:#{lead.id}", kind: kind, subject: activity.subject, due: activity.due_date&.iso8601,
+        id: "lead:#{lead.id}", kind: kind, subject: activity.subject, due: LocalTime.iso(activity.due_date, zone),
+        due_utc: activity.due_date.utc.iso8601, **zone.describe,
         assigned_to: ctx.user_names[assignee_id], url: Records.new(ctx).url('lead', lead)
       } }, count: 1)
     end

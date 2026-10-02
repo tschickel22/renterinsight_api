@@ -108,6 +108,27 @@ RSpec.describe 'MCP project tools', :mcp, type: :request do
       expect(mine['items'].map { |i| i['title'] }).to eq(['Order skirting'])
     end
 
+    it 'orders by due date with undated work last, then phase order, then position, the same every call' do
+      p = project!({}, phases: [['Site prep', 'in_progress', nil], ['Delivery', 'not_started', nil],
+                                ['Set', 'not_started', nil]])
+      # Created out of order on purpose, so id order would be wrong.
+      step!(phase(p, 'Set'), name: 'Level home', position: 0)
+      step!(phase(p, 'Delivery'), name: 'Clear path', position: 1)
+      step!(phase(p, 'Site prep'), name: 'Pour footers', position: 1)
+      step!(phase(p, 'Delivery'), name: 'Book transport', position: 0)
+      step!(phase(p, 'Site prep'), name: 'Soil test', position: 0)
+      task!(p, phase(p, 'Delivery'), title: 'Order skirting', position: 5)
+      task!(p, phase(p, 'Set'), title: 'Dated task', due_date: Date.current + 3)
+      step!(phase(p, 'Set'), name: 'Dated step', position: 9, estimated_completion_date: Date.current + 1)
+
+      expected = ['Dated step', 'Dated task', 'Soil test', 'Pour footers', 'Book transport', 'Clear path',
+                  'Order skirting', 'Level home']
+      2.times do
+        result, = call_tool(token, 'list_project_tasks')
+        expect(result['items'].map { |i| i['title'] }).to eq(expected)
+      end
+    end
+
     it 'keeps to the plan, the role, the company and the person\'s locations' do
       p = project!
       other = Company.create!(name: 'Other', industry: 'manufactured_housing')

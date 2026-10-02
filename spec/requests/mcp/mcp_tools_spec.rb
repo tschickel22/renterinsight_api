@@ -292,6 +292,9 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       # A date alone means the end of that day where the dealer is, not midnight UTC.
       expect(created.due_date.in_time_zone('America/Denver').strftime('%Y-%m-%d %H:%M'))
         .to eq("#{1.day.from_now.to_date.iso8601} 17:00")
+      # The reply names the zone and gives the time on the dealer's clock.
+      expect(task['created']).to include('time_zone' => 'America/Denver', 'time_zone_source' => 'location Denver')
+      expect(task.dig('created', 'due')).to start_with("#{1.day.from_now.to_date.iso8601}T17:00:00-0")
 
       ticket, = call_tool(token, 'create_service_ticket', title: 'Leaking skylight', description: 'Front bedroom',
                                                          customer_id: "contact:#{contact.id}")

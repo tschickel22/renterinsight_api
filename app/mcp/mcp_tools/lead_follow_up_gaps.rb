@@ -10,7 +10,10 @@ module McpTools
     title 'Leads with no next step'
     description 'Counts of open leads by owner and by status: how many have had no activity in quiet_days ' \
                 '(default 14), how many have no follow-up scheduled, and how many follow-ups are overdue. ' \
-                'Closed statuses are left out. Use it before list_leads to see where follow-up is slipping.'
+                'Closed statuses are left out. Use it before list_leads to see where follow-up is slipping. ' \
+                'An owner row with assignable false is someone who can no longer take work (an inactive user, ' \
+                'or an id that is not a user at this company): suggest reassigning those leads to someone ' \
+                'from get_reference_data, never assigning more work to that owner.'
     input_schema(
       properties: {
         quiet_days: { type: 'integer', minimum: 1, maximum: 365 },
@@ -38,8 +41,10 @@ module McpTools
       ].map { |c| Arel.sql(c) }
 
       row = ->(counts) { %i[open_leads quiet no_follow_up overdue_follow_up].zip(counts).to_h }
-      by_owner = rel.group(:owner_id).pluck(:owner_id, *columns).map do |owner_id, *counts|
-        { owner: owner_id ? (ctx.user_names[owner_id] || "User #{owner_id}") : 'Unassigned', owner_id: owner_id }.merge(row.call(counts))
+      grouped = rel.group(:owner_id).pluck(:owner_id, *columns)
+      assignable = ctx.company.users.active.where(id: grouped.map(&:first).compact).pluck(:id).to_set
+      by_owner = grouped.map do |owner_id, *counts|
+        owner_label(ctx, owner_id, assignable).merge(row.call(counts))
       end
       labels = ctx.company.lead_statuses.pluck(:key, :label).to_h
       by_status = rel.group(:status).pluck(:status, *columns).map do |status, *counts|
@@ -52,6 +57,23 @@ module McpTools
         by_owner: by_owner.sort_by { |r| -r[:no_follow_up] },
         by_status: by_status.sort_by { |r| -r[:open_leads] }
       }, count: by_owner.size + by_status.size)
+    end
+
+    # get_reference_data lists only active users of this company, so an owner
+    # outside that list is named for what it is. An owner id from another
+    # company (staging lead 145 at Summit Park was owned by a platform admin
+    # of company 1) is never resolved to a name: that would show one tenant's
+    # people to another.
+    def self.owner_label(ctx, owner_id, assignable)
+      return { owner: 'Unassigned', owner_id: nil } unless owner_id
+      return { owner: ctx.user_names[owner_id], owner_id: owner_id } if assignable.include?(owner_id)
+
+      if (name = ctx.user_names[owner_id])
+        { owner: "#{name} (inactive)", owner_id: owner_id, owner_status: 'inactive', assignable: false }
+      else
+        { owner: "Not a user at #{ctx.company.name}", owner_id: owner_id, owner_status: 'not_a_user_here',
+          assignable: false }
+      end
     end
   end
 end

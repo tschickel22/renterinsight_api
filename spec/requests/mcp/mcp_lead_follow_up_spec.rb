@@ -68,11 +68,45 @@ RSpec.describe 'MCP lead follow-up', :mcp, type: :request do
       expect(result['by_status'].map { |r| r['status'] }).to eq(['new'])
     end
 
+    it 'names owners who cannot take work and marks them not assignable, without naming another company\'s user' do
+      gone = company.users.create!(email: "gone-#{SecureRandom.hex(3)}@example.com", first_name: 'Gus', last_name: 'Gone',
+                                   password: 'Pass1234!', role: 'user', status: 'inactive')
+      outsider = connector_company.users.create!(email: "out-#{SecureRandom.hex(3)}@example.com", first_name: 'Olga',
+                                                 last_name: 'Outsider', password: 'Pass1234!', role: 'user', status: 'active')
+      lead!
+      lead!(owner_id: gone.id)
+      lead!.update_columns(owner_id: outsider.id)
+
+      result, = call_tool(token, 'lead_follow_up_gaps')
+      rows = result['by_owner'].index_by { |r| r['owner_id'] }
+      expect(rows[rep.id]).to include('owner' => 'Rita Rep')
+      expect(rows[rep.id]).not_to have_key('assignable')
+      expect(rows[gone.id]).to include('owner' => 'Gus Gone (inactive)', 'owner_status' => 'inactive', 'assignable' => false)
+      expect(rows[outsider.id]).to include('owner' => "Not a user at #{company.name}", 'owner_status' => 'not_a_user_here',
+                                           'assignable' => false)
+      expect(result.to_json).not_to include('Olga', 'User ')
+    end
+
     it "does not count another company's leads" do
       other = connector_company
       other.leads.create!(first_name: 'X', last_name: 'Y', email: 'x@example.com', status: 'new')
       result, = call_tool(token, 'lead_follow_up_gaps')
       expect(result['totals']['open_leads']).to eq(0)
+    end
+  end
+
+  describe 'pipeline_summary' do
+    let(:user) { connector_user(company, { 'leads' => %w[read], 'crm' => %w[read] }) }
+
+    it 'counts open leads the way lead_follow_up_gaps does, leaving closed statuses out' do
+      2.times { lead! }
+      lead!(status: 'junk_lead')
+
+      summary, = call_tool(token, 'pipeline_summary')
+      gaps, = call_tool(token, 'lead_follow_up_gaps')
+      expect(summary['open_leads_by_status']).to eq([{ 'status' => 'new', 'label' => 'New', 'count' => 2 }])
+      expect(summary['open_leads_total']).to eq(2)
+      expect(summary['open_leads_total']).to eq(gaps.dig('totals', 'open_leads'))
     end
   end
 
@@ -91,6 +125,39 @@ RSpec.describe 'MCP lead follow-up', :mcp, type: :request do
       expect(McpTools::Undo.describe(change)).to eq("Created lead follow-up #{activity.id}")
       expect(McpTools::Undo.undo!(change, by: user)).to be_undone
       expect(activity.reload.status).to eq('cancelled')
+    end
+
+    it "reads a local time in the lead's location zone and says which zone it used" do
+      lead = lead!
+      result, error, text = call_tool(token, 'add_lead_follow_up', id: "lead:#{lead.id}", subject: 'Call',
+                                                                        due_date: '2026-10-06T10:00')
+      expect(error).to be_falsey, text
+      expect(lead.lead_activities.last.due_date).to eq(Time.utc(2026, 10, 6, 16, 0))
+      expect(result['scheduled']).to include('due' => '2026-10-06T10:00:00-06:00', 'due_utc' => '2026-10-06T16:00:00Z',
+                                             'time_zone' => 'America/Denver', 'time_zone_source' => 'location Denver')
+      expect(result['scheduled']).not_to have_key('time_zone_warning')
+    end
+
+    it 'warns when the location zone does not fit its state, as on Summit Park staging' do
+      # locations.timezone defaults to Eastern, so a Colorado lot nobody set up reads as Eastern.
+      showroom = company.locations.create!(name: 'Denver Showroom', city: 'Denver', state: 'CO')
+      expect(showroom.timezone).to eq('America/New_York')
+      lead = lead!(location_id: showroom.id)
+
+      result, = call_tool(token, 'add_lead_follow_up', id: "lead:#{lead.id}", subject: 'Call', due_date: '2026-10-06T10:00')
+      # The app reads this location in Eastern, so the connector does too, and says so.
+      expect(lead.lead_activities.last.due_date).to eq(Time.utc(2026, 10, 6, 14, 0))
+      expect(result['scheduled']).to include('time_zone' => 'America/New_York', 'time_zone_source' => 'location Denver Showroom')
+      expect(result['scheduled']['time_zone_warning']).to include('Denver Showroom is in CO', 'Settings, Locations')
+    end
+
+    it "falls back to the company's time zone setting when the lead has no location" do
+      Setting.set('Company', company.id, 'operational_settings', { 'timezone' => 'America/Chicago' })
+      lead = lead!(location_id: nil)
+
+      result, = call_tool(token, 'add_lead_follow_up', id: "lead:#{lead.id}", subject: 'Call', due_date: '2026-10-06T10:00')
+      expect(lead.lead_activities.last.due_date).to eq(Time.utc(2026, 10, 6, 15, 0))
+      expect(result['scheduled']).to include('time_zone' => 'America/Chicago', 'time_zone_source' => 'company time zone setting')
     end
 
     it 'schedules a call as an outbound call' do
