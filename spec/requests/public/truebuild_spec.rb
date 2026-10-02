@@ -78,6 +78,17 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(body['media']).to include('photos' => [], 'floor_plans' => [], 'tour_url' => nil)
   end
 
+  it 'shows a family of options in one place, however the price book filed it' do
+    tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
+    stray = option(tile, 'Black Stainless Steel Package - Gas', dealer_cost: 3000)
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    groups = JSON.parse(response.body)['groups']
+    kitchen = groups.find { |g| g['name'] == 'Kitchen & Appliances' }['options']
+    expect(kitchen.map { |o| o['id'] }).to include(stray.id)
+    expect(kitchen.select { |o| o['family'] == 'appliance package' }.size).to eq(3)
+    expect(groups.map { |g| g['name'] }).not_to include('Backsplash & Tile') # nothing else was in it
+  end
+
   it 'hides every price when the dealer does' do
     company.dealer_catalog_terms.first.update!(price_display: 'hidden')
     get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }

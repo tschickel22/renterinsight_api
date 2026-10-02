@@ -77,7 +77,7 @@ module Truebuild
 
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at), variant.updated_at].map { |t| t.try(:to_i) || t }
-      Rails.cache.fetch("truebuild:finish_groups:v1:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+      Rails.cache.fetch("truebuild:finish_groups:v2:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
         catalog.instance_variable_set(:@book, book)
@@ -178,7 +178,7 @@ module Truebuild
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v6:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v7:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -219,6 +219,7 @@ module Truebuild
       # Families span groups: order forms file a fireplace under Fireplaces
       # in one series and Interior Walls & Trim in another.
       families = OptionFamilies.for(rest.reject { |op| op.option.kind == 'color' }.map(&:option))
+      by_group = one_place_per_family(by_group, families)
       by_group.sort_by { |g, _| [g.position.to_i, g.name] }.map do |group, ops|
         colors, others = ops.partition { |op| op.option.kind == 'color' }
         sets = colors.group_by { |op| op.option.metadata['color_set'].presence || 'Colors' }
@@ -233,6 +234,22 @@ module Truebuild
                          .sort_by { |o| [o[:standard] ? 0 : 1, (o[:family] || o[:name]).downcase, o[:name].downcase] }
         }
       end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
+    end
+
+    # A family is one choice, so it is shown in one place: the group holding
+    # most of it. Bay Port's appliance packages came in three (Packages,
+    # Kitchen & Appliances, and Backsplash & Tile for the black stainless
+    # pair), and the buyer was asked to choose appliances three times.
+    def one_place_per_family(by_group, families)
+      homes = by_group.flat_map { |g, ops| ops.filter_map { |op| (f = families[op.catalog_option_id]) && [f, g] } }
+                      .group_by(&:first)
+                      .transform_values { |pairs| pairs.map(&:last).tally.max_by { |g, n| [n, -g.position.to_i] }.first }
+      moved = Hash.new { |h, k| h[k] = [] }
+      by_group.each do |g, ops|
+        ops.each { |op| moved[(f = families[op.catalog_option_id]) ? homes[f] : g] << op }
+        moved[g] # a group keeps its place even when all it held moved away
+      end
+      moved
     end
 
     # A color chip: the factory's own sample picture and measured color when a
