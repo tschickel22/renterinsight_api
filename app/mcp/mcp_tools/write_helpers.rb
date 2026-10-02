@@ -26,23 +26,6 @@ module McpTools
       user
     end
 
-    # Due dates in the dealer's own time, not UTC: "2026-10-02" from a Denver
-    # rep used to land at 6pm on the 1st. A date with no time means the end of
-    # that business day.
-    def parse_due!(ctx, value, location_id: nil)
-      zone_name = (location_id && ctx.company.locations.where(id: location_id).pick(:timezone)).presence ||
-                  ctx.company.time_zone
-      zone = ActiveSupport::TimeZone[zone_name] || Time.zone
-      text = value.to_s.strip
-      if text.match?(/\A\d{4}-\d{2}-\d{2}\z/)
-        zone.parse("#{text} 17:00")
-      else
-        zone.parse(text) || raise(UserError, 'due_date must look like 2026-10-02 or 2026-10-02T15:00.')
-      end
-    rescue ArgumentError
-      raise UserError, 'due_date must look like 2026-10-02 or 2026-10-02T15:00.'
-    end
-
     # CLAUDE.md, WRITING STYLE: no em or en dashes in anything a dealer's
     # customer reads. Refused rather than rewritten, so the AI rewrites it in
     # its own words instead of us mangling punctuation.
