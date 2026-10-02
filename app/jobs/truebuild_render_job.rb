@@ -32,7 +32,9 @@ class TruebuildRenderJob < ApplicationJob
     live = live_render_ids
     return rows.select { |r| r.updated_at < stale_after.ago } if live.nil?
 
-    rows.reject { |r| live.include?(r.id) }
+    # A drawing under way is never taken for lost on the queue's word alone:
+    # requeuing it starts a second, paid drawing of the same layer.
+    rows.reject { |r| live.include?(r.id) || (r.status == 'running' && r.updated_at > stale_after.ago) }
   end
 
   def self.requeue(row, queue: :default)
@@ -43,8 +45,12 @@ class TruebuildRenderJob < ApplicationJob
   def self.live_render_ids
     return nil unless ActiveJob::Base.queue_adapter.is_a?(ActiveJob::QueueAdapters::SolidQueueAdapter)
 
+    # The queue hands arguments back already decoded (serialize coder: JSON).
+    # Parsed again they always failed, so no drawing had a live job and every
+    # one waiting over two minutes was queued again, on every page refresh.
     SolidQueue::Job.where(class_name: name, finished_at: nil).pluck(:arguments).filter_map do |args|
-      JSON.parse(args.to_s)['arguments']&.first.to_i
+      args = JSON.parse(args) if args.is_a?(String)
+      args.is_a?(Hash) ? Array(args['arguments']).first.to_i : nil
     rescue JSON::ParserError
       nil
     end.to_set

@@ -19,7 +19,7 @@ RSpec.describe TruebuildRenderJob do
     let(:scope) { TruebuildRender.where(purpose: 'layer') }
 
     it 'finds a row whose job no longer exists, without waiting out the stale window' do
-      lost = row(status: 'running', age: 3.minutes)
+      lost = row(status: 'queued', age: 3.minutes)
       alive = row(status: 'running', age: 3.minutes)
       fresh = row(status: 'queued', age: 10.seconds)
       row(status: 'done', age: 1.hour)
@@ -27,6 +27,22 @@ RSpec.describe TruebuildRenderJob do
 
       expect(described_class.orphaned(scope, stale_after: 15.minutes)).to eq([lost])
       expect(fresh).to be_persisted
+    end
+
+    it 'never takes a drawing under way for lost before the stale window, whatever the queue says' do
+      drawing = row(status: 'running', age: 3.minutes)
+      stuck = row(status: 'running', age: 20.minutes)
+      allow(described_class).to receive(:live_render_ids).and_return(Set[])
+
+      expect(described_class.orphaned(scope, stale_after: 15.minutes)).to eq([stuck])
+      expect(drawing).to be_persisted
+    end
+
+    it "reads the queue's own decoded arguments" do
+      allow(ActiveJob::Base).to receive(:queue_adapter).and_return(ActiveJob::QueueAdapters::SolidQueueAdapter.new)
+      SolidQueue::Job.create!(queue_name: 'low', class_name: described_class.name,
+                              arguments: { 'job_class' => described_class.name, 'arguments' => [4242] })
+      expect(described_class.live_render_ids).to include(4242)
     end
 
     it 'falls back to age when the queue cannot be asked' do

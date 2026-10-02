@@ -60,6 +60,7 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
   end
 
   it 'queues each drawing once across factories, behind buyers, outside the daily limit for buyers' do
+    ActiveJob::Base.queue_adapter.enqueued_jobs.clear # jobs other specs left in the shared test queue
     ENV['TRUEVIEW_DAILY_LIMIT'] = '0'
     run = described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id })
     expect { TruebuildFactoryRunJob.perform_now(run.id) }.to have_enqueued_job(TruebuildRenderJob).on_queue('low').exactly(3).times
