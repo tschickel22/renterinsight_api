@@ -108,10 +108,42 @@ module McpTools
       if change.action == 'created'
         "Created #{label} #{change.record_id}"
       else
-        fields = change.after.keys.reject { |k| k == 'actual_close_date' }
-        "Changed #{fields.map { |f| f.tr('_', ' ').sub(/ id\z/, '') }.join(', ')} on #{label} #{change.record_id}: " +
-          fields.map { |f| "#{change.before[f].inspect} to #{change.after[f].inspect}" }.join(', ')
+        fields = change.after.keys.reject { |k| k == 'actual_close_date' || change.before[k] == change.after[k] }
+        return "Changed nothing on #{label} #{change.record_id}" if fields.empty?
+
+        "Changed #{fields.map { |f| field_label(f) }.join(', ')} on #{label} #{change.record_id}: " +
+          fields.map { |f| "#{field_label(f)} #{shown(change, f, change.before[f])} to #{shown(change, f, change.after[f])}" }
+                .join('; ')
       end
+    end
+
+    def field_label(field)
+      field.tr('_', ' ').sub(/ id\z/, '')
+    end
+
+    # A person reads this log, so an id becomes the thing it points at:
+    # "category account 1030 Savings / Reserve", not "nil to 392".
+    def shown(change, field, value)
+      return 'blank' if value.nil? || value == ''
+      return value.inspect unless field.end_with?('_id')
+
+      model = change.record_type.safe_constantize
+      assoc = model&.reflect_on_all_associations(:belongs_to)&.find { |a| a.foreign_key.to_s == field && !a.polymorphic? }
+      target = assoc&.klass&.find_by(id: value)
+      return value.inspect unless target
+      return value.inspect if target.respond_to?(:company_id) && target.company_id != change.company_id
+
+      name =
+        if target.respond_to?(:account_number) && target.respond_to?(:name)
+          [target.account_number, target.name].compact.join(' ')
+        elsif target.respond_to?(:entry_number)
+          "entry ##{target.entry_number}"
+        elsif target.respond_to?(:full_name)
+          target.full_name
+        else
+          target.try(:name) || target.try(:title)
+        end
+      name.presence || value.inspect
     end
 
     # --- created records ---------------------------------------------------

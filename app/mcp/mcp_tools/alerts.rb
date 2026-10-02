@@ -23,7 +23,7 @@ module McpTools
       when :changes
         notify(ctx, 'change_limit_reached',
                "#{ctx.user.full_name}'s AI app (#{app_name(ctx)}) reached its limit on changes. Review what it " \
-               'changed under Settings, AI Apps, and undo it there if that was not expected.')
+               'changed under Settings, Integrations, AI Apps, and undo it there if that was not expected.')
       end
       if limit_reached.nil? && status == 'denied' && recent_refusals(ctx) >= REFUSALS_PER_HOUR
         notify(ctx, 'repeated_refusals',

@@ -68,8 +68,9 @@ module McpTools
           result = Result.new(payload: result, count: 0) unless result.is_a?(Result)
           status = 'ok'
           count = result.count
-          MCP::Tool::Response.new([{ type: 'text', text: JSON.generate(result.payload) }],
-                                  structured_content: result.payload)
+          payload = with_undo_hint(ctx, result.payload)
+          MCP::Tool::Response.new([{ type: 'text', text: JSON.generate(payload) }],
+                                  structured_content: payload)
         rescue Denied => e
           limit_reached = { LimitReached => :records, ChangeLimitReached => :changes }[e.class]
           status = 'denied'
@@ -94,6 +95,18 @@ module McpTools
 
       def error(text)
         MCP::Tool::Response.new([{ type: 'text', text: text }], error: true)
+      end
+
+      # The connector cannot undo its own changes; a person does that in the
+      # app. Said on every write that recorded a change, because the moment
+      # someone saves a draft is when they want to know how to discard it.
+      def with_undo_hint(ctx, payload)
+        return payload unless write_tool? && ctx.pending_changes.any? && payload.is_a?(Hash)
+
+        app = Brand.current(company: ctx.company).name
+        text = "You (or an admin) can undo this change in #{app} under Settings, Integrations, AI Apps: " \
+               "#{ctx.app_url('/settings?tab=ai-apps')}"
+        payload.keys.first.is_a?(String) ? payload.merge('undo' => text) : payload.merge(undo: text)
       end
 
       # Model callbacks (activity logs, notifications, workflow events) read

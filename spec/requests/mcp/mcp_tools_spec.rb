@@ -185,7 +185,7 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
 
     it 'tells the AI cost is internal when on, and how to turn it on when off' do
       off = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } })
-      expect(off.dig('result', 'instructions')).to include('your', 'admin can allow it under Settings, AI Apps')
+      expect(off.dig('result', 'instructions')).to include('your', 'admin can allow it under Settings, Integrations, AI Apps')
 
       Setting.set('Company', company.id, 'mcp_settings', { 'show_costs' => true })
       on = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } })
