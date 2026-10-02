@@ -30,8 +30,11 @@ seems to cover it, then write the answer in this order:
    Receivables (section 5) always get full treatment, even in an empty month.
 3. **The checklist** (section 9).
 
-**When the books are empty, stop early.** If revenue, cost of sales and expenses are
-all zero for the month and the year to date, write only: the verdict, the settings or
+**When the books are empty, stop early in what you write, not in what you check.**
+Still make every call; a month with an empty P&L can still have overdue bills, won
+deals with no close date or aged stock, and any of those goes in the verdict. If
+revenue, cost of sales and expenses are all zero for the month and the year to date,
+write only: the verdict, the settings or
 bank account fix (sections 1 and 2), the bank feed (section 3), receivables by
 customer (section 5), and a checklist of at most five items. Do not render the other
 sections, not even as one line each. Say at the end that the rest of the close can
@@ -101,7 +104,10 @@ in draft, which have not hit the books. Compare total due soon with cash on hand
 `list_invoices` with overdue_only and sort largest: count, total and aging buckets
 from `totals`. A dealer chases customers, not invoices: lead with `totals.by_customer`
 (customer, open invoices, balance, oldest days past due), then the five largest
-overdue invoices by amount and days past due.
+overdue invoices by amount and days past due. Say which set a customer table comes
+from: in `accounting_summary` it covers all open invoices, in `list_invoices` with
+overdue_only it covers overdue ones only, so a customer's numbers can differ between
+the two. Use one and name it, or show both and say why they differ.
 Use `aging_counts`, `aging_invoices` and each invoice's `aging_bucket` rather than
 matching amounts to buckets yourself (several invoices can share one amount). If
 `more_not_shown` is above zero, say how many you did not list. Describe what invoices
@@ -152,11 +158,12 @@ ages. If floor plan figures are absent, say they are not visible here.
 
 ## 9. The checklist
 
-End with a short checklist, most important first, each item with who should do it if
-the data names someone:
+End with a short checklist, most important first. Name who should do an item only
+when a tool returned that person (a deal's salesperson, a project's owner); never
+assign a role the data does not name.
 
-- [ ] Fix the Chase link to GL 1110 before categorizing anything (bookkeeper)
-- [ ] Categorize 41 unmatched bank lines from September (bookkeeper)
+- [ ] Fix the Chase link to GL 1110 before categorizing anything
+- [ ] Categorize 41 unmatched bank lines from September
 - [ ] Call about invoice 1042, 63 days overdue, $4,800
 - [ ] Confirm deal D-2207 delivered; stage still shows negotiation
 
@@ -174,5 +181,9 @@ Then one sentence on whether the month is ready to close.
 - If the data looks like test or sample records (placeholder names, repeated "New
   Opportunity" deals), say so once at the top so the reader knows how much is signal.
 - Plain words for an owner, not accounting jargon. No em dashes or en dashes.
+- Use plain headings ("Bank feed", "What you are owed"), never this file's section
+  numbers; skipped sections would leave gaps in the numbering.
+- A percentage you work out yourself: check the arithmetic and say what it is a
+  percentage of.
 - Closing the period (locking it) happens in DealerTide. Say so if asked; this
   connector cannot lock periods.
