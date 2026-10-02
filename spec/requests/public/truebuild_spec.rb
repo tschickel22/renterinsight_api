@@ -78,6 +78,19 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(body['media']).to include('photos' => [], 'floor_plans' => [], 'tour_url' => nil)
   end
 
+  it 'offers the vinyl floor colors, listed as standard items, as a Flooring choice' do
+    floors = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'flooring', name: 'Flooring', position: 6)
+    option(floors, 'Thunder (9661)', kind: 'standard', is_standard: true)
+    option(floors, 'Nordic White (9662)', kind: 'standard', is_standard: true)
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    group = JSON.parse(response.body)['groups'].find { |g| g['name'] == 'Flooring' }
+    expect(group['color_sets']).to eq([{ 'name' => 'Flooring', 'options' => group['color_sets'].first['options'] }])
+    expect(group['color_sets'].first['options'].map { |o| o['name'] }).to eq(['Nordic White (9662)', 'Thunder (9661)'])
+    expect(group['options']).to eq([])
+    expect(Truebuild::Trueview::Buyer.new(company, variant).finish_choices(Truebuild::BuyerCatalog.finish_groups(variant))
+                                     .map { |f| f[:surface] }).to include('Flooring')
+  end
+
   it 'shows a family of options in one place, however the price book filed it' do
     tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
     stray = option(tile, 'Black Stainless Steel Package - Gas', dealer_cost: 3000)

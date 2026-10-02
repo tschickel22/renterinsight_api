@@ -77,7 +77,7 @@ module Truebuild
 
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at), variant.updated_at].map { |t| t.try(:to_i) || t }
-      Rails.cache.fetch("truebuild:finish_groups:v2:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+      Rails.cache.fetch("truebuild:finish_groups:v3:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
         catalog.instance_variable_set(:@book, book)
@@ -178,7 +178,7 @@ module Truebuild
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v7:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v8:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -198,9 +198,16 @@ module Truebuild
     # "Shutters: Black" as a no-charge option is a color choice written as an
     # option: one of a set the buyer picks from, not something included.
     NAMED_CHOICE = /\A([A-Za-z0-9][A-Za-z0-9 ]{2,30}):\s*(.+)\z/ # "3 Tab Shingles: Black Weatherwood"
+    # Sheet vinyl (lino) colors listed as standard items with the mill's
+    # number: "Thunder (9661)", "Nordic White (9662)". The kitchen and bath
+    # floor, a color the buyer chooses, not something merely included.
+    FLOOR_COLOR = /\A[A-Za-z][A-Za-z ]+\s\(\d{4}\)\z/
 
     def groups(prices, retail)
       uniq = prices.uniq(&:catalog_option_id)
+      floors, uniq = uniq.partition do |op|
+        op.is_standard && op.option.kind == 'standard' && op.option.name.match?(FLOOR_COLOR) && op.option.group&.name.to_s.match?(/floor/i)
+      end
       choices, rest = uniq.partition { |op| op.is_standard && op.option.kind != 'color' && op.option.name.match?(NAMED_CHOICE) }
       by_group = rest.group_by { |op| op.option.group }
       extra_sets = Hash.new { |h, k| h[k] = [] } # group id => [[set, option json]]
@@ -214,6 +221,11 @@ module Truebuild
         by_group[group] ||= []
         extra_sets[group.id] << [Catalog::PriceBooks::ColorSets.normalize(set_title),
                                  color_json(op, retail, set_title, value.strip)]
+      end
+
+      floors.each do |op|
+        by_group[op.option.group] ||= []
+        extra_sets[op.option.group.id] << ['Flooring', color_json(op, retail, 'Flooring')]
       end
 
       # Families span groups: order forms file a fireplace under Fireplaces
