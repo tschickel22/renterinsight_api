@@ -200,6 +200,28 @@ RSpec.describe 'TrueView rendering' do
       expect(render.reload).to have_attributes(status: 'rejected', error: 'Hidden: The cabinets are cream, the sample is bright white.')
     end
 
+    it 'draws nothing for a surface whose outline failed, rather than cut it by what changed' do
+      failed = TruebuildSurfaceMask.new(status: 'failed', error: 'outline scored 2')
+      allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(failed)
+      expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)
+      Truebuild::Trueview.perform!(render)
+      expect(render.reload).to have_attributes(status: 'failed', cost_usd: 0)
+      expect(render.error).to start_with('Not drawn: no outline yet')
+    end
+
+    it 'tells the check that an added or doubled pull is wrong' do
+      draws([5])
+      asked = []
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |content:, **|
+        asked << content.map { |c| c[:text] }.join
+        { input: { 'score' => 5 }, input_tokens: 1, output_tokens: 1 }
+      end
+      Truebuild::Trueview.perform!(render)
+      expect(asked.first).to include('a second pull or knob on a door')
+      expect(Truebuild::Trueview.prompt(room: 'bath', selection: [{ 'surface' => 'Cabinets', 'value' => 'Timberwolf' }]))
+        .to include('never add hardware')
+    end
+
     it 'shows the layer when the check itself cannot run' do
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
         .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })

@@ -52,11 +52,13 @@ module Truebuild
         { photos: photos, drawing: drawing }
       end
 
-      # Option ids whose drawing failed its check on any photo, under the
-      # current cut: BuyerCatalog does not offer them. Cached briefly, as the
-      # designer asks on every load.
+      # What BuyerCatalog does not offer, as option id sets, under the
+      # current cut. Cached briefly, as the designer asks on every load.
+      #   failed        its drawing failed its check on a photo
+      #   not_pictured  no photo of its room shows the surface (shutter
+      #                 colors for a home photographed without shutters)
       def self.held_back(company, variant)
-        Rails.cache.fetch("truebuild:trueview:held:v#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
+        Rails.cache.fetch("truebuild:trueview:held:v2:#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
           new(company, variant).held_back
         end
       end
@@ -64,7 +66,12 @@ module Truebuild
       def held_back
         plan = self.plan
         failed = hidden_layers(plan) - done_layers(plan).keys
-        plan.select { |p| failed.include?([p[:photo], p[:key], p[:prompt]]) }.map { |p| p[:option_id] }.uniq.to_set
+        skipped = skipped_layers(plan)
+        ids = ->(items) { items.map { |p| p[:option_id] }.uniq.to_set }
+        { failed: ids.call(plan.select { |p| failed.include?([p[:photo], p[:key], p[:prompt]]) }),
+          not_pictured: ids.call(plan.group_by { |p| p[:option_id] }
+                                     .select { |_, ps| ps.all? { |p| skipped.include?([p[:photo], p[:key], p[:prompt]]) } }
+                                     .values.flatten) }
       end
 
       # Queues every missing layer, once per PREDRAW_EVERY, within the daily
@@ -223,10 +230,12 @@ module Truebuild
       end
 
       # [photo, selection_key, prompt] => layer_url of a passed drawing
-      # under an older cut, newest first.
+      # under an older cut, newest first. Only one cut by its surface's
+      # outline: cut by what it changed, each accent color sat on its own wall.
       def older_layers(plan)
         rows(plan).done.where.not(layer_url: nil).order(:id)
                   .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .select { |r| r.usage['outlined'] || Surfaces.category(r.selection.first&.dig('surface')).nil? }
                   .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
       end
 

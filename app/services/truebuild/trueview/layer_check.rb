@@ -67,7 +67,8 @@ module Truebuild
         described = Surfaces.describe(surface)
         text = described ? " The #{surface} here means #{described}; anything else keeping its finish is correct." : ''
         "#{text} If the photo already showed this finish, little or no change is correct (score 4 or 5). An appliance " \
-          'package may leave the range hood as it was.'
+          'package may leave the range hood as it was. Anything added or doubled (a second pull or knob on a door, new ' \
+          'hardware, a new object) is clearly wrong: score 2.'
       end
 
       def sample_content(sample, value, hex)

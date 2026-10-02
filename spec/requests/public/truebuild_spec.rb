@@ -402,10 +402,21 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(sets['Shutters']).to eq(['Black'])
     end
 
+    it 'does not offer colors for a surface no photo shows, such as shutters on a home without them' do
+      trueview
+      TruebuildRender.find_by("selection->0->>'surface' = 'Shutters'")
+                     .update!(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      option(floor_plan, 'None', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Shutters' })
+      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+      sets = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.map { |st| st['name'] }
+      expect(sets).not_to include('Shutters')
+      expect(sets).to include('Siding', 'Corner posts')
+    end
+
     it 'shows the older drawing while it is cut again, and not once the new check rejects it' do
       trueview
       clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
-      clay_row.update!(status: 'done', image_url: 'https://b/clay.png', layer_url: 'https://b/clay-old.webp', usage: { 'mask_version' => 2 })
+      clay_row.update!(status: 'done', image_url: 'https://b/clay.png', layer_url: 'https://b/clay-old.webp', usage: { 'mask_version' => 2, 'outlined' => true })
       expect(trueview['photos'].first['layers']).to include(clay.id.to_s => 'https://b/clay-old.webp')
 
       recut = TruebuildRender.where("usage ? 'recut_from'").sole

@@ -41,7 +41,7 @@ module Truebuild
     # wall each time (or every wall), which breaks layers that must line up.
     SURFACE_SCOPE = [
       [/accent/i, 'An accent wall is ONE wall only: the single largest wall section facing the camera. Every other wall keeps its current color.'],
-      [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets. Countertops, walls and appliances stay exactly as they are.'],
+      [/cabinet|vanit|hw /i, 'Cabinets means every cabinet door, drawer front and cabinet box in the photo, including the island base, upper and lower cabinets. Countertops, walls and appliances stay exactly as they are. Keep every knob, pull, handle and hinge exactly as it is, the same number in the same places: never add hardware (a bath door drawn with a pull on each side).'],
       # These homes use a matching 4 inch laminate lip along the wall; left
       # alone it kept the old counter's pattern under a new counter.
       [/appliance/i, 'Appliances means the refrigerator, range, range hood or microwave and dishwasher: give them the finish and style the package names (stainless, black stainless, black, French door refrigerator), keeping their positions and sizes. Cabinets and countertops stay exactly as they are.'],
@@ -117,6 +117,12 @@ module Truebuild
         if mask&.status == 'failed' && mask.error.to_s.include?('framing')
           return render.update!(status: 'failed', error: "Not drawn: #{mask.error}", cost_usd: 0)
         end
+        # No outline yet: cut by what each drawing changed, every accent
+        # color landed on a different wall. Drawn once the outline is found
+        # (Surfaces retries it), never without one.
+        if mask && mask.status != 'done'
+          return render.update!(status: 'failed', error: "Not drawn: no outline yet (#{mask.error.to_s.first(200)})", cost_usd: 0)
+        end
       end
       # The samples named when the row was made, in prompt order.
       ids = Array(render.usage['swatch_ids'])
@@ -159,7 +165,7 @@ module Truebuild
                 model: result[:model] || render.model, cost_usd: spent.round(4) }
       if render.purpose == 'layer'
         attrs.merge!(layer_url: store(render, layer[:bytes], layer[:mime], suffix: 'layer'), mask_coverage: layer[:coverage])
-        attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'))
+        attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'), 'outlined' => mask.present?)
         # Failed its check twice: kept for review, never shown to buyers.
         attrs.merge!(status: 'rejected', error: "Hidden: #{verdict['note'] || 'failed its check'}") unless verdict['ok']
       end
@@ -197,7 +203,7 @@ module Truebuild
       render.update!(status: verdict['ok'] ? 'done' : 'rejected', cost_usd: verdict['cost_usd'], latency_ms: 0,
                      mask_coverage: layer[:coverage], error: (verdict['ok'] ? nil : "Hidden: #{verdict['note'] || 'failed its check'}"),
                      layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
-                     usage: render.usage.merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd')))
+                     usage: render.usage.merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'), 'outlined' => mask.present?))
     end
 
     def source_aspect(source)
