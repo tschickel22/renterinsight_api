@@ -70,19 +70,23 @@ class BankTransactionImportService
     raw = extract_field(row, column_map[:date])
     return nil if raw.blank?
 
+    text = raw.to_s.strip
     format = column_map[:date_format] || '%m/%d/%Y'
-    begin
-      return Date.strptime(raw.to_s.strip, format)
+    date = [format, '%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y', '%d/%m/%Y'].uniq.lazy.filter_map do |fmt|
+      Date.strptime(text, fmt)
     rescue Date::Error
-      ['%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y', '%d/%m/%Y'].each do |fmt|
-        begin
-          return Date.strptime(raw.to_s.strip, fmt)
-        rescue Date::Error
-          next
-        end
-      end
       nil
-    end
+    end.first
+    century_fix(date)
+  end
+
+  # %Y reads "5/5/25" as the year 25 instead of failing, and Heartland's
+  # whole first import (286 lines, then every entry posted from them) landed
+  # in the year 25. Bank exports with two-digit years mean this century.
+  def century_fix(date)
+    return date if date.nil? || date.year >= 100
+
+    date >> (2000 * 12)
   end
 
   def parse_amount(row, column_map)
