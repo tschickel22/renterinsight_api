@@ -41,9 +41,10 @@ RSpec.describe 'MCP budget tools', :mcp, type: :request do
     end
   end
 
-  def post!(debit, credit, amount, date = Date.current)
+  def post!(debit, credit, amount, date = Date.current, location_id: nil)
     Accounting::ManualPostingService.new(company).post_simple!(debit_account: debit, credit_account: credit,
-                                                               amount: amount, memo: 'test', entry_date: date)
+                                                               amount: amount, memo: 'test', entry_date: date,
+                                                               location_id: location_id)
   end
 
   def gid(account)
@@ -137,13 +138,22 @@ RSpec.describe 'MCP budget tools', :mcp, type: :request do
       expect(sales_row).to include('budget' => 2_000.0, 'actual' => 1_500.0, 'impact' => -500.0)
     end
 
-    it "answers a location budget's variance instead of crashing" do
+    it "compares a location budget with that location's books only" do
       budget = budget!({ location_id: denver.id, status: 'active' }, sales => 1_000)
-      _, error, text = call_tool(token, 'budget_variance', id: "budget:#{budget.id}")
-      # journal_entries has no location_id, so BudgetService cannot filter by
-      # location yet; the tool says so instead of erroring.
-      expect(error).to be(true)
-      expect(text).to include('location budget')
+      post!(bank, sales, 400, location_id: denver.id)
+      post!(bank, sales, 250, location_id: boulder.id)
+      post!(bank, sales, 100) # no location: company level only
+
+      result, error, text = call_tool(token, 'budget_variance', id: "budget:#{budget.id}", period: 'month',
+                                                                month: Date.current.strftime('%Y-%m'))
+      expect(error).to be_falsey, text
+      sales_row = result['rows'].find { |r| r['account_name'] == 'Home Sales' }
+      expect(sales_row['actual']).to eq(400.0)
+
+      coverage = BudgetService.data_coverage(company, budget.fiscal_year, location_id: denver.id)
+      expect(coverage[:has_data]).to be(true)
+      expect(coverage[:unlocated_lines]).to eq(2)
+      expect(BudgetService.data_coverage(company, budget.fiscal_year, location_id: boulder.id + 999)[:has_data]).to be(false)
     end
 
     it "gives last year's actuals by month and says how much history there is" do

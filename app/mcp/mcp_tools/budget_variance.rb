@@ -26,11 +26,6 @@ module McpTools
       fiscal_month = fiscal_month!(ctx, budget, month) if period == 'month'
       raise UserError, 'period quarter needs quarter (1 to 4).' if period == 'quarter' && quarter.blank?
 
-      if budget.location_id.present? && !budget.consolidated? && !JournalEntry.column_names.include?('location_id')
-        raise UserError, 'Budget against actual is not available for a location budget yet, because the books ' \
-                         'do not record a location on each entry. Compare the company-wide or consolidated budget instead.'
-      end
-
       report = begin
         BudgetService.calculate_variance(budget, period: period, month: fiscal_month, quarter: quarter)
       rescue ActiveRecord::StatementInvalid => e
