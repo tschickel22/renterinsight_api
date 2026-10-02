@@ -1,0 +1,31 @@
+<%= @brand.name %> now works with Claude
+
+Hi <%= @user.first_name.presence || 'there' %>,
+
+AI Apps is now turned on for <%= @company.name %>. Your team can connect Claude to <%= @brand.name %> and ask it about leads, deals, inventory, service, the books, budgets, install projects and commission plans, using the same information they already see in <%= @brand.name %>.
+
+1. CHOOSE WHO CAN USE IT
+You are an admin, so you already have access. For anyone else, open Settings, Users, Roles & Permissions and give their role the AI Connector permission: Read to connect, Update to let Claude make changes for them.
+<%= @roles_url %>
+
+2. INSTALL IT IN CLAUDE
+- In Claude, open the directory and add <%= @brand.name %>: <%= @install_url %>
+- Sign in with your <%= @brand.name %> login.
+- To let Claude make changes, tick "Also let it make changes" on the sign-in screen.
+
+3. THINGS TO ASK
+- "Which of my leads are going cold, and what should we do about them?"
+- "My bank feed is behind. Help me get it caught up."
+- "How are my install projects going this week? Draft the customer updates."
+- "I want to rethink how my salespeople get paid. Walk me through it."
+- "Help me rough out a budget for next year."
+- "Help me close last month."
+
+GOOD TO KNOW
+- Claude sees only what each person can see in <%= @brand.name %>, at their locations.
+- It asks before every change, and every change is recorded. Review and undo them under Settings, Integrations, AI Apps: <%= @ai_apps_url %>
+- It never messages your customers, activates campaigns, workflows, budgets or commission plans, pays bills or deletes records. Those stay in <%= @brand.name %>.
+- Dealer cost and gross stay hidden from Claude unless you turn on "Let AI apps see dealer cost and gross" on the same AI Apps page.
+
+More detail: <%= @docs_url %>
+Questions? Write to <%= @brand.support_email %>.

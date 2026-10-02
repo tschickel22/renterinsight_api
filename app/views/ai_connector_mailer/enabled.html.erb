@@ -1,0 +1,51 @@
+<h2><%= @brand.name %> now works with Claude</h2>
+
+<p>Hi <%= @user.first_name.presence || 'there' %>,</p>
+
+<p>
+  AI Apps is now turned on for <strong><%= @company.name %></strong>. Your team can connect Claude to
+  <%= @brand.name %> and ask it about leads, deals, inventory, service, the books, budgets, install
+  projects and commission plans, using the same information they already see in <%= @brand.name %>.
+</p>
+
+<h3>1. Choose who can use it</h3>
+<p>
+  You are an admin, so you already have access. For anyone else, open
+  <a href="<%= @roles_url %>">Settings, Users, Roles &amp; Permissions</a> and give their role the
+  <strong>AI Connector</strong> permission: <strong>Read</strong> to connect, <strong>Update</strong> to let
+  Claude make changes for them.
+</p>
+
+<h3>2. Install it in Claude</h3>
+<ol>
+  <li>In Claude, open the directory and add <strong><%= @brand.name %></strong>
+      (<a href="<%= @install_url %>">open the listing</a>).</li>
+  <li>Sign in with your <%= @brand.name %> login.</li>
+  <li>To let Claude make changes, tick <strong>Also let it make changes</strong> on the sign-in screen.</li>
+</ol>
+
+<h3>3. Things to ask</h3>
+<ul>
+  <li>"Which of my leads are going cold, and what should we do about them?"</li>
+  <li>"My bank feed is behind. Help me get it caught up."</li>
+  <li>"How are my install projects going this week? Draft the customer updates."</li>
+  <li>"I want to rethink how my salespeople get paid. Walk me through it."</li>
+  <li>"Help me rough out a budget for next year."</li>
+  <li>"Help me close last month."</li>
+</ul>
+
+<h3>Good to know</h3>
+<ul>
+  <li>Claude sees only what each person can see in <%= @brand.name %>, at their locations.</li>
+  <li>It asks before every change, and every change is recorded. You can review and undo them under
+      <a href="<%= @ai_apps_url %>">Settings, Integrations, AI Apps</a>.</li>
+  <li>It never messages your customers, activates campaigns, workflows, budgets or commission plans,
+      pays bills or deletes records. Those stay in <%= @brand.name %>.</li>
+  <li>Dealer cost and gross stay hidden from Claude unless you turn on
+      "Let AI apps see dealer cost and gross" on the same AI Apps page.</li>
+</ul>
+
+<p>
+  More detail: <a href="<%= @docs_url %>"><%= @docs_url %></a>. Questions? Write to
+  <a href="mailto:<%= @brand.support_email %>"><%= @brand.support_email %></a>.
+</p>
