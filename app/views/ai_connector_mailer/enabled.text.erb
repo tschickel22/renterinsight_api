@@ -2,18 +2,41 @@
 
 Hi <%= @user.first_name.presence || 'there' %>,
 
-AI Apps is now turned on for <%= @company.name %>. Your team can connect Claude to <%= @brand.name %> and ask it about leads, deals, inventory, service, the books, budgets, install projects and commission plans, using the same information they already see in <%= @brand.name %>.
+AI Apps is now turned on for <%= @company.name %>. Your team can add <%= @brand.name %> to Claude and ask it about leads, deals, inventory, service, the books, budgets, install projects and commission plans, using the same information they already see in <%= @brand.name %>.
 
-1. CHOOSE WHO CAN USE IT
-You are an admin, so you already have access. For anyone else, open Settings, Users, Roles & Permissions and give their role the AI Connector permission: Read to connect, Update to let Claude make changes for them.
+STEP 1. CHOOSE WHO CAN USE IT (ADMINS)
+You are an admin, so you already have access. For anyone else, open Settings, Users, Roles & Permissions in <%= @brand.name %> and give their role the AI Connector permission: Read to connect, Update to let Claude make changes for them.
 <%= @roles_url %>
 
-2. INSTALL IT IN CLAUDE
-- In Claude, open the directory and add <%= @brand.name %>: <%= @install_url %>
-- Sign in with your <%= @brand.name %> login.
-- To let Claude make changes, tick "Also let it make changes" on the sign-in screen.
+STEP 2. ADD THE <%= @brand.name.upcase %> PLUGIN IN CLAUDE
+The plugin brings both pieces at once: the connection to <%= @brand.name %> and six ready-made skills. You need a Claude Pro, Max, Team or Enterprise plan.
+- Open Claude at https://claude.ai or in the Claude desktop app.
+- Select Customize (in the sidebar), then Plugins.
+- Select Discover, search for <%= @brand.name %>, open it and select Add.
+<% if @directory_url %>- Or go straight to the listing: <%= @directory_url %>
+<% end %>
+STEP 3. CONNECT YOUR <%= @brand.name.upcase %> ACCOUNT
+- Still on the plugin's page, open its Connectors tab.
+- Next to <%= @brand.name %>, select Add if it says Not added, then Connect.
+- Sign in with your <%= @brand.name %> email and password. To let Claude make changes (add notes, tasks, drafts), tick "Also let it make changes" on that screen, then approve.
+- The connector now shows Connected. It also appears under Customize, Connectors.
+On a Claude Team or Enterprise plan, your Claude organization Owner may need to add the <%= @brand.name %> connector for the team first (they select "Connect for your team"). Each person then connects with their own <%= @brand.name %> login.
 
-3. THINGS TO ASK
+STEP 4. USE IT IN A CHAT
+- Start a new chat. Select + in the message box, then Connectors, and make sure <%= @brand.name %> is switched on.
+- Ask in plain words. The first time Claude uses a <%= @brand.name %> tool it may ask permission; choose Allow once or Always allow.
+- To pick a skill yourself, type / in the message box and choose one of the <%= @brand.name %> skills.
+
+EVERYDAY QUESTIONS
+- "Show my open deals by stage."
+- "Find Maria Lopez and tell me where her deal stands."
+- "What three bedroom homes do we have in stock under $90,000?"
+- "What tasks are due for me this week?"
+- "Which service tickets are still open?"
+- "Add a note to the Garcia lead: called, wants a tour Saturday."
+- "Create a task for me to call John Lopez tomorrow at 10."
+
+BIGGER JOBS (THESE USE THE BUILT IN SKILLS)
 - "Which of my leads are going cold, and what should we do about them?"
 - "My bank feed is behind. Help me get it caught up."
 - "How are my install projects going this week? Draft the customer updates."
