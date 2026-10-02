@@ -112,6 +112,11 @@ module Truebuild
           return render.update!(status: 'skipped', error: 'Not in this photo', cost_usd: 0,
                                 usage: render.usage.merge('mask_version' => Layer::VERSION))
         end
+        # Outlining this photo just failed on its shape: drawing would fail
+        # the same way, and be paid for.
+        if mask&.status == 'failed' && mask.error.to_s.include?('framing')
+          return render.update!(status: 'failed', error: "Not drawn: #{mask.error}", cost_usd: 0)
+        end
       end
       # The samples named when the row was made, in prompt order.
       ids = Array(render.usage['swatch_ids'])

@@ -112,12 +112,15 @@ module Truebuild
         plan = buyer.plan
         return { photos: photos.size, drawings: 0, shared: 0, already_drawn: 0, outlines: 0, cost_usd: 0.0, note: 'No finishes in the price book' } if plan.empty?
 
-        fresh = buyer.missing(plan).reject { |_, old| old }.map(&:first) # an older cut is cut again for free
+        # Claude has not picked this model's photos yet: the run may draw on
+        # others than the first ones, so nothing counts as drawn already.
+        unpicked = PhotoChoice.needs_pick?(variant)
+        fresh = unpicked ? plan.uniq { |p| [p[:photo], p[:key]] } : buyer.missing(plan).reject { |_, old| old }.map(&:first) # an older cut is cut again for free
         ids = fresh.map { |p| [p[:photo], p[:key], p[:prompt]] }
         shared = ids.count { |id| seen.include?(id) }
         seen.merge(ids)
         surfaces = plan.filter_map { |p| (c = Surfaces.category(p[:selection].first['surface'])) && [p[:photo], c] }.uniq
-        have = TruebuildSurfaceMask.where(source_url: photos.map(&:last), version: Surfaces::VERSION).pluck(:source_url, :surface).to_set
+        have = unpicked ? Set.new : TruebuildSurfaceMask.where(source_url: photos.map(&:last), version: Surfaces::VERSION).pluck(:source_url, :surface).to_set
         new_outlines = surfaces.reject { |s| have.include?(s) || outlined.include?(s) }
         outlined.merge(new_outlines)
         drawings = ids.size - shared

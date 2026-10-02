@@ -34,15 +34,21 @@ module Truebuild
       CATEGORIES = [
         ['cabinets', /cabinet|vanit|lav|hw /i,
          'the cabinet doors, drawer fronts and cabinet boxes, including an island base and any vanity. Not countertops, appliances, sinks, stools, chairs or the floor'],
+        # A refrigerator option on a photo with no refrigerator is skipped
+        # rather than drawn and rejected (a side-by-side on a kitchen photo
+        # that shows only the range).
+        ['refrigerator', /refrigerator|\brefer\b|fridge/i, 'the refrigerator only. Not other appliances, cabinets or countertops'],
         ['appliances', /appliance/i,
          'the kitchen appliances: refrigerator, range or cooktop, range hood or over the range microwave, and dishwasher. Not cabinets or countertops'],
         ['countertop', /counter/i, 'the countertops, including an island top and any short backsplash lip of the same material. Not the sink'],
         ['backsplash', /backsplash/i,
-         'the backsplash: the wall surface between the countertop and the upper cabinets. Not the range, microwave, hood, outlets, window or anything on the counter'],
+         'the backsplash: the tile, brick or panel on the wall above the countertops, everywhere it runs (beside a window, ' \
+         'behind the range up to the hood). Not the range, microwave, hood, outlets, window, cabinets or anything on the counter'],
         ['flooring', /floor|carpet/i, 'the floor. Not rugs, furniture legs or cabinets'],
         ['accent wall', /accent|wall ?board/i,
-         'the single largest flat interior wall facing the camera, from floor or countertop to ceiling. Not the ceiling, ' \
-         'cabinets, backsplash, windows, doors, mirrors, light fixtures or any other wall'],
+         'one painted wall (plain drywall or wall panel) facing the camera, the largest one, from floor or countertop to ' \
+         'ceiling. Never a tub or shower surround (fiberglass, acrylic or tile), never tile, brick, stone or a backsplash, and ' \
+         'not the ceiling, cabinets, windows, doors, mirrors, light fixtures or any other wall'],
         ['siding', /siding|shake/i, "the main house's exterior wall siding. Not trim, windows, doors, roof, skirting, porch or neighboring houses"],
         ['shutters', /shutter/i, 'the window shutters on the main house'],
         ['shingles', /shingle|roof/i,
@@ -55,6 +61,11 @@ module Truebuild
 
       def category(surface)
         CATEGORIES.find { |_, re, _| surface.to_s.match?(re) }&.first
+      end
+
+      # What a finish's surface covers in a photo, in words.
+      def describe(surface)
+        CATEGORIES.find { |_, re, _| surface.to_s.match?(re) }&.last
       end
 
       # The mask record for a photo and surface, finding it on first use.
@@ -148,11 +159,15 @@ module Truebuild
         TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
 
+      # Surfaces that share pixels: an appliance package changes the
+      # refrigerator too.
+      SHARED = { 'refrigerator' => ['appliances'], 'appliances' => ['refrigerator'] }.freeze
+
       # Surfaces never overlap, so whatever another accepted outline of this
       # photo already covers is not this one. Bay Port's backsplash took in
       # the cabinets' edges and the accent wall ran onto the cabinets.
       def without_others(mask, source_url, key)
-        TruebuildSurfaceMask.where(source_url: source_url, version: VERSION, status: 'done').where.not(surface: key)
+        TruebuildSurfaceMask.where(source_url: source_url, version: VERSION, status: 'done').where.not(surface: [key, *SHARED[key]])
                             .select(&:present?).reduce(mask) do |m, other|
           o = Vips::Image.new_from_buffer(Trueview.fetch_source(other.mask_url)[:bytes], '')
           o = o.extract_band(0) if o.bands > 1

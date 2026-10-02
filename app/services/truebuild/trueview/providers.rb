@@ -14,18 +14,31 @@ module Truebuild
         ASPECTS = { '1:1' => 1.0, '3:2' => 1.5, '2:3' => 2 / 3.0, '4:3' => 4 / 3.0, '3:4' => 0.75, '5:4' => 1.25,
                     '4:5' => 0.8, '16:9' => 16 / 9.0, '9:16' => 9 / 16.0, '21:9' => 21 / 9.0 }.freeze
 
+        SHAPE_TOLERANCE = 0.02 # a photo this close to one of ASPECTS is sent as it is
+        RETRIES = [3, 10].freeze # seconds before each retry of a Gemini server error
+        RETRY_CODES = [429, 500, 502, 503, 504].freeze
+
         # aspect: the source photo's width / height. Asked for, because Lite
-        # left to itself once drew a wide exterior as a tall portrait.
+        # left to itself once drew a wide exterior as a tall portrait. Gemini
+        # draws only the shapes in ASPECTS: a 1600x972 exterior (1.65) came
+        # back 16:9 every time and failed the framing check on every finish,
+        # each one paid for. A photo between shapes is padded out to the
+        # nearest one and the drawing cropped back to the photo.
         def edit(spec, source, prompt, samples: [], aspect: nil)
           model = resolve(spec[:model])
           config = { responseModalities: ['IMAGE'] }
           image_config = {}
           image_config[:imageSize] = spec[:size] if spec[:size]
-          image_config[:aspectRatio] = ASPECTS.min_by { |_, r| (Math.log(r) - Math.log(aspect)).abs }.first if aspect
+          box = nil
+          if aspect
+            shape, ratio = ASPECTS.min_by { |_, r| (Math.log(r) - Math.log(aspect)).abs }
+            image_config[:aspectRatio] = shape
+            source, box = padded(source, ratio) if (ratio / aspect - 1).abs > SHAPE_TOLERANCE
+          end
           config[:imageConfig] = image_config if image_config.any?
           images = [source, *samples].map { |img| { inline_data: { mime_type: img[:mime], data: Base64.strict_encode64(img[:bytes]) } } }
           body = { contents: [{ role: 'user', parts: [{ text: prompt }, *images] }], generationConfig: config }
-          res = HTTParty.post("#{BASE}/models/#{model}:generateContent", headers: headers, body: body.to_json, timeout: 180)
+          res = post_with_retries("#{BASE}/models/#{model}:generateContent", body)
           raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
 
           parts = res.parsed_response.dig('candidates', 0, 'content', 'parts') || []
@@ -37,9 +50,46 @@ module Truebuild
 
           data = image['inlineData'] || image['inline_data']
           meta = res.parsed_response['usageMetadata'] || {}
-          { bytes: Base64.decode64(data['data']), mime: data['mimeType'] || data['mime_type'] || 'image/png', model: model,
+          bytes = Base64.decode64(data['data'])
+          mime = data['mimeType'] || data['mime_type'] || 'image/png'
+          bytes, mime = cropped(bytes, box) if box
+          { bytes: bytes, mime: mime, model: model,
             usage: { 'prompt_tokens' => meta['promptTokenCount'].to_i, 'output_tokens' => meta['candidatesTokenCount'].to_i,
                      'total_tokens' => meta['totalTokenCount'].to_i } }
+        end
+
+        # Google answers 500 "Internal error" now and then under load; 18 of
+        # one factory run's drawings were lost to it. Unpaid, so tried again.
+        def post_with_retries(url, body)
+          RETRIES.each do |wait|
+            res = HTTParty.post(url, headers: headers, body: body.to_json, timeout: 180)
+            return res unless RETRY_CODES.include?(res.code)
+
+            sleep(wait) unless Rails.env.test?
+          end
+          HTTParty.post(url, headers: headers, body: body.to_json, timeout: 180)
+        end
+
+        # The photo padded out (its edges stretched) to ratio, and where the
+        # photo sits in it, as shares of the padded width and height.
+        def padded(source, ratio)
+          img = Vips::Image.new_from_buffer(source[:bytes], '')
+          img = img.flatten if img.has_alpha?
+          w = img.width
+          h = img.height
+          pw, ph = ratio > w.to_f / h ? [(h * ratio).round, h] : [w, (w / ratio).round]
+          x = (pw - w) / 2
+          y = (ph - h) / 2
+          out = img.embed(x, y, pw, ph, extend: :copy)
+          [{ bytes: out.jpegsave_buffer(Q: 92), mime: 'image/jpeg' }, [x.to_f / pw, y.to_f / ph, w.to_f / pw, h.to_f / ph]]
+        end
+
+        def cropped(bytes, box)
+          img = Vips::Image.new_from_buffer(bytes, '')
+          left, top, width, height = box
+          [img.crop((left * img.width).round, (top * img.height).round,
+                    [(width * img.width).round, img.width].min, [(height * img.height).round, img.height].min).pngsave_buffer,
+           'image/png']
         end
 
         # "gemini-3.1-flash-image" may be published as "...-preview"; take the

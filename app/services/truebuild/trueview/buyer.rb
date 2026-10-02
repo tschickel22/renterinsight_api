@@ -13,7 +13,7 @@ module Truebuild
     class Buyer
       MODEL = 'nb2-lite' # chosen in the lab bake-off: cheapest, fastest, looked best
       ROOMS = {
-        'kitchen' => /cabinet|counter|backsplash|floor|accent|wall ?board|hw |appliance/i,
+        'kitchen' => /cabinet|counter|backsplash|floor|accent|wall ?board|hw |appliance|refrigerator/i,
         'bath' => /cabinet|counter|lav|floor|accent|wall ?board/i,
         'exterior' => /siding|shutter|shingle|corner post|shake/i
       }.freeze
@@ -143,7 +143,9 @@ module Truebuild
         upgrades = groups.flat_map { |g| g[:options] }.filter_map do |o|
           if o[:family] == 'cabinet finish' && (color = cabinet_color(o[:name]))
             { option_id: o[:id], surface: 'Cabinets', value: color }
-          elsif o[:family] == 'appliance package' || o[:family].to_s.start_with?('refrigerator')
+          elsif o[:family].to_s.start_with?('refrigerator')
+            { option_id: o[:id], surface: 'Refrigerator', value: o[:name].to_s.gsub(/\(.*?\)/, ' ').squish }
+          elsif o[:family] == 'appliance package'
             { option_id: o[:id], surface: 'Appliances', value: o[:name].to_s.gsub(/\(.*?\)/, ' ').squish }
           end
         end

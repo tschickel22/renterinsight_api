@@ -43,7 +43,7 @@ module Truebuild
           tool: TOOL, max_tokens: 300, temperature: 0,
           content: [{ type: 'text', text: 'The photo as built:' }, image(photo),
                     { type: 'text', text: "The same photo with the #{surface} changed to #{value}. Is all of the visible " \
-                                          "#{surface} in the new finish, evenly, with nothing else changed or added?" },
+                                          "#{surface} in the new finish, evenly, with nothing else changed or added?#{scope(surface)}" },
                     image(composite)]
         )
         score = result[:input]['score'].to_i
@@ -53,6 +53,17 @@ module Truebuild
         # The check could not run: show the layer rather than hide good work,
         # and say so in review.
         { 'score' => nil, 'note' => "Not checked: #{e.message.first(120)}", 'ok' => true, 'cost_usd' => 0 }
+      end
+
+      # What counts as the surface, so other surfaces keeping their finish are
+      # not marked down: a factory run's checks held back a brick backsplash
+      # for not changing with the accent wall, and black appliance packages on
+      # a kitchen whose appliances were already black.
+      def scope(surface)
+        described = Surfaces.describe(surface)
+        text = described ? " The #{surface} here means #{described}; anything else keeping its finish is correct." : ''
+        "#{text} If the photo already showed this finish, little or no change is correct (score 4 or 5). An appliance " \
+          'package may leave the range hood as it was.'
       end
 
       def image(img)
