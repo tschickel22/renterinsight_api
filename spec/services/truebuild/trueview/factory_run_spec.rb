@@ -79,6 +79,15 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     ENV.delete('TRUEVIEW_DAILY_LIMIT')
   end
 
+  it 'counts drawings made under an older cut as re-cuts, paying only for their check' do
+    run = described_class.start!([topeka_home], budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    TruebuildFactoryRunJob.perform_now(run.id)
+    run.renders.update_all(status: 'done', image_url: 'https://b/d.png', layer_url: 'https://b/l.webp', usage: { 'mask_version' => 1 })
+    estimate = described_class.estimate([topeka_home])
+    expect(estimate[:totals]).to include(drawings: 0, recuts: 3)
+    expect(estimate[:totals][:cost_usd]).to be_within(0.01).of(3 * described_class::RECUT_COST + estimate[:totals][:outlines] * estimate[:rates][:outline])
+  end
+
   it 'stops before a model that would go over budget' do
     run = described_class.start!(everything, budget_usd: 0.1, scope: { manufacturer_id: mfr.id })
     TruebuildFactoryRunJob.perform_now(run.id)

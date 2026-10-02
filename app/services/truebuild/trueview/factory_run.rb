@@ -15,6 +15,7 @@ module Truebuild
 
       PRIORITY = 10 # behind buyers' own drawings (0) in the same queue
       LAYER_COST = 0.04 # per drawing until enough have been measured
+      RECUT_COST = 0.012 # an existing drawing cut again on a newer outline: only its check is paid
       OUTLINE_COST = 0.06
 
       # Active models of the scope that a published price book prices.
@@ -41,8 +42,9 @@ module Truebuild
         outlines = models.sum { |m| m[:outlines] }
         { models: models,
           totals: { models: models.size, with_photos: models.count { |m| m[:photos].positive? },
-                    drawings: drawings, shared: models.sum { |m| m[:shared] }, already_drawn: models.sum { |m| m[:already_drawn] },
-                    outlines: outlines, cost_usd: (drawings * rates[:layer] + outlines * rates[:outline]).round(2) },
+                    drawings: drawings, recuts: models.sum { |m| m[:recuts].to_i }, shared: models.sum { |m| m[:shared] },
+                    already_drawn: models.sum { |m| m[:already_drawn] }, outlines: outlines,
+                    cost_usd: models.sum { |m| m[:cost_usd] }.round(2) },
           rates: rates }
       end
 
@@ -241,15 +243,19 @@ module Truebuild
       def model_cost(variant, rates, seen, outlined)
         buyer = Buyer.new(nil, variant)
         photos = PhotoChoice.photos(variant)
-        return { photos: 0, drawings: 0, shared: 0, already_drawn: 0, outlines: 0, cost_usd: 0.0, note: 'No photos' } if photos.empty?
+        return { photos: 0, drawings: 0, recuts: 0, shared: 0, already_drawn: 0, outlines: 0, cost_usd: 0.0, note: 'No photos' } if photos.empty?
 
         plan = buyer.plan
-        return { photos: photos.size, drawings: 0, shared: 0, already_drawn: 0, outlines: 0, cost_usd: 0.0, note: 'No finishes in the price book' } if plan.empty?
+        return { photos: photos.size, drawings: 0, recuts: 0, shared: 0, already_drawn: 0, outlines: 0, cost_usd: 0.0, note: 'No finishes in the price book' } if plan.empty?
 
         # Claude has not picked this model's photos yet: the run may draw on
         # others than the first ones, so nothing counts as drawn already.
         unpicked = PhotoChoice.needs_pick?(variant)
-        fresh = unpicked ? plan.uniq { |p| [p[:photo], p[:key]] } : buyer.missing(plan).reject { |_, old| old }.map(&:first) # an older cut is cut again for free
+        missing = unpicked ? [] : buyer.missing(plan)
+        fresh = unpicked ? plan.uniq { |p| [p[:photo], p[:key]] } : missing.reject { |_, old| old }.map(&:first)
+        # Drawn under an older cut: cut again on the current outline, paying only for its check.
+        recut_ids = missing.select { |_, old| old }.map { |p, _| [p[:photo], p[:key], p[:prompt]] }.reject { |id| seen.include?(id) }
+        seen.merge(recut_ids)
         ids = fresh.map { |p| [p[:photo], p[:key], p[:prompt]] }
         shared = ids.count { |id| seen.include?(id) }
         seen.merge(ids)
@@ -258,8 +264,9 @@ module Truebuild
         new_outlines = surfaces.reject { |s| have.include?(s) || outlined.include?(s) }
         outlined.merge(new_outlines)
         drawings = ids.size - shared
-        { photos: photos.size, drawings: drawings, shared: shared, already_drawn: plan.size - fresh.size, outlines: new_outlines.size,
-          cost_usd: (drawings * rates[:layer] + new_outlines.size * rates[:outline]).round(2) }
+        { photos: photos.size, drawings: drawings, recuts: recut_ids.size, shared: shared, already_drawn: plan.size - fresh.size,
+          outlines: new_outlines.size,
+          cost_usd: (drawings * rates[:layer] + new_outlines.size * rates[:outline] + recut_ids.size * RECUT_COST).round(2) }
       end
 
       # Average cost per drawing and per outline so far, by measurement once
