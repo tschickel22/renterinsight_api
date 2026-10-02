@@ -6,6 +6,9 @@ class TenantModuleOverride < ApplicationRecord
   belongs_to :overridden_by, class_name: 'User', optional: true
   
   after_commit :bust_tenant_basic_cache
+  after_commit :welcome_ai_connector_admins, on: %i[create update]
+
+  AI_CONNECTOR_KEY = 'admin.ai_connector'
 
   # Validations
   validates :module_key, presence: true
@@ -53,6 +56,20 @@ class TenantModuleOverride < ApplicationRecord
     Rails.cache.delete_matched("tenant_basic/#{company_id}/*")
   rescue NotImplementedError
     Company.where(id: company_id).update_all(updated_at: Time.current)
+  end
+
+  # Turning AI Apps on for a dealership emails its admins how to install the
+  # DealerTide plugin in Claude and what to ask. Only on the switch from off
+  # to on, so saving the row again (a new reason, say) sends nothing.
+  def welcome_ai_connector_admins
+    return unless module_key == AI_CONNECTOR_KEY && is_enabled
+    return unless previously_new_record? || saved_change_to_is_enabled?
+
+    company.users.active.to_a.select(&:effective_admin?).each do |admin|
+      AiConnectorMailer.enabled(company_id, admin.id).deliver_later
+    end
+  rescue StandardError => e
+    Rails.logger.error("[TenantModuleOverride] AI connector welcome email failed for company #{company_id}: #{e.message}")
   end
 
   def valid_module_key
