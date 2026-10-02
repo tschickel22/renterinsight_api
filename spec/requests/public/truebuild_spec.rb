@@ -52,6 +52,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'percent', value: 25)
     # These examples read the full list; the buyer view has its own below.
     company.dealer_catalog_terms.create!(price_display: 'full', buyer_view: 'everything')
+    # A lot home opens the designer once its TrueView is drawn; taken as
+    # drawn here except where a test says otherwise.
+    allow(Truebuild::ModelList).to receive(:trueview_ready).and_wrap_original { |_, ids| ids.to_set }
   end
 
   it 'gives a buyer the options this home offers, at retail, with colors as one-of sets and no cost anywhere' do
@@ -160,7 +163,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(response.body).not_to match(/cost/i)
   end
 
-  it 'shows only the factories, series or TrueView-ready models a site asks for' do
+  it 'shows only the brands, series or TrueView-ready models a site asks for' do
+    allow(Truebuild::ModelList).to receive(:trueview_ready).and_call_original
     photo = 'https://s7d9.scene7.com/is/image/championhomes/belvidere-exterior-1'
     variant.update!(media: { 'photos' => [{ 'url' => photo, 'room' => 'exterior' }] })
     names = ->(params) { (get '/public/truebuild/models', params: { token: token }.merge(params)) && JSON.parse(response.body)['models'].map { |m| m['name'] } }
@@ -181,7 +185,8 @@ RSpec.describe 'Public TrueBuild', type: :request do
 
     get '/public/truebuild/models', params: { token: token, facets: 1 }
     facets = JSON.parse(response.body)['facets']
-    expect(facets['factories']).to eq([{ 'id' => factory.id, 'name' => 'Topeka', 'models' => 1 }])
+    # The brand, never the plant: Topeka builds under the manufacturer's name.
+    expect(facets['brands']).to eq([{ 'name' => mfr.name, 'factory_ids' => [factory.id], 'models' => 1 }])
     expect(facets['series']).to eq([{ 'name' => 'Aspire', 'factory_ids' => [factory.id], 'models' => 1 }])
     expect(facets['trueview_ready']).to eq(1)
   end
@@ -195,6 +200,13 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(JSON.parse(response.body)['truebuild']).to eq('available' => false)
     get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
     expect(response).to have_http_status(:not_found)
+
+    # Not built, but its TrueView is not drawn yet: listed like any home.
+    vehicle.update!(status: 'on_order')
+    allow(Truebuild::ModelList).to receive(:trueview_ready).and_call_original
+    Rails.cache.clear
+    get "/public/inventory/#{vehicle.id}", params: { token: token, statuses: 'available,on_order' }
+    expect(JSON.parse(response.body)['truebuild']).to eq('available' => false)
   end
 
   it 'marks the homes a buyer can design in the listing, and filters to them' do
@@ -202,7 +214,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
                             status: 'available', is_deleted: false, catalog_plan_variant: variant)
     get '/public/inventory', params: { token: token, statuses: 'available,on_order' }
     by_id = JSON.parse(response.body)['items'].index_by { |i| i['id'] }
-    expect(by_id[vehicle.id]).to include('designable' => true, 'trueview' => false)
+    expect(by_id[vehicle.id]).to include('designable' => true, 'trueview' => true)
     expect(by_id[built.id]).to include('designable' => false)
 
     get '/public/inventory', params: { token: token, statuses: 'available,on_order', designable: 1 }

@@ -25,19 +25,24 @@ module Truebuild
     DESIGNABLE_STATUSES = %w[available_to_order ordered on_order].freeze
 
     # The lot's homes a buyer can design, for listings and their filter:
-    # not built yet, linked to a model a published book prices, and the
-    # dealer offers TrueBuild.
+    # not built yet, linked to a model a published book prices, with its
+    # TrueView drawn, and the dealer offers TrueBuild. A home still waiting
+    # on its drawings is listed like any other: 32 of one lot's homes said
+    # Design it with finishes drawn on two.
     def self.designable_homes(company, vehicles)
       return vehicles.none unless company.has_module?(MODULE) &&
                                   (company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?)
 
-      vehicles.where(status: DESIGNABLE_STATUSES)
-              .where(catalog_plan_variant_id: CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id))
-                                                                 .select(:catalog_plan_variant_id))
+      linked = vehicles.where(status: DESIGNABLE_STATUSES)
+                       .where(catalog_plan_variant_id: CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id))
+                                                                          .select(:catalog_plan_variant_id))
+      ready = ModelList.trueview_ready(linked.distinct.pluck(:catalog_plan_variant_id))
+      linked.where(catalog_plan_variant_id: ready.to_a)
     end
 
     def self.designable_home?(company, vehicle)
-      vehicle.present? && DESIGNABLE_STATUSES.include?(vehicle.status) && available?(company, vehicle.catalog_plan_variant)
+      vehicle.present? && available?(company, vehicle.catalog_plan_variant) &&
+        designable_homes(company, company.vehicles.where(id: vehicle.id)).exists?
     end
 
     def initialize(company, variant, location: nil, vehicle: nil)

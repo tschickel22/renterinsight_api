@@ -17,9 +17,12 @@ class Api::V1::TruebuildHomesController < ApplicationController
     return unless authorize_action!('inventory', 'read')
 
     catalog = Truebuild::HomeMatcher.new
-    homes = scoped_vehicles.includes(catalog_plan_variant: :catalog_plan).order(:status, :model).limit(500).map do |v|
+    vehicles = scoped_vehicles.includes(catalog_plan_variant: :catalog_plan).order(:status, :model).limit(500).to_a
+    ready = Truebuild::ModelList.trueview_ready(vehicles.filter_map(&:catalog_plan_variant_id).uniq)
+    homes = vehicles.map do |v|
       { id: v.id, title: [v.year, v.make, v.model].compact.join(' '), status: v.status, stock_number: v.stock_number,
         designable: Truebuild::BuyerCatalog::DESIGNABLE_STATUSES.include?(v.status),
+        trueview: ready.include?(v.catalog_plan_variant_id),
         linked: v.catalog_plan_variant && catalog.variant_json(v.catalog_plan_variant),
         suggestions: v.catalog_plan_variant_id ? [] : catalog.suggest(v) }
     end

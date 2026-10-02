@@ -49,8 +49,13 @@ module Truebuild
     # site shows.
     def facets(manufacturer_id: nil)
       plans = call(manufacturer_id: manufacturer_id)
-      factories = Factory.where(id: plans.map { |p| p[:factory_id] }.compact.uniq).pluck(:id, :name)
-      { factories: factories.map { |id, name| { id: id, name: name, models: plans.count { |p| p[:factory_id] == id } } }.sort_by { |f| f[:name].to_s },
+      # By brand, never by plant name: a brand's factories travel together.
+      factories = Factory.where(id: plans.map { |p| p[:factory_id] }.compact.uniq).includes(:manufacturer).to_a
+      brands = factories.group_by(&:brand).map do |brand, fs|
+        ids = fs.map(&:id)
+        { name: brand, factory_ids: ids, models: plans.count { |p| ids.include?(p[:factory_id]) } }
+      end
+      { brands: brands.sort_by { |b| b[:name].to_s },
         series: plans.group_by { |p| p[:series] }.reject { |s, _| s.blank? }
                      .map { |s, ps| { name: s, factory_ids: ps.map { |p| p[:factory_id] }.uniq, models: ps.size } }.sort_by { |s| s[:name] },
         trueview_ready: plans.count { |p| p[:trueview] } }
