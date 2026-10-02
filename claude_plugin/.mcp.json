@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dealertide": {
+      "type": "http",
+      "url": "https://api.dealertide.com/mcp"
+    }
+  }
+}

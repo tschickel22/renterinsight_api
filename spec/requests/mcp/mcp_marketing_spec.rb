@@ -54,6 +54,21 @@ RSpec.describe 'MCP marketing tools', :mcp, type: :request do
       expect(instructions).not_to match(/[–—]/)
     end
 
+    it 'points to the exact page for the things it cannot do' do
+      instructions = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {},
+                                                     clientInfo: { name: 'claude-ai', version: '1' } })
+                     .dig('result', 'instructions')
+
+      expect(instructions).to include('/accounting/journal-entries', '/commissions/payments', '/accounting/bills',
+                                      '/settings?tab=ai-apps', 'Settings, Integrations, AI Apps')
+    end
+
+    it 'sends the same boundaries in get_reference_data, for clients that hide the instructions' do
+      _r, is_error, text = call_tool(token, 'get_reference_data')
+      expect(is_error).to be(false)
+      expect(JSON.parse(text)['cannot_do_here']).to include('I cannot send messages', '/commissions/payments')
+    end
+
     it 'exposes no tool that activates, starts, schedules or sends' do
       names = mcp_post(token, 'tools/list').dig('result', 'tools').map { |t| t['name'] }
       expect(names).to include('create_workflow_draft', 'create_campaign_draft', 'enroll_in_nurture')

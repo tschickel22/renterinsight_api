@@ -8,7 +8,8 @@ module McpTools
   #
   #   status, owner, stage changes  restored to the value before
   #   notes the AI added            deleted
-  #   tasks and service tickets     cancelled, not deleted, so history stays
+  #   tasks, service tickets and    cancelled, not deleted, so history stays
+  #   lead follow-ups
   #   leads the AI created          deleted only if nobody has touched them
   #   deals moved to won or lost    not undone: that also posts accounting
   #                                 and marks the home sold, which a stage
@@ -23,6 +24,18 @@ module McpTools
     LEAD_FIELDS = %w[first_name last_name email phone status owner_id].freeze
     WORKFLOW_FIELDS = %w[name description entity_type trigger conditions steps halt_on_reply].freeze
     UNDO_NOTE = 'Undo of an AI connector change'
+
+    # Areas outside the CRM (accounting, budgets, projects, commission plans)
+    # keep their undo rules beside their tools. Each handler answers
+    # handles?(record), label(record_type), undo_created(change, record) and
+    # undo_updated(change, record), returning a Result.
+    def self.handlers
+      Areas.all
+    end
+
+    def self.handler_for(record)
+      handlers.find { |h| h.handles?(record) }
+    end
 
     Result = Struct.new(:undone, :message, keyword_init: true) do
       def undone?
@@ -62,8 +75,13 @@ module McpTools
       return skipped('The record no longer exists.') unless record
       return skipped('That record belongs to another company.') unless same_company?(record, change)
 
+      handler = handler_for(record)
       result = Current.set(user: by, original_user: by, company_id: change.company_id) do
-        change.action == 'created' ? undo_created(change, record) : undo_updated(change, record)
+        if handler
+          change.action == 'created' ? handler.undo_created(change, record) : handler.undo_updated(change, record)
+        else
+          change.action == 'created' ? undo_created(change, record) : undo_updated(change, record)
+        end
       end
       if result.undone?
         change.update!(undone_at: Time.current, undone_by_user_id: by.id, undo_note: result.message)
@@ -79,17 +97,53 @@ module McpTools
     end
 
     def describe(change)
+      area = handlers.find { |h| h.respond_to?(:describe_change) && h.label(change.record_type) }
+      return area.describe_change(change) if area
+
       label = { 'Lead' => 'lead', 'Deal' => 'deal', 'Note' => 'note', 'Task' => 'task',
                 'ServiceTicket' => 'service ticket', 'WorkflowRule' => 'draft workflow', 'Campaign' => 'draft campaign',
-                'NurtureEnrollment' => 'nurture enrollment' }[change.record_type] || change.record_type.downcase
+                'NurtureEnrollment' => 'nurture enrollment', 'LeadActivity' => 'lead follow-up' }[change.record_type] ||
+              handlers.lazy.filter_map { |h| h.label(change.record_type) }.first || change.record_type.underscore.tr('_', ' ')
       return "Edited #{label} #{change.record_id}" if change.record_type == 'WorkflowRule' && change.action == 'updated'
       if change.action == 'created'
         "Created #{label} #{change.record_id}"
       else
-        fields = change.after.keys.reject { |k| k == 'actual_close_date' }
-        "Changed #{fields.map { |f| f.tr('_', ' ').sub(/ id\z/, '') }.join(', ')} on #{label} #{change.record_id}: " +
-          fields.map { |f| "#{change.before[f].inspect} to #{change.after[f].inspect}" }.join(', ')
+        fields = change.after.keys.reject { |k| k == 'actual_close_date' || change.before[k] == change.after[k] }
+        return "Changed nothing on #{label} #{change.record_id}" if fields.empty?
+
+        "Changed #{fields.map { |f| field_label(f) }.join(', ')} on #{label} #{change.record_id}: " +
+          fields.map { |f| "#{field_label(f)} #{shown(change, f, change.before[f])} to #{shown(change, f, change.after[f])}" }
+                .join('; ')
       end
+    end
+
+    def field_label(field)
+      field.tr('_', ' ').sub(/ id\z/, '')
+    end
+
+    # A person reads this log, so an id becomes the thing it points at:
+    # "category account 1030 Savings / Reserve", not "nil to 392".
+    def shown(change, field, value)
+      return 'blank' if value.nil? || value == ''
+      return value.inspect unless field.end_with?('_id')
+
+      model = change.record_type.safe_constantize
+      assoc = model&.reflect_on_all_associations(:belongs_to)&.find { |a| a.foreign_key.to_s == field && !a.polymorphic? }
+      target = assoc&.klass&.find_by(id: value)
+      return value.inspect unless target
+      return value.inspect if target.respond_to?(:company_id) && target.company_id != change.company_id
+
+      name =
+        if target.respond_to?(:account_number) && target.respond_to?(:name)
+          [target.account_number, target.name].compact.join(' ')
+        elsif target.respond_to?(:entry_number)
+          "entry ##{target.entry_number}"
+        elsif target.respond_to?(:full_name)
+          target.full_name
+        else
+          target.try(:name) || target.try(:title)
+        end
+      name.presence || value.inspect
     end
 
     # --- created records ---------------------------------------------------
@@ -123,6 +177,11 @@ module McpTools
 
         record.update!(is_deleted: true, status: 'archived')
         done('Draft campaign archived.')
+      when LeadActivity
+        return skipped('The follow-up was already worked on.') unless record.status.to_s == change.after['status'].to_s
+
+        record.cancel!
+        done('Follow-up cancelled.')
       when NurtureEnrollment
         return skipped('That enrollment had already stopped.') unless %w[running idle].include?(record.status)
 

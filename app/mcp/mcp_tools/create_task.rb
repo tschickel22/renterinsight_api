@@ -5,7 +5,9 @@ module McpTools
     tool_name 'create_task'
     title 'Create a task'
     description 'Create a task, optionally linked to a lead, contact, account, deal or service ticket, ' \
-                'assigned to the signed-in user unless another user id is given.'
+                'assigned to the signed-in user unless another user id is given. A due time is read in the ' \
+                "time zone of the linked record's location, else the signed-in user's location, else the " \
+                "company's setting. The reply names that zone (time_zone); pass on any time_zone_warning."
     input_schema(
       properties: {
         title: { type: 'string' },
@@ -40,12 +42,14 @@ module McpTools
         task.location_id = record.try(:location_id)
       end
       task.location_id ||= ctx.default_location_id
-      task.due_date = WriteHelpers.parse_due!(ctx, due_date, location_id: task.location_id) if due_date.present?
+      task.due_date, zone = LocalTime.parse!(ctx, due_date, location_id: task.location_id) if due_date.present?
       task.save!
       ctx.record_change(action: 'created', record: task, after: { status: task.status })
 
-      Base::Result.new(payload: { created: { id: "task:#{task.id}", title: task.title, due: task.due_date&.iso8601,
-                                             assigned_to: ctx.user_names[task.assigned_to_id] } }, count: 1)
+      created = { id: "task:#{task.id}", title: task.title, due: task.due_date&.iso8601,
+                  assigned_to: ctx.user_names[task.assigned_to_id] }
+      created.merge!(due: LocalTime.iso(task.due_date, zone), due_utc: task.due_date.utc.iso8601, **zone.describe) if zone
+      Base::Result.new(payload: { created: created }, count: 1)
     end
   end
 end

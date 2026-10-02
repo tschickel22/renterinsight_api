@@ -59,7 +59,7 @@ module McpTools
         paused_other_sequences: paused.map { |e| e.nurture_sequence&.name }.compact,
         warnings: warnings,
         note: 'The first step is sending now. To stop the rest of the sequence, pause it on their record in ' \
-              'DealerTide, or undo this change under Settings, AI Apps (that pauses it; messages already sent stay sent).'
+              'DealerTide, or undo this change under Settings, Integrations, AI Apps (that pauses it; messages already sent stay sent).'
       }, count: 1)
     end
 

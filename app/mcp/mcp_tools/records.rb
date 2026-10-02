@@ -25,7 +25,8 @@ module McpTools
 
     QUOTE_ITEM_FIELDS = %w[name description quantity unit_price total].freeze
     DEAL_COST_FIELDS = %w[unit_cost pack_amount finance_reserve product_margin front_gross back_gross total_gross].freeze
-    UNIT_COST_FIELDS = %w[dealer_cost freight_cost pdi_cost total_cost holdback_amount target_gross minimum_price].freeze
+    UNIT_COST_FIELDS = %w[dealer_cost freight_cost pdi_cost total_cost holdback_amount target_gross minimum_price
+                          floor_plan_amount floor_plan_start_date floor_plan_accrued_interest].freeze
 
     attr_reader :ctx
 
@@ -226,7 +227,8 @@ module McpTools
       {
         name: deal.name, deal_number: deal.deal_number, stage: deal.stage, stage_label: stage_label(deal.stage),
         selling_price: deal.selling_price&.to_f, probability: deal.probability,
-        expected_close_date: iso(deal.expected_close_date), customer: deal_customer(deal),
+        expected_close_date: iso(deal.expected_close_date), actual_close_date: iso(deal.actual_close_date),
+        delivery_date: iso(deal.delivery_date), customer: deal_customer(deal),
         salesperson: user_name(deal.primary_salesperson_id || deal.owner_id || deal.user_id),
         unit: deal.vehicle_id && ctx.company.vehicles.where(id: deal.vehicle_id).pick(:stock_number),
         location: location_name(deal.location_id), updated_at: iso(deal.updated_at),
@@ -235,7 +237,10 @@ module McpTools
     end
 
     def cost_fields(record, fields)
-      fields.to_h { |f| [f, record.public_send(f)&.to_f] }.compact
+      fields.to_h do |f|
+        value = record.public_send(f)
+        [f, value.is_a?(Date) ? value.iso8601 : value&.to_f]
+      end.compact
     end
 
     def deal_detail(deal)

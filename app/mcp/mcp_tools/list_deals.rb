@@ -6,19 +6,24 @@ module McpTools
     title 'List deals'
     description 'List deals, most recently updated first. Filter by pipeline stage key (see get_reference_data), ' \
                 'open vs closed, the salesperson ("me" or a user id), or a name/deal number/customer search. ' \
-                'stale_days lists open deals not updated in that many days.'
+                'stale_days lists open deals not updated in that many days. closed_from and closed_to (2026-09-01) ' \
+                'filter on the actual close date, so "deals closed in September" is one call with state any or won. ' \
+                'Each deal shows expected and actual close dates and the delivery date.'
     input_schema(
       properties: {
         stage: { type: 'string' },
         state: { type: 'string', enum: %w[open won lost any] },
         salesperson: { type: 'string', description: '"me" or a user id' },
         stale_days: { type: 'integer', minimum: 1 },
+        closed_from: { type: 'string', description: 'Actual close date on or after, 2026-09-01' },
+        closed_to: { type: 'string', description: 'Actual close date on or before, 2026-09-30' },
         query: { type: 'string' },
         limit: { type: 'integer', minimum: 1, maximum: Context::MAX_ROWS }
       }
     )
 
-    def self.perform(ctx, stage: nil, state: 'open', salesperson: nil, stale_days: nil, query: nil, limit: 20)
+    def self.perform(ctx, stage: nil, state: 'open', salesperson: nil, stale_days: nil, closed_from: nil, closed_to: nil,
+                     query: nil, limit: 20)
       records = Records.new(ctx)
       company = ctx.company
       rel = records.scope('deal')
@@ -35,6 +40,8 @@ module McpTools
         rel = rel.where('deals.primary_salesperson_id = :u OR deals.owner_id = :u OR deals.user_id = :u', u: uid)
       end
       rel = rel.where('deals.updated_at < ?', stale_days.to_i.days.ago) if stale_days.present?
+      rel = rel.where('deals.actual_close_date >= ?', parse_date(closed_from, 'closed_from')) if closed_from.present?
+      rel = rel.where('deals.actual_close_date <= ?', parse_date(closed_to, 'closed_to')) if closed_to.present?
       listing(ctx, 'deal', rel.order(updated_at: :desc), limit)
     end
   end

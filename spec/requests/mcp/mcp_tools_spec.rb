@@ -140,6 +140,23 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
     end
   end
 
+  describe 'list_deals by close date' do
+    it 'finds deals actually closed in a month and shows their close and delivery dates' do
+      company.deals.create!(name: 'September close', stage: 'proposal', contact_id: buyer.id, location_id: denver.id)
+             .update_columns(actual_close_date: Date.new(2026, 9, 14), delivery_date: Date.new(2026, 9, 20))
+      company.deals.create!(name: 'August close', stage: 'proposal', contact_id: buyer.id, location_id: denver.id)
+             .update_columns(actual_close_date: Date.new(2026, 8, 30))
+
+      result, = call_tool(token, 'list_deals', state: 'any', closed_from: '2026-09-01', closed_to: '2026-09-30')
+      expect(result['items'].map { |d| d['name'] }).to eq(['September close'])
+      expect(result['items'].first).to include('actual_close_date' => '2026-09-14', 'delivery_date' => '2026-09-20')
+
+      _r, is_error, text = call_tool(token, 'list_deals', closed_from: 'September')
+      expect(is_error).to be(true)
+      expect(text).to include('closed_from must be a date')
+    end
+  end
+
   describe 'dealer cost' do
     it 'never appears on a deal or an inventory unit' do
       unit = company.vehicles.create!(stock_number: 'S-100', vin: 'CHAMP123456', year: 2026, make: 'Champion', model: 'Aspire',
@@ -185,7 +202,7 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
 
     it 'tells the AI cost is internal when on, and how to turn it on when off' do
       off = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } })
-      expect(off.dig('result', 'instructions')).to include('your', 'admin can allow it under Settings, AI Apps')
+      expect(off.dig('result', 'instructions')).to include('your', 'admin can allow it under Settings, Integrations, AI Apps')
 
       Setting.set('Company', company.id, 'mcp_settings', { 'show_costs' => true })
       on = mcp_post(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } })
@@ -292,6 +309,9 @@ RSpec.describe 'MCP tools', :mcp, type: :request do
       # A date alone means the end of that day where the dealer is, not midnight UTC.
       expect(created.due_date.in_time_zone('America/Denver').strftime('%Y-%m-%d %H:%M'))
         .to eq("#{1.day.from_now.to_date.iso8601} 17:00")
+      # The reply names the zone and gives the time on the dealer's clock.
+      expect(task['created']).to include('time_zone' => 'America/Denver', 'time_zone_source' => 'location Denver')
+      expect(task.dig('created', 'due')).to start_with("#{1.day.from_now.to_date.iso8601}T17:00:00-0")
 
       ticket, = call_tool(token, 'create_service_ticket', title: 'Leaking skylight', description: 'Front bedroom',
                                                          customer_id: "contact:#{contact.id}")

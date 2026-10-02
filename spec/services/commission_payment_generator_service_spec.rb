@@ -93,6 +93,21 @@ RSpec.describe CommissionPaymentGeneratorService do
       expect(payments[rep.id].calculation_details['line_items'].map { |l| l['component_id'] }).to all(be_present)
     end
 
+    it 'pays a volume bonus in full to the primary on a split deal and says it was not split' do
+      component!(name: 'First home', component_type: 'volume_bonus', flat_amount: 500, units_threshold: 1,
+                 threshold_period: 'monthly')
+      deal = deal!(secondary_salesperson_id: partner.id)
+      engine = described_class.new(deal.reload)
+
+      bonus = engine.lines_for_role(:primary_salesperson).find { |l| l[:component].name == 'First home' }
+      expect(bonus[:amount]).to eq(500)
+      expect(bonus[:note]).to include('reaches the 1 unit bonus',
+                                      'not split; volume bonuses pay in full to the person who reached the threshold')
+      expect(engine.lines_for_role(:secondary_salesperson).map { |l| l[:component].name }).not_to include('First home')
+      front = engine.lines_for_role(:primary_salesperson).find { |l| l[:component].name == 'Front' }
+      expect(front[:note]).to include('split 50/50 with the secondary salesperson')
+    end
+
     it 'pays the primary in full with no secondary on the deal' do
       deal = deal!
       expect(total(deal)).to eq((deal.front_gross.to_d * BigDecimal('0.25')).round(2).to_f + 50)

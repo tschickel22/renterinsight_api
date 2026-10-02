@@ -6,8 +6,9 @@ module McpTools
     tool_name 'pipeline_summary'
     title 'Pipeline summary'
     description 'A snapshot of the sales pipeline the user can see: open deals per stage with their total ' \
-                'selling price, deals won and lost this month, and open leads per status with how many came ' \
-                'in over the last 7 and 30 days.'
+                'selling price, deals won and lost this month, and open leads per status (closed statuses such ' \
+                'as lost or junk left out, as in lead_follow_up_gaps) with how many leads came in over the ' \
+                'last 7 and 30 days.'
     input_schema(properties: {})
     read_only!
 
@@ -33,7 +34,15 @@ module McpTools
 
       if ctx.can?('leads', 'read')
         leads = records.scope('lead')
-        payload[:open_leads_by_status] = leads.group(:status).count.map { |status, count| { status: status, count: count } }
+        # Open means what list_leads and lead_follow_up_gaps mean: not in a
+        # status the company marks closed (lost, junk, do not contact).
+        open_leads = ListLeads.open_statuses(ctx, leads)
+        lead_labels = company.lead_statuses.pluck(:key, :label).to_h
+        by_status = open_leads.group(:status).count.map do |status, count|
+          { status: status, label: lead_labels[status], count: count }
+        end
+        payload[:open_leads_by_status] = by_status.sort_by { |r| -r[:count] }
+        payload[:open_leads_total] = by_status.sum { |r| r[:count] }
         payload[:new_leads_last_7_days] = leads.where(created_at: 7.days.ago..).count
         payload[:new_leads_last_30_days] = leads.where(created_at: 30.days.ago..).count
       end

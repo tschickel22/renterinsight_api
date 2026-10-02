@@ -32,7 +32,10 @@ RSpec.describe 'Claude directory readiness', :mcp, type: :request do
     it 'marks the tools that change existing data as destructive' do
       destructive = McpController::WRITE_TOOLS.select { |t| t.to_h.dig(:annotations, :destructiveHint) }.map(&:name_value)
       expect(destructive).to contain_exactly('update_lead_status', 'assign_lead', 'update_deal_stage',
-                                             'update_workflow_draft', 'enroll_in_nurture')
+                                             'update_workflow_draft', 'enroll_in_nurture',
+                                             'categorize_bank_transaction', 'match_bank_transaction', 'exclude_bank_transaction',
+                                             'update_budget_draft', 'update_project_task',
+                                             'update_commission_plan_draft')
       expect(McpTools::EnrollInNurture.to_h.dig(:annotations, :openWorldHint)).to be(true)
     end
   end

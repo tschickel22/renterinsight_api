@@ -1,0 +1,18 @@
+{
+  "name": "dealertide",
+  "version": "1.0.0",
+  "description": "DealerTide dealer management for Claude: leads, deals, inventory, service, accounting, budgets, projects and commission plans, with skills for the work dealers do every week.",
+  "author": {
+    "name": "DealerTide",
+    "url": "https://dealertide.com"
+  },
+  "homepage": "https://dealertide.com",
+  "keywords": [
+    "dealer",
+    "dms",
+    "manufactured housing",
+    "rv",
+    "crm",
+    "accounting"
+  ]
+}

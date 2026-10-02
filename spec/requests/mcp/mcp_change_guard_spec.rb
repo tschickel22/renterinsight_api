@@ -190,4 +190,28 @@ RSpec.describe 'MCP change limits and undo', :mcp, type: :request do
       expect(body['skipped_changes'].first['message']).to include('Changed again since')
     end
   end
+
+  describe 'change log wording' do
+    it 'names people and skips fields that did not change' do
+      lead = lead!(owner_id: nil)
+      rep = connector_user(company, {})
+      call_tool(token, 'assign_lead', id: "lead:#{lead.id}", user_id: rep.id)
+
+      text = McpTools::Undo.describe(McpChange.last)
+      expect(text).to include("owner blank to #{rep.full_name}")
+      expect(text).not_to include('nil')
+    end
+  end
+
+  describe 'undo hint' do
+    it 'tells the AI on every write where the person can undo it, and not on reads' do
+      lead = lead!
+      _r, is_error, text = call_tool(token, 'add_note', id: "lead:#{lead.id}", text: 'AI note')
+      expect(is_error).to be(false)
+      expect(JSON.parse(text)['undo']).to include('Settings, Integrations, AI Apps', '/settings?tab=ai-apps')
+
+      _r, _e, read = call_tool(token, 'list_leads')
+      expect(JSON.parse(read)).not_to have_key('undo')
+    end
+  end
 end
