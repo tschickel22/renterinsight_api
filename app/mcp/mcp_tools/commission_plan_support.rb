@@ -18,14 +18,22 @@ module McpTools
     COMPONENT_FIELDS = %w[name description component_type gross_type rate flat_amount units_threshold
                           threshold_period applies_to_role deal_type vertical].freeze
 
+    # Dealers say "front gross" when they mean front gross after pack, which
+    # is commissionable_front here; front is the accounting figure before pack.
+    GROSS_TYPE_HELP = 'commissionable_front is front gross after pack (front gross minus pack), what most dealers ' \
+                      'pay on and what they usually mean when they say "front gross". front is the accounting front ' \
+                      'gross before pack. When the user just says "front gross", ask whether pack comes off first; ' \
+                      'if they do not say, use commissionable_front and tell them so.'
+
     COMPONENT_SCHEMA = {
       type: 'array',
       description: 'The pieces of the plan, paid in order. component_type: percent_of_gross (needs gross_type and rate), ' \
                    'flat_per_unit (flat_amount per deal), volume_bonus (flat_amount, units_threshold, threshold_period ' \
                    'monthly or quarterly), addon_commission (rate on add-on gross: delivery, setup, skirting, accessories). ' \
-                   "gross_type: #{CommissionComponent::GROSS_TYPES.join(', ')} (commissionable_front is front gross minus pack, " \
-                   'what most dealers pay on). rate is a percent: 25 or 0.25 both mean 25%. applies_to_role: ' \
-                   "#{CommissionComponent::ROLES.join(', ')}. deal_type: #{CommissionComponent::DEAL_TYPES.join(', ')}. " \
+                   "gross_type: #{CommissionComponent::GROSS_TYPES.join(', ')}. #{GROSS_TYPE_HELP} rate is a percent: 25 or " \
+                   "0.25 both mean 25%. applies_to_role: #{CommissionComponent::ROLES.join(', ')}. A deal with a second " \
+                   'salesperson splits the primary salesperson components 50/50 with the secondary; volume bonuses are ' \
+                   "never split. deal_type: #{CommissionComponent::DEAL_TYPES.join(', ')}. " \
                    "vertical: #{CommissionComponent::VERTICALS.join(', ')}.",
       items: {
         type: 'object',
@@ -33,7 +41,7 @@ module McpTools
           name: { type: 'string' },
           description: { type: 'string' },
           component_type: { type: 'string', enum: CommissionComponent::COMPONENT_TYPES },
-          gross_type: { type: 'string', enum: CommissionComponent::GROSS_TYPES },
+          gross_type: { type: 'string', enum: CommissionComponent::GROSS_TYPES, description: GROSS_TYPE_HELP },
           rate: { type: 'number', description: 'Percent: 25 or 0.25 both mean 25%' },
           flat_amount: { type: 'number' },
           units_threshold: { type: 'integer' },

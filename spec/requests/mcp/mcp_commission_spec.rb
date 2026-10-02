@@ -195,6 +195,75 @@ RSpec.describe 'MCP commission plan tools', :mcp, type: :request do
       expect(payouts).to eq('primary_salesperson' => 125.02, 'secondary_salesperson' => 125.01)
     end
 
+    # Found from Claude Desktop on staging: a split deal halved the front
+    # line but paid the bonus in full with nothing saying why.
+    it 'says a volume bonus on a split deal was not split, and warns that the plan splits the primary' do
+      plan_parts = [{ name: 'Front', component_type: 'percent_of_gross', gross_type: 'commissionable_front', rate: 25,
+                      applies_to_role: 'primary_salesperson' },
+                    { name: 'Five a month', component_type: 'volume_bonus', flat_amount: 500, units_threshold: 5,
+                      threshold_period: 'monthly', applies_to_role: 'primary_salesperson' }]
+      result, error, text = call_tool(token, 'simulate_commission_plan', components: plan_parts, scenarios: [
+        scenario.merge(label: 'Shared fifth', split_with_secondary: true, units_this_period: 5)
+      ])
+      expect(error).to be_falsey, text
+
+      payouts = result['scenarios'].first['payouts'].index_by { |p| p['role'] }
+      bonus = payouts['primary_salesperson']['components'].find { |c| c['component'] == 'Five a month' }
+      expect(bonus['amount']).to eq(500.0)
+      expect(bonus['note']).to include('not split; volume bonuses pay in full to the person who reached the threshold')
+      expect(payouts['secondary_salesperson']['components'].map { |c| c['component'] }).to eq(['Front'])
+
+      warning = result['warnings'].find { |w| w.include?('no secondary_salesperson component') }
+      expect(warning).to include('Shared fifth', '(Front)', 'split 50/50', 'Volume bonuses are not split')
+      expect(result['warnings'].join(' ')).not_to match(/[–—]/)
+    end
+
+    it 'gives no split warning when the plan pays the secondary on its own terms' do
+      plan_parts = [{ name: 'Front', component_type: 'percent_of_gross', gross_type: 'commissionable_front', rate: 25,
+                      applies_to_role: 'primary_salesperson' },
+                    { name: 'Second', component_type: 'flat_per_unit', flat_amount: 100,
+                      applies_to_role: 'secondary_salesperson' }]
+      result, = call_tool(token, 'simulate_commission_plan', components: plan_parts,
+                                                             scenarios: [scenario.merge(split_with_secondary: true)])
+      expect(result['warnings'].join(' ')).not_to include('no secondary_salesperson component')
+    end
+
+    it 'says which gross each line used and what the pack took off' do
+      plan_parts = [{ name: 'After pack', component_type: 'percent_of_gross', gross_type: 'commissionable_front', rate: 25,
+                      applies_to_role: 'primary_salesperson' },
+                    { name: 'Before pack', component_type: 'percent_of_gross', gross_type: 'front', rate: 10,
+                      applies_to_role: 'sales_manager' },
+                    { name: 'Per home', component_type: 'flat_per_unit', flat_amount: 300,
+                      applies_to_role: 'primary_salesperson' }]
+      result, error, text = call_tool(token, 'simulate_commission_plan', components: plan_parts, scenarios: [scenario])
+      expect(error).to be_falsey, text
+
+      run = result['scenarios'].first
+      expect(run['figures_used']).to include('front_gross' => 12_000.0, 'commissionable_front_gross' => 11_000.0,
+                                             'pack_taken_off' => 1_000.0)
+      lines = run['payouts'].flat_map { |p| p['components'] }.index_by { |c| c['component'] }
+      expect(lines['After pack']['based_on']).to include('gross_type' => 'commissionable_front', 'amount' => 11_000.0,
+                                                         'pack_taken_off' => 1_000.0)
+      expect(lines['After pack']['based_on']['worked_out']).to eq('$12,000.00 front gross less $1,000.00 pack is $11,000.00')
+      expect(lines['Before pack']['based_on']).to include('gross_type' => 'front', 'amount' => 12_000.0)
+      expect(lines['Before pack']['based_on']['worked_out']).to include('before pack')
+      expect(lines['Per home']).not_to have_key('based_on')
+      expect(result['warnings'].join(' ')).to include('Before pack: pays on front gross before pack')
+
+      no_pack, = call_tool(token, 'simulate_commission_plan', components: plan_parts,
+                                                              scenarios: [scenario.merge(pack: 0)])
+      expect(no_pack['scenarios'].first['figures_used']).not_to have_key('pack_taken_off')
+      expect(no_pack['warnings'].join(' ')).not_to include('pays on front gross before pack')
+    end
+
+    it 'tells Claude what "front gross" usually means' do
+      tools = mcp_post(token, 'tools/list').dig('result', 'tools').index_by { |t| t['name'] }
+      gross = tools['create_commission_plan_draft'].dig('inputSchema', 'properties', 'components', 'items',
+                                                        'properties', 'gross_type', 'description')
+      expect(gross).to include('front gross after pack', 'use commissionable_front')
+      expect(tools.values.map { |t| t['description'] }.join).not_to match(/[–—]/)
+    end
+
     it 'matches what the payment engine computes for a real deal with the same figures' do
       plan = plan!(name: 'Engine check')
       company.commission_components.create!(name: 'Mgr', component_type: 'percent_of_gross', gross_type: 'back',

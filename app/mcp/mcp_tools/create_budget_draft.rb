@@ -7,8 +7,11 @@ module McpTools
     tool_name 'create_budget_draft'
     title 'Draft a budget'
     description 'Create a budget as a DRAFT, either from lines you give (revenue and expense accounts from ' \
-                'budget_history or the chart of accounts) or by copying a prior fiscal year (its budget if there ' \
-                'is one, otherwise its actuals) with a growth percent. Show the user the numbers before saving. ' \
+                'budget_history or the chart of accounts; balance sheet accounts are refused) or by copying a prior ' \
+                'fiscal year (its budget if there is one, otherwise its posted revenue and expenses) with a growth ' \
+                'percent. A copy takes revenue and expense accounts only, and is refused when that year has no ' \
+                'revenue or expense activity: check budget_history first and build from lines when it is empty. ' \
+                'Show the user the numbers before saving. ' \
                 'It does not count until a person activates it in DealerTide; this connector cannot activate, ' \
                 'lock or approve budgets.'
     input_schema(
@@ -18,7 +21,8 @@ module McpTools
         location_id: { type: 'integer', description: 'Leave out for a company-wide budget' },
         description: { type: 'string' },
         lines: BudgetArea::LINE_SCHEMA,
-        copy_from_fiscal_year: { type: 'integer', description: 'Instead of lines: start from this fiscal year' },
+        copy_from_fiscal_year: { type: 'integer', description: 'Instead of lines: start from this fiscal year (revenue and ' \
+                                                                       'expense accounts only)' },
         growth_percent: { type: 'number', description: 'With copy_from_fiscal_year, e.g. 5 for 5 percent' }
       },
       required: ['fiscal_year']
@@ -41,7 +45,7 @@ module McpTools
         if copy_from_fiscal_year.present?
           raise UserError, 'Give either lines or copy_from_fiscal_year, not both.' if lines.present?
 
-          copy!(ctx, year, location_id, name, copy_from_fiscal_year, growth_percent)
+          copy!(ctx, year, location_id, name, description, copy_from_fiscal_year, growth_percent)
         else
           raise UserError, 'Give lines, or copy_from_fiscal_year to start from a prior year.' if lines.blank?
 
@@ -83,16 +87,68 @@ module McpTools
       end
     end
 
-    def self.copy!(ctx, year, location_id, name, source_year, growth_percent)
-      result = BudgetService.create_from_prior_year(
-        company: ctx.company, source_year: BudgetArea.check_fiscal_year!(source_year), target_year: year,
-        location_id: location_id, growth_percent: growth_percent.to_f, name: name, created_by: ctx.user
-      )
-      raise UserError, result.message.to_s.gsub(/\s*[\u2013\u2014]\s*/, ", ") unless result.success?
+    # Copies only revenue and expense accounts. BudgetService.create_from_prior_year
+    # (the app's copy) takes every account with entries, so a year whose only
+    # activity was a bank transfer became a "budget" of two cash accounts. A
+    # year with no profit and loss activity is refused and nothing is saved.
+    def self.copy!(ctx, year, location_id, name, description, source_year, growth_percent)
+      company = ctx.company
+      source_year = BudgetArea.check_fiscal_year!(source_year)
+      months_by_account, source_label, coverage = copy_source(company, source_year, location_id)
+      if months_by_account.empty?
+        raise UserError, "No revenue or expense activity in fiscal year #{source_year}, so there is nothing to " \
+                         'copy and nothing was saved. Build the budget from the owner\'s own numbers with lines instead.'
+      end
 
-      budget = result.data
-      budget.update_column(:metadata, budget.metadata.merge('created_via' => 'ai_connector'))
-      budget
+      growth = 1 + (growth_percent.to_f / 100)
+      parsed = months_by_account.to_h do |account, months|
+        [account, [months.map { |m| (m * growth.to_d).round(2) }, nil]]
+      end
+      Budget.transaction do
+        budget = company.budgets.create!(
+          name: name, fiscal_year: year, location_id: location_id, description: description, budget_type: 'annual',
+          status: 'draft', consolidation_type: 'standalone', created_by_id: ctx.user.id,
+          metadata: { 'source' => 'prior_year', 'source_year' => source_year, 'source_label' => source_label,
+                      'growth_percent' => growth_percent.to_f, 'created_via' => 'ai_connector',
+                      'data_coverage' => coverage&.deep_stringify_keys, 'annualized' => source_label == 'actuals_annualized' }.compact
+        )
+        BudgetArea.write_lines!(budget, parsed)
+        budget
+      end
+    end
+
+    # [{ account => [12 BigDecimals] }, source label, coverage]. The source
+    # year's budget if it has revenue or expense lines, otherwise its posted
+    # revenue and expenses, annualized when only some months have any.
+    def self.copy_source(company, source_year, location_id)
+      source_budget = company.budgets.standalone.by_fiscal_year(source_year).find_by(location_id: location_id)
+      if source_budget
+        rows = source_budget.budget_lines.includes(:chart_of_account).filter_map do |line|
+          account = line.chart_of_account
+          next unless copyable?(account)
+
+          months = (1..12).map { |m| line.month_amount(m).to_d }
+          [account, months] unless months.all?(&:zero?)
+        end
+        return [rows.to_h, "budget:#{source_budget.id}", nil] if rows.any?
+      end
+
+      actuals = BudgetService.actuals_by_month(company, source_year, location_id: location_id)
+      accounts = company.chart_of_accounts.where(id: actuals.keys).select { |a| copyable?(a) }
+      raw = accounts.to_h { |a| [a.id, actuals[a.id]] }.reject { |_, monthly| monthly.values.all?(&:zero?) }
+      return [{}, nil, nil] if raw.empty?
+
+      months_with_data = (1..12).select { |m| raw.values.any? { |monthly| monthly[m].to_d.nonzero? } }
+      coverage = { months_with_data: months_with_data, coverage_count: months_with_data.size }
+      partial = months_with_data.size < 12
+      raw = BudgetService.annualize_partial_data(raw, coverage) if partial
+      by_id = accounts.index_by(&:id)
+      rows = raw.to_h { |id, monthly| [by_id[id], (1..12).map { |m| monthly[m].to_d }] }
+      [rows, partial ? 'actuals_annualized' : 'actuals_full_year', coverage]
+    end
+
+    def self.copyable?(account)
+      account && BudgetArea::PL_TYPES.include?(account.account_type) && account.is_active && !account.is_header
     end
   end
 end

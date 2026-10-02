@@ -31,14 +31,19 @@ module McpTools
       payload = {
         fiscal_year: year, month_labels: BudgetArea.month_labels(company, year),
         coverage: coverage.slice(:months_with_data, :coverage_count, :first_data_month, :last_data_month, :is_partial, :is_empty),
-        note: coverage_note(coverage),
+        has_pl_history: rows.any?,
+        note: coverage_note(coverage, rows.any?),
         groups: groups, net_income: net
       }
       Base::Result.new(payload: payload, count: rows.size)
     end
 
-    def self.coverage_note(coverage)
+    def self.coverage_note(coverage, pl_rows)
       return 'No posted entries in this fiscal year. Build the budget from the owner\'s own numbers instead.' if coverage[:is_empty]
+      unless pl_rows
+        return 'The posted entries in this fiscal year touch only balance sheet accounts (bank, loans, inventory), ' \
+               'not revenue or expenses, so there is no history to copy. Build the budget from the owner\'s own numbers.'
+      end
       return nil unless coverage[:is_partial]
 
       "Only #{coverage[:coverage_count]} of 12 months have entries (#{coverage[:first_data_month]} to " \

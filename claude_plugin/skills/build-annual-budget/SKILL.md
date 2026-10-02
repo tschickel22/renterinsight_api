@@ -12,10 +12,10 @@ Write plainly. Never use em dashes or en dashes.
 ## 1. See what is already there
 
 1. `list_budgets` for the year they mean. If a draft already exists for that year and location, offer to revise it (step 6) instead of starting another.
-2. `budget_history` for the last fiscal year (and the one before if it is thin). Read `coverage`:
-   - 10 or more months: real history. Use it as the starting point and let the interview adjust it.
+2. Always check for profit and loss history first: `budget_history` for the last fiscal year (and the one before if it is thin). History means revenue and expense lines. Read `has_pl_history` and `groups`, not just `coverage`: a year can have posted entries (a bank transfer, a loan payment, an inventory purchase) and still have no revenue or expenses at all, and then there is nothing to copy.
+   - No revenue or expense lines (`has_pl_history` false, or `groups` empty): this is the common case. Do not try `copy_from_fiscal_year`; it refuses and saves nothing. Say "There is no revenue or expense history in DealerTide to build from, so we will build it from your numbers," and go to the interview. You will build every line with the owner from scratch.
+   - 10 or more months of revenue and expenses: real history. Use it as the starting point and let the interview adjust it.
    - 1 to 9 months: partial. Say so plainly ("Your books only have March through July of last year, so I will treat those as a guide, not the answer"). Do not treat missing months as zero sales.
-   - None: this is the common case. Say "There is not enough history in DealerTide to build from, so we will build it from your numbers," and go to the interview.
 3. Note the account list in `budget_history` and `get_budget` results. Only budget accounts that exist. If you need one that does not (for example a separate floor plan interest account), tell them to add it under Accounting, Chart of Accounts and leave it out for now. Do not lump it into a wrong account silently.
 
 `get_reference_data` gives locations. Ask whether this budget is company-wide or for one location. Location users can only budget their own location.
@@ -54,7 +54,7 @@ Show a short P&L for the year: revenue, cost of goods sold, gross profit, expens
 
 ## 5. Save
 
-`create_budget_draft` with name, fiscal_year, location_id if one, and lines. If they want last year's books with a growth figure and history is good, `copy_from_fiscal_year` with `growth_percent` is fine instead. Give them the link from the result and say: "It is saved as a draft. It does not count until someone opens it in DealerTide, checks it and clicks Activate."
+`create_budget_draft` with name, fiscal_year, location_id if one, and lines. Lines are revenue and expense accounts only; balance sheet accounts (bank, savings, loans, inventory) are refused, so never put a cash transfer or a loan into a budget. Only when step 1 found real revenue and expense history and they want last year with a growth figure, `copy_from_fiscal_year` with `growth_percent` is fine instead. It copies revenue and expense accounts only. If it refuses because that year has no revenue or expense activity, nothing was saved: tell them so and build the lines with them. Give them the link from the result and say: "It is saved as a draft. It does not count until someone opens it in DealerTide, checks it and clicks Activate."
 
 ## 6. Revise an existing draft
 

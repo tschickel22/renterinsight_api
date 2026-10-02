@@ -217,6 +217,48 @@ RSpec.describe 'MCP budget tools', :mcp, type: :request do
       expect(result['source']).to start_with('budget:')
     end
 
+    # Found from Claude Desktop on staging: a year whose only entry was a
+    # transfer between two bank accounts was copied as a "budget" of those
+    # two cash accounts.
+    it 'refuses to copy a year with no revenue or expense activity and saves nothing' do
+      savings = account!('T1030', 'Savings / Reserve', 'asset', sub_type: 'bank')
+      post!(bank, savings, 12_000, Date.new(year - 1, 4, 10))
+
+      _, error, text = call_tool(token, 'create_budget_draft', fiscal_year: year, copy_from_fiscal_year: year - 1,
+                                                               growth_percent: 5)
+      expect(error).to be(true)
+      expect(text).to include("No revenue or expense activity in fiscal year #{year - 1}", 'nothing was saved')
+      expect(text).not_to match(/[–—]/)
+      expect(company.budgets.count).to eq(0)
+
+      history, = call_tool(token, 'budget_history', fiscal_year: year - 1)
+      expect(history['has_pl_history']).to be(false)
+      expect(history['note']).to include('only balance sheet accounts')
+    end
+
+    it 'copies only revenue and expense accounts from actuals, annualizing a partial year' do
+      savings = account!('T1030', 'Savings / Reserve', 'asset', sub_type: 'bank')
+      post!(bank, sales, 900, Date.new(year - 1, 3, 15))
+      post!(bank, savings, 12_000, Date.new(year - 1, 6, 10))
+
+      result, error, text = call_tool(token, 'create_budget_draft', fiscal_year: year, copy_from_fiscal_year: year - 1,
+                                                                     growth_percent: 10)
+      expect(error).to be_falsey, text
+      copy = company.budgets.find_by!(fiscal_year: year)
+      expect(copy.budget_lines.pluck(:chart_of_account_id)).to eq([sales.id])
+      expect(copy.budget_lines.first.month_1).to eq(990)
+      expect(copy.metadata).to include('source_label' => 'actuals_annualized', 'created_via' => 'ai_connector')
+      expect(result['source']).to eq('actuals_annualized')
+    end
+
+    it "leaves balance sheet lines out when copying a prior year's budget" do
+      budget!({ fiscal_year: year, location_id: nil }, sales => 1_000, bank => 5_000)
+      call_tool(token, 'create_budget_draft', fiscal_year: year + 1, copy_from_fiscal_year: year)
+
+      copy = company.budgets.find_by!(fiscal_year: year + 1)
+      expect(copy.budget_lines.pluck(:chart_of_account_id)).to eq([sales.id])
+    end
+
     it 'keeps a location user to their own locations' do
       local = connector_user(company, { 'budgets' => %w[read create] }, location: denver)
       local_token = connect!(local)['access_token']

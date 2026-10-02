@@ -18,7 +18,10 @@ module McpTools
                 'commissionable_front_gross, total_gross, selling_price, deal_type new or used, vertical mh or rv, ' \
                 'quantity, split_with_secondary) and units_this_period for volume bonuses: the unit this deal is for the ' \
                 'person in the bonus period, counting this one (a volume bonus pays once, on the unit that reaches its ' \
-                'threshold). Warnings name anything the plan will not do the way it reads. Uses only the numbers given; ' \
+                'threshold). front_gross is before pack; commissionable front is front gross less pack. Each percent ' \
+                'line says in based_on which gross figure it used and, when pack applies, how much the pack took off; ' \
+                'show that to the user. On a split deal the primary components are split 50/50 and volume bonuses are ' \
+                'not split. Warnings name anything the plan will not do the way it reads. Uses only the numbers given; ' \
                 'never reads real deals.'
     input_schema(
       properties: {
@@ -31,7 +34,8 @@ module McpTools
             properties: {
               label: { type: 'string' },
               selling_price: { type: 'number' },
-              front_gross: { type: 'number', description: 'Accounting front gross, before pack' },
+              front_gross: { type: 'number', description: 'Accounting front gross, before pack. If the user gives "front ' \
+                                                          'gross" already after pack, pass it as commissionable_front_gross' },
               pack: { type: 'number', description: 'Dealer pack taken off front gross before commission' },
               commissionable_front_gross: { type: 'number', description: 'Defaults to front_gross minus pack' },
               back_gross: { type: 'number', description: 'Finance reserve plus product margin' },
@@ -109,17 +113,65 @@ module McpTools
         next if lines.empty?
 
         { role: role.to_s, total: engine.total_for_role(role).to_f,
-          components: lines.map { |l| { component: l[:component].name, amount: l[:amount].to_f, note: l[:note] }.compact } }
+          components: lines.map { |l| line_json(deal, l) } }
       end
       {
         label: input['label'].presence || "Scenario #{index + 1}",
         figures_used: deal.to_h.slice(:selling_price, :front_gross, :commissionable_front_gross, :back_gross, :total_gross,
                                       :addon_gross).transform_values { |v| v&.to_f }
-                          .merge(quantity: deal.quantity, deal_type: deal.commission_deal_type,
+                          .merge(pack_taken_off: pack_taken_off(deal)&.to_f,
+                                 quantity: deal.quantity, deal_type: deal.commission_deal_type,
                                  vertical: deal.commission_vertical, split_with_secondary: deal.secondary_salesperson_id.present?,
                                  units_this_period: position).compact,
         payouts: roles
       }
+    end
+
+    GROSS_FIGURES = {
+      'front' => 'front gross, before pack',
+      'commissionable_front' => 'commissionable front gross, front gross less pack',
+      'back' => 'back gross', 'total' => 'total gross', 'addon' => 'add-on gross', 'selling_price' => 'selling price'
+    }.freeze
+
+    def self.line_json(deal, line)
+      { component: line[:component].name, amount: line[:amount].to_f, note: line[:note],
+        based_on: based_on(deal, line[:component]) }.compact
+    end
+
+    # Which figure a percent line was worked out on, and what the pack did to
+    # it, so "front gross" cannot be misread. Flat and volume lines use none.
+    def self.based_on(deal, component)
+      key = case component.component_type
+            when 'addon_commission' then 'addon'
+            when 'percent_of_gross', 'percentage' then component.gross_type.to_s.delete_suffix('_gross')
+            end
+      return nil unless GROSS_FIGURES.key?(key)
+
+      value = { 'front' => deal.front_gross, 'commissionable_front' => deal.commissionable_front_gross,
+                'back' => deal.back_gross, 'total' => deal.total_gross, 'addon' => deal.addon_gross,
+                'selling_price' => deal.selling_price }[key]
+      out = { gross_type: key, figure: GROSS_FIGURES[key], amount: value&.to_f }
+      pack = pack_taken_off(deal)
+      if pack && key == 'commissionable_front'
+        out[:pack_taken_off] = pack.to_f
+        out[:worked_out] = "#{money(deal.front_gross)} front gross less #{money(pack)} pack is " \
+                           "#{money(deal.commissionable_front_gross)}"
+      elsif pack && key == 'front'
+        out[:worked_out] = "front gross before pack; after the #{money(pack)} pack the commissionable front " \
+                           "would be #{money(deal.commissionable_front_gross)}"
+      end
+      out.compact
+    end
+
+    def self.pack_taken_off(deal)
+      return nil if deal.front_gross.nil? || deal.commissionable_front_gross.nil?
+
+      diff = deal.front_gross - deal.commissionable_front_gross
+      diff.zero? ? nil : diff
+    end
+
+    def self.money(value)
+      ActiveSupport::NumberHelper.number_to_currency(value.to_d)
     end
 
     # Defaults mirror Deal: commissionable front = front minus pack, total =
@@ -156,7 +208,41 @@ module McpTools
                  "units_this_period #{c.units_threshold} to see it."
         end
       end
+      out.concat(split_warnings(components, scenarios))
+      out.concat(pack_warnings(components, scenarios))
       out.uniq
+    end
+
+    # The engine splits the primary's components 50/50 whenever a second
+    # salesperson is on the deal, whether or not the plan mentions one.
+    def self.split_warnings(components, scenarios)
+      split = scenarios.each_with_index.select { |s, _| s['split_with_secondary'] }
+                       .map { |s, i| s['label'].presence || "Scenario #{i + 1}" }
+      return [] if split.empty? || components.any? { |c| c.applies_to_role == 'secondary_salesperson' }
+
+      primary = components.select { |c| c.applies_to_role.nil? || c.applies_to_role == 'primary_salesperson' }
+      shared = primary.reject { |c| c.component_type == 'volume_bonus' }
+      return [] if shared.empty?
+
+      text = "#{split.join(', ')} #{split.one? ? 'has' : 'have'} a secondary salesperson and this plan has no " \
+             "secondary_salesperson component, so the primary salesperson's components (#{shared.map(&:name).join(', ')}) " \
+             'are split 50/50 with the secondary, any odd cent to the primary.'
+      if primary.any? { |c| c.component_type == 'volume_bonus' }
+        text += ' Volume bonuses are not split; they pay in full to the person who reached the threshold.'
+      end
+      [text + ' Tell the owner, and add a secondary_salesperson component if the second person should be paid differently.']
+    end
+
+    # A front gross component on deals that carry a pack is the usual
+    # misreading of "front gross" (dealers mostly mean after pack).
+    def self.pack_warnings(components, scenarios)
+      return [] unless scenarios.any? { |s| s['pack'].to_f.nonzero? || s['commissionable_front_gross'].present? }
+
+      components.select { |c| c.component_type.in?(%w[percent_of_gross percentage]) && c.gross_type.to_s.delete_suffix('_gross') == 'front' }
+                .map do |c|
+        "#{c.name}: pays on front gross before pack. Dealers who say \"front gross\" usually mean after pack; if " \
+          'so, use gross_type commissionable_front.'
+      end
     end
   end
 end

@@ -33,6 +33,7 @@ class CommissionPaymentGeneratorService
   }.freeze
 
   SPLIT_SHARE = BigDecimal('0.5')
+  VOLUME_NOT_SPLIT_NOTE = 'not split; volume bonuses pay in full to the person who reached the threshold'
 
   def self.generate_for_deal(deal)
     new(deal).generate
@@ -128,9 +129,12 @@ class CommissionPaymentGeneratorService
     secondary.present? && secondary != @deal.try(:primary_salesperson_id)
   end
 
-  # Volume bonuses belong to the person and are never split.
+  # Volume bonuses belong to the person and are never split. The note says
+  # so, so a split deal's bonus line does not read as an unsplit mistake.
   def split_line(line, side)
-    return line if line[:component].component_type == 'volume_bonus' && side == :primary
+    if line[:component].component_type == 'volume_bonus' && side == :primary
+      return line.merge(note: [line[:note], VOLUME_NOT_SPLIT_NOTE].compact.join('; '))
+    end
 
     full = line[:amount]
     secondary_share = (full * SPLIT_SHARE).floor(2)
