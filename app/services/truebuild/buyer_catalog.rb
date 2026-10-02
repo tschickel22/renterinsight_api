@@ -207,7 +207,7 @@ module Truebuild
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v11:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v12:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -291,24 +291,27 @@ module Truebuild
     # A color set is one choice, so it is shown in one place: the group named
     # for it (Cabinets under Cabinets), else the first group holding it. Bay
     # Port's book lists Destin White and Timberwolf under Packages and under
-    # Cabinets, and the buyer picked a cabinet color twice.
+    # Cabinets, and the buyer picked a cabinet color twice; Aspire 082's book
+    # lists them only under Packages, so a buyer looking at Cabinets found
+    # just the paid upgrades.
     # built: [[group, { set name => [chip] }, other ops]] in display order.
     def one_place_per_color_set(built)
       holders = Hash.new { |h, k| h[k] = [] }
       built.each { |group, sets, _| sets.each_key { |set| holders[set] << group } }
-      built.each do |group, sets, _|
-        sets.keys.each do |set|
-          next if holders[set].size < 2
+      holders.each do |set, groups|
+        named = Catalog::PriceBooks::Sections.group_for(set).last
+        home = groups.find { |g| g.name == named } || built.find { |g, _, _| g.name == named }&.first ||
+               (@variant && CatalogOptionGroup.find_by(manufacturer_id: @variant.manufacturer_id, name: named)) || groups.first
+        built << [home, {}, []] unless built.any? { |g, _, _| g == home }
+        home_sets = built.find { |g, _, _| g == home }[1]
+        groups.each do |g|
+          next if g == home
 
-          named = Catalog::PriceBooks::Sections.group_for(set).last
-          home = holders[set].find { |g| g.name == named } || holders[set].first
-          next if home == group
-
-          home_sets = built.find { |g, _, _| g == home }[1]
-          home_sets[set] = Array(home_sets[set]) + sets.delete(set)
+          from = built.find { |b, _, _| b == g }[1]
+          home_sets[set] = Array(home_sets[set]) + from.delete(set)
         end
       end
-      built
+      built.sort_by { |g, _, _| [g.name == FIRST_GROUP ? 0 : 1, g.position.to_i, g.name] }
     end
 
     # A family is one choice, so it is shown in one place: the group holding

@@ -148,6 +148,17 @@ RSpec.describe 'Public TrueBuild', type: :request do
       .to eq([['Vinyl plank', ['Slate Grey LVP']]])
   end
 
+  it 'moves cabinet colors listed only under Packages to Cabinets' do
+    packages = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'packages', name: 'Packages', position: 2)
+    CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 10)
+    option(packages, 'Timberwolf', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    groups = JSON.parse(response.body)['groups']
+    expect(groups.first).to include('name' => 'Cabinets')
+    expect(groups.first['color_sets'].first['options'].map { |o| o['name'] }).to eq(['Timberwolf'])
+    expect(groups.map { |g| g['name'] }).not_to include('Packages')
+  end
+
   it 'shows a family of options in one place, however the price book filed it' do
     tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
     stray = option(tile, 'Black Stainless Steel Package - Gas', dealer_cost: 3000)
@@ -452,7 +463,11 @@ RSpec.describe 'Public TrueBuild', type: :request do
       recut.update!(status: 'rejected', layer_url: 'https://b/clay-new.webp', usage: recut.usage.merge('mask_version' => Truebuild::Trueview::Layer::VERSION))
       body = trueview
       expect(body['photos'].first['layers']).not_to have_key(clay.id.to_s)
-      expect(body['photos'].first['unavailable']).to include(clay.id)
+      # Held back before the larger model tried it: it gets that one try, told what the check found.
+      expect(body['photos'].first['pending']).to include(clay.id)
+      retry_row = TruebuildRender.where(status: 'queued').where("usage->>'draw_with' = 'nb2'").sole
+      expect(retry_row.selection).to eq(recut.selection)
+      expect(recut.reload.status).to eq('superseded')
     end
 
     it 'checks a held-back drawing again, cut again for free, rather than paying for a new one' do

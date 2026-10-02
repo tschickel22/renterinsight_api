@@ -101,19 +101,19 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
                                                'check' => { 'note' => note } })
     end
 
-    it 'draws a held-back finish again with every note, then on the larger model' do
+    it 'draws a held-back finish again on the larger model with every note, for two rounds' do
       held('Clay', 'The porch wall kept the old siding.')
       expect { described_class.drawing_finished!(run.reload) }.to have_enqueued_job(TruebuildFactoryRunRepairJob).with(run.id)
       expect { described_class.drawing_finished!(run.reload) }.not_to have_enqueued_job(TruebuildFactoryRunRepairJob)
 
       expect(described_class.repair!(run.reload)).to eq(1)
       again = run.renders.find_by(status: 'queued')
-      expect(again.usage).to include('reviewer_note' => 'Paint on the trim. Also: The porch wall kept the old siding.', 'repair_round' => 1)
-      expect(again.usage).not_to have_key('draw_with')
+      expect(again.usage).to include('reviewer_note' => 'Paint on the trim. Also: The porch wall kept the old siding.', 'repair_round' => 1,
+                                     'draw_with' => 'nb2')
       expect(again.model_key).to eq('nb2-lite')
       expect(described_class.progress(run.reload)).to include(phase: 'repairing', repair: { rounds: 1, redrawn: 1 })
 
-      again.update!(status: 'rejected', usage: again.usage.merge('mask_version' => version, 'check' => { 'note' => 'Still patchy.' }))
+      again.update!(status: 'rejected', usage: again.usage.merge('mask_version' => version, 'escalated' => true, 'check' => { 'note' => 'Still patchy.' }))
       described_class.drawing_finished!(run.reload)
       described_class.repair!(run.reload)
       last = run.renders.find_by(status: 'queued')

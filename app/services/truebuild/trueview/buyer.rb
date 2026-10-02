@@ -35,7 +35,7 @@ module Truebuild
         # A drawing under an older cut shows until its re-cut is done, so a
         # Layer::VERSION bump does not blank every finish at once.
         hidden = hidden_layers(plan)
-        done = older_layers(plan).except(*hidden).merge(done_layers(plan))
+        done = older_layers(plan).except(*hidden, *failed_now(plan)).merge(done_layers(plan))
         skipped = skipped_layers(plan)
         requeue_stale(plan)
         drawing = rows(plan).where(status: %w[queued running]).count
@@ -100,7 +100,8 @@ module Truebuild
       # photo (another factory's copy of it) counts as drawn.
       def missing(plan = self.plan)
         done = done_layers(plan)
-        skipped = skipped_layers(plan) | hidden_layers(plan)
+        retry_of = held_before_escalation(plan)
+        skipped = skipped_layers(plan) | (hidden_layers(plan) - retry_of.keys)
         drawn_before = older_drawings(plan)
         busy = TruebuildRender.where(status: %w[queued running], purpose: 'layer', model_key: MODEL,
                                      source_url: plan.map { |p| p[:photo] }.uniq).pluck(:source_url, :selection_key).to_set
@@ -109,7 +110,7 @@ module Truebuild
           next if done.key?(id) || skipped.include?(id) || busy.include?([p[:photo], p[:key]])
 
           busy << [p[:photo], p[:key]]
-          [p, drawn_before[id]]
+          [p, drawn_before[id], retry_of[id]]
         end
       end
 
@@ -119,13 +120,20 @@ module Truebuild
       def queue_missing!(run: nil)
         spec = MODELS.fetch(MODEL)
         queued = 0
-        missing.each do |p, old|
+        missing.each do |p, old, held|
+          old = nil if held
           # Drawn already under an older cut: cut it again, free, and the
           # daily limit is not spent on it.
           next unless old || run || within_daily_limit?
 
           usage = { 'swatch_ids' => p[:swatch_ids], 'predraw' => true }
           usage['recut_from'] = old.id if old
+          if held
+            # Held back before the larger model was tried: one try on it, told
+            # everything the checks found.
+            usage.merge!('draw_with' => Trueview::ESCALATE_TO, 'reviewer_note' => FactoryRun.notes(held).presence).compact!
+            held.update!(status: 'superseded')
+          end
           usage['factory_run_id'] = run.id if run
           row = TruebuildRender.create!(catalog_plan_variant_id: @variant.id, room: p[:room], source_url: p[:photo],
                                         selection: p[:selection], selection_key: p[:key], model_key: MODEL,
@@ -223,6 +231,14 @@ module Truebuild
                   .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
       end
 
+      # Held back under the current cut without the larger model having
+      # tried it (drawn before that try existed): [photo, key, prompt] => row.
+      def held_before_escalation(plan)
+        rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .reject { |r| r.usage['escalated'] || r.usage['draw_with'] == Trueview::ESCALATE_TO }
+                  .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r] }
+      end
+
       # Failed their check under the current cut: not redrawn on every visit.
       def hidden_layers(plan)
         rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
@@ -237,6 +253,13 @@ module Truebuild
                   .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .select { |r| r.usage['outlined'] || Surfaces.category(r.selection.first&.dig('surface')).nil? }
                   .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
+      end
+
+      # Failed under the current cut, including one set aside for a retry on
+      # the larger model: its older drawing must not show meanwhile.
+      def failed_now(plan)
+        rows(plan).where(status: %w[rejected superseded]).select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .map { |r| [r.source_url, r.selection_key, r.prompt] }.uniq
       end
 
       # The newest drawing per finish made under an older cut. A rejected one

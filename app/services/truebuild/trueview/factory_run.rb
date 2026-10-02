@@ -88,11 +88,12 @@ module Truebuild
       # Once a run's drawings are all done, what failed gets another round:
       # an outline Claude rejected is outlined again with its note, a
       # drawing held back by its check is drawn again with every note so
-      # far, and in the last round on the larger image model. All within the
+      # far, on the larger image model (every drawing already had two Lite
+      # tries and one on the larger model, Trueview.draw_order). All within the
       # run's budget. Lite drew Bay Port's porch wall half in the old siding
       # twice; held back for good, a buyer simply never saw that finish.
       REPAIR_ROUNDS = 2
-      STRONGER = 'nb2' # Nano Banana 2: about twice Lite's cost, and steadier
+      STRONGER = Trueview::ESCALATE_TO # Nano Banana 2: about twice Lite's cost, and steadier
 
       # Called as each of a run's drawings finishes.
       def drawing_finished!(run)
@@ -139,7 +140,7 @@ module Truebuild
         queued = 0
         held = run.renders.where(status: 'rejected').to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
         passed = run.renders.done.where(source_url: held.map(&:source_url)).pluck(:source_url, :selection_key, :prompt).to_set
-        cost = rates[:layer] * (round == REPAIR_ROUNDS ? 2 : 1)
+        cost = rates[:layer] * 2 # on the larger model
         held.each do |old|
           next if passed.include?([old.source_url, old.selection_key, old.prompt])
           break if spent + cost > run.budget_usd.to_f
@@ -151,7 +152,7 @@ module Truebuild
                .merge('status' => 'queued',
                       'usage' => old.usage.slice('swatch_ids', 'predraw', 'factory_run_id')
                                    .merge('reviewer_note' => notes(old), 'repair_round' => round,
-                                          'draw_with' => (STRONGER if round == REPAIR_ROUNDS)).compact)
+                                          'draw_with' => STRONGER).compact)
           )
           TruebuildRenderJob.set(queue: :low, priority: PRIORITY).perform_later(row.id)
           spent += cost
@@ -161,9 +162,14 @@ module Truebuild
         seen = Set.new
         outlined = Set.new
         variants.each do |v|
-          cost = model_cost(v, rates, seen, outlined)[:cost_usd]
-          next if cost.positive? && spent + cost > run.budget_usd.to_f
+          # Counted as shared only once a model that shares it was queued.
+          trial_seen = seen.dup
+          trial_outlined = outlined.dup
+          cost = model_cost(v, rates, trial_seen, trial_outlined)[:cost_usd]
+          next if spent + cost > run.budget_usd.to_f
 
+          seen = trial_seen
+          outlined = trial_outlined
           queued += Buyer.new(nil, v).queue_missing!(run: run)
           spent += cost
         end

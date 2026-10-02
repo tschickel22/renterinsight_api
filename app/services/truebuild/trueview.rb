@@ -144,10 +144,17 @@ module Truebuild
       aspect = source_aspect(source)
       spent = 0.0
       result = layer = verdict = nil
-      attempts = render.purpose == 'layer' ? LAYER_ATTEMPTS : 1
-      attempts.times do |attempt|
-        asked = verdict ? "#{prompt}\n\nA check of the last drawing found: #{verdict['note']} Fix that." : prompt
-        result, drawn_cost = draw(spec, source, asked, samples, aspect)
+      tries = draw_order(render, spec)
+      notes = []
+      escalated = false
+      tries.each_with_index do |try_spec, attempt|
+        asked = if try_spec.equal?(spec) || notes.empty?
+                  verdict ? "#{prompt}\n\nA check of the last drawing found: #{verdict['note']} Fix that." : prompt
+                else
+                  "#{prompt}\n\nChecks of the earlier drawings found: #{notes.join(' ')} Fix all of that."
+                end
+        escalated ||= !try_spec.equal?(spec)
+        result, drawn_cost = draw(try_spec, source, asked, samples, aspect)
         spent += drawn_cost
         unless result
           return render.update!(status: 'failed', cost_usd: spent.round(4),
@@ -159,7 +166,8 @@ module Truebuild
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **check_with)
         spent += verdict['cost_usd'].to_f
-        break if verdict['ok'] || attempt == attempts - 1
+        notes << verdict['note'] if verdict['note'].present?
+        break if verdict['ok'] || attempt == tries.size - 1
       end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
@@ -168,12 +176,25 @@ module Truebuild
       if render.purpose == 'layer'
         attrs.merge!(layer_url: store(render, layer[:bytes], layer[:mime], suffix: 'layer'), mask_coverage: layer[:coverage])
         attrs[:usage] = attrs[:usage].merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'), 'outlined' => mask.present?)
-        # Failed its check twice: kept for review, never shown to buyers.
+        attrs[:usage]['escalated'] = true if escalated
+        # Failed every try: kept for review, never shown to buyers.
         attrs.merge!(status: 'rejected', error: "Hidden: #{verdict['note'] || 'failed its check'}") unless verdict['ok']
       end
       render.update!(attrs)
     rescue StandardError => e
       render.update!(status: 'failed', error: e.message.to_s.first(1000))
+    end
+
+    # Lite, twice, then once on the larger model with every note so far: a
+    # Bay Port bath held back five of six countertops after two Lite tries.
+    # A row already sent to the larger model is drawn on it once.
+    ESCALATE_TO = 'nb2'
+
+    def draw_order(render, spec)
+      return [spec] unless render.purpose == 'layer'
+      return [spec] if render.usage['draw_with'] == ESCALATE_TO
+
+      [spec] * LAYER_ATTEMPTS + (spec.equal?(MODELS[ESCALATE_TO]) ? [] : [MODELS.fetch(ESCALATE_TO)])
     end
 
     # One drawing, redrawn if the model reframes the photo. [result, cost],

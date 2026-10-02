@@ -222,6 +222,26 @@ RSpec.describe 'TrueView rendering' do
         .to include('never add hardware')
     end
 
+    it 'tries the larger model last, told everything the checks found, before holding a layer back' do
+      models = []
+      prompts = []
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |spec, _src, prompt, **|
+        models << spec[:model]
+        prompts << prompt
+        { bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
+      end
+      notes = ['Edges kept the old color.', 'The island base is unchanged.', nil]
+      scores = [2, 3, 5]
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do
+        { input: { 'score' => scores.shift, 'note' => notes.shift }, input_tokens: 1, output_tokens: 1 }
+      end
+      Truebuild::Trueview.perform!(render)
+      expect(models).to eq(['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image'])
+      expect(prompts.last).to end_with('Checks of the earlier drawings found: Edges kept the old color. The island base is unchanged. Fix all of that.')
+      expect(render.reload).to have_attributes(status: 'done')
+      expect(render.usage['escalated']).to be(true)
+    end
+
     it 'shows the layer when the check itself cannot run' do
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
         .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
