@@ -120,25 +120,12 @@ module Truebuild
         variants = CatalogPlanVariant.where(id: run.variant_ids).to_a
         photos = variants.flat_map { |v| PhotoChoice.photos(v).map(&:last) }.uniq
 
+        # Outlines worth another try are only marked due here; each is
+        # outlined again inside the drawing jobs queued below (Surfaces.mask_for),
+        # in parallel. Outlining them all in this job took many minutes, and a
+        # worker restart ran it twice over the same outlines.
+        failed_outlines(photos).each { |mask| Surfaces.make_due!(mask) }
         outline_usd = 0.0
-        failed_outlines(photos).each do |mask|
-          break if spent + outline_usd + rates[:outline] > run.budget_usd.to_f
-
-          source = Trueview.fetch_source(mask.source_url)
-          note = mask.error
-          mask.destroy!
-          fresh = Surfaces.find!(mask.source_url, source[:bytes], mask.surface, correction: note)
-          outline_usd += fresh.usage['cost_usd'].to_f
-          # Drawings skipped as "not in this photo" for want of an outline are drawn now.
-          if fresh.present?
-            TruebuildRender.where(source_url: mask.source_url, purpose: 'layer', status: 'skipped').to_a
-                           .select { |r| Surfaces.category(r.selection.first&.dig('surface')) == mask.surface }
-                           .each { |r| r.update!(status: 'superseded') }
-          end
-        rescue StandardError => e
-          Rails.logger.warn("TrueView repair outline #{mask.id}: #{e.message}")
-        end
-        spent += outline_usd
 
         queued = 0
         held = run.renders.where(status: 'rejected').to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
@@ -191,7 +178,7 @@ module Truebuild
       def failed_outlines(photos)
         TruebuildSurfaceMask.where(source_url: photos, version: Surfaces::VERSION).select do |m|
           if m.status == 'failed' then !m.error.to_s.include?('framing')
-          else m.status == 'done' && m.coverage.to_f.zero? && Array(m.usage['attempts']).last.to_h['present'] == true
+          else Surfaces.rejected?(m) && m.usage['tries'].to_i + 1 < Surfaces::OUTLINE_TRIES
           end
         end
       end
@@ -217,6 +204,12 @@ module Truebuild
         end
         TruebuildRenderJob.orphaned(run.renders, stale_after: LOST_AFTER)
                           .each { |row| TruebuildRenderJob.requeue(row, queue: :low) }
+        # A repair round queued but never done (its job was dropped).
+        if run.progress['repair_queued'].to_i > run.progress['repair_rounds'].to_i && run.updated_at < LOST_AFTER.ago &&
+           !run.renders.where(status: %w[queued running]).exists?
+          run.touch
+          TruebuildFactoryRunRepairJob.perform_later(run.id)
+        end
       end
 
       # Where a run stands, from its drawings.

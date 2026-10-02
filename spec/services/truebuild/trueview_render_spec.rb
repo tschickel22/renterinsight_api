@@ -146,6 +146,15 @@ RSpec.describe 'TrueView rendering' do
       expect(Truebuild::Trueview::Surfaces.retry_due?(last_try)).to be(false)
     end
 
+    it 'lets one job outline a surface again while the others skip it' do
+      due = TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION,
+                                         status: 'done', coverage: 0, mask_url: 'https://b/m.png', updated_at: 1.hour.ago,
+                                         usage: { 'attempts' => [{ 'present' => true, 'fit' => 3 }] })
+      stale = TruebuildSurfaceMask.find(due.id)
+      expect(Truebuild::Trueview::Surfaces.claim(due)).to be(true)
+      expect(Truebuild::Trueview::Surfaces.claim(stale)).to be(false)
+    end
+
     it 'never cuts a layer, grown edge included, onto a surface that outranks it' do
       outline = (Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 150, 200, fill: true).cast(:uchar)
       blocked = (Vips::Image.black(300, 200) + 0).draw_rect(255, 150, 0, 150, 200, fill: true).cast(:uchar)

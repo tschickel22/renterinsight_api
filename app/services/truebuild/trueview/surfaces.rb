@@ -82,12 +82,19 @@ module Truebuild
         key = category(surface) or return nil
         found = TruebuildSurfaceMask.find_by(source_url: source_url, surface: key, version: VERSION)
         return found if found && !retry_due?(found)
+        return found if found && found.status == 'failed' && !claim(found)
 
         if found && rejected?(found)
           # Claude found the surface but turned the outline down: outline it
           # again, told why, a few times before taking it as not drawable.
+          # One job claims it; the others drawing this surface now skip, and
+          # are drawn again once the new outline passes.
+          return found unless claim(found)
+
           found.destroy!
-          return find!(source_url, source_bytes, key, correction: found.error, tries: found.usage['tries'].to_i + 1)
+          fresh = find!(source_url, source_bytes, key, correction: found.error, tries: found.usage['tries'].to_i + 1)
+          redraw_skipped(source_url, key) if fresh.present?
+          return fresh
         end
         found&.destroy!
         carried_over(source_url, key) || find!(source_url, source_bytes, key)
@@ -154,6 +161,29 @@ module Truebuild
         return !mask.error.to_s.include?('framing') if mask.status == 'failed'
 
         rejected?(mask) && mask.usage['tries'].to_i + 1 < OUTLINE_TRIES
+      end
+
+      # Due for another outline now, whenever it was turned down.
+      def make_due!(mask)
+        mask.update_columns(updated_at: (RETRY_FAILED_AFTER + 1.minute).ago)
+      end
+
+      # Only one job outlines a surface again: the one whose update moves it.
+      def claim(mask)
+        TruebuildSurfaceMask.where(id: mask.id, updated_at: mask.updated_at).update_all(updated_at: Time.current) == 1
+      end
+
+      # Drawings of this surface skipped as "not in this photo" while it had
+      # no outline: set aside, so the model's next queue draws them.
+      def redraw_skipped(source_url, key)
+        rows = TruebuildRender.where(source_url: source_url, purpose: 'layer', status: 'skipped').to_a
+                              .select { |r| category(r.selection.first&.dig('surface')) == key }
+        TruebuildRender.where(id: rows.map(&:id)).update_all(status: 'superseded', updated_at: Time.current)
+        variants = rows.filter_map(&:catalog_plan_variant_id).uniq
+        CatalogPlanVariant.where(id: variants).find_each do |v|
+          run = TruebuildFactoryRun.find_by(id: rows.find { |r| r.catalog_plan_variant_id == v.id }&.usage&.dig('factory_run_id'))
+          Buyer.new(nil, v).queue_missing!(run: run&.status == 'running' ? run : nil)
+        end
       end
 
       def find!(source_url, source_bytes, key, correction: nil, tries: 0)

@@ -155,20 +155,19 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
       expect(run.renders.where(status: 'rejected').count).to eq(1)
     end
 
-    it 'outlines again a surface Claude found but rejected the outline of, then draws what it skipped' do
+    it 'marks a turned-down outline due, for the drawing jobs to outline again in parallel' do
       mask = TruebuildSurfaceMask.create!(source_url: front, surface: 'shutters', version: Truebuild::Trueview::Surfaces::VERSION,
                                           status: 'done', coverage: 0, mask_url: 'https://b/m.png', error: 'It took in the windows.',
                                           usage: { 'attempts' => [{ 'present' => true, 'fit' => 2 }] })
-      run.renders.find_by("selection->0->>'surface' = 'Shutters'").update!(status: 'skipped')
-      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: 'x', mime: 'image/jpeg')
-      expect(Truebuild::Trueview::Surfaces).to receive(:find!).with(front, 'x', 'shutters', correction: 'It took in the windows.')
-        .and_return(TruebuildSurfaceMask.new(status: 'done', coverage: 0.05, mask_url: 'https://b/n.png', usage: { 'cost_usd' => 0.05 }))
-      allow_any_instance_of(Truebuild::Trueview::Buyer).to receive(:queue_missing!).and_return(1)
-
+      expect(Truebuild::Trueview::Surfaces).not_to receive(:find!)
+      expect(Truebuild::Trueview::Surfaces.retry_due?(mask)).to be(false)
       described_class.repair!(run.reload)
-      expect(TruebuildSurfaceMask.exists?(mask.id)).to be(false)
-      expect(run.renders.find_by("selection->0->>'surface' = 'Shutters'").status).to eq('superseded')
-      expect(run.reload.progress['outline_repair_usd']).to eq(0.05)
+      expect(Truebuild::Trueview::Surfaces.retry_due?(mask.reload)).to be(true)
+    end
+
+    it 'starts again a repair round a deploy dropped' do
+      run.update_columns(progress: run.reload.progress.merge('repair_queued' => 1, 'repair_rounds' => 0), updated_at: 1.hour.ago)
+      expect { described_class.progress(run.reload) }.to have_enqueued_job(TruebuildFactoryRunRepairJob).with(run.id)
     end
   end
 
