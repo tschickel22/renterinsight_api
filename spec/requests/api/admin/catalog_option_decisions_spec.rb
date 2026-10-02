@@ -55,6 +55,21 @@ RSpec.describe 'Api::Admin::CatalogOptionDecisions', type: :request do
     expect { post "/api/admin/catalog_price_books/#{book.id}/option_review", headers: admin }.to have_enqueued_job(CatalogOptionReviewJob).with(book.id)
   end
 
+  it "finds the book's options to decide about" do
+    get "/api/admin/catalog_price_books/#{book.id}/options", headers: admin, params: { q: 'french' }
+    expect(JSON.parse(response.body)['items']).to eq([{ 'id' => french.id, 'name' => 'French Door Fridge Upgrade', 'group' => 'Kitchen & Appliances' }])
+  end
+
+  it 'lists decisions kept across three or more books as code rule candidates' do
+    3.times do |i|
+      other = CatalogPriceBook.create!(manufacturer: mfr, factory: factory, name: "Book #{i}", status: 'superseded')
+      CatalogOptionDecision.create!(manufacturer: mfr, option_key: "k#{i}", kind: 'family', value: 'refrigerator',
+                                    catalog_price_book: other, reviewed_at: Time.current)
+    end
+    get '/api/admin/option_decisions/patterns', headers: admin
+    expect(JSON.parse(response.body)['items']).to eq([{ 'kind' => 'family', 'value' => 'refrigerator', 'books' => 3, 'manufacturers' => 1, 'options' => 3 }])
+  end
+
   it 'is platform admins only' do
     get "/api/admin/catalog_price_books/#{book.id}/option_decisions", headers: headers_for('admin')
     expect(response).to have_http_status(:forbidden)

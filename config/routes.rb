@@ -3069,8 +3069,10 @@ Rails.application.routes.draw do
           # What Claude and admins decided about its options (CatalogOptionDecisionsController).
           get  'option_decisions', to: 'catalog_option_decisions#index'
           post 'option_review', to: 'catalog_option_decisions#review'
+          get  'options', to: 'catalog_option_decisions#options'
         end
       end
+      get   'option_decisions/patterns', to: 'catalog_option_decisions#patterns'
       patch 'option_decisions/:id', to: 'catalog_option_decisions#update'
       post  'option_decisions', to: 'catalog_option_decisions#create'
 

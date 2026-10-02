@@ -6,7 +6,7 @@
 # Claude on the manufacturer's next book. Platform data: no company scope.
 class Api::Admin::CatalogOptionDecisionsController < ApplicationController
   before_action :require_platform_admin!
-  before_action :set_book, only: %i[index review]
+  before_action :set_book, only: %i[index review options]
   before_action :set_decision, only: %i[update]
 
   # GET /api/admin/catalog_price_books/:id/option_decisions?unreviewed=1
@@ -25,6 +25,30 @@ class Api::Admin::CatalogOptionDecisionsController < ApplicationController
     render json: { items: groups, review: @book.metadata['option_review'],
                    unreviewed: CatalogOptionDecision.where(manufacturer_id: @book.manufacturer_id, option_key: options.keys,
                                                            reviewed_at: nil).distinct.count(:suggestion) }
+  end
+
+  # GET /api/admin/catalog_price_books/:id/options?q=fridge
+  # The book's options, to choose some for an admin's own decision.
+  def options
+    q = params[:q].to_s.strip
+    scope = CatalogOption.where(manufacturer_id: @book.manufacturer_id, id: @book.option_prices.select(:catalog_option_id))
+                         .where(status: 'active').includes(:group)
+    scope = scope.where('catalog_options.name ILIKE ?', "%#{ActiveRecord::Base.sanitize_sql_like(q)}%") if q.present?
+    render json: { items: scope.order(:name).limit(50).map { |o| { id: o.id, name: o.name, group: o.group&.name } } }
+  end
+
+  # GET /api/admin/option_decisions/patterns
+  # Decisions admins kept again and again (the same kind and value across
+  # three or more books): candidates for a rule in code, which is free and
+  # catches the next wording before Claude is asked.
+  def patterns
+    rows = CatalogOptionDecision.where(status: 'active').where.not(reviewed_at: nil).where.not(kind: 'not_family')
+                                .group(:kind, :value)
+                                .having('COUNT(DISTINCT catalog_price_book_id) >= 3')
+                                .pluck(:kind, :value, Arel.sql('COUNT(DISTINCT catalog_price_book_id)'),
+                                       Arel.sql('COUNT(DISTINCT manufacturer_id)'), Arel.sql('COUNT(*)'))
+    render json: { items: rows.map { |k, v, books, mfrs, n| { kind: k, value: v, books: books, manufacturers: mfrs, options: n } }
+                              .sort_by { |r| -r[:books] } }
   end
 
   # POST /api/admin/catalog_price_books/:id/option_review
