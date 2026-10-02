@@ -19,14 +19,15 @@ RSpec.describe AiConnectorMailer, type: :mailer do
       expect(mail.to).to eq([admin.email])
       expect(mail.subject).to include('works with Claude', company.name)
       expect(body).to include('Hi Dana', 'Roles &amp; Permissions', 'Also let it make changes',
-                              'Help me close last month.', '/settings?tab=ai-apps', '/settings?tab=users')
+                              'Help me close last month.', '/settings?tab=ai-apps', '/settings?tab=users',
+                              'Customize', 'Plugins', 'Discover', 'Connectors', 'Show my open deals by stage.')
       expect(mail.text_part.decoded).to include('Settings, Integrations, AI Apps')
       expect(mail.text_part.decoded + mail.html_part.decoded).not_to match(/[–—]/)
     end
 
-    it 'links the directory listing once it is set, and the docs page before' do
+    it 'adds a direct link to the directory listing when it is set' do
       admin = user!('company_admin')
-      expect(described_class.enabled(company.id, admin.id).text_part.decoded).to include('/ai-connector/')
+      expect(described_class.enabled(company.id, admin.id).text_part.decoded).not_to include('go straight to the listing')
 
       allow(described_class).to receive(:directory_url).and_return('https://claude.ai/directory/dealertide')
       expect(described_class.enabled(company.id, admin.id).text_part.decoded)

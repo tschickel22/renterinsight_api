@@ -3,28 +3,66 @@
 <p>Hi <%= @user.first_name.presence || 'there' %>,</p>
 
 <p>
-  AI Apps is now turned on for <strong><%= @company.name %></strong>. Your team can connect Claude to
-  <%= @brand.name %> and ask it about leads, deals, inventory, service, the books, budgets, install
-  projects and commission plans, using the same information they already see in <%= @brand.name %>.
+  AI Apps is now turned on for <strong><%= @company.name %></strong>. Your team can add <%= @brand.name %> to
+  Claude and ask it about leads, deals, inventory, service, the books, budgets, install projects and commission
+  plans, using the same information they already see in <%= @brand.name %>.
 </p>
 
-<h3>1. Choose who can use it</h3>
+<h3>Step 1. Choose who can use it (admins)</h3>
 <p>
   You are an admin, so you already have access. For anyone else, open
-  <a href="<%= @roles_url %>">Settings, Users, Roles &amp; Permissions</a> and give their role the
-  <strong>AI Connector</strong> permission: <strong>Read</strong> to connect, <strong>Update</strong> to let
+  <a href="<%= @roles_url %>">Settings, Users, Roles &amp; Permissions</a> in <%= @brand.name %> and give their role
+  the <strong>AI Connector</strong> permission: <strong>Read</strong> to connect, <strong>Update</strong> to let
   Claude make changes for them.
 </p>
 
-<h3>2. Install it in Claude</h3>
+<h3>Step 2. Add the <%= @brand.name %> plugin in Claude</h3>
+<p>The plugin brings both pieces at once: the connection to <%= @brand.name %> and six ready-made skills. You need a
+  Claude Pro, Max, Team or Enterprise plan.</p>
 <ol>
-  <li>In Claude, open the directory and add <strong><%= @brand.name %></strong>
-      (<a href="<%= @install_url %>">open the listing</a>).</li>
-  <li>Sign in with your <%= @brand.name %> login.</li>
-  <li>To let Claude make changes, tick <strong>Also let it make changes</strong> on the sign-in screen.</li>
+  <li>Open Claude at <a href="https://claude.ai">claude.ai</a> or in the Claude desktop app.</li>
+  <li>Select <strong>Customize</strong> (in the sidebar), then <strong>Plugins</strong>.</li>
+  <li>Select <strong>Discover</strong>, search for <strong><%= @brand.name %></strong>, open it and select
+      <strong>Add</strong>.<% if @directory_url %> Or go straight to the listing:
+      <a href="<%= @directory_url %>"><%= @directory_url %></a>.<% end %></li>
 </ol>
 
-<h3>3. Things to ask</h3>
+<h3>Step 3. Connect your <%= @brand.name %> account</h3>
+<ol>
+  <li>Still on the plugin's page, open its <strong>Connectors</strong> tab.</li>
+  <li>Next to <strong><%= @brand.name %></strong>, select <strong>Add</strong> if it says Not added, then
+      <strong>Connect</strong>.</li>
+  <li>Sign in with your <%= @brand.name %> email and password. To let Claude make changes (add notes, tasks,
+      drafts), tick <strong>Also let it make changes</strong> on that screen, then approve.</li>
+  <li>The connector now shows <strong>Connected</strong>. It also appears under <strong>Customize</strong>,
+      <strong>Connectors</strong>.</li>
+</ol>
+<p><em>On a Claude Team or Enterprise plan</em>, your Claude organization Owner may need to add the
+  <%= @brand.name %> connector for the team first (they select <strong>Connect for your team</strong>). Each person
+  then connects with their own <%= @brand.name %> login.</p>
+
+<h3>Step 4. Use it in a chat</h3>
+<ol>
+  <li>Start a new chat. Select <strong>+</strong> in the message box, then <strong>Connectors</strong>, and make
+      sure <strong><%= @brand.name %></strong> is switched on.</li>
+  <li>Ask in plain words. The first time Claude uses a <%= @brand.name %> tool it may ask permission; choose
+      <strong>Allow once</strong> or <strong>Always allow</strong>.</li>
+  <li>To pick a skill yourself, type <strong>/</strong> in the message box and choose one of the
+      <%= @brand.name %> skills.</li>
+</ol>
+
+<h3>Everyday questions</h3>
+<ul>
+  <li>"Show my open deals by stage."</li>
+  <li>"Find Maria Lopez and tell me where her deal stands."</li>
+  <li>"What three bedroom homes do we have in stock under $90,000?"</li>
+  <li>"What tasks are due for me this week?"</li>
+  <li>"Which service tickets are still open?"</li>
+  <li>"Add a note to the Garcia lead: called, wants a tour Saturday."</li>
+  <li>"Create a task for me to call John Lopez tomorrow at 10."</li>
+</ul>
+
+<h3>Bigger jobs (these use the built in skills)</h3>
 <ul>
   <li>"Which of my leads are going cold, and what should we do about them?"</li>
   <li>"My bank feed is behind. Help me get it caught up."</li>
@@ -39,10 +77,10 @@
   <li>Claude sees only what each person can see in <%= @brand.name %>, at their locations.</li>
   <li>It asks before every change, and every change is recorded. You can review and undo them under
       <a href="<%= @ai_apps_url %>">Settings, Integrations, AI Apps</a>.</li>
-  <li>It never messages your customers, activates campaigns, workflows, budgets or commission plans,
-      pays bills or deletes records. Those stay in <%= @brand.name %>.</li>
-  <li>Dealer cost and gross stay hidden from Claude unless you turn on
-      "Let AI apps see dealer cost and gross" on the same AI Apps page.</li>
+  <li>It never messages your customers, activates campaigns, workflows, budgets or commission plans, pays bills
+      or deletes records. Those stay in <%= @brand.name %>.</li>
+  <li>Dealer cost and gross stay hidden from Claude unless you turn on "Let AI apps see dealer cost and gross"
+      on the same AI Apps page.</li>
 </ul>
 
 <p>
