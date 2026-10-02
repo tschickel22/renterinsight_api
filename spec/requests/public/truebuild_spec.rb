@@ -182,6 +182,14 @@ RSpec.describe 'Public TrueBuild', type: :request do
     Rails.cache.clear
     expect(names.call(trueview_only: true)).to eq(['Belvidere'])
     expect(JSON.parse(response.body)['models'].first['trueview']).to be(true)
+    # Only the sizes TrueView is drawn for: another size of the plan drops out.
+    other = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '2852H32392', width_ft: 28, length_ft: 52)
+    CatalogVariantPrice.create!(price_book: book, variant: other, net_base_price: 70_000)
+    Rails.cache.clear
+    variants = (get '/public/truebuild/models', params: { token: token, trueview_only: 1 }) && JSON.parse(response.body)['models'].first['variants']
+    expect(variants.map { |v| [v['id'], v['trueview']] }).to eq([[variant.id, true]])
+    all = (get '/public/truebuild/models', params: { token: token }) && JSON.parse(response.body)['models'].first['variants']
+    expect(all.map { |v| v['id'] }).to contain_exactly(variant.id, other.id)
 
     get '/public/truebuild/models', params: { token: token, facets: 1 }
     facets = JSON.parse(response.body)['facets']

@@ -26,7 +26,13 @@ module Truebuild
       plans = plans.select { |p| factory_ids.include?(p[:factory_id]) } if factory_ids.any?
       plans = plans.select { |p| series.include?(p[:series]) } if series.any?
       ready = self.class.trueview_ready(plans.flat_map { |p| p[:variants].map { |v| v[:id] } })
-      plans = plans.map { |p| p.merge(trueview: p[:variants].any? { |v| ready.include?(v[:id]) }) }
+      plans = plans.map do |p|
+        variants = p[:variants].map { |v| v.merge(trueview: ready.include?(v[:id])) }
+        # TrueView only: only the sizes it is drawn for, so a buyer never
+        # opens one that falls back to plain photos.
+        variants = variants.select { |v| v[:trueview] } if trueview_only
+        p.merge(variants: variants, trueview: variants.any? { |v| v[:trueview] })
+      end
       trueview_only ? plans.select { |p| p[:trueview] } : plans
     end
 
