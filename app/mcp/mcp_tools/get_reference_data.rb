@@ -8,7 +8,9 @@ module McpTools
     title 'Statuses, stages, people and locations'
     description 'Who the signed-in user is, plus the lead status keys, deal pipeline stage keys, the active ' \
                 'users work can be assigned to, and the locations this user can see. Call this before ' \
-                'filtering by status or stage, or assigning work.'
+                'filtering by status or stage, or assigning work. Also returns cannot_do_here: what this connector ' \
+                'deliberately does not do and the exact words and page to give the user instead. Read it before ' \
+                'telling someone you cannot help.'
     input_schema(properties: {})
     read_only!
 
@@ -28,7 +30,10 @@ module McpTools
           { key: key, label: s['name'] || s[:name], probability: company.pipeline_stage_probability(key) }
         end,
         users: users,
-        locations: locations.order(:name).map { |l| { id: l.id, name: l.name } }
+        locations: locations.order(:name).map { |l| { id: l.id, name: l.name, time_zone: l.timezone } },
+        # Some clients never show the server instructions to the model, so
+        # the boundaries travel with the first call it is told to make.
+        cannot_do_here: Guidance.boundaries(ctx)
       }
       Base::Result.new(payload: payload, count: users.size)
     end

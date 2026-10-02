@@ -53,7 +53,7 @@ module McpTools
         #{at.call('/commissions/payments')}." Projects: "I can update tasks and checklist steps and add tasks,
         but changing a phase, assigning contractors or deleting is done in #{app} on the project. Checking off
         work can email the customer, and I will ask first." Users, roles, permissions, company settings,
-        payments and loans: "That is not available here; use #{app}." If a tool refuses something, repeat its
+        recording customer payments and loans: "That is not available here; use #{app}." If a tool refuses something, repeat its
         reason to the user rather than guessing.
         Write customer-facing copy plainly and never use em dashes or en dashes.
       TEXT
