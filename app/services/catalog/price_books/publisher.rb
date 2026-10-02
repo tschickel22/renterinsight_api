@@ -41,6 +41,7 @@ module Catalog
         end
         CatalogPriceBookNoticeJob.perform_later(@book.id)
         CatalogModelMediaJob.perform_later(@book.manufacturer_id)
+        CatalogOptionReviewJob.perform_later(@book.id)
         counts
       end
 

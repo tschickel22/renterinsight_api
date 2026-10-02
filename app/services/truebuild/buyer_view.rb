@@ -36,7 +36,7 @@ module Truebuild
       return group[:options] if group[:name].to_s.match?(WHOLE_GROUPS)
 
       featured = Array(terms&.buyer_featured_option_ids).map(&:to_i)
-      group[:options].select { |o| featured.include?(o[:id]) || buyer_family?(o[:family]) }
+      group[:options].select { |o| featured.include?(o[:id]) || buyer_family?(o[:family]) || (o[:learned] && o[:family]) || o[:includes] }
     end
 
     def custom(group, terms)

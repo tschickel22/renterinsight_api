@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_01_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_02_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1516,6 +1516,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_190000) do
     t.index ["catalog_price_book_id"], name: "index_catalog_import_items_on_catalog_price_book_id"
     t.index ["matched_type", "matched_id"], name: "index_catalog_import_items_on_matched"
     t.index ["reviewed_by_id"], name: "index_catalog_import_items_on_reviewed_by_id"
+  end
+
+  create_table "catalog_option_decisions", force: :cascade do |t|
+    t.bigint "manufacturer_id"
+    t.string "option_key", null: false
+    t.string "kind", null: false
+    t.string "value"
+    t.string "source", default: "claude", null: false
+    t.string "status", default: "active", null: false
+    t.string "suggestion"
+    t.text "note"
+    t.bigint "catalog_price_book_id"
+    t.bigint "reviewed_by_id"
+    t.datetime "reviewed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_id"], name: "index_catalog_option_decisions_on_catalog_price_book_id"
+    t.index ["manufacturer_id", "option_key", "kind"], name: "idx_catalog_option_decisions_unique", unique: true
+    t.index ["manufacturer_id"], name: "index_catalog_option_decisions_on_manufacturer_id"
+    t.index ["reviewed_by_id"], name: "index_catalog_option_decisions_on_reviewed_by_id"
+    t.index ["suggestion"], name: "index_catalog_option_decisions_on_suggestion"
   end
 
   create_table "catalog_option_groups", force: :cascade do |t|
@@ -8392,6 +8413,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_190000) do
   add_foreign_key "catalog_import_items", "catalog_price_book_documents"
   add_foreign_key "catalog_import_items", "catalog_price_books"
   add_foreign_key "catalog_import_items", "users", column: "reviewed_by_id"
+  add_foreign_key "catalog_option_decisions", "catalog_price_books", on_delete: :nullify
+  add_foreign_key "catalog_option_decisions", "manufacturers"
+  add_foreign_key "catalog_option_decisions", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "catalog_option_groups", "factories"
   add_foreign_key "catalog_option_groups", "manufacturers"
   add_foreign_key "catalog_option_prices", "catalog_options"

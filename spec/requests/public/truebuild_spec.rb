@@ -119,6 +119,35 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(groups.find { |g| g['name'] == 'Packages' }['color_sets']).to eq([])
   end
 
+  it "applies what Claude or an admin decided about options the name rules miss" do
+    decide = ->(o, kind, value = nil) { CatalogOptionDecision.create!(manufacturer: mfr, option_key: o.key, kind: kind, value: value) }
+    sxs = option(kitchen, 'Side by Side Fridge Upgrade', dealer_cost: 800)
+    french = option(kitchen, 'French Door Fridge Upgrade', dealer_cost: 1200)
+    ultimate = option(kitchen, 'Chef Kitchen Bundle', dealer_cost: 5000)
+    [sxs, french].each { |o| decide.call(o, 'family', 'refrigerator') }
+    decide.call(ultimate, 'includes', 'refrigerator')
+    decide.call(gas, 'not_family')
+    tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
+    stacked = option(tile, 'Inhale Gris Stacked 1 Row', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Backsplash' })
+    plain = option(tile, '1 Row Ceramic Inhale Gris', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Backsplash' })
+    [stacked, plain].each { |o| decide.call(o, 'same_finish', '1 Row Inhale Gris') }
+    floors = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'flooring', name: 'Flooring', position: 6)
+    slate = option(floors, 'Slate Grey LVP', kind: 'standard', is_standard: true)
+    decide.call(slate, 'color_choice', 'Vinyl plank')
+
+    get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
+    groups = JSON.parse(response.body)['groups']
+    kitchen_options = groups.find { |g| g['name'] == 'Kitchen & Appliances' }['options'].index_by { |o| o['name'] }
+    expect(kitchen_options.values_at('Side by Side Fridge Upgrade', 'French Door Fridge Upgrade').map { |o| o['family'] }).to eq(%w[refrigerator refrigerator])
+    expect(kitchen_options['Chef Kitchen Bundle']).to include('includes' => 'refrigerator')
+    expect(kitchen_options['Stainless Package - Gas']['family']).to be_nil
+    expect(kitchen_options['Stainless Package - Electric']['family']).to be_nil # a family of one is no choice
+    backsplash = groups.find { |g| g['name'] == 'Backsplash & Tile' }['color_sets'].first['options']
+    expect(backsplash.map { |o| o['name'] }).to eq(['1 Row Inhale Gris'])
+    expect(groups.find { |g| g['name'] == 'Flooring' }['color_sets'].map { |st| [st['name'], st['options'].map { |o| o['name'] }] })
+      .to eq([['Vinyl plank', ['Slate Grey LVP']]])
+  end
+
   it 'shows a family of options in one place, however the price book filed it' do
     tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'tile', name: 'Backsplash & Tile', position: 9)
     stray = option(tile, 'Black Stainless Steel Package - Gas', dealer_cost: 3000)

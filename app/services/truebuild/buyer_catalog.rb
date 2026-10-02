@@ -58,6 +58,7 @@ module Truebuild
     # catalog is cached per dealer, model and location until their prices
     # can have moved. Photos are added fresh (the lot home's own come first).
     def call
+      CatalogOptionReviewJob.once(@book)
       Rails.cache.fetch(cache_key, expires_in: 30.minutes) { build }.merge(media: media)
     end
 
@@ -102,8 +103,9 @@ module Truebuild
       return [] unless book
 
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
-               CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at), variant.updated_at].map { |t| t.try(:to_i) || t }
-      Rails.cache.fetch("truebuild:finish_groups:v5:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+               CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
+               CatalogOptionDecision.stamp(variant.manufacturer_id), variant.updated_at].map { |t| t.try(:to_i) || t }
+      Rails.cache.fetch("truebuild:finish_groups:v6:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
         catalog.instance_variable_set(:@book, book)
@@ -203,8 +205,9 @@ module Truebuild
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
                CatalogOption.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
+               CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v10:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v11:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
@@ -231,8 +234,11 @@ module Truebuild
 
     def groups(prices, retail)
       uniq = prices.uniq(&:catalog_option_id)
+      @finish_alias = uniq.filter_map { |op| (v = decided(op, 'same_finish')) && [op.catalog_option_id, v] }.to_h
       floors, uniq = uniq.partition do |op|
-        op.is_standard && op.option.kind == 'standard' && op.option.name.match?(FLOOR_COLOR) && op.option.group&.name.to_s.match?(/floor/i)
+        op.is_standard && op.option.kind != 'color' &&
+          (decided(op, 'color_choice') ||
+           (op.option.kind == 'standard' && op.option.name.match?(FLOOR_COLOR) && op.option.group&.name.to_s.match?(/floor/i)))
       end
       choices, rest = uniq.partition { |op| op.is_standard && op.option.kind != 'color' && op.option.name.match?(NAMED_CHOICE) }
       by_group = rest.group_by { |op| op.option.group }
@@ -250,13 +256,14 @@ module Truebuild
       end
 
       floors.each do |op|
+        set = decided(op, 'color_choice') || 'Flooring'
         by_group[op.option.group] ||= []
-        extra_sets[op.option.group.id] << ['Flooring', color_json(op, retail, 'Flooring')]
+        extra_sets[op.option.group.id] << [set, color_json(op, retail, set)]
       end
 
       # Families span groups: order forms file a fireplace under Fireplaces
       # in one series and Interior Walls & Trim in another.
-      families = OptionFamilies.for(rest.reject { |op| op.option.kind == 'color' }.map(&:option))
+      families = with_decisions(OptionFamilies.for(rest.reject { |op| op.option.kind == 'color' }.map(&:option)), rest)
       by_group = one_place_per_family(by_group, families)
       built = by_group.sort_by { |g, _| [g.name == FIRST_GROUP ? 0 : 1, g.position.to_i, g.name] }.map do |group, ops|
         colors, others = ops.partition { |op| op.option.kind == 'color' }
@@ -271,7 +278,7 @@ module Truebuild
           color_sets: sets.map { |set, os| { name: set, options: one_per_finish(os).sort_by { |o| o[:name] } } }
                           .sort_by { |st| st[:name] },
           # A family's members sit together, under the first one's name.
-          options: others.map { |op| option_json(op, retail).merge(family: families[op.catalog_option_id]) }
+          options: others.map { |op| option_json(op, retail).merge(family: families[op.catalog_option_id], learned: decided(op, 'family').present?) }
                          .sort_by { |o| [o[:standard] ? 0 : 1, (o[:family] || o[:name]).downcase, o[:name].downcase] }
         }
       end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
@@ -328,15 +335,40 @@ module Truebuild
     # factory's sample, then the spelling without brackets.
     FINISH_MATERIAL = %w[ceramic porcelain glass subway tile].freeze
 
+    # A learned same_finish decision names the spelling to show, and joins
+    # spellings the word rule cannot ("Inhale Gris 1 Row Stacked").
     def one_per_finish(chips)
-      chips.group_by { |c| finish_words(c[:name]) }.values.map do |same|
-        same.min_by { |c| [c[:standard] ? 0 : 1, c[:swatch_url].present? ? 0 : 1, c[:name].include?('(') ? 1 : 0, c[:name].length] }
+      aliases = @finish_alias || {}
+      chips.group_by { |c| finish_words(aliases[c[:id]] || c[:name]) }.values.map do |same|
+        kept = same.min_by { |c| [c[:standard] ? 0 : 1, c[:swatch_url].present? ? 0 : 1, c[:name].include?('(') ? 1 : 0, c[:name].length] }
+        (name = same.filter_map { |c| aliases[c[:id]] }.first) ? kept.merge(name: name) : kept
       end
     end
 
     def finish_words(name)
       words = name.downcase.scan(/[a-z0-9]+/).map { |w| w == 'rows' ? 'row' : w }.uniq.sort
       (words - FINISH_MATERIAL).presence || words # "Glass" and "Subway" alone stay two
+    end
+
+    # What Claude or an admin decided about an option, by kind (CatalogOptionDecision).
+    def decided(op, kind)
+      decisions.dig(op.option.key, kind)
+    end
+
+    def decisions
+      @decisions ||= CatalogOptionDecision.applying(@variant.manufacturer_id)
+    end
+
+    # Learned pick-one families over the name rules: a family decided for an
+    # option sets it, not_family clears it. A family of one is no choice.
+    def with_decisions(families, ops)
+      ops.each do |op|
+        if (family = decided(op, 'family')) then families[op.catalog_option_id] = family
+        elsif decisions.dig(op.option.key)&.key?('not_family') then families.delete(op.catalog_option_id)
+        end
+      end
+      counts = families.values.tally
+      families.select { |_, f| counts[f] > 1 }
     end
 
     # A color chip: the factory's own sample picture and measured color when a
@@ -358,7 +390,10 @@ module Truebuild
       o = op.option
       { id: o.id, name: o.name, kind: o.kind, standard: op.is_standard, swatch_url: o.swatch_url,
         hex: (ColorSwatches.hex(o.name) if o.kind == 'color'),
-        in_place_of: o.in_place_of, price: op.is_standard ? nil : retail[o.id] }
+        in_place_of: o.in_place_of, price: op.is_standard ? nil : retail[o.id] }.tap do |json|
+        # A package that already has one: picking it clears that family, and the reverse.
+        (included = decided(op, 'includes')) && json[:includes] = included
+      end
     end
 
     # Standards sheets are titled by product line, not plan series ("Dutch

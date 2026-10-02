@@ -3066,8 +3066,13 @@ Rails.application.routes.draw do
           patch 'documents/:document_id/tabs', action: :update_tabs, as: :update_document_tabs
           patch 'documents/:document_id/plant', action: :update_plant, as: :update_document_plant
           post 'refresh_media'
+          # What Claude and admins decided about its options (CatalogOptionDecisionsController).
+          get  'option_decisions', to: 'catalog_option_decisions#index'
+          post 'option_review', to: 'catalog_option_decisions#review'
         end
       end
+      patch 'option_decisions/:id', to: 'catalog_option_decisions#update'
+      post  'option_decisions', to: 'catalog_option_decisions#create'
 
       # ==================== CATALOG SOURCES (Surface B — Platform Admin Only) ====================
       resources :catalog_sources do
