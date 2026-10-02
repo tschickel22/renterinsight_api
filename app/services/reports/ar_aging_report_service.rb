@@ -11,6 +11,7 @@ module Reports
         .includes(:contact)
         .where(status: ['sent', 'partial', 'overdue', 'finalized', 'viewed', 'pending'])
         .where('amount_due > 0')
+        .where(is_deleted: [false, nil])
 
       invoices = invoices.where(location_id: location_id) if location_id && invoices.column_names.include?('location_id')
 

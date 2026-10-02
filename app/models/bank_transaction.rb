@@ -72,18 +72,53 @@ class BankTransaction < ApplicationRecord
     )
   end
 
-  def categorize!(account:, contact: nil, memo: nil, create_je: false, source: 'manual')
-    update!(
-      category_account: account,
-      contact: contact,
-      memo: memo || self.memo,
-      status: 'matched',
-      matched_at: Time.current,
-      matched_by: source
-    )
+  # Raised when a line cannot be booked. Nothing is saved: a line marked
+  # categorized with no entry behind it looks done in the feed while the
+  # money is missing from the books. Factory Direct had 119 of those.
+  class PostingError < StandardError; end
 
-    if create_je
-      create_journal_entry_from_categorization!
+  # Raised when the money is already in the books as an entry nobody linked
+  # to this line. Categorizing would post it a second time; matching the
+  # line to that entry is what is wanted.
+  class AlreadyBooked < StandardError
+    attr_reader :entries
+
+    def initialize(entries)
+      @entries = entries
+      first = entries.first
+      super("This transaction is already in the books as entry #{first.entry_number} on " \
+            "#{first.entry_date&.strftime('%m/%d/%Y')}. Match it to that entry instead of categorizing, " \
+            'or it would be counted twice.')
+    end
+  end
+
+  # Books the line to an account. With create_je (what the Categorize panel
+  # sends), the entry is posted in the same transaction, and if it cannot be
+  # posted nothing changes. Re-categorizing a line this replaces the entry
+  # its earlier categorization posted (voided, as the app voids entries).
+  def categorize!(account:, contact: nil, memo: nil, create_je: false, source: 'manual')
+    transaction do
+      previous = matched_journal_entry
+      if previous && !posted_by_categorization?(previous)
+        raise PostingError, "This transaction is matched to entry #{previous.entry_number}. Unmatch it before categorizing."
+      end
+      if create_je && previous.nil?
+        booked = BankTransactionMatchingService.new(company).booked_entries(self)
+        raise AlreadyBooked, booked if booked.any?
+      end
+
+      previous&.void!(Current.user) unless previous&.is_void?
+      update!(
+        category_account: account,
+        contact: contact,
+        memo: memo || self.memo,
+        status: 'matched',
+        matched_journal_entry: nil,
+        matched_at: Time.current,
+        matched_by: source
+      )
+
+      create_journal_entry_from_categorization! if create_je
     end
   end
 
@@ -94,22 +129,36 @@ class BankTransaction < ApplicationRecord
     )
   end
 
+  # An entry this line's categorization posted is voided with it, or it
+  # would stay in the books and be posted again on the next categorize. An
+  # entry the line was only matched to (booked another way) is left alone.
   def unmatch!
-    update!(
-      status: 'unmatched',
-      matched_journal_entry: nil,
-      matched_at: nil,
-      matched_by: nil,
-      category_account: nil,
-      rule: nil
-    )
+    transaction do
+      je = matched_journal_entry
+      je.void!(Current.user) if je && posted_by_categorization?(je) && !je.is_void?
+      update!(
+        status: 'unmatched',
+        matched_journal_entry: nil,
+        matched_at: nil,
+        matched_by: nil,
+        category_account: nil,
+        rule: nil
+      )
+    end
+  end
+
+  def posted_by_categorization?(je)
+    je.source_entity_type == 'BankTransaction' && je.source_entity_id == id
   end
 
   def create_journal_entry_from_categorization!
-    return unless category_account.present?
+    raise PostingError, 'Pick an account to categorize to.' unless category_account.present?
 
     bank_gl_account = bank_account.chart_of_account
-    return unless bank_gl_account
+    unless bank_gl_account
+      raise PostingError, 'This bank account is not linked to a GL account, so nothing can be posted. ' \
+                          'Link it under Accounting, Bank Accounts first.'
+    end
 
     posting_service = Accounting::ManualPostingService.new(company)
     je_location_id = bank_account.try(:location_id) ||
@@ -139,10 +188,9 @@ class BankTransaction < ApplicationRecord
            )
          end
 
-    if je
-      update!(matched_journal_entry: je, matched_at: Time.current)
-    end
+    raise PostingError, posting_service.last_error_message || 'The journal entry could not be posted.' unless je
 
+    update!(matched_journal_entry: je, matched_at: Time.current)
     je
   end
 end

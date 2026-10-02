@@ -2,6 +2,10 @@
 
 module Accounting
   class ManualPostingService
+    # Why the last post_simple! returned nil, for callers that must not
+    # carry on as if it had posted.
+    attr_reader :last_error_message
+
     def initialize(company)
       @company = company
     end
@@ -45,6 +49,7 @@ module Accounting
       )
 
       unless je.save
+        @last_error_message = "The journal entry could not be posted: #{je.errors.full_messages.join(', ')}"
         Rails.logger.error("[Accounting] ManualPostingService failed: #{je.errors.full_messages.join(', ')}")
         return nil
       end

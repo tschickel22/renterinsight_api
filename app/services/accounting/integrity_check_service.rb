@@ -20,6 +20,7 @@ module Accounting
         *report_issues,
         *posting_failures,
         *unposted_documents,
+        *bank_lines_not_in_books,
         *changed_after_posting,
         *deal_invoice_issues
       ]
@@ -58,6 +59,18 @@ module Accounting
         Issue.new(:error, "#{count} #{model.name.downcase.pluralize(count)} failed to post " \
                           "(latest: #{sample.gl_post_error.to_s.first(160)})")
       end
+    end
+
+    # Feed lines marked matched with no entry behind them read as booked in
+    # the feed but are not in the ledger. Factory Direct had 119 (all already
+    # booked by hand and never linked); Heartland had 28 from rules.
+    def bank_lines_not_in_books
+      lines = BankTransaction.where(company_id: @company.id, status: %w[matched reconciled], matched_journal_entry_id: nil)
+      count = lines.count
+      return [] if count.zero?
+
+      [Issue.new(:error, "#{count} bank #{'line'.pluralize(count)} marked matched with no journal entry, " \
+                         "totaling #{money(lines.sum('ABS(amount)'))}")]
     end
 
     # Sent or paid invoices a day old with no entry, when the company has
