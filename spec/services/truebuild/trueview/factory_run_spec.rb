@@ -86,6 +86,29 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(run.renders.count).to eq(0)
   end
 
+  it 'is marked finished once nothing is left, so it no longer blocks the next run' do
+    run = described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    TruebuildFactoryRunJob.perform_now(run.id)
+    run.renders.update_all(status: 'done', layer_url: 'https://b/l.webp')
+    run.update_columns(updated_at: 1.hour.ago)
+    expect(described_class.progress(run.reload)[:phase]).to eq('finished')
+    expect(run.reload.status).to eq('finished')
+  end
+
+  it 'puts back on the queue a run whose model queuing a deploy dropped' do
+    run = described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    run.update_columns(updated_at: 1.hour.ago)
+    expect { described_class.progress(run) }.to have_enqueued_job(TruebuildFactoryRunJob).with(run.id)
+  end
+
+  it 'counts what was actually spent against the budget when it is more than the estimate' do
+    run = described_class.start!([topeka_home], budget_usd: 0.3, scope: { manufacturer_id: mfr.id })
+    TruebuildRender.create!(source_url: front, selection: [], selection_key: 'x', model_key: 'nb2-lite', provider: 'gemini', model: 'lite',
+                            purpose: 'layer', status: 'done', cost_usd: 0.29, usage: { 'factory_run_id' => run.id })
+    TruebuildFactoryRunJob.perform_now(run.id)
+    expect(run.reload.status).to eq('budget_reached')
+  end
+
   describe 'repair rounds' do
     let(:run) { described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id }) }
     let(:version) { Truebuild::Trueview::Layer::VERSION }

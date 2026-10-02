@@ -6,8 +6,9 @@
 # running: models are being queued, or their drawings drawn.
 # budget_reached: stopped before a model that would have gone over budget.
 # stopped: a platform admin stopped it; drawings not yet started were cancelled.
+# finished: everything drawn and its repair rounds done.
 class TruebuildFactoryRun < ApplicationRecord
-  STATUSES = %w[running budget_reached stopped].freeze
+  STATUSES = %w[running budget_reached stopped finished].freeze
 
   belongs_to :manufacturer
 

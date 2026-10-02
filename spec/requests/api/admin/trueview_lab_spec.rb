@@ -364,7 +364,7 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(response).to have_http_status(:created)
       run_id = JSON.parse(response.body)['id']
       post '/api/admin/trueview_lab/factory_runs', headers: admin, params: { manufacturer_id: mfr.id, factory_id: factory.id, budget_usd: 20 }.to_json
-      expect(JSON.parse(response.body)['error']).to eq('A run for this is already going')
+      expect(JSON.parse(response.body)['error']).to start_with('A run for this is already going')
 
       get '/api/admin/trueview_lab/factory_runs', headers: admin
       expect(JSON.parse(response.body).first).to include('id' => run_id, 'phase' => 'queuing', 'budget_usd' => 20.0)

@@ -69,7 +69,9 @@ module Truebuild
           return unless run.reload.status == 'running'
 
           variant = CatalogPlanVariant.find_by(id: id)
-          committed = run.committed_usd
+          # What was actually spent, when retries made it more than the
+          # estimate: Aspire's first run spent $5.75 of a $5 budget.
+          committed = [run.committed_usd, run.renders.sum(:cost_usd).to_f].max
           if variant && Array(variant.shown_media['photos']).any?
             PhotoChoice.pick!(variant) if PhotoChoice.needs_pick?(variant)
             variant.reload
@@ -102,7 +104,8 @@ module Truebuild
 
         run.with_lock do
           round = run.progress['repair_rounds'].to_i
-          return if round >= REPAIR_ROUNDS || run.progress['repair_queued'].to_i > round
+          return finish!(run) if round >= REPAIR_ROUNDS
+          return if run.progress['repair_queued'].to_i > round
 
           run.update!(progress: run.progress.merge('repair_queued' => round + 1))
         end
@@ -177,6 +180,7 @@ module Truebuild
         run.update!(progress: run.progress.merge('repair_rounds' => queued.zero? ? REPAIR_ROUNDS : round,
                                                  'outline_repair_usd' => (run.progress['outline_repair_usd'].to_f + outline_usd).round(4),
                                                  'repaired' => run.progress['repaired'].to_i + queued))
+        finish!(run) if queued.zero?
         queued
       end
 
@@ -198,8 +202,26 @@ module Truebuild
         [render.usage['reviewer_note'], render.usage.dig('check', 'note')].compact_blank.uniq.join(' Also: ')
       end
 
+      LOST_AFTER = 15.minutes # a deploy restarts the workers; a job this quiet was lost
+
+      def finish!(run)
+        run.update!(status: 'finished', stopped_at: Time.current)
+      end
+
+      # A deploy can drop a run's jobs: the model queuing stops partway, or
+      # drawings wait for ever. Each is put back on the queue where it stopped.
+      def resume_lost(run)
+        if run.models_queued < run.variant_ids.size && run.updated_at < LOST_AFTER.ago
+          run.touch
+          TruebuildFactoryRunJob.perform_later(run.id)
+        end
+        TruebuildRenderJob.orphaned(run.renders, stale_after: LOST_AFTER)
+                          .each { |row| TruebuildRenderJob.requeue(row, queue: :low) }
+      end
+
       # Where a run stands, from its drawings.
       def progress(run)
+        resume_lost(run) if run.status == 'running'
         counts = run.renders.group(:status).count
         open = counts.values_at('queued', 'running').compact.sum
         repair_queued = run.progress['repair_queued'].to_i
@@ -209,6 +231,9 @@ module Truebuild
                 elsif repair_queued > run.progress['repair_rounds'].to_i then 'repairing'
                 else 'finished'
                 end
+        # Nothing left to draw or repair: the run is over. Until this, a run
+        # stayed "running" for ever and blocked the next run of its scope.
+        finish!(run) if phase == 'finished' && run.status == 'running' && run.updated_at < LOST_AFTER.ago
         { id: run.id, phase: phase, manufacturer: run.manufacturer&.name, factory_id: run.factory_id, series: run.series,
           budget_usd: run.budget_usd.to_f, committed_usd: run.committed_usd, spent_usd: (run.renders.sum(:cost_usd).to_f + run.progress['outline_repair_usd'].to_f).round(2),
           models: run.variant_ids.size, models_queued: run.models_queued, estimate: run.estimate,

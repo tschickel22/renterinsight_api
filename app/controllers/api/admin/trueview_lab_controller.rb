@@ -188,9 +188,10 @@ class Api::Admin::TrueviewLabController < ApplicationController
     return render json: { error: 'Set a budget' }, status: :unprocessable_entity unless budget.positive?
 
     scope = { manufacturer_id: params[:manufacturer_id].to_i, factory_id: params[:factory_id].presence&.to_i, series: params[:series].presence }
-    if TruebuildFactoryRun.where(status: 'running', manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id], series: scope[:series]).exists?
-      return render json: { error: 'A run for this is already going' }, status: :unprocessable_entity
-    end
+    # Only one that is really still going: a finished one is marked so as it is looked at.
+    going = TruebuildFactoryRun.where(status: 'running', manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id], series: scope[:series])
+                               .any? { |r| Truebuild::Trueview::FactoryRun.progress(r)[:phase] != 'finished' }
+    return render json: { error: 'A run for this is already going. Stop it first, or wait for it to finish.' }, status: :unprocessable_entity if going
 
     run = Truebuild::Trueview::FactoryRun.start!(variants, budget_usd: budget, scope: scope, by: current_user)
     render json: Truebuild::Trueview::FactoryRun.progress(run), status: :created
