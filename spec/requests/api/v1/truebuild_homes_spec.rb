@@ -11,6 +11,7 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
   let(:bay_port) { CatalogPlan.create!(manufacturer: mfr, factory: factory, series: 'Aspire', name: 'Bay Port') }
   let!(:bay56) { variant('2856H32168', 56) }
   let!(:bay60) { variant('2860H32168', 60) }
+  let!(:bay56_modular) { variant('2856M32168', 56) }
   let(:admin) do
     user = User.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: 'T', last_name: 'S', password: 'Pass1234!',
                         company_id: company.id, role: 'company_admin')
@@ -38,6 +39,9 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
     homes = JSON.parse(response.body)['homes'].index_by { |h| h['id'] }
     expect(homes.keys).to contain_exactly(by_name.id, by_number.id)
     expect(homes[by_name.id]['suggestions'].map { |s| [s['variant_id'], s['reason']] }).to eq([[bay56.id, "Same name and 56' long"]])
+    modular = home("56' Bay Port").tap { |v| v.update_columns(home_type: 'Modular') }
+    get '/api/v1/truebuild_homes', headers: admin
+    expect(JSON.parse(response.body)['homes'].find { |h| h['id'] == modular.id }['suggestions'].map { |s| s['variant_id'] }).to eq([bay56_modular.id])
     expect(homes[by_number.id]['suggestions'].first).to include('variant_id' => bay60.id, 'reason' => 'Same model number')
 
     patch "/api/v1/truebuild_homes/#{by_name.id}", headers: admin, params: { variant_id: bay56.id }.to_json

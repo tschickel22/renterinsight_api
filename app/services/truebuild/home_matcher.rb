@@ -3,7 +3,8 @@
 module Truebuild
   # Which TrueBuild model a home on the lot is. A home from a feed carries
   # the model number ("1440 H11065"); one entered by hand carries a name and
-  # a length ("56' Bay Port"), matched on the plan name and the length.
+  # a length ("56' Bay Port"), matched on the plan name, the length, and
+  # HUD or modular from the home's type.
   class HomeMatcher
     def priced_ids
       @priced_ids ||= CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id))
@@ -26,6 +27,9 @@ module Truebuild
       named = variants.select { |v| (name = v.catalog_plan&.name.to_s.downcase).length >= 3 && text.downcase.include?(name) }
       length = text[/(\d{2})\s*['’]/, 1]&.to_i || vehicle.try(:length).to_i
       sized = named.select { |v| v.length_ft.to_i == length }
+      # The same plan comes HUD and modular; the home says which it is.
+      code = vehicle.try(:home_type).to_s.match?(/modular/i) ? 'MOD' : 'HUD'
+      sized = sized.select { |v| v.building_code == code }
       list = sized.any? ? sized.map { |v| [v, "Same name and #{length}' long"] } : named.map { |v| [v, 'Same name'] }
       list.first(3).map { |v, why| variant_json(v).merge(reason: why) }
     end
