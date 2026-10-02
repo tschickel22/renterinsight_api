@@ -336,6 +336,16 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       expect(largest['items'].map { |i| i['invoice_number'] }).to eq(%w[INV-BIG INV-MID])
     end
 
+    it 'says when the bank feed looks stopped, not just behind' do
+      txn!('OLD DEPOSIT', 100, date: Date.current - 60)
+      feed = call_tool(token, 'accounting_summary').first['bank_feed']
+      expect(feed['newest_line']).to eq((Date.current - 60).iso8601)
+      expect(feed['feed_note']).to include('60 days old', 'looks stopped')
+
+      txn!('NEW DEPOSIT', 100, date: Date.current - 2)
+      expect(call_tool(token, 'accounting_summary').first['bank_feed']).not_to have_key('feed_note')
+    end
+
     it 'says which sections follow the dates, and splits the bank feed by period' do
       summary = call_tool(token, 'accounting_summary', start_date: (Date.current - 10).iso8601,
                                                         end_date: Date.current.iso8601).first

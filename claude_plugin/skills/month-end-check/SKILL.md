@@ -36,7 +36,10 @@ one line each instead of walking every step.
 ## 2. Bank feed
 
 From the summary's `bank_feed`: `unmatched_in_period` for the month,
-`unmatched_through_period_end` for the month and before it, and the oldest.
+`unmatched_through_period_end` for the month and before it, the oldest unmatched
+line, and `newest_line`. If `feed_note` says the feed looks stopped, lead with that:
+nothing after that date can be in the books, and fixing the feed comes before
+categorizing.
 Unmatched bank lines mean the P&L above is incomplete; say so in those words when
 there are many.
 
@@ -62,7 +65,9 @@ whoever owns those customers (`create_task`), one per invoice, with approval.
 
 `list_deals` with state "any", closed_from and closed_to set to the month: these are
 the deals actually closed in it (`actual_close_date`). For each, say whether it shows
-a delivery date and a selling price. A won deal with no `actual_close_date` cannot be
+a delivery date and a selling price. Deals show `costs` only when the dealer lets AI
+apps see cost; when it is missing, say in one line that unit cost is not visible here
+rather than skipping the check. A won deal with no `actual_close_date` cannot be
 placed in a month; list it separately as "won, close date missing" rather than
 guessing. If the dealer allows cost visibility and the person can see
 it, note deals with no unit cost, which leaves gross wrong. Do not compute gross

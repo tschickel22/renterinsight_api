@@ -147,13 +147,31 @@ module McpTools
 
     def self.bank_feed(ctx, from, to)
       unmatched = AccountingAccess.bank_transactions(ctx).where(status: 'unmatched')
-      { unmatched: unmatched.count,
+      newest = AccountingAccess.bank_transactions(ctx).maximum(:transaction_date)
+      {
+        unmatched: unmatched.count,
         unmatched_in_period: unmatched.where(transaction_date: from..to).count,
-        unmatched_through_period_end: unmatched.where('transaction_date <= ?', to).count, unmatched_total_in: AccountingAccess.money(unmatched.where('amount > 0').sum(:amount)),
+        unmatched_through_period_end: unmatched.where('transaction_date <= ?', to).count,
+        unmatched_total_in: AccountingAccess.money(unmatched.where('amount > 0').sum(:amount)),
         unmatched_total_out: AccountingAccess.money(unmatched.where('amount < 0').sum(:amount).abs),
         oldest_unmatched: unmatched.minimum(:transaction_date)&.iso8601,
+        newest_line: newest&.iso8601,
+        feed_note: feed_note(newest),
         last_reconciled: ctx.company.bank_reconciliations.where(status: 'completed').maximum(:statement_date)&.iso8601,
-        url: ctx.app_url('/accounting/bank-transactions') }
+        url: ctx.app_url('/accounting/bank-transactions')
+      }.reject { |key, value| key == :feed_note && value.nil? }
+    end
+
+    # A feed that stopped is a different problem from a feed that is behind:
+    # the bank connection or the imports need fixing before any categorizing.
+    def self.feed_note(newest)
+      return 'No bank lines at all: no bank feed is connected or imported.' unless newest
+
+      days = (Date.current - newest).to_i
+      return nil if days <= 14
+
+      "The newest bank line is #{days} days old (#{newest.iso8601}). The feed looks stopped, not just behind: " \
+        'check the bank connection or import the missing statements before closing a month.'
     end
 
     def self.bills(ctx)

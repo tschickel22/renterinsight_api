@@ -86,19 +86,24 @@ class Project < ApplicationRecord
 
     old_status = phase.status
 
+    # One clock reading: completed_at and started_at were each read from
+    # Time.current, so a phase completed straight from not started showed
+    # its completion a few microseconds before its start.
+    now = Time.current
+
     ActiveRecord::Base.transaction do
       case new_status
       when 'completed'
         phase.update!(
           status: 'completed',
-          completed_at: Time.current,
+          completed_at: now,
           completed_by_id: changed_by&.id,
-          started_at: phase.started_at || Time.current
+          started_at: phase.started_at || now
         )
       when 'in_progress'
         phase.update!(
           status: 'in_progress',
-          started_at: phase.started_at || Time.current,
+          started_at: phase.started_at || now,
           completed_at: nil,
           completed_by_id: nil
         )
