@@ -119,8 +119,8 @@ module McpTools
     end
 
     # A plan is in use once a deal points at it or a payment names it.
-    # Payments made by CommissionPaymentGeneratorService do not set
-    # commission_plan_id, so the deal link is the check that matters.
+    # Payments made before the engine rework do not carry commission_plan_id,
+    # so the deal link is checked as well.
     def in_use?(plan)
       plan.commission_payments.exists? || Deal.where(commission_plan_id: plan.id).exists?
     end

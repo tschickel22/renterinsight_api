@@ -40,19 +40,21 @@ The components the engine supports:
 | "25% of the gross after pack" | `percent_of_gross`, gross_type `commissionable_front`, rate 25 |
 | "Manager gets 5% of everything" | `percent_of_gross`, gross_type `total`, role `sales_manager` |
 | "F&I gets 20% of the back" | `percent_of_gross`, gross_type `back`, role `finance_manager` |
-| "$300 a deal" | `flat_per_unit`, flat_amount 300 |
+| "$300 a home" | `flat_per_unit`, flat_amount 300 (times the deal's quantity) |
 | "10% of delivery and setup" | `addon_commission`, rate 10 |
+| "$500 when you hit 5 homes a month" | `volume_bonus`, flat_amount 500, units_threshold 5, threshold_period monthly |
+| "Used homes pay 20%" | `percent_of_gross` with deal_type `used` |
 
 Be honest about what it cannot do yet, and say it before you build, not after:
 
 - **Minimums ("mini") and caps:** not supported. A flat component is paid on top of the percent, not instead of it. Offer to leave the mini to be handled by hand, or to approximate with a flat amount if that is close enough for them.
 - **Tiered rates** (20% up to $10,000 of gross, 25% above): not supported. Build one rate and note the tier for payroll.
-- **Volume bonuses:** the engine currently pays the bonus on every closed deal and does not check the unit threshold. Recommend leaving bonuses out of the plan and paying them by hand for now.
-- **Split deals:** a second salesperson is paid the primary's components in full, with no split percent. If they split deals, warn them that both reps would be paid in full.
-- **New vs used and MH vs RV limits:** the engine pays every deal type regardless of the limit set on a component. Use separate plans per person or role if the difference matters.
+- **Volume bonuses** pay once per person per month or quarter, on the deal that reaches the threshold (the 5th home pays the bonus; the 1st to 4th and the 6th onward do not). A bonus for every home past a number ("$100 a home after 5") is not supported; say so.
+- **Split deals** are split 50/50 between the two salespeople on the primary's components, with any odd cent to the primary. A different split (60/40) is not supported yet. Volume bonuses are never split.
+- **New vs used and MH vs RV limits** work, but a deal counts as new or used only when its deal type or its home's condition says so. Tell them to make sure homes have a condition set, or a used-only component pays nothing.
 - **Anything about what a specific person earned before** is not available through this connector.
 
-The simulator lists these as warnings whenever they apply. Repeat each warning to the owner plainly.
+The simulator returns warnings where a plan will not behave the way it reads. Repeat each one to the owner plainly. For a volume bonus, include a scenario whose units_this_period is the threshold, or the bonus shows as 0. Use split_with_secondary on one scenario if they split deals.
 
 ## 4. Test before saving
 

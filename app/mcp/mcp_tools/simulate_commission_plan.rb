@@ -16,8 +16,10 @@ module McpTools
                 '(same shape as create_commission_plan_draft) to test a design before saving. Each scenario takes ' \
                 'the deal figures (front_gross, back_gross, addon_gross, pack, and optionally ' \
                 'commissionable_front_gross, total_gross, selling_price, deal_type new or used, vertical mh or rv, ' \
-                'quantity) and units_this_period for volume bonuses. Warnings name every place the engine pays ' \
-                'differently from what the plan says. Uses only the numbers given; never reads real deals.'
+                'quantity, split_with_secondary) and units_this_period for volume bonuses: the unit this deal is for the ' \
+                'person in the bonus period, counting this one (a volume bonus pays once, on the unit that reaches its ' \
+                'threshold). Warnings name anything the plan will not do the way it reads. Uses only the numbers given; ' \
+                'never reads real deals.'
     input_schema(
       properties: {
         plan_id: { type: 'string', description: 'commission_plan:4' },
@@ -38,7 +40,8 @@ module McpTools
               deal_type: { type: 'string', enum: %w[new used] },
               vertical: { type: 'string', enum: %w[mh rv] },
               quantity: { type: 'integer', minimum: 1 },
-              units_this_period: { type: 'integer', minimum: 0, description: 'Units the person has delivered in the bonus period' }
+              split_with_secondary: { type: 'boolean', description: 'A second salesperson shares the deal (50/50 split)' },
+              units_this_period: { type: 'integer', minimum: 1, description: 'Which unit this is for the person in the bonus period, counting this deal' }
             }
           }
         }
@@ -49,9 +52,11 @@ module McpTools
 
     ROLES = %i[primary_salesperson secondary_salesperson sales_manager finance_manager desk_manager].freeze
 
-    # Only the figures the engine reads. Built from what the user typed.
+    # Only what the engine reads, built from what the user typed. A
+    # secondary salesperson id stands in for "someone shares this deal".
     SimDeal = Struct.new(:commission_plan, :selling_price, :front_gross, :commissionable_front_gross, :back_gross,
-                         :total_gross, :addon_gross, keyword_init: true)
+                         :total_gross, :addon_gross, :quantity, :commission_deal_type, :commission_vertical,
+                         :primary_salesperson_id, :secondary_salesperson_id, keyword_init: true)
 
     def self.perform(ctx, scenarios:, plan_id: nil, components: nil)
       CommissionPlanSupport.require!(ctx, 'read')
@@ -97,17 +102,22 @@ module McpTools
 
     def self.scenario(plan, input, index)
       deal = sim_deal(plan, input)
-      engine = CommissionPaymentGeneratorService.new(deal)
+      position = input['units_this_period'].presence&.to_i || 1
+      engine = CommissionPaymentGeneratorService.new(deal, volume_position: position)
       roles = ROLES.filter_map do |role|
-        comps = engine.send(:get_components_for_role, role)
-        next if comps.empty?
+        lines = engine.lines_for_role(role)
+        next if lines.empty?
 
-        lines = comps.map { |c| { component: c.name, amount: engine.send(:calculate_component_amount, c).to_f } }
-        { role: role.to_s, total: engine.send(:calculate_total_for_components, comps).to_f, components: lines }
+        { role: role.to_s, total: engine.total_for_role(role).to_f,
+          components: lines.map { |l| { component: l[:component].name, amount: l[:amount].to_f, note: l[:note] }.compact } }
       end
       {
         label: input['label'].presence || "Scenario #{index + 1}",
-        figures_used: deal.to_h.except(:commission_plan).transform_values { |v| v&.to_f },
+        figures_used: deal.to_h.slice(:selling_price, :front_gross, :commissionable_front_gross, :back_gross, :total_gross,
+                                      :addon_gross).transform_values { |v| v&.to_f }
+                          .merge(quantity: deal.quantity, deal_type: deal.commission_deal_type,
+                                 vertical: deal.commission_vertical, split_with_secondary: deal.secondary_salesperson_id.present?,
+                                 units_this_period: position).compact,
         payouts: roles
       }
     end
@@ -122,41 +132,29 @@ module McpTools
         commission_plan: plan, selling_price: num.call('selling_price'), front_gross: front,
         commissionable_front_gross: num.call('commissionable_front_gross') || (front && (front - (num.call('pack') || 0))),
         back_gross: back, total_gross: num.call('total_gross') || ((front || 0) + back),
-        addon_gross: num.call('addon_gross') || 0
+        addon_gross: num.call('addon_gross') || 0,
+        quantity: [s['quantity'].to_i, 1].max, commission_deal_type: s['deal_type'].presence,
+        commission_vertical: s['vertical'].presence, primary_salesperson_id: 1,
+        secondary_salesperson_id: s['split_with_secondary'] ? 2 : nil
       )
     rescue ArgumentError
       raise UserError, 'Scenario figures must be numbers.'
     end
 
-    # Where today's engine pays differently from what a component says.
+    # Where the plan will not do what it reads like it does.
     def self.warnings(components, scenarios)
       out = []
       components.each do |c|
-        case c.component_type
-        when 'volume_bonus'
-          out << "#{c.name}: DealerTide currently pays this bonus (#{c.flat_amount.to_f}) on every closed deal for the " \
-                 "role, without checking the #{c.units_threshold} unit #{c.threshold_period} threshold. Until that is " \
-                 'fixed, pay volume bonuses by hand or leave them out of the plan.'
-        when 'flat_per_unit'
-          if scenarios.any? { |s| s['quantity'].to_i > 1 }
-            out << "#{c.name}: paid once per deal, not per home, so a multi home deal earns it once."
-          end
-        when 'addon_commission'
-          if c.gross_type.present? && c.gross_type != 'addon'
-            out << "#{c.name}: an add-on component pays on its gross type, which is #{c.gross_type}, not add-on gross. " \
-                   'Set gross type to Add-on Gross.'
-          end
+        limited = [c.deal_type, c.vertical].compact_blank.reject { |v| v == 'all' }
+        if limited.any?
+          out << "#{c.name}: limited to #{limited.join(' ')} deals. A real deal counts as new or used only when its " \
+                 'deal type or its home says so; a deal with neither gets nothing from this component.'
         end
-        if (c.deal_type.present? && c.deal_type != 'all') || (c.vertical.present? && c.vertical != 'all')
-          out << "#{c.name}: limited to #{[c.deal_type, c.vertical].compact.reject { |v| v == 'all' }.join(' ')} deals, " \
-                 'but the payment engine does not apply that limit yet; it pays on every deal type.'
+        if c.component_type == 'volume_bonus' && scenarios.none? { |s| s['units_this_period'].to_i == c.units_threshold.to_i }
+          out << "#{c.name}: pays once per #{c.threshold_period == 'quarterly' ? 'quarter' : 'month'}, on unit " \
+                 "#{c.units_threshold}. None of these scenarios is that unit, so it shows 0; add one with " \
+                 "units_this_period #{c.units_threshold} to see it."
         end
-      end
-      if components.any? { |c| c.applies_to_role == 'secondary_salesperson' }
-        out << 'Components set for the secondary salesperson are not used: a secondary salesperson is paid the ' \
-               "primary salesperson's components in full, with no split."
-      elsif components.any? { |c| c.applies_to_role.in?([nil, 'primary_salesperson', 'all_participants']) }
-        out << 'On a split deal the secondary salesperson is paid the primary components in full as well; there is no split percentage yet.'
       end
       out.uniq
     end

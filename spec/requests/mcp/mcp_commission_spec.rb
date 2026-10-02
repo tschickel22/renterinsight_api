@@ -170,15 +170,29 @@ RSpec.describe 'MCP commission plan tools', :mcp, type: :request do
       expect(company.commission_components.count).to eq(0)
     end
 
-    it 'warns where the engine pays differently from the plan' do
+    it 'pays a volume bonus once, on the unit that reaches the threshold, only on the deal kind it names' do
       bonus = { name: 'Five a month', component_type: 'volume_bonus', flat_amount: 500, units_threshold: 5,
                 threshold_period: 'monthly', applies_to_role: 'primary_salesperson', deal_type: 'new' }
-      result, = call_tool(token, 'simulate_commission_plan', components: [bonus],
-                                                             scenarios: [scenario.merge(units_this_period: 1)])
+      scenarios = [scenario.merge(label: 'first', deal_type: 'new', units_this_period: 1),
+                   scenario.merge(label: 'fifth', deal_type: 'new', units_this_period: 5),
+                   scenario.merge(label: 'sixth', deal_type: 'new', units_this_period: 6),
+                   scenario.merge(label: 'fifth used', deal_type: 'used', units_this_period: 5)]
+      result, error, text = call_tool(token, 'simulate_commission_plan', components: [bonus], scenarios: scenarios)
+      expect(error).to be_falsey, text
 
-      expect(result['scenarios'].first['payouts'].first['total']).to eq(500.0)
-      expect(result['warnings'].join(' ')).to include('without checking the 5 unit monthly threshold',
-                                                      'does not apply that limit')
+      totals = result['scenarios'].to_h { |s| [s['label'], s['payouts'].first&.dig('total') || 0.0] }
+      expect(totals).to eq('first' => 0.0, 'fifth' => 500.0, 'sixth' => 0.0, 'fifth used' => 0.0)
+      expect(result['warnings'].join(' ')).to include('limited to new deals')
+    end
+
+    it 'splits the primary components 50/50 on a shared deal, odd cent to the primary' do
+      plan_parts = [{ name: 'Front', component_type: 'percent_of_gross', gross_type: 'front', rate: 25,
+                      applies_to_role: 'primary_salesperson' }]
+      result, = call_tool(token, 'simulate_commission_plan', components: plan_parts,
+                                                             scenarios: [{ front_gross: 1000.12, split_with_secondary: true }])
+      payouts = result['scenarios'].first['payouts'].to_h { |p| [p['role'], p['total']] }
+      # 25% of 1,000.12 is 250.03
+      expect(payouts).to eq('primary_salesperson' => 125.02, 'secondary_salesperson' => 125.01)
     end
 
     it 'matches what the payment engine computes for a real deal with the same figures' do

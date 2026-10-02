@@ -253,8 +253,9 @@ module Api
           return render json: { error: 'Component not found in this plan' }, status: :not_found
         end
 
-        # Check if component is used in any payments
-        if component.commission_payment_line_items.exists?
+        # A component that has been paid stays on its plan, so the payment's
+        # breakdown keeps pointing at the plan it was paid under.
+        if component.paid?
           return render json: {
             error: 'Cannot remove component that has been used in commission payments'
           }, status: :unprocessable_entity
