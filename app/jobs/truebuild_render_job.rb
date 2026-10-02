@@ -13,6 +13,15 @@ class TruebuildRenderJob < ApplicationJob
 
     render.update_columns(usage: render.usage.merge('job_id' => job_id))
     Truebuild::Trueview.perform!(render)
+    run_finished(render)
+  end
+
+  # The last drawing of a factory run starts its repair round.
+  def run_finished(render)
+    run = TruebuildFactoryRun.find_by(id: render.reload.usage['factory_run_id']) or return
+    Truebuild::Trueview::FactoryRun.drawing_finished!(run)
+  rescue StandardError => e
+    Rails.logger.warn("TruebuildRenderJob run_finished #{render.id}: #{e.message}")
   end
 
   # Queued or running rows that no job will ever finish (a deploy restarted

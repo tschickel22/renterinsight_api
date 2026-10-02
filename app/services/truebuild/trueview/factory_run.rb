@@ -85,18 +85,128 @@ module Truebuild
         end
       end
 
+      # Once a run's drawings are all done, what failed gets another round:
+      # an outline Claude rejected is outlined again with its note, a
+      # drawing held back by its check is drawn again with every note so
+      # far, and in the last round on the larger image model. All within the
+      # run's budget. Lite drew Bay Port's porch wall half in the old siding
+      # twice; held back for good, a buyer simply never saw that finish.
+      REPAIR_ROUNDS = 2
+      STRONGER = 'nb2' # Nano Banana 2: about twice Lite's cost, and steadier
+
+      # Called as each of a run's drawings finishes.
+      def drawing_finished!(run)
+        return unless run.status == 'running' && run.models_queued >= run.variant_ids.size
+        return if run.renders.where(status: %w[queued running]).exists?
+
+        run.with_lock do
+          round = run.progress['repair_rounds'].to_i
+          return if round >= REPAIR_ROUNDS || run.progress['repair_queued'].to_i > round
+
+          run.update!(progress: run.progress.merge('repair_queued' => round + 1))
+        end
+        TruebuildFactoryRunRepairJob.perform_later(run.id)
+      end
+
+      # One round. Returns the number of drawings queued again.
+      def repair!(run)
+        round = run.progress['repair_rounds'].to_i + 1
+        rates = self.rates
+        spent = run.renders.sum(:cost_usd).to_f + run.progress['outline_repair_usd'].to_f
+        variants = CatalogPlanVariant.where(id: run.variant_ids).to_a
+        photos = variants.flat_map { |v| PhotoChoice.photos(v).map(&:last) }.uniq
+
+        outline_usd = 0.0
+        failed_outlines(photos).each do |mask|
+          break if spent + outline_usd + rates[:outline] > run.budget_usd.to_f
+
+          source = Trueview.fetch_source(mask.source_url)
+          note = mask.error
+          mask.destroy!
+          fresh = Surfaces.find!(mask.source_url, source[:bytes], mask.surface, correction: note)
+          outline_usd += fresh.usage['cost_usd'].to_f
+          # Drawings skipped as "not in this photo" for want of an outline are drawn now.
+          if fresh.present?
+            TruebuildRender.where(source_url: mask.source_url, purpose: 'layer', status: 'skipped').to_a
+                           .select { |r| Surfaces.category(r.selection.first&.dig('surface')) == mask.surface }
+                           .each { |r| r.update!(status: 'superseded') }
+          end
+        rescue StandardError => e
+          Rails.logger.warn("TrueView repair outline #{mask.id}: #{e.message}")
+        end
+        spent += outline_usd
+
+        queued = 0
+        held = run.renders.where(status: 'rejected').to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+        passed = run.renders.done.where(source_url: held.map(&:source_url)).pluck(:source_url, :selection_key, :prompt).to_set
+        cost = rates[:layer] * (round == REPAIR_ROUNDS ? 2 : 1)
+        held.each do |old|
+          next if passed.include?([old.source_url, old.selection_key, old.prompt])
+          break if spent + cost > run.budget_usd.to_f
+
+          old.update!(status: 'superseded')
+          row = TruebuildRender.create!(
+            old.attributes.slice('catalog_plan_variant_id', 'room', 'source_url', 'selection', 'selection_key', 'model_key',
+                                 'provider', 'model', 'purpose', 'prompt')
+               .merge('status' => 'queued',
+                      'usage' => old.usage.slice('swatch_ids', 'predraw', 'factory_run_id')
+                                   .merge('reviewer_note' => notes(old), 'repair_round' => round,
+                                          'draw_with' => (STRONGER if round == REPAIR_ROUNDS)).compact)
+          )
+          TruebuildRenderJob.set(queue: :low, priority: PRIORITY).perform_later(row.id)
+          spent += cost
+          queued += 1
+        end
+        # Drawings that waited on an outline, now there is one.
+        seen = Set.new
+        outlined = Set.new
+        variants.each do |v|
+          cost = model_cost(v, rates, seen, outlined)[:cost_usd]
+          next if cost.positive? && spent + cost > run.budget_usd.to_f
+
+          queued += Buyer.new(nil, v).queue_missing!(run: run)
+          spent += cost
+        end
+
+        run.update!(progress: run.progress.merge('repair_rounds' => queued.zero? ? REPAIR_ROUNDS : round,
+                                                 'outline_repair_usd' => (run.progress['outline_repair_usd'].to_f + outline_usd).round(4),
+                                                 'repaired' => run.progress['repaired'].to_i + queued))
+        queued
+      end
+
+      # Outlines worth another try: one that errored (not on framing, which
+      # fails the same way again), and one Claude found the surface in but
+      # rejected the outline of. That one is stored as no outline, so every
+      # color of the surface was skipped as not in the photo.
+      def failed_outlines(photos)
+        TruebuildSurfaceMask.where(source_url: photos, version: Surfaces::VERSION).select do |m|
+          if m.status == 'failed' then !m.error.to_s.include?('framing')
+          else m.status == 'done' && m.coverage.to_f.zero? && Array(m.usage['attempts']).last.to_h['present'] == true
+          end
+        end
+      end
+
+      # Every note the checks and reviewers have made on this photo and
+      # finish, so a new drawing is told all of what went wrong, not just the last.
+      def notes(render)
+        [render.usage['reviewer_note'], render.usage.dig('check', 'note')].compact_blank.uniq.join(' Also: ')
+      end
+
       # Where a run stands, from its drawings.
       def progress(run)
         counts = run.renders.group(:status).count
         open = counts.values_at('queued', 'running').compact.sum
+        repair_queued = run.progress['repair_queued'].to_i
         phase = if run.status != 'running' then run.status
                 elsif run.models_queued < run.variant_ids.size then 'queuing'
-                elsif open.positive? then 'drawing'
+                elsif open.positive? then repair_queued.positive? ? 'repairing' : 'drawing'
+                elsif repair_queued > run.progress['repair_rounds'].to_i then 'repairing'
                 else 'finished'
                 end
         { id: run.id, phase: phase, manufacturer: run.manufacturer&.name, factory_id: run.factory_id, series: run.series,
-          budget_usd: run.budget_usd.to_f, committed_usd: run.committed_usd, spent_usd: run.renders.sum(:cost_usd).to_f.round(2),
+          budget_usd: run.budget_usd.to_f, committed_usd: run.committed_usd, spent_usd: (run.renders.sum(:cost_usd).to_f + run.progress['outline_repair_usd'].to_f).round(2),
           models: run.variant_ids.size, models_queued: run.models_queued, estimate: run.estimate,
+          repair: { rounds: run.progress['repair_rounds'].to_i, redrawn: run.progress['repaired'].to_i },
           drawings: { done: counts['done'].to_i, held_back: counts['rejected'].to_i, not_in_photo: counts['skipped'].to_i,
                       failed: counts['failed'].to_i, waiting: open, cancelled: counts['cancelled'].to_i },
           created_at: run.created_at, stopped_at: run.stopped_at }

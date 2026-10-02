@@ -101,7 +101,9 @@ module Truebuild
     LAYER_ATTEMPTS = 2       # drawings per layer, for its check (LayerCheck)
 
     def perform!(render)
-      spec = MODELS.fetch(render.model_key)
+      # A factory run's last repair round draws on a larger model; the row
+      # stays keyed to the buyer's model so buyers find the layer.
+      spec = MODELS.fetch(render.usage['draw_with'].presence || render.model_key)
       render.update!(status: 'running', error: nil)
       source = fetch_source(render.source_url)
       if render.purpose == 'layer'

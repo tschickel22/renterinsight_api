@@ -86,6 +86,69 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(run.renders.count).to eq(0)
   end
 
+  describe 'repair rounds' do
+    let(:run) { described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id }) }
+    let(:version) { Truebuild::Trueview::Layer::VERSION }
+
+    before do
+      TruebuildFactoryRunJob.perform_now(run.id)
+      run.renders.update_all(status: 'done', layer_url: 'https://b/l.webp', usage: { 'factory_run_id' => run.id, 'mask_version' => version })
+    end
+
+    def held(value, note)
+      run.renders.find_by("selection->0->>'value' = ?", value)
+         .update!(status: 'rejected', usage: { 'factory_run_id' => run.id, 'mask_version' => version, 'reviewer_note' => 'Paint on the trim.',
+                                               'check' => { 'note' => note } })
+    end
+
+    it 'draws a held-back finish again with every note, then on the larger model' do
+      held('Clay', 'The porch wall kept the old siding.')
+      expect { described_class.drawing_finished!(run.reload) }.to have_enqueued_job(TruebuildFactoryRunRepairJob).with(run.id)
+      expect { described_class.drawing_finished!(run.reload) }.not_to have_enqueued_job(TruebuildFactoryRunRepairJob)
+
+      expect(described_class.repair!(run.reload)).to eq(1)
+      again = run.renders.find_by(status: 'queued')
+      expect(again.usage).to include('reviewer_note' => 'Paint on the trim. Also: The porch wall kept the old siding.', 'repair_round' => 1)
+      expect(again.usage).not_to have_key('draw_with')
+      expect(again.model_key).to eq('nb2-lite')
+      expect(described_class.progress(run.reload)).to include(phase: 'repairing', repair: { rounds: 1, redrawn: 1 })
+
+      again.update!(status: 'rejected', usage: again.usage.merge('mask_version' => version, 'check' => { 'note' => 'Still patchy.' }))
+      described_class.drawing_finished!(run.reload)
+      described_class.repair!(run.reload)
+      last = run.renders.find_by(status: 'queued')
+      expect(last.usage).to include('draw_with' => 'nb2', 'repair_round' => 2)
+      expect(last.usage['reviewer_note']).to end_with('Also: Still patchy.')
+
+      last.update!(status: 'done', layer_url: 'https://b/l2.webp', usage: last.usage.merge('mask_version' => version))
+      expect { described_class.drawing_finished!(run.reload) }.not_to have_enqueued_job(TruebuildFactoryRunRepairJob)
+      expect(described_class.progress(run.reload)[:phase]).to eq('finished')
+    end
+
+    it 'stops repairing at the budget' do
+      held('Clay', 'Patchy.')
+      run.update!(budget_usd: run.renders.sum(:cost_usd).to_f + 0.01)
+      expect(described_class.repair!(run.reload)).to eq(0)
+      expect(run.renders.where(status: 'rejected').count).to eq(1)
+    end
+
+    it 'outlines again a surface Claude found but rejected the outline of, then draws what it skipped' do
+      mask = TruebuildSurfaceMask.create!(source_url: front, surface: 'shutters', version: Truebuild::Trueview::Surfaces::VERSION,
+                                          status: 'done', coverage: 0, mask_url: 'https://b/m.png', error: 'It took in the windows.',
+                                          usage: { 'attempts' => [{ 'present' => true, 'fit' => 2 }] })
+      run.renders.find_by("selection->0->>'surface' = 'Shutters'").update!(status: 'skipped')
+      allow(Truebuild::Trueview).to receive(:fetch_source).and_return(bytes: 'x', mime: 'image/jpeg')
+      expect(Truebuild::Trueview::Surfaces).to receive(:find!).with(front, 'x', 'shutters', correction: 'It took in the windows.')
+        .and_return(TruebuildSurfaceMask.new(status: 'done', coverage: 0.05, mask_url: 'https://b/n.png', usage: { 'cost_usd' => 0.05 }))
+      allow_any_instance_of(Truebuild::Trueview::Buyer).to receive(:queue_missing!).and_return(1)
+
+      described_class.repair!(run.reload)
+      expect(TruebuildSurfaceMask.exists?(mask.id)).to be(false)
+      expect(run.renders.find_by("selection->0->>'surface' = 'Shutters'").status).to eq('superseded')
+      expect(run.reload.progress['outline_repair_usd']).to eq(0.05)
+    end
+  end
+
   it "reuses Claude's photo pick for a model with the same photos" do
     second = "#{front}-2"
     topeka_home.update!(media: { 'photos' => [front, second].map { |u| { 'url' => u, 'room' => 'exterior' } },
