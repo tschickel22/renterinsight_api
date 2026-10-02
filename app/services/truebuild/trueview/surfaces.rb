@@ -21,8 +21,10 @@ module Truebuild
     module Surfaces
       module_function
 
-      VERSION = 11      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
-                        # 9 presence judged beside the overlay, 10 presence asked too strictly
+      VERSION = 12      # 1 text segmentation, 2 unchecked, 3 to 5 earlier checks, 6 overlapping, 7 roof took the gable, 8 two tries,
+                        # 9 presence judged beside the overlay, 10 presence asked too strictly, 11 carried outlines,
+                        # 12 edges by precedence and a check for spill onto neighbors (an outline whose description
+                        # did not change is carried over, free)
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
       PAINTER = 'nb2-lite'
       MAGENTA = [255, 0, 255]
@@ -33,22 +35,27 @@ module Truebuild
       # [key, matches a finish's surface name, what to outline]
       CATEGORIES = [
         ['cabinets', /cabinet|vanit|lav|hw /i,
-         'the cabinet doors, drawer fronts and cabinet boxes, including an island base and any vanity. Not countertops, appliances, sinks, stools, chairs or the floor'],
+         'the cabinet doors, drawer fronts and cabinet boxes, including an island base and any vanity, up to the underside ' \
+         'of the countertop. Not the countertop or its front edge (the band of countertop material facing the camera above ' \
+         'the doors), appliances, sinks, stools, chairs or the floor'],
         # A refrigerator option on a photo with no refrigerator is skipped
         # rather than drawn and rejected (a side-by-side on a kitchen photo
         # that shows only the range).
         ['refrigerator', /refrigerator|\brefer\b|fridge/i, 'the refrigerator only. Not other appliances, cabinets or countertops'],
         ['appliances', /appliance/i,
          'the kitchen appliances: refrigerator, range or cooktop, range hood or over the range microwave, and dishwasher. Not cabinets or countertops'],
-        ['countertop', /counter/i, 'the countertops, including an island top and any short backsplash lip of the same material. Not the sink'],
+        ['countertop', /counter/i,
+         'the countertops: the top surface and its front edge facing the camera (the band of the same material above the ' \
+         'cabinet doors), an island top, and any short backsplash lip of the same material. Not the sink or the cabinets'],
         ['backsplash', /backsplash/i,
          'the backsplash: the tile, brick or panel on the wall above the countertops, everywhere it runs (beside a window, ' \
          'behind the range up to the hood). Not the range, microwave, hood, outlets, window, cabinets or anything on the counter'],
         ['flooring', /floor|carpet/i, 'the floor. Not rugs, furniture legs or cabinets'],
         ['accent wall', /accent|wall ?board/i,
          'one painted wall (plain drywall or wall panel) facing the camera, the largest one, from floor or countertop to ' \
-         'ceiling. Never a tub or shower surround (fiberglass, acrylic or tile), never tile, brick, stone or a backsplash, and ' \
-         'not the ceiling, cabinets, windows, doors, mirrors, light fixtures or any other wall'],
+         'ceiling. Exactly one wall. Never any part of a tub or shower surround (fiberglass, acrylic or tile) or its edge, ' \
+         'trim or door frame, never tile, brick, stone or a backsplash, and not the ceiling, cabinets, windows, doors, ' \
+         'mirrors, light fixtures or any other wall'],
         ['siding', /siding|shake/i, "the main house's exterior wall siding. Not trim, windows, doors, roof, skirting, porch or neighboring houses"],
         ['shutters', /shutter/i, 'the window shutters on the main house'],
         ['shingles', /shingle|roof/i,
@@ -163,16 +170,40 @@ module Truebuild
       # refrigerator too.
       SHARED = { 'refrigerator' => ['appliances'], 'appliances' => ['refrigerator'] }.freeze
 
-      # Surfaces never overlap, so whatever another accepted outline of this
-      # photo already covers is not this one. Bay Port's backsplash took in
-      # the cabinets' edges and the accent wall ran onto the cabinets.
+      # Where two surfaces meet, the edge belongs to the one earlier here,
+      # whichever was outlined first. First come had Aspire 082's cabinets
+      # take the countertop's front edge (white doors under a white and grey
+      # counter), so every countertop left the edge in the old finish and
+      # every cabinet color painted over it. Light colors side by side are
+      # where the painter cannot see an edge, so the order decides, not it.
+      PRECEDENCE = ['countertop', 'backsplash', 'refrigerator', 'appliances', 'cabinets', 'flooring', 'accent wall',
+                    'shutters', 'corner posts', 'shingles', 'siding'].freeze
+
+      def outranks?(key, other)
+        (PRECEDENCE.index(key) || PRECEDENCE.size) < (PRECEDENCE.index(other) || PRECEDENCE.size)
+      end
+
+      # Surfaces never overlap: whatever an accepted outline of a surface that
+      # outranks this one covers is not this one. Bay Port's backsplash took
+      # in the cabinets' edges and the accent wall ran onto the cabinets.
       def without_others(mask, source_url, key)
-        TruebuildSurfaceMask.where(source_url: source_url, version: VERSION, status: 'done').where.not(surface: [key, *SHARED[key]])
-                            .select(&:present?).reduce(mask) do |m, other|
+        blocked = claimed_above(source_url, key, mask.width, mask.height)
+        blocked ? (blocked > 127).ifthenelse(0, mask).cast(:uchar) : mask
+      end
+
+      # The pixels surfaces that outrank key hold in this photo, as one 0/255
+      # image of the given size, or nil. Used again when a layer is cut, so an
+      # outline made before an outranking one never paints over its edge.
+      def claimed_above(source_url, key, width, height)
+        others = TruebuildSurfaceMask.where(source_url: source_url, version: VERSION, status: 'done')
+                                     .where.not(surface: [key, *SHARED[key]]).select { |o| o.present? && outranks?(o.surface, key) }
+        return nil if others.empty?
+
+        others.map do |other|
           o = Vips::Image.new_from_buffer(Trueview.fetch_source(other.mask_url)[:bytes], '')
           o = o.extract_band(0) if o.bands > 1
-          (Layer.fit(o, m.width, m.height) > 127).ifthenelse(0, m).cast(:uchar)
-        end
+          Layer.fit(o, width, height)
+        end.reduce { |a, b| (a > 127) | (b > 127) }.ifthenelse(255, 0).cast(:uchar)
       end
 
       CHECK_TOOL = {
@@ -186,6 +217,11 @@ module Truebuild
                    description: '5 exact; 4 the surface with only small overspill onto neighbors (a few pixels of a stool, a sliver ' \
                                 'of trim); 3 mostly the surface but a clearly visible extra area; 2 a large part is something else; ' \
                                 '1 the wrong thing' },
+            spills: { type: 'boolean',
+                      description: 'The magenta covers a clearly visible part of a neighboring surface: a countertop edge on ' \
+                                   'cabinets, cabinet doors on a countertop, a tub or shower surround or its edge, another wall, ' \
+                                   'a door or window frame.' },
+            walls: { type: 'integer', description: 'For an accent wall only: how many separate walls the magenta covers.' },
             note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
           },
           required: %w[present fit]
@@ -241,11 +277,24 @@ module Truebuild
           tool: CHECK_TOOL, max_tokens: 400, temperature: 0,
           content: [{ type: 'text', text: 'Photo:' }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(image) } },
                     { type: 'text', text: "The same photo with an outline filled in magenta. It should be #{key}: #{description}. " \
-                                          'The surface is in the photo; judge only the outline (answer present: true).' },
+                                          'The surface is in the photo; judge only the outline (answer present: true). Look ' \
+                                          'closely where light colors meet (white doors under a white counter edge, a pale wall ' \
+                                          'beside a white tub surround): that is where outlines go wrong.' },
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
         cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
-        result[:input].slice('fit', 'note').merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
+        verdict = result[:input].slice('fit', 'note', 'spills', 'walls')
+        verdict['fit'] = strict_fit(key, verdict)
+        verdict.merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
+      end
+
+      # A 4 allows a few stray pixels, not a neighbor: Aspire 082's bath accent
+      # wall took three walls and the shower surround's edge and scored 4.
+      def strict_fit(key, verdict)
+        fit = verdict['fit'].to_i
+        fit = [fit, MIN_FIT - 1].min if verdict['spills']
+        fit = [fit, 2].min if key == 'accent wall' && verdict['walls'].to_i > 1
+        fit
       end
 
       def paint_prompt(description, correction = nil)

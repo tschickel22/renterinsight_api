@@ -162,7 +162,7 @@ module Truebuild
         end
         break unless render.purpose == 'layer'
 
-        layer = Layer.build(source[:bytes], result[:bytes], mask: mask_image(mask))
+        layer = Layer.build(source[:bytes], result[:bytes], mask: mask_image(mask), blocked: blocked_image(mask, source[:bytes]))
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **check_with)
         spent += verdict['cost_usd'].to_f
@@ -220,7 +220,7 @@ module Truebuild
         render.update!(status: 'queued', image_url: nil, usage: render.usage.except('recut_from'))
         return perform!(render)
       end
-      layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask))
+      layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask), blocked: blocked_image(mask, source[:bytes]))
       verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                  value: render.selection.first&.dig('value'), **check_with)
       render.update!(status: verdict['ok'] ? 'done' : 'rejected', cost_usd: verdict['cost_usd'], latency_ms: 0,
@@ -244,6 +244,15 @@ module Truebuild
       return nil unless mask&.present?
 
       Vips::Image.new_from_buffer(fetch_source(mask.mask_url)[:bytes], '')
+    end
+
+    # What surfaces that outrank this one hold in the photo (Surfaces::PRECEDENCE),
+    # kept out of the layer even where its own outline, made first, took it.
+    def blocked_image(mask, source_bytes)
+      return nil unless mask&.present?
+
+      size = Vips::Image.new_from_buffer(source_bytes, '')
+      Surfaces.claimed_above(mask.source_url, mask.surface, size.width, size.height)
     end
 
     def store_bytes(bytes, mime, key)

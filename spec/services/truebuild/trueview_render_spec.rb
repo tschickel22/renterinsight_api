@@ -103,15 +103,38 @@ RSpec.describe 'TrueView rendering' do
       expect(mask).to have_attributes(coverage: 0, error: 'No shutters on this house.')
     end
 
-    it 'leaves out what another outline of the photo already covers' do
-      cabinets = png((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 75, 100, fill: true))
-      TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION, mask_url: 'https://b/masks/cab.png', coverage: 0.125)
+    it 'gives an edge two outlines share to the surface that outranks the other, whichever came first' do
+      countertop = png((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 75, 100, fill: true))
+      TruebuildSurfaceMask.create!(source_url: 'https://x/k.jpg', surface: 'countertop', version: Truebuild::Trueview::Surfaces::VERSION, mask_url: 'https://b/masks/top.png', coverage: 0.125)
       allow(Truebuild::Trueview).to receive(:fetch_source) do |url|
-        url.include?('masks/') ? { bytes: cabinets, mime: 'image/png' } : { bytes: photo.jpegsave_buffer, mime: 'image/jpeg' }
+        url.include?('masks/') ? { bytes: countertop, mime: 'image/png' } : { bytes: photo.jpegsave_buffer, mime: 'image/jpeg' }
       end
-      paints(painted) # the left quarter painted: half of it is the cabinets
-      mask = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Backsplash')
-      expect(mask.coverage.to_f).to be_within(0.01).of(0.125)
+      paints(painted) # the left quarter painted: half of it is the countertop
+      cabinets = Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
+      expect(cabinets.coverage.to_f).to be_within(0.01).of(0.125)
+      # The countertop outranks the cabinets, so it would keep the edge had it come second.
+      expect(Truebuild::Trueview::Surfaces.outranks?('countertop', 'cabinets')).to be(true)
+      expect(Truebuild::Trueview::Surfaces.claimed_above('https://x/k.jpg', 'countertop', 300, 200)).to be_nil
+    end
+
+    it 'rejects an outline that spills onto a neighbor, or an accent wall over more than one wall' do
+      fit = ->(key, verdict) { Truebuild::Trueview::Surfaces.strict_fit(key, verdict) }
+      expect(fit.call('cabinets', 'fit' => 5)).to eq(5)
+      expect(fit.call('cabinets', 'fit' => 4, 'spills' => true)).to eq(3)
+      expect(fit.call('accent wall', 'fit' => 4, 'walls' => 3)).to eq(2)
+      expect(fit.call('accent wall', 'fit' => 5, 'walls' => 1)).to eq(5)
+    end
+
+    it 'never cuts a layer, grown edge included, onto a surface that outranks it' do
+      outline = (Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 150, 200, fill: true).cast(:uchar)
+      blocked = (Vips::Image.black(300, 200) + 0).draw_rect(255, 150, 0, 150, 200, fill: true).cast(:uchar)
+      drawn = png((photo + 60).cast(:uchar))
+      free = Truebuild::Trueview::Layer.build(photo.jpegsave_buffer, drawn, mask: outline)
+      held = Truebuild::Trueview::Layer.build(photo.jpegsave_buffer, drawn, mask: outline, blocked: blocked)
+      expect(free[:coverage]).to be > 0.5 # grown past its own edge
+      expect(held[:coverage]).to be_within(0.001).of(0.5)
+      alpha = Vips::Image.new_from_buffer(held[:bytes], '').extract_band(3)
+      expect(alpha.crop(150, 0, 150, 200).max).to eq(0)
     end
 
     it 'skips a surface the photo does not show, without paying for a finish drawing' do

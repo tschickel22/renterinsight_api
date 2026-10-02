@@ -21,7 +21,7 @@ module Truebuild
       MIN_REGION = 0.001 # share of the photo; smaller regions are noise
       MAX_HOLE = 0.02  # share of the photo; enclosed gaps up to this are filled
       FEATHER = 2.5
-      VERSION = 17     # bump when the cut or its check changes, so old layers are re-cut (16: checked against the sample, 17: never cut without an outline)
+      VERSION = 18     # bump when the cut or its check changes, so old layers are re-cut (16: checked against the sample, 17: never cut without an outline, 18: edges by surface precedence)
       EDGE_FEATHER = 1.2
       OUTLINE_GROW = 2 # pixels at the photo's 1600 width
 
@@ -37,11 +37,13 @@ module Truebuild
       # mask: the surface's outline in the original photo (Surfaces). When
       # given, the layer is the drawing inside it and nothing else; the
       # change-based cut is only for surfaces without an outline.
-      def build(original_bytes, render_bytes, mask: nil)
+      # blocked: what surfaces that outrank this one hold (Surfaces::PRECEDENCE),
+      # never part of the layer, however the outline was grown.
+      def build(original_bytes, render_bytes, mask: nil, blocked: nil)
         orig = rgb(Vips::Image.new_from_buffer(original_bytes, ''))
         edit = rgb(Vips::Image.new_from_buffer(render_bytes, ''))
         edit = fit(edit, orig.width, orig.height)
-        return outlined(edit, mask, orig.width, orig.height) if mask
+        return outlined(edit, mask, orig.width, orig.height, blocked: blocked) if mask
 
         delta = orig.gaussblur(1.5).colourspace(:lab).dE76(edit.gaussblur(1.5).colourspace(:lab))
         drift = delta.percent(50)
@@ -57,14 +59,19 @@ module Truebuild
           coverage: (mask.avg / 255.0).round(4) }
       end
 
-      def outlined(edit, mask, width, height)
+      def outlined(edit, mask, width, height, blocked: nil)
         mask = mask.extract_band(0) if mask.bands > 1
         mask = fit(mask, width, height)
         mask = (mask > 127).ifthenelse(255, 0).cast(:uchar)
         # The painted outline runs a pixel or two inside the real edge; grow
         # it so no sliver of the old finish shows along cabinet edges.
         mask = mask.morph(disc(OUTLINE_GROW), :dilate) if OUTLINE_GROW.positive?
+        # Grown and feathered, but never onto a surface that outranks it: the
+        # growth carried white cabinet paint onto a white counter edge.
+        held = blocked && (fit(blocked.bands > 1 ? blocked.extract_band(0) : blocked, width, height) > 127)
+        mask = held.ifthenelse(0, mask).cast(:uchar) if held
         alpha = mask.gaussblur(EDGE_FEATHER).cast(:uchar)
+        alpha = held.ifthenelse(0, alpha).cast(:uchar) if held
         { bytes: edit.bandjoin(alpha).webpsave_buffer(Q: 82, alpha_q: 90), mime: 'image/webp',
           coverage: (mask.avg / 255.0).round(4) }
       end
