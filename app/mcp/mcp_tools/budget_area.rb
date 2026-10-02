@@ -140,12 +140,24 @@ module McpTools
       [groups, { months: net.map { |m| money(m) }, annual: money(net.sum) }]
     end
 
+    # Revenue, costs and net income, never one sum of all lines: adding
+    # revenue to costs gave a "total budgeted" that meant nothing.
+    def pl_totals(budget)
+      sums = Hash.new(0.to_d)
+      budget.budget_lines.includes(:chart_of_account).each do |line|
+        sums[group_key(line.chart_of_account)] += line.annual_total.to_d
+      end
+      { revenue: money(sums['revenue']), cost_of_goods_sold: money(sums['cost_of_goods_sold']),
+        expense: money(sums['expense']),
+        net_income: money(sums['revenue'] - sums['cost_of_goods_sold'] - sums['expense']) }
+    end
+
     def summary(ctx, budget)
       {
         id: "budget:#{budget.id}", name: budget.name, fiscal_year: budget.fiscal_year, status: budget.status,
         location: budget.location_name, consolidated: budget.consolidated?,
         editable_here: draft_editable?(budget),
-        total_budgeted: money(budget.budget_lines.sum(:annual_total)),
+        totals: pl_totals(budget),
         updated_at: budget.updated_at&.iso8601, url: url(ctx, budget)
       }
     end

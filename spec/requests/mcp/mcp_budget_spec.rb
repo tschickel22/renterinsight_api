@@ -100,6 +100,14 @@ RSpec.describe 'MCP budget tools', :mcp, type: :request do
       expect(doc['url']).to end_with("/accounting/budgets/#{budget.id}")
     end
 
+    it 'totals a budget as revenue, costs and net income, not one sum of every line' do
+      budget = budget!({}, sales => 10_000, cogs => 7_000, ads => 500)
+      listed = call_tool(token, 'list_budgets', fiscal_year: year).first['items'].find { |b| b['id'] == "budget:#{budget.id}" }
+      expect(listed).not_to have_key('total_budgeted')
+      expect(listed['totals']).to eq('revenue' => 120_000.0, 'cost_of_goods_sold' => 84_000.0, 'expense' => 6_000.0,
+                                     'net_income' => 30_000.0)
+    end
+
     it "never reaches another company's budget" do
       other = Company.create!(name: 'Other', industry: 'manufactured_housing')
       theirs = other.budgets.create!(name: 'Theirs', fiscal_year: year, budget_type: 'annual', status: 'draft',

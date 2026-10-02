@@ -109,8 +109,9 @@ module McpTools
       return 'Not linked to a GL account, so lines cannot be categorized. Link it under Accounting, Bank Accounts.' unless gl
       return nil if cash_account?(gl)
 
-      "Linked to GL #{[gl.account_number, gl.name].compact_blank.join(' ')}, which is a " \
-        "#{gl.sub_type.presence&.tr('_', ' ') || gl.account_type} account, not a bank or cash account. Everything " \
+      kind = gl.sub_type.presence&.tr('_', ' ') || gl.account_type.to_s
+      "Linked to GL #{[gl.account_number, gl.name].compact_blank.join(' ')}, which is #{kind.match?(/\A[aeiou]/i) ? 'an' : 'a'} " \
+        "#{kind} account, not a bank or cash account. Everything " \
         'categorized from this feed posts there. Check the link under Accounting, Bank Accounts before categorizing.'
     end
 

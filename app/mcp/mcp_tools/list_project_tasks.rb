@@ -54,6 +54,17 @@ module McpTools
                           'project_phase_tasks.position', 'project_phase_tasks.id')
                    .limit(cap).to_a
 
+      # Dealers work the phase checklist, and many projects also carry a
+      # project task copied from each step. Listing both showed every item
+      # twice, so a task with the same title as a step on its project, and
+      # no due date or assignee of its own, is left out and counted.
+      step_titles = ProjectPhaseTask.joins(:project_phase).where(project_phases: { project_id: project_rows.keys })
+                                    .pluck('project_phases.project_id', 'project_phase_tasks.name')
+                                    .to_set { |pid, title| [pid, title.to_s.strip.downcase] }
+      copies, tasks = tasks.partition do |t|
+        t.due_date.nil? && t.assigned_to_id.nil? && step_titles.include?([t.project_id, t.title.to_s.strip.downcase])
+      end
+
       rows = tasks.map do |t|
         [sort_key(t.due_date, t.project_phase&.position, t.project_id, t.position, 1, t.id),
          ProjectSupport.task_summary(ctx, t, project: project_rows[t.project_id], phase_name: t.project_phase&.name)]
@@ -64,7 +75,13 @@ module McpTools
          ProjectSupport.step_summary(ctx, s, phase, project: project_rows[phase.project_id])]
       end
       items = rows.sort_by(&:first).first(cap).map(&:last)
-      Base::Result.new(payload: { count: items.size, items: items }, count: items.size)
+      payload = { count: items.size, items: items }
+      if copies.any?
+        payload[:tasks_hidden_as_copies_of_steps] = copies.size
+        payload[:note] = "#{copies.size} project task#{'s' unless copies.size == 1} with the same title as a checklist " \
+                         'step on the same project (and no date or assignee) left out; the step is listed instead.'
+      end
+      Base::Result.new(payload: payload, count: items.size)
     end
 
     # Due date with undated last, then phase order, then project, then the

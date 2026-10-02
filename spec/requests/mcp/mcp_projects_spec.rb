@@ -110,6 +110,20 @@ RSpec.describe 'MCP project tools', :mcp, type: :request do
       expect(mine['items'].map { |i| i['title'] }).to eq(['Order skirting'])
     end
 
+    it 'lists a step once when a bare project task copies it, but keeps a copy that has its own date' do
+      p = project!
+      step!(phase(p, 'Site prep'), name: 'Prepare purchase agreement')
+      task!(p, phase(p, 'Site prep'), title: 'Prepare purchase agreement')
+      step!(phase(p, 'Site prep'), name: 'Order skirting', position: 1)
+      task!(p, phase(p, 'Site prep'), title: 'Order skirting', due_date: Date.current + 3)
+
+      result, = call_tool(token, 'list_project_tasks', project_id: "project:#{p.id}")
+      titles = result['items'].map { |i| [i['kind'], i['title']] }
+      expect(titles.count { |_, t| t == 'Prepare purchase agreement' }).to eq(1)
+      expect(titles).to include(%w[project_task Order\ skirting])
+      expect(result['tasks_hidden_as_copies_of_steps']).to eq(1)
+    end
+
     it 'orders by due date with undated work last, then phase order, then position, the same every call' do
       p = project!({}, phases: [['Site prep', 'in_progress', nil], ['Delivery', 'not_started', nil],
                                 ['Set', 'not_started', nil]])

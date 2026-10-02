@@ -313,6 +313,7 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       expect(summary).to include('open_invoices' => 2, 'open_balance' => 4618.28, 'counted' => a_string_including('balance due'))
       expect(summary['aging']).to include('current' => 2309.14, 'days_90_plus' => 2309.14, 'days_1_30' => 0.0)
       expect(summary['aging_counts']).to include('current' => 1, 'days_90_plus' => 1)
+      expect(summary['aging_invoices']).to eq('current' => ['LN-3002-P11'], 'days_90_plus' => ['LN-3002-P01'])
       expect(summary['oldest_past_due']).to include('invoice_number' => 'LN-3002-P01', 'days_past_due' => 301)
       expect(list['totals'].except('matching_invoices')).to eq(summary)
       expect(list['totals']['matching_invoices']).to eq(2)
@@ -358,7 +359,7 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       cash = call_tool(token, 'accounting_summary').first['cash']
       expect(cash['total']).to eq(0.0)
       flagged = cash['accounts'].find { |a| a.dig('gl_account', 'number') == '1994' }
-      expect(flagged).to include('book_balance' => 700.0, 'in_total' => false, 'gl_account_warning' => a_string_including('not a bank or cash account'))
+      expect(flagged).to include('book_balance' => 700.0, 'in_total' => false, 'gl_account_warning' => a_string_including('which is an accounts receivable account'))
     end
 
     it 'names the sections a person cannot see instead of reporting zero' do

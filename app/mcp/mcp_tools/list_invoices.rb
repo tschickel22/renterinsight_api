@@ -79,16 +79,21 @@ module McpTools
     def self.aging(rel)
       amounts = BUCKETS.index_with { 0.to_d }
       counts = BUCKETS.index_with { 0 }
+      names = BUCKETS.index_with { [] }
       oldest = nil
-      open_with_balance(rel).pluck(:invoice_number, :due_date, :invoice_date, :amount_due).each do |number, due, issued, owed|
+      open_with_balance(rel).reorder(:due_date, :id).pluck(:invoice_number, :due_date, :invoice_date, :amount_due).each do |number, due, issued, owed|
         days = days_past_due(due, issued)
         key = bucket(days)
         amounts[key] += owed.to_d
         counts[key] += 1
+        names[key] << number if names[key].size < 5
         oldest = { invoice_number: number, due_date: (due || issued)&.iso8601, days_past_due: days, amount_due: AccountingAccess.money(owed) } if days.positive? && (oldest.nil? || days > oldest[:days_past_due])
       end
       { counted: COUNTED, open_invoices: counts.values.sum, open_balance: AccountingAccess.money(amounts.values.sum),
         aging: amounts.transform_values { |v| AccountingAccess.money(v) }, aging_counts: counts,
+        # Up to five invoice numbers per bucket: loan invoices often share one
+        # amount, and an AI matched a bucket total to the wrong invoice twice.
+        aging_invoices: names.reject { |_, v| v.empty? },
         oldest_past_due: oldest }.compact
     end
   end
