@@ -14,25 +14,30 @@ class McpController < ActionController::API
   CALLS_PER_HOUR = 600
   MAX_BODY_BYTES = 256.kilobytes
 
+  # Areas beyond the CRM (accounting, budgets, projects, commission plans)
+  # list their own tools and prompts in an Area module beside them.
+  AREAS = McpTools::Areas.all
+
   READ_TOOLS = [
     McpTools::Search, McpTools::Fetch, McpTools::GetReferenceData, McpTools::PipelineSummary,
     McpTools::ListLeads, McpTools::ListContacts, McpTools::ListAccounts, McpTools::ListDeals,
     McpTools::ListInventory, McpTools::ListServiceTickets, McpTools::ListQuotes, McpTools::ListMyTasks,
     McpTools::ListCampaigns, McpTools::GetCampaign, McpTools::ListWorkflows, McpTools::GetWorkflow,
-    McpTools::ListNurtureSequences
-  ].freeze
+    McpTools::ListNurtureSequences, McpTools::LeadFollowUpGaps
+  ].concat(AREAS.flat_map { |a| a::READ_TOOLS }).freeze
 
   PROMPTS = [
     McpPrompts::MorningBriefing, McpPrompts::LeadTriage, McpPrompts::AgingInventory,
-    McpPrompts::StalledDeals, McpPrompts::CustomerFollowUp, McpPrompts::ServiceBacklog
-  ].freeze
+    McpPrompts::StalledDeals, McpPrompts::CustomerFollowUp, McpPrompts::ServiceBacklog,
+    McpPrompts::LeadsSlipping
+  ].concat(AREAS.flat_map { |a| a::PROMPTS }).freeze
 
   WRITE_TOOLS = [
     McpTools::CreateLead, McpTools::AddNote, McpTools::CreateTask, McpTools::UpdateLeadStatus,
     McpTools::AssignLead, McpTools::UpdateDealStage, McpTools::CreateServiceTicket,
     McpTools::EnrollInNurture, McpTools::CreateWorkflowDraft, McpTools::UpdateWorkflowDraft,
-    McpTools::CreateCampaignDraft
-  ].freeze
+    McpTools::CreateCampaignDraft, McpTools::AddLeadFollowUp
+  ].concat(AREAS.flat_map { |a| a::WRITE_TOOLS }).freeze
 
   def create
     grant, access = authenticate!
@@ -141,9 +146,16 @@ class McpController < ActionController::API
       "I cannot send messages, but I can draft it for you to send, add someone to an existing nurture
       sequence, or draft a campaign." Deleting any record: "I cannot delete records; that is done in
       #{app}." Changing many records at once (more than a handful): "I make changes one record at a time
-      and there is a limit per hour; for bulk changes use the bulk actions in #{app}." #{cost_answer} Users,
-      roles, permissions, company settings, invoices, payments and loans: "That is not available here;
-      use #{app}." If a tool refuses something, repeat its reason to the user rather than guessing.
+      and there is a limit per hour; for bulk changes use the bulk actions in #{app}." #{cost_answer}
+      Accounting: "I can read the books and categorize or exclude bank transactions one at a time, but
+      paying bills, sending invoices, editing or voiding journal entries and reconciling are done in #{app}."
+      Activating, locking or approving a budget: "I can build or change a draft budget, but it only counts
+      once someone opens it in #{app}, checks it and clicks Activate." Commission plans: "I can design one,
+      test it on example deals and save it as an inactive draft, but an admin activates it in #{app}. What
+      anyone earned is not available here." Projects: "I can update tasks and checklist steps and add tasks,
+      but changing a phase, assigning contractors or deleting is done in #{app} on the project. Checking off
+      work can email the customer, and I will ask first." Users, roles, permissions, company settings,
+      payments and loans: "That is not available here; use #{app}." If a tool refuses something, repeat its reason to the user rather than guessing.
       Write customer-facing copy plainly and never use em dashes or en dashes.
     TEXT
   end
