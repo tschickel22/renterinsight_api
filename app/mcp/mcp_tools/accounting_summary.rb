@@ -36,7 +36,7 @@ module McpTools
       section(ctx, payload, 'financial_reports', :cash) { cash(ctx) }
       section(ctx, payload, 'bank_accounts_accounting', :bank_feed) { bank_feed(ctx, from, to) }
       section(ctx, payload, 'bills', :bills) { bills(ctx) }
-      section(ctx, payload, 'finance', :customer_invoices) { ListInvoices.aging(AccountingAccess.invoices(ctx)) }
+      section(ctx, payload, 'finance', :customer_invoices) { ListInvoices.aging(AccountingAccess.invoices(ctx), ctx.company) }
       payload[:url] = ctx.app_url('/accounting')
       Base::Result.new(payload: payload, count: 1)
     end
@@ -76,8 +76,24 @@ module McpTools
       { basis: basis(ctx),
         period: pnl(ctx, from, to),
         fiscal_year_to_date: pnl(ctx, ytd_from, to),
+        fiscal_period: fiscal_period(ctx, to),
         notes: posting_notes(ctx).presence,
         url: ctx.app_url('/accounting/reports/profit-and-loss') }.compact
+    end
+
+    # "Close the month" first means: is it already closed or locked? Locking
+    # is done in the app; this only says where the period stands.
+    def self.fiscal_period(ctx, date)
+      period = ctx.company.fiscal_periods.where('start_date <= ? AND end_date >= ?', date, date).first
+      unless period
+        return { status: 'not_set_up',
+                 note: 'No fiscal period covers this date, so it cannot be closed or locked yet. Fiscal periods are ' \
+                       'set up under Accounting, Period Close.' }
+      end
+
+      { fiscal_year: period.fiscal_year, period_number: period.period_number, start_date: period.start_date.iso8601,
+        end_date: period.end_date.iso8601, status: period.status, closed_at: period.closed_at&.iso8601,
+        url: ctx.app_url('/accounting/year-end-close') }.compact
     end
 
     # Invoices and payments reach the P&L only when Accounting Settings says

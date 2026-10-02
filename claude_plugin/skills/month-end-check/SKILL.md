@@ -25,10 +25,20 @@ seems to cover it, then write the answer in this order:
 
 1. **Verdict, three lines at most.** Whether the month can close, and the two or three
    findings that matter most. The owner should be able to stop reading here.
-2. **Sections 1 to 7 below.** A section that came back empty gets one line ("No bills
+2. **Sections 1 to 8 below.** A section that came back empty gets one line ("No bills
    are owed or overdue."). Only sections with something to act on get detail.
    Receivables (section 5) always get full treatment, even in an empty month.
-3. **The checklist** (section 8).
+3. **The checklist** (section 9).
+
+**When the books are empty, stop early.** If revenue, cost of sales and expenses are
+all zero for the month and the year to date, write only: the verdict, the settings or
+bank account fix (sections 1 and 2), the bank feed (section 3), receivables by
+customer (section 5), and a checklist of at most five items. Do not render the other
+sections, not even as one line each. Say at the end that the rest of the close can
+run once something is posted.
+
+If a connector call fails with "isn't responding", wait and try it once more. If it
+fails again, say which checks could not run and stop rather than guessing.
 
 When two tools give different totals for the same thing, reconcile them out loud
 ("the summary counts 104 open invoices; 103 are overdue and 1 is not due yet") rather
@@ -38,6 +48,11 @@ than silently picking one.
 
 Call `accounting_summary` for the month. Report revenue, cost of sales, expenses and
 net income in four lines, and anything the tool says it skipped for permissions.
+
+Read `profit_and_loss.fiscal_period` first: if the month is already closed or locked,
+say so in the verdict, since nothing posted now would land in it without reopening.
+If it says not_set_up, say the month cannot be closed or locked until fiscal periods
+are set up under Accounting, Period Close.
 Read `dates_apply_to`: only the P&L follows the month's dates; cash, bills and
 invoices are as of today. Say "as of today" when you report them.
 
@@ -84,13 +99,15 @@ in draft, which have not hit the books. Compare total due soon with cash on hand
 ## 5. Customer invoices (what we are owed)
 
 `list_invoices` with overdue_only and sort largest: count, total and aging buckets
-from `totals`, and the five largest overdue by customer, amount and days past due.
+from `totals`. A dealer chases customers, not invoices: lead with `totals.by_customer`
+(customer, open invoices, balance, oldest days past due), then the five largest
+overdue invoices by amount and days past due.
 Use `aging_counts`, `aging_invoices` and each invoice's `aging_bucket` rather than
 matching amounts to buckets yourself (several invoices can share one amount). If
 `more_not_shown` is above zero, say how many you did not list. Describe what invoices
 are only from fields you read; an invoice number pattern is not evidence of what an
-invoice is for. Always offer to create follow-up tasks for whoever owns those
-customers (`create_task`), one per invoice, with approval.
+invoice is for. Always offer to create follow-up tasks (`create_task`), one per
+customer, not one per invoice, with approval.
 
 ## 6. Deals
 
@@ -124,7 +141,16 @@ final payment slip into next month; name them. If a project's `deal` is still op
 early stage while the setup work is under way, say so: work is happening on a sale
 that is not marked won.
 
-## 8. The checklist
+## 8. Inventory and floor plan
+
+`list_inventory` with min_days_in_stock 90 for aged units still in stock: how many,
+the oldest few by days in stock, and their asking prices. If units show `costs` with
+`floor_plan_amount`, total what is floored on those units and the accrued interest;
+an aged unit on floor plan costs money every month it sits. If most units have no
+`days_in_stock` (no in-stock date entered), say so in one line instead of guessing
+ages. If floor plan figures are absent, say they are not visible here.
+
+## 9. The checklist
 
 End with a short checklist, most important first, each item with who should do it if
 the data names someone:
@@ -143,6 +169,8 @@ Then one sentence on whether the month is ready to close.
   your own.
 - Use the numbers the tools return, and say "no date is recorded" rather than
   inferring what an empty field means.
+- Never assume a numbered series is complete. If you saw P01, P02, P03 and P05, say
+  which numbers you saw; do not write "P01 through P05".
 - If the data looks like test or sample records (placeholder names, repeated "New
   Opportunity" deals), say so once at the top so the reader knows how much is signal.
 - Plain words for an owner, not accounting jargon. No em dashes or en dashes.

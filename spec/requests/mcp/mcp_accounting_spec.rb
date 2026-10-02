@@ -336,6 +336,29 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       expect(largest['items'].map { |i| i['invoice_number'] }).to eq(%w[INV-BIG INV-MID])
     end
 
+    it 'rolls receivables up by customer, largest balance first' do
+      ana = company.contacts.create!(first_name: 'Ana', last_name: 'Diaz', location_id: denver.id)
+      joe = company.contacts.create!(first_name: 'Joe', last_name: 'Williams', location_id: denver.id)
+      3.times { |n| invoice!("LN-P0#{n}", status: 'overdue', due: Date.current - (30 * (n + 1)), owed: 2309.14).update_columns(contact_id: joe.id) }
+      invoice!('INV-ANA', status: 'overdue', due: Date.current - 10, owed: 500).update_columns(contact_id: ana.id)
+
+      rows = call_tool(token, 'accounting_summary').first.dig('customer_invoices', 'by_customer')
+      expect(rows.first).to include('customer' => 'Joe Williams', 'open_invoices' => 3, 'balance' => 6927.42,
+                                    'oldest_days_past_due' => 90, 'customer_id' => "contact:#{joe.id}")
+      expect(rows.second).to include('customer' => 'Ana Diaz', 'open_invoices' => 1)
+    end
+
+    it 'says whether the month is open, closed or locked' do
+      summary = call_tool(token, 'accounting_summary').first
+      expect(summary.dig('profit_and_loss', 'fiscal_period')).to include('status' => 'not_set_up')
+
+      FiscalPeriod.generate_for_year(company, Date.current.year)
+      company.fiscal_periods.find_by(fiscal_year: Date.current.year, period_number: Date.current.month)
+             .update!(status: 'closed', closed_at: Time.current)
+      period = call_tool(token, 'accounting_summary').first.dig('profit_and_loss', 'fiscal_period')
+      expect(period).to include('status' => 'closed', 'period_number' => Date.current.month)
+    end
+
     it 'says when the bank feed looks stopped, not just behind' do
       txn!('OLD DEPOSIT', 100, date: Date.current - 60)
       feed = call_tool(token, 'accounting_summary').first['bank_feed']

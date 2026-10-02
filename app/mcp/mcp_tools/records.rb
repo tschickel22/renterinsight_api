@@ -25,7 +25,8 @@ module McpTools
 
     QUOTE_ITEM_FIELDS = %w[name description quantity unit_price total].freeze
     DEAL_COST_FIELDS = %w[unit_cost pack_amount finance_reserve product_margin front_gross back_gross total_gross].freeze
-    UNIT_COST_FIELDS = %w[dealer_cost freight_cost pdi_cost total_cost holdback_amount target_gross minimum_price].freeze
+    UNIT_COST_FIELDS = %w[dealer_cost freight_cost pdi_cost total_cost holdback_amount target_gross minimum_price
+                          floor_plan_amount floor_plan_start_date floor_plan_accrued_interest].freeze
 
     attr_reader :ctx
 
@@ -236,7 +237,10 @@ module McpTools
     end
 
     def cost_fields(record, fields)
-      fields.to_h { |f| [f, record.public_send(f)&.to_f] }.compact
+      fields.to_h do |f|
+        value = record.public_send(f)
+        [f, value.is_a?(Date) ? value.iso8601 : value&.to_f]
+      end.compact
     end
 
     def deal_detail(deal)

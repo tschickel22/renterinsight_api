@@ -41,7 +41,7 @@ module McpTools
       # of paid or any includes invoices that owe nothing); the aging block
       # always counts open invoices with a balance, the same set
       # accounting_summary counts.
-      payload = { totals: { matching_invoices: rel.count }.merge(aging(rel)) }
+      payload = { totals: { matching_invoices: rel.count }.merge(aging(rel, ctx.company)) }
       order = sort.to_s == 'largest' ? Arel.sql('invoices.amount_due DESC NULLS LAST, invoices.due_date ASC') : Arel.sql('invoices.due_date ASC NULLS LAST')
       rows = rel.order(order, :id).limit(ctx.row_limit(limit)).to_a
       items = rows.map { |i| AccountingAccess.invoice(ctx, i) }
@@ -76,17 +76,23 @@ module McpTools
     # Same buckets as the AR aging report, with how many invoices sit in each
     # and the oldest past due one named, so a bucket can be checked rather
     # than guessed from amounts (several loan invoices share one amount).
-    def self.aging(rel)
+    def self.aging(rel, company)
       amounts = BUCKETS.index_with { 0.to_d }
       counts = BUCKETS.index_with { 0 }
       names = BUCKETS.index_with { [] }
       oldest = nil
-      open_with_balance(rel).reorder(:due_date, :id).pluck(:invoice_number, :due_date, :invoice_date, :amount_due).each do |number, due, issued, owed|
+      customers = Hash.new { |h, k| h[k] = { invoices: 0, balance: 0.to_d, oldest_days: nil } }
+      open_with_balance(rel).reorder(:due_date, :id)
+                            .pluck(:invoice_number, :due_date, :invoice_date, :amount_due, :contact_id).each do |number, due, issued, owed, contact_id|
         days = days_past_due(due, issued)
         key = bucket(days)
         amounts[key] += owed.to_d
         counts[key] += 1
         names[key] << number if names[key].size < 5
+        row = customers[contact_id]
+        row[:invoices] += 1
+        row[:balance] += owed.to_d
+        row[:oldest_days] = days if days.positive? && (row[:oldest_days].nil? || days > row[:oldest_days])
         oldest = { invoice_number: number, due_date: (due || issued)&.iso8601, days_past_due: days, amount_due: AccountingAccess.money(owed) } if days.positive? && (oldest.nil? || days > oldest[:days_past_due])
       end
       { counted: COUNTED, open_invoices: counts.values.sum, open_balance: AccountingAccess.money(amounts.values.sum),
@@ -94,7 +100,20 @@ module McpTools
         # Up to five invoice numbers per bucket: loan invoices often share one
         # amount, and an AI matched a bucket total to the wrong invoice twice.
         aging_invoices: names.reject { |_, v| v.empty? },
-        oldest_past_due: oldest }.compact
+        oldest_past_due: oldest, by_customer: by_customer(company, customers) }.compact
+    end
+
+    # A dealer chases a customer, not an invoice: one call covers eight loan
+    # invoices. The ten largest balances, with how many invoices and the
+    # oldest days past due.
+    def self.by_customer(company, customers)
+      top = customers.sort_by { |_, r| -r[:balance] }.first(10)
+      names = company.contacts.where(id: top.map(&:first).compact).pluck(:id, :first_name, :last_name)
+                     .to_h { |id, first, last| [id, [first, last].compact_blank.join(' ')] }
+      top.map do |contact_id, r|
+        { customer: names[contact_id].presence || 'No customer on the invoice', customer_id: contact_id && "contact:#{contact_id}",
+          open_invoices: r[:invoices], balance: AccountingAccess.money(r[:balance]), oldest_days_past_due: r[:oldest_days] || 0 }
+      end
     end
   end
 end
