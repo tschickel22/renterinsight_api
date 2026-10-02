@@ -49,7 +49,15 @@ class BudgetService
     scope = company.journal_entries
                    .posted
                    .where(entry_date: start_date..end_date)
-    scope = scope.where(location_id: location_id) if location_id.present?
+    # Location is recorded on each journal line, not on the entry. Lines with
+    # no location count for the company as a whole only, never for a
+    # location, and the result says how many there were.
+    unlocated_lines = 0
+    if location_id.present?
+      in_year = scope
+      scope = scope.where(id: JournalEntryLine.where(location_id: location_id).select(:journal_entry_id))
+      unlocated_lines = JournalEntryLine.where(journal_entry_id: in_year.select(:id), location_id: nil).count
+    end
 
     calendar_months_present = scope.distinct.pluck(
       Arel.sql('EXTRACT(YEAR FROM entry_date)::int'),
@@ -82,7 +90,8 @@ class BudgetService
       first_data_month:   first_month_label,
       last_data_month:    last_month_label,
       is_partial:         coverage_count.positive? && coverage_count < 12,
-      is_empty:           coverage_count.zero?
+      is_empty:           coverage_count.zero?,
+      unlocated_lines:    unlocated_lines
     }
   end
 
@@ -99,7 +108,9 @@ class BudgetService
               .merge(JournalEntry.in_ledger)
               .where(journal_entries: { company_id: company.id,
                                         entry_date: start_date..end_date })
-    scope = scope.where(journal_entries: { location_id: location_id }) if location_id.present?
+    # Location lives on the line (see data_coverage); unlocated lines are
+    # company level only.
+    scope = scope.where(journal_entry_lines: { location_id: location_id }) if location_id.present?
 
     rows = scope.group(
       'journal_entry_lines.chart_of_account_id',
