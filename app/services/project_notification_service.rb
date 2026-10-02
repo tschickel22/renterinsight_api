@@ -56,8 +56,24 @@ class ProjectNotificationService
   # Sends a clean HTML email to the project's customer when the phase is
   # visible_to_client. Routes through the company/platform email provider
   # (AWS SES) — no dealer OAuth, no per-project setup required.
+  #
+  # Only what the dealer chose: the phase's "notify client on start/complete"
+  # switch (copied from the project template), a phase and project the client
+  # can see, and once per phase. Before 2026-10-02 any phase going in
+  # progress emailed the customer, switch or not (checking off a phase's
+  # first step does that), and reopening a phase sent it again.
+  def self.client_should_hear?(project, phase, event)
+    return false unless phase.visible_to_client && project.client_visible
+
+    case event
+    when 'phase_started' then phase.notify_client_on_start && !phase.client_notified_start
+    when 'phase_completed' then phase.notify_client_on_complete && !phase.client_notified_complete
+    else false
+    end
+  end
+
   def self.send_phase_change_to_client_fallback(project, phase, event)
-    return unless phase.visible_to_client
+    return unless client_should_hear?(project, phase, event)
 
     client_email = resolve_client_email(project)
     unless client_email.present?
@@ -85,9 +101,9 @@ class ProjectNotificationService
     project.update_columns(progress_percent: completion) if project.progress_percent != completion
 
     subject = case event
-              when 'phase_started'   then "#{home_name} — #{phase.name} has started"
-              when 'phase_completed' then "#{home_name} — #{phase.name} is complete!"
-              else                        "#{home_name} — Project Update"
+              when 'phase_started'   then "#{home_name}: #{phase.name} has started"
+              when 'phase_completed' then "#{home_name}: #{phase.name} is complete!"
+              else                        "#{home_name}: Project Update"
               end
 
     headline = case event
@@ -138,6 +154,7 @@ class ProjectNotificationService
       category: 'project_notification',
       communicable: project
     )
+    phase.update_column(event == 'phase_started' ? :client_notified_start : :client_notified_complete, true)
     Rails.logger.info("[ProjectNotificationService] phase fallback email sent to client #{client_email} for project #{project.id}")
   rescue => e
     Rails.logger.error("[ProjectNotificationService] phase fallback error: #{e.class}: #{e.message}")
@@ -451,13 +468,13 @@ class ProjectNotificationService
       summary = a.completion_summary.present? ? "<div style=\"color:#666;font-size:13px;margin-top:2px;\">#{a.completion_summary.to_s.truncate(200)}</div>" : ''
       photo_count = a.completion_photos.is_a?(Array) ? a.completion_photos.length : 0
       photos = photo_count > 0 ? "<div style=\"color:#888;font-size:12px;margin-top:2px;\">#{photo_count} photo(s) attached</div>" : ''
-      "<li style=\"margin-bottom:12px;\"><strong>#{task_name}</strong> — #{contractor_name}#{summary}#{photos}</li>"
+      "<li style=\"margin-bottom:12px;\"><strong>#{task_name}</strong>: #{contractor_name}#{summary}#{photos}</li>"
     end.join
 
     subject = if count == 1
       a = assignments.first
       contractor_name = a.contractor&.name || 'Contractor'
-      "Review Submitted: #{resolve_task_name(a)} — #{contractor_name}"
+      "Review Submitted: #{resolve_task_name(a)}: #{contractor_name}"
     else
       "#{count} reviews pending on #{project.name}"
     end
@@ -571,7 +588,7 @@ class ProjectNotificationService
     client_name = resolve_client_name(project) || 'there'
     summary = assignment.completion_summary.present? ? "<p><em>What was done:</em> #{assignment.completion_summary.to_s.truncate(300)}</p>" : ''
 
-    subject = "#{project.name} — Please review completed work: #{task_name}"
+    subject = "#{project.name}: Please review completed work: #{task_name}"
 
     portal_link = if project.client_access_token.present?
       url = "#{frontend_base_url}/p/#{project.client_access_token}"
@@ -643,14 +660,14 @@ class ProjectNotificationService
         company: company,
         type: :contractor_review_submitted,
         title: "Customer Approved: #{task_name}",
-        message: "#{task_name} was approved #{actor_label} — ready for your final confirmation.",
+        message: "#{task_name} was approved #{actor_label}: ready for your final confirmation.",
         notifiable: assignment
       )
 
       broadcast_review_toast(user, {
         type: 'contractor_review',
         title: 'Customer Approved',
-        description: "#{task_name} approved #{actor_label} — confirm to close",
+        description: "#{task_name} approved #{actor_label}: confirm to close",
         entityType: 'contractor_review',
         entityId: assignment.id,
         link: '/projects/reviews',
@@ -660,7 +677,7 @@ class ProjectNotificationService
 
     if primary_recipient&.email.present?
       notes = assignment.client_review_notes.present? ? "<p><em>Customer notes:</em> #{assignment.client_review_notes}</p>" : ''
-      subject = "Customer approved #{task_name} — confirm to close"
+      subject = "Customer approved #{task_name}: confirm to close"
       body = <<~HTML
         <p>Hello #{primary_recipient.full_name},</p>
         <p>The customer has approved the completed work on <strong>#{task_name}</strong>#{on_behalf ? ' (recorded on their behalf)' : ''} for <strong>#{project&.name}</strong>.</p>
@@ -1177,23 +1194,23 @@ class ProjectNotificationService
 
       case event
       when 'phase_started'
-        "#{home_name} — #{phase.name} has started"
+        "#{home_name}: #{phase.name} has started"
       when 'phase_completed'
-        "#{home_name} — #{phase.name} is complete!"
+        "#{home_name}: #{phase.name} is complete!"
       when 'task_completed'
-        "#{home_name} — #{task&.title || 'Task'} completed"
+        "#{home_name}: #{task&.title || 'Task'} completed"
       when 'task_assigned'
-        "#{home_name} — New task assigned: #{task&.title}"
+        "#{home_name}: New task assigned: #{task&.title}"
       when 'milestone_reached'
-        "#{home_name} — Milestone reached: #{phase.name}"
+        "#{home_name}: Milestone reached: #{phase.name}"
       when 'inspection_passed'
-        "#{home_name} — Inspection passed: #{phase.name}"
+        "#{home_name}: Inspection passed: #{phase.name}"
       when 'inspection_failed'
-        "#{home_name} — Inspection needs attention: #{phase.name}"
+        "#{home_name}: Inspection needs attention: #{phase.name}"
       when 'payment_due'
-        "#{home_name} — Payment milestone reached"
+        "#{home_name}: Payment milestone reached"
       else
-        "#{home_name} — Project Update"
+        "#{home_name}: Project Update"
       end
     end
 
