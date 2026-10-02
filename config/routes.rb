@@ -304,6 +304,8 @@ Rails.application.routes.draw do
       patch  'truebuild_pricing/addons/:id', to: 'truebuild_pricing#update_addon'
       delete 'truebuild_pricing/addons/:id', to: 'truebuild_pricing#destroy_addon'
       get    'truebuild_designs', to: 'truebuild_designs#index'
+      get    'truebuild_homes', to: 'truebuild_homes#index'
+      patch  'truebuild_homes/:id', to: 'truebuild_homes#update'
       post   'truebuild_designs/:id/quote', to: 'truebuild_designs#create_quote'
       get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
       post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'

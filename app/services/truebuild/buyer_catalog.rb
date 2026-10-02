@@ -24,6 +24,18 @@ module Truebuild
     # sold as they stand.
     DESIGNABLE_STATUSES = %w[available_to_order ordered on_order].freeze
 
+    # The lot's homes a buyer can design, for listings and their filter:
+    # not built yet, linked to a model a published book prices, and the
+    # dealer offers TrueBuild.
+    def self.designable_homes(company, vehicles)
+      return vehicles.none unless company.has_module?(MODULE) &&
+                                  (company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?)
+
+      vehicles.where(status: DESIGNABLE_STATUSES)
+              .where(catalog_plan_variant_id: CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id))
+                                                                 .select(:catalog_plan_variant_id))
+    end
+
     def self.designable_home?(company, vehicle)
       vehicle.present? && DESIGNABLE_STATUSES.include?(vehicle.status) && available?(company, vehicle.catalog_plan_variant)
     end

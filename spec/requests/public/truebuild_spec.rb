@@ -197,6 +197,20 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  it 'marks the homes a buyer can design in the listing, and filters to them' do
+    built = Vehicle.create!(company: company, year: 2026, make: 'Champion', model: 'Built One', vin: "VIN#{SecureRandom.hex(6).upcase}",
+                            status: 'available', is_deleted: false, catalog_plan_variant: variant)
+    get '/public/inventory', params: { token: token, statuses: 'available,on_order' }
+    by_id = JSON.parse(response.body)['items'].index_by { |i| i['id'] }
+    expect(by_id[vehicle.id]).to include('designable' => true, 'trueview' => false)
+    expect(by_id[built.id]).to include('designable' => false)
+
+    get '/public/inventory', params: { token: token, statuses: 'available,on_order', designable: 1 }
+    expect(JSON.parse(response.body)['items'].map { |i| i['id'] }).to eq([vehicle.id])
+    get '/public/inventory/filters', params: { token: token, statuses: 'available,on_order' }
+    expect(JSON.parse(response.body)['designable_count']).to eq(1)
+  end
+
   it "shows the manufacturer's photos and floor plan for a linked home with none of its own" do
     variant.update!(media: { 'photos' => [{ 'url' => 'https://img/kitchen-1', 'room' => 'kitchen' }],
                              'floor_plans' => ['https://img/plan'], 'matterport_url' => 'https://my.matterport.com/show/?m=x' })

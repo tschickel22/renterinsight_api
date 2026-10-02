@@ -138,6 +138,11 @@ class Public::InventoryController < ApplicationController
       )
     end
 
+    # Homes a buyer can design (TrueBuild): not built yet and linked to a model.
+    if ActiveModel::Type::Boolean.new.cast(params[:designable])
+      @vehicles = Truebuild::BuyerCatalog.designable_homes(@company, @vehicles)
+    end
+
     # Vehicle filters
     @vehicles = @vehicles.where(make: params[:make]) if params[:make].present?
     @vehicles = @vehicles.where(model: params[:model]) if params[:model].present?
@@ -178,6 +183,10 @@ class Public::InventoryController < ApplicationController
     total_pages = (total_count.to_f / per_page).ceil
     
     @vehicles = @vehicles.offset((page - 1) * per_page).limit(per_page)
+    # Which homes on this page open the designer, and which show finishes on
+    # their photos, for a badge on the card.
+    @designable_ids = Truebuild::BuyerCatalog.designable_homes(@company, @company.vehicles.where(id: @vehicles.map(&:id))).pluck(:id).to_set
+    @trueview_variant_ids = Truebuild::ModelList.trueview_ready(@vehicles.select { |v| @designable_ids.include?(v.id) }.map(&:catalog_plan_variant_id).uniq)
     
     # Get branding (Location → Company → Platform hierarchy)
     location = params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : nil
@@ -353,6 +362,8 @@ class Public::InventoryController < ApplicationController
     end
     
     render json: {
+      # Homes a buyer can design (TrueBuild), so the filter shows only when there are some.
+      designable_count: Truebuild::BuyerCatalog.designable_homes(@company, vehicles).count,
       makes: makes,
       models: models,
       models_by_make: models_by_make,
@@ -749,6 +760,11 @@ class Public::InventoryController < ApplicationController
       #
       # Principal and interest only — see Websites::CalculatorSettings.
       monthly_payment: estimated_monthly_payment(vehicle),
+
+      # TrueBuild: the buyer can design this home (choose its options and
+      # finishes), and see them on its photos when trueview is true.
+      designable: @designable_ids.to_a.include?(vehicle.id),
+      trueview: @designable_ids.to_a.include?(vehicle.id) && @trueview_variant_ids.to_a.include?(vehicle.catalog_plan_variant_id),
 
       # Computed fields
       display_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,
