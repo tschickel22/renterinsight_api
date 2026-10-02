@@ -14,5 +14,6 @@
     "rv",
     "crm",
     "accounting"
-  ]
+  ],
+  "license": "MIT"
 }
