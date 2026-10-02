@@ -173,9 +173,20 @@ RSpec.describe 'MCP project tools', :mcp, type: :request do
       expect(text).to include('blocked by: Permit')
     end
 
+    it 'starts a phase without asking when its "notify client on start" switch is off' do
+      p = project!
+      s = step!(phase(p, 'Delivery'), name: 'Schedule transport')
+
+      result, error, text = call_tool(token, 'update_project_task', id: "phase_step:#{s.id}", status: 'completed')
+      expect(error).to be_falsey, text
+      expect(result).to include('phase_started' => true)
+      expect(result['notified']['customer']).to be(false)
+    end
+
     it 'stops before a step that would email the customer, then goes ahead once the person agrees' do
       p = project!
       delivery = phase(p, 'Delivery')
+      delivery.update!(notify_client_on_start: true)
       s = step!(delivery, name: 'Schedule transport')
 
       _, error, text = call_tool(token, 'update_project_task', id: "phase_step:#{s.id}", status: 'completed')

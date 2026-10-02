@@ -187,9 +187,11 @@ module McpTools
       customer = prefs.any? { |p| p.recipient_type == 'Contact' && (p.via_email || p.via_sms) }
       team = prefs.any? { |p| p.recipient_type == 'User' && (p.via_email || p.via_sms) }
       emailed = prefs.any? { |p| p.via_email && p.effective_email.present? }
-      # ProjectNotificationService emails the customer by default when a
-      # visible phase starts and no preference row sent an email.
-      if event == 'phase_started' && !emailed && phase&.visible_to_client &&
+      # Without a preference row that emails, ProjectNotificationService
+      # emails the customer only when the phase's own switch says to (see
+      # client_should_hear?), once.
+      if event == 'phase_started' && !emailed && phase &&
+         ProjectNotificationService.client_should_hear?(project, phase, event) &&
          ProjectNotificationService.send(:resolve_client_email, project).present?
         customer = true
       end
