@@ -88,6 +88,14 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(estimate[:totals][:cost_usd]).to be_within(0.01).of(3 * described_class::RECUT_COST + estimate[:totals][:outlines] * estimate[:rates][:outline])
   end
 
+  it 'says which models are on sites already and when a run last took them' do
+    allow(Truebuild::ModelList).to receive(:trueview_ready).and_return(Set[topeka_home.id])
+    run = described_class.start!([topeka_home], budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    by = described_class.estimate(everything)[:models].index_by { |m| m[:id] }
+    expect(by[topeka_home.id]).to include(on_sites: true, last_run_at: run.created_at)
+    expect(by[decatur_home.id]).to include(on_sites: false, last_run_at: nil)
+  end
+
   it 'stops before a model that would go over budget' do
     run = described_class.start!(everything, budget_usd: 0.1, scope: { manufacturer_id: mfr.id })
     TruebuildFactoryRunJob.perform_now(run.id)

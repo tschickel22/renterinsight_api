@@ -34,9 +34,14 @@ module Truebuild
         rates = self.rates
         seen = Set.new
         outlined = Set.new
+        # Which are drawn and on dealer sites already, and when a run last
+        # took each, so a run of a few models does not redo the same ones.
+        on_sites = ModelList.trueview_ready(variants.map(&:id))
+        last_run = last_runs
         models = variants.map do |v|
           cost = model_cost(v, rates, seen, outlined)
-          { id: v.id, name: name(v), model_number: v.model_number, series: v.catalog_plan&.series }.merge(cost)
+          { id: v.id, name: name(v), model_number: v.model_number, series: v.catalog_plan&.series,
+            on_sites: on_sites.include?(v.id), last_run_at: last_run[v.id] }.merge(cost)
         end
         drawings = models.sum { |m| m[:drawings] }
         outlines = models.sum { |m| m[:outlines] }
@@ -46,6 +51,12 @@ module Truebuild
                     already_drawn: models.sum { |m| m[:already_drawn] }, outlines: outlines,
                     cost_usd: models.sum { |m| m[:cost_usd] }.round(2) },
           rates: rates }
+      end
+
+      # variant id => when the latest run that included it started.
+      def last_runs
+        TruebuildFactoryRun.order(:created_at).pluck(:variant_ids, :created_at)
+                           .each_with_object({}) { |(ids, at), h| Array(ids).each { |id| h[id.to_i] = at } }
       end
 
       def start!(variants, budget_usd:, scope:, by: nil)
