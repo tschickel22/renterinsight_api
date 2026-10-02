@@ -101,12 +101,34 @@ module Api
         end
         
         deal = @company.deals.find(deal_id)
-        user = deal.primary_salesperson || current_user
-        
-        service = CommissionCalculationService.new(deal, user)
-        result = service.calculate
-        
-        render json: result
+
+        # The engine that makes the payments (CommissionCalculationService
+        # read every component in the company, not the deal's plan, and
+        # disagreed with what was paid). Same response shape as before.
+        engine = CommissionPaymentGeneratorService.new(deal)
+        line = engine.component_line(@component)
+        render json: {
+          deal_id: deal.id,
+          deal_identifier: deal.name || "Deal ##{deal.id}",
+          payee_user_id: deal.primary_salesperson_id,
+          total_commission: line[:amount].to_f,
+          line_items: [{
+            component_id: @component.id, component_name: @component.name,
+            component_type: @component.component_type,
+            gross_type: @component.component_type == 'addon_commission' ? 'addon' : @component.gross_type,
+            rate: @component.rate&.to_f, amount: line[:amount].to_f, note: line[:note]
+          }.compact],
+          plan: deal.commission_plan && {
+            id: deal.commission_plan_id, name: deal.commission_plan.name,
+            primary_salesperson_total: engine.total_for_role(:primary_salesperson).to_f
+          },
+          deal_economics: {
+            selling_price: deal.selling_price, cost: deal.unit_cost, front_gross: deal.front_gross,
+            pack: deal.effective_pack_amount, commissionable_front_gross: deal.commissionable_front_gross,
+            back_gross: deal.back_gross, total_gross: deal.total_gross, addon_gross: deal.addon_gross,
+            quantity: deal.quantity
+          }
+        }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Deal not found' }, status: :not_found
       end

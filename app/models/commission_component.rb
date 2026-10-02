@@ -101,26 +101,39 @@ scope :for_current_location, -> {
   # INSTANCE METHODS
   # ============================================================================
   
-  # Check if this component applies to a given deal
+  # Whether this component pays on the deal. A deal's new/used and MH/RV come
+  # from Deal#commission_deal_type and #commission_vertical (deal_type on a
+  # real deal usually holds the financing type, like Chattel or FHA). When the
+  # deal's kind is unknown, only components meant for all deals apply.
   def applies_to_deal?(deal)
-    # Check deal type filter
-    return false if deal_type.present? && deal_type != 'all' && deal_type != deal.deal_type
-    
-    # Check vertical filter
-    return false if vertical.present? && vertical != 'all' && vertical != deal.vertical
-    
+    return false if deal_type.present? && deal_type != 'all' && deal_type != deal.try(:commission_deal_type)
+    return false if vertical.present? && vertical != 'all' && vertical != deal.try(:commission_vertical)
+
     true
   end
-  
+
+  # True once a commission payment has paid this component, which is when it
+  # can no longer be taken off its plan. Payments record their components in
+  # calculation_details line_items (component_id since the engine rework;
+  # older payments only by name, so those are matched by plan and name).
+  def paid?
+    payments = CommissionPayment.where(company_id: company_id, is_deleted: [false, nil])
+    return true if payments.where("calculation_details -> 'line_items' @> ?", [{ component_id: id }].to_json).exists?
+    return false unless commission_plan_id
+
+    payments.where("commission_plan_id = :plan OR calculation_details ->> 'plan_id' = :plan_s", plan: commission_plan_id, plan_s: commission_plan_id.to_s)
+            .where("calculation_details -> 'line_items' @> ?", [{ description: name }].to_json).exists?
+  end
+
   # Human-readable description of what this component pays
   def calculation_description
     case component_type
     when 'percent_of_gross'
       "#{(rate * 100).round(2)}% of #{gross_type.humanize} gross"
     when 'flat_per_unit'
-      "$#{flat_amount} per unit"
+      "$#{flat_amount} per unit (times the deal's quantity)"
     when 'volume_bonus'
-      "$#{flat_amount} bonus if #{units_threshold}+ units per #{threshold_period}"
+      "$#{flat_amount} bonus once per #{threshold_period == 'quarterly' ? 'quarter' : 'month'}, on the #{units_threshold.to_i.ordinalize} unit"
     when 'addon_commission'
       "#{(rate * 100).round(2)}% of add-ons (delivery, setup, etc.)"
     else

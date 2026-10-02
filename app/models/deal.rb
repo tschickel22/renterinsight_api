@@ -769,25 +769,31 @@ class Deal < ApplicationRecord
   # Determine which commission plan applies to this deal (PUBLIC - called from controller)
   def determine_commission_plan
     return commission_plan if commission_plan_id.present?
-    
+
     salesperson = primary_salesperson || owner
     return nil unless salesperson && company
-    
-    user_plan = company.commission_plans
-      .active.current
-      .where(assigned_user_id: salesperson.id)
-      .first
-    return user_plan if user_plan
-    
-    if salesperson.role.present?
-      role_plan = company.commission_plans
-        .active.current
-        .where(assigned_role: salesperson.role)
-        .first
-      return role_plan if role_plan
-    end
-    
-    company.commission_plans.active.current.defaults.first
+
+    CommissionPlan.for_salesperson(salesperson, company)
+  end
+
+  # New or used, for commission components limited to one. deal_type on most
+  # deals holds the financing type (Chattel, FHA, Land in Lieu), so the unit's
+  # condition decides when deal_type does not say. nil when neither knows.
+  def commission_deal_type
+    kind = deal_type.to_s.strip.downcase
+    return kind if %w[new used].include?(kind)
+
+    condition = vehicle&.condition.to_s.strip.downcase
+    %w[new used].include?(condition) ? condition : nil
+  end
+
+  COMMISSION_VERTICALS = { 'mh' => 'mh', 'manufactured_home' => 'mh', 'manufactured_housing' => 'mh',
+                           'rv' => 'rv' }.freeze
+
+  # mh or rv, for commission components limited to one: the deal's vertical,
+  # else the company's industry. nil when neither says.
+  def commission_vertical
+    COMMISSION_VERTICALS[vertical.to_s.strip.downcase] || COMMISSION_VERTICALS[company&.industry.to_s]
   end
 
   # Generate commission payment records for this deal's participants. Called from the GL

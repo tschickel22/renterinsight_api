@@ -20,30 +20,24 @@ class CommissionPlan < ApplicationRecord
     Current.location_filtered? ? where(location_id: Current.location_id) : all
   }
   
-  # Find the applicable plan for a user
+  # The plan that applies to a salesperson's deals. Priority: assigned to the
+  # person, then to one of their roles, then the company default. Roles are the
+  # RBAC role keys the plan form offers, plus the legacy users.role column.
   def self.for_salesperson(user, company)
-    # Priority: User-specific > Role-based > Company default
-    plan = company.commission_plans.active.current
-                  .where(assigned_user_id: user.id)
-                  .order(created_at: :desc)
-                  .first
-    
-    return plan if plan.present?
-    
-    # Try role-based plan (check if user has role string attribute)
-    if user.respond_to?(:role) && user.role.present?
-      plan = company.commission_plans.active.current
-                    .where(assigned_role: user.role)
-                    .order(created_at: :desc)
-                    .first
-      
-      return plan if plan.present?
-    end
-    
-    # Fall back to company default
-    company.commission_plans.active.current.defaults.first
+    plans = company.commission_plans.active.current.order(created_at: :desc)
+
+    plans.find_by(assigned_user_id: user.id) ||
+      (role_keys_for(user, company).any? && plans.find_by(assigned_role: role_keys_for(user, company))) ||
+      plans.defaults.first
   end
-  
+
+  def self.role_keys_for(user, company)
+    rbac = user.user_role_assignments.joins(:role)
+               .where('user_role_assignments.company_id = ? OR user_role_assignments.company_id IS NULL', company.id)
+               .pluck('roles.key')
+    (rbac + [user.try(:role)]).compact_blank.uniq
+  end
+
   # Check if plan is valid for a given date
   def valid_for_date?(date = Date.today)
     (effective_date.nil? || effective_date <= date) &&
