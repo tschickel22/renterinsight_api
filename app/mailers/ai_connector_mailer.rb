@@ -5,11 +5,14 @@
 # to ask. Sent once per admin when the admin.ai_connector add-on is switched
 # on. Platform-branded: it comes from the platform, not the dealership.
 class AiConnectorMailer < ApplicationMailer
-  # The plugin's listing in Claude's directory, when set. The email always
-  # gives the click path (Customize, Plugins, Discover); this adds a direct
-  # link.
+  layout 'branded_mailer'
+
+  # The DealerTide plugin in Claude's directory (connector plus skills).
+  # CLAUDE_PLUGIN_DIRECTORY_URL overrides it if the listing ever moves.
+  DIRECTORY_URL = 'https://claude.ai/customize/plugins/id/acda747f-bac8-4859-8784-6a4d3ae0c4d4%40anthropic-plugin-directory'
+
   def self.directory_url
-    ENV['CLAUDE_PLUGIN_DIRECTORY_URL'].presence
+    ENV['CLAUDE_PLUGIN_DIRECTORY_URL'].presence || DIRECTORY_URL
   end
 
   def enabled(company_id, user_id)
@@ -18,6 +21,10 @@ class AiConnectorMailer < ApplicationMailer
     return if @company.nil? || @user.nil? || @user.email.blank?
 
     @brand = Brand.current
+    branding = (PlatformSetting.branding || {}).to_h.with_indifferent_access
+    @brand_primary = branding[:primaryColor].presence || '#0F2A52'
+    @brand_accent = branding[:secondaryColor].presence || '#00AFA8'
+    @brand_font = "#{branding[:fontFamily].presence || 'Poppins'}, -apple-system, 'Segoe UI', Arial, sans-serif"
     app = Brand.app_url.to_s.chomp('/')
     @ai_apps_url = "#{app}/settings?tab=ai-apps"
     @roles_url = "#{app}/settings?tab=users"

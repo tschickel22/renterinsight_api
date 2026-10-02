@@ -25,13 +25,21 @@ RSpec.describe AiConnectorMailer, type: :mailer do
       expect(mail.text_part.decoded + mail.html_part.decoded).not_to match(/[–—]/)
     end
 
-    it 'adds a direct link to the directory listing when it is set' do
+    it 'links the plugin in Claude, and the link can be overridden' do
       admin = user!('company_admin')
-      expect(described_class.enabled(company.id, admin.id).text_part.decoded).not_to include('go straight to the listing')
+      expect(described_class.enabled(company.id, admin.id).html_part.decoded)
+        .to include(described_class::DIRECTORY_URL, 'Add DealerTide in Claude')
 
-      allow(described_class).to receive(:directory_url).and_return('https://claude.ai/directory/dealertide')
-      expect(described_class.enabled(company.id, admin.id).text_part.decoded)
-        .to include('https://claude.ai/directory/dealertide')
+      allow(described_class).to receive(:directory_url).and_return('https://claude.ai/directory/moved')
+      expect(described_class.enabled(company.id, admin.id).text_part.decoded).to include('https://claude.ai/directory/moved')
+    end
+
+    it 'uses the platform brand colors and logo' do
+      admin = user!('company_admin')
+      PlatformSetting.branding = { 'primaryColor' => '#0F2A52', 'secondaryColor' => '#00AFA8',
+                                   'logo' => 'https://cdn.example.com/dealertide-logo.png' }
+      html = described_class.enabled(company.id, admin.id).html_part.decoded
+      expect(html).to include('#0F2A52', '#00AFA8', 'https://cdn.example.com/dealertide-logo.png')
     end
 
     it 'sends nothing for a user of another company' do

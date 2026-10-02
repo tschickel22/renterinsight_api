@@ -1,0 +1,45 @@
+<%# Platform-branded email frame: logo on the brand color, a white card, and a
+    footer. Colors and logo come from Platform Admin branding (PlatformSetting),
+    so a rebrand is a settings change. Inline styles only: most email clients
+    ignore style blocks. %>
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body style="margin:0;padding:0;background:#f3f5f8;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;">
+      <tr>
+        <td align="center" style="padding:24px 12px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                 style="max-width:600px;background:#ffffff;border-radius:10px;overflow:hidden;
+                        font-family:<%= @brand_font %>;color:#1f2937;font-size:15px;line-height:1.6;">
+            <tr>
+              <td align="center" style="background:<%= @brand_primary %>;padding:26px 20px;">
+                <% if @brand.logo_url.present? %>
+                  <img src="<%= @brand.logo_url %>" alt="<%= @brand.name %>" width="180"
+                       style="display:block;max-width:180px;height:auto;border:0;">
+                <% else %>
+                  <span style="color:#ffffff;font-size:24px;font-weight:bold;"><%= @brand.name %></span>
+                <% end %>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px 28px 8px 28px;">
+                <%= yield %>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px 26px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;">
+                You are receiving this because you are an administrator of <%= @company&.name %> in <%= @brand.name %>.
+                Questions? <a href="mailto:<%= @brand.support_email %>" style="color:<%= @brand_accent %>;"><%= @brand.support_email %></a>
+                <br>&copy; <%= Time.current.year %> <%= @brand.name %>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

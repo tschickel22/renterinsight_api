@@ -1,4 +1,4 @@
-<h2><%= @brand.name %> now works with Claude</h2>
+<h2 style="margin:0 0 14px 0;font-size:22px;color:<%= @brand_primary %>;"><%= @brand.name %> now works with Claude</h2>
 
 <p>Hi <%= @user.first_name.presence || 'there' %>,</p>
 
@@ -8,26 +8,30 @@
   plans, using the same information they already see in <%= @brand.name %>.
 </p>
 
-<h3>Step 1. Choose who can use it (admins)</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Step 1. Choose who can use it (admins)</h3>
 <p>
   You are an admin, so you already have access. For anyone else, open
-  <a href="<%= @roles_url %>">Settings, Users, Roles &amp; Permissions</a> in <%= @brand.name %> and give their role
+  <a style="color:<%= @brand_accent %>;" href="<%= @roles_url %>">Settings, Users, Roles &amp; Permissions</a> in <%= @brand.name %> and give their role
   the <strong>AI Connector</strong> permission: <strong>Read</strong> to connect, <strong>Update</strong> to let
   Claude make changes for them.
 </p>
 
-<h3>Step 2. Add the <%= @brand.name %> plugin in Claude</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Step 2. Add the <%= @brand.name %> plugin in Claude</h3>
 <p>The plugin brings both pieces at once: the connection to <%= @brand.name %> and six ready-made skills. You need a
   Claude Pro, Max, Team or Enterprise plan.</p>
 <ol>
-  <li>Open Claude at <a href="https://claude.ai">claude.ai</a> or in the Claude desktop app.</li>
+  <li>Open Claude at <a style="color:<%= @brand_accent %>;" href="https://claude.ai">claude.ai</a> or in the Claude desktop app.</li>
   <li>Select <strong>Customize</strong> (in the sidebar), then <strong>Plugins</strong>.</li>
   <li>Select <strong>Discover</strong>, search for <strong><%= @brand.name %></strong>, open it and select
-      <strong>Add</strong>.<% if @directory_url %> Or go straight to the listing:
-      <a href="<%= @directory_url %>"><%= @directory_url %></a>.<% end %></li>
+      <strong>Add</strong>. Or use the button below to go straight to it.</li>
 </ol>
+<p style="text-align:center;margin:18px 0;">
+  <a href="<%= @directory_url %>"
+     style="display:inline-block;background:<%= @brand_accent %>;color:#ffffff;text-decoration:none;
+            font-weight:bold;padding:12px 26px;border-radius:6px;">Add <%= @brand.name %> in Claude</a>
+</p>
 
-<h3>Step 3. Connect your <%= @brand.name %> account</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Step 3. Connect your <%= @brand.name %> account</h3>
 <ol>
   <li>Still on the plugin's page, open its <strong>Connectors</strong> tab.</li>
   <li>Next to <strong><%= @brand.name %></strong>, select <strong>Add</strong> if it says Not added, then
@@ -41,7 +45,7 @@
   <%= @brand.name %> connector for the team first (they select <strong>Connect for your team</strong>). Each person
   then connects with their own <%= @brand.name %> login.</p>
 
-<h3>Step 4. Use it in a chat</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Step 4. Use it in a chat</h3>
 <ol>
   <li>Start a new chat. Select <strong>+</strong> in the message box, then <strong>Connectors</strong>, and make
       sure <strong><%= @brand.name %></strong> is switched on.</li>
@@ -51,7 +55,7 @@
       <%= @brand.name %> skills.</li>
 </ol>
 
-<h3>Everyday questions</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Everyday questions</h3>
 <ul>
   <li>"Show my open deals by stage."</li>
   <li>"Find Maria Lopez and tell me where her deal stands."</li>
@@ -62,7 +66,7 @@
   <li>"Create a task for me to call John Lopez tomorrow at 10."</li>
 </ul>
 
-<h3>Bigger jobs (these use the built in skills)</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Bigger jobs (these use the built in skills)</h3>
 <ul>
   <li>"Which of my leads are going cold, and what should we do about them?"</li>
   <li>"My bank feed is behind. Help me get it caught up."</li>
@@ -72,11 +76,11 @@
   <li>"Help me close last month."</li>
 </ul>
 
-<h3>Good to know</h3>
+<h3 style="margin:22px 0 6px 0;font-size:16px;color:<%= @brand_primary %>;">Good to know</h3>
 <ul>
   <li>Claude sees only what each person can see in <%= @brand.name %>, at their locations.</li>
   <li>It asks before every change, and every change is recorded. You can review and undo them under
-      <a href="<%= @ai_apps_url %>">Settings, Integrations, AI Apps</a>.</li>
+      <a style="color:<%= @brand_accent %>;" href="<%= @ai_apps_url %>">Settings, Integrations, AI Apps</a>.</li>
   <li>It never messages your customers, activates campaigns, workflows, budgets or commission plans, pays bills
       or deletes records. Those stay in <%= @brand.name %>.</li>
   <li>Dealer cost and gross stay hidden from Claude unless you turn on "Let AI apps see dealer cost and gross"
@@ -84,6 +88,6 @@
 </ul>
 
 <p>
-  More detail: <a href="<%= @docs_url %>"><%= @docs_url %></a>. Questions? Write to
-  <a href="mailto:<%= @brand.support_email %>"><%= @brand.support_email %></a>.
+  More detail: <a style="color:<%= @brand_accent %>;" href="<%= @docs_url %>"><%= @docs_url %></a>. Questions? Write to
+  <a style="color:<%= @brand_accent %>;" href="mailto:<%= @brand.support_email %>"><%= @brand.support_email %></a>.
 </p>
