@@ -31,10 +31,10 @@ module McpTools
       to = ListTool.parse_date(end_date, 'end_date') || Date.current
       raise UserError, 'start_date must be on or before end_date.' if from > to
 
-      payload = { as_of: Date.current.iso8601, skipped: [] }
+      payload = { as_of: Date.current.iso8601, dates_apply_to: DATES_APPLY_TO, skipped: [] }
       section(ctx, payload, 'financial_reports', :profit_and_loss) { profit(ctx, from, to) }
       section(ctx, payload, 'financial_reports', :cash) { cash(ctx) }
-      section(ctx, payload, 'bank_accounts_accounting', :bank_feed) { bank_feed(ctx) }
+      section(ctx, payload, 'bank_accounts_accounting', :bank_feed) { bank_feed(ctx, from, to) }
       section(ctx, payload, 'bills', :bills) { bills(ctx) }
       section(ctx, payload, 'finance', :customer_invoices) { ListInvoices.aging(AccountingAccess.invoices(ctx)) }
       payload[:url] = ctx.app_url('/accounting')
@@ -141,9 +141,15 @@ module McpTools
               "#{' A bank account linked to a GL account that is not a bank or cash account is left out of the total.' if counted.size < accounts.size}" }
     end
 
-    def self.bank_feed(ctx)
+    DATES_APPLY_TO = 'start_date and end_date apply to profit_and_loss only, plus the bank_feed counts named ' \
+                     'in_period and through_period_end. Cash, the rest of bank_feed, bills and customer_invoices ' \
+                     'are as of today.'
+
+    def self.bank_feed(ctx, from, to)
       unmatched = AccountingAccess.bank_transactions(ctx).where(status: 'unmatched')
-      { unmatched: unmatched.count, unmatched_total_in: AccountingAccess.money(unmatched.where('amount > 0').sum(:amount)),
+      { unmatched: unmatched.count,
+        unmatched_in_period: unmatched.where(transaction_date: from..to).count,
+        unmatched_through_period_end: unmatched.where('transaction_date <= ?', to).count, unmatched_total_in: AccountingAccess.money(unmatched.where('amount > 0').sum(:amount)),
         unmatched_total_out: AccountingAccess.money(unmatched.where('amount < 0').sum(:amount).abs),
         oldest_unmatched: unmatched.minimum(:transaction_date)&.iso8601,
         last_reconciled: ctx.company.bank_reconciliations.where(status: 'completed').maximum(:statement_date)&.iso8601,

@@ -20,7 +20,7 @@ Work only from what the data actually shows:
 - **Late phase:** a phase that is not completed or skipped and is past its `estimated_completion`. Give the number of days late.
 - **Stuck:** a phase `in_progress` whose `started_at` is well past its `estimated_days`, or one with no steps checked off.
 - **Blocked:** an open task with status `blocked`, or a step marked `customer_must_act` that has no `customer_acknowledged_at` yet. The second kind is waiting on the buyer, not the crew.
-- **Cost drift:** only when `costs` is present. Compare `actual_cost` with `budget` and give the variance. When `costs` is missing, say nothing about money.
+- **Cost drift:** only when `costs` is present. Compare `actual_cost` with `budget` and give the variance. When `costs` is missing and `costs_hidden` explains why, say once in the internal review that job costs are hidden and how the dealer can turn them on; never in a customer update. When both are missing, the project simply has no costs recorded; say nothing about money.
 - **Too thin to judge:** if a project has no estimated dates on its phases and no due dates on its tasks, say it cannot be called late or on time and recommend adding phase dates in DealerTide. Do not guess. It's common for steps to carry no dates of their own. A step with `due_source: "phase"` inherited its phase's date, so treat it as an approximate due date.
 
 Normal setup order is: site prep, foundation or piers, delivery, set and leveling, marriage line on multi-sections, utilities, skirting and steps, inspections, punch list, then move-in or the certificate of occupancy. Point it out when a later phase has started while an earlier required phase is still open.

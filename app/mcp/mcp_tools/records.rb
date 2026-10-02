@@ -226,7 +226,8 @@ module McpTools
       {
         name: deal.name, deal_number: deal.deal_number, stage: deal.stage, stage_label: stage_label(deal.stage),
         selling_price: deal.selling_price&.to_f, probability: deal.probability,
-        expected_close_date: iso(deal.expected_close_date), customer: deal_customer(deal),
+        expected_close_date: iso(deal.expected_close_date), actual_close_date: iso(deal.actual_close_date),
+        delivery_date: iso(deal.delivery_date), customer: deal_customer(deal),
         salesperson: user_name(deal.primary_salesperson_id || deal.owner_id || deal.user_id),
         unit: deal.vehicle_id && ctx.company.vehicles.where(id: deal.vehicle_id).pick(:stock_number),
         location: location_name(deal.location_id), updated_at: iso(deal.updated_at),

@@ -22,17 +22,27 @@ otherwise the current month. Say which one you picked.
 
 Call `accounting_summary` for the month. Report revenue, cost of sales, expenses and
 net income in four lines, cash per bank account, and anything the tool says it
-skipped for permissions.
+skipped for permissions. Read `dates_apply_to`: only the P&L follows the month's
+dates; cash, bills and invoices are as of today. Say "as of today" when you report them.
+If `profit_and_loss.notes` says invoices are not set to post to the books, say that
+plainly: revenue from invoices will not show in the P&L until it is turned on.
+
+**An empty month is a finding, not a checklist.** If revenue, cost of sales and
+expenses are all zero, say first that nothing was posted to the month, give the
+likely reasons the tools show (invoices not set to post, a bank feed not worked,
+no deals closed), and keep the rest short: skip sections that come back empty with
+one line each instead of walking every step.
 
 ## 2. Bank feed
 
-From the summary (or `list_bank_transactions` with status unmatched and the month's
-dates): how many transactions are still unmatched for the month and before it, and
-the oldest. Unmatched bank lines mean the P&L above is incomplete; say so in those
-words when there are many.
+From the summary's `bank_feed`: `unmatched_in_period` for the month,
+`unmatched_through_period_end` for the month and before it, and the oldest.
+Unmatched bank lines mean the P&L above is incomplete; say so in those words when
+there are many.
 
-If there are more than a handful, offer to run the bank-feed-cleanup skill now
-rather than working them here.
+If there are more than five, you must end this section by asking: "Want me to work
+through the bank feed now?" and, on yes, follow the bank-feed-cleanup skill. Do not
+skip this offer, even if the feed was discussed earlier in the conversation.
 
 ## 3. Bills (what we owe)
 
@@ -41,15 +51,20 @@ draft, which have not hit the books. Compare total due soon with cash on hand.
 
 ## 4. Customer invoices (what we are owed)
 
-`list_invoices` with overdue_only: count, total and aging buckets. Name the five
-largest overdue by customer and days. Offer to create follow-up tasks for whoever
-owns those customers (`create_task`), one per invoice, with approval.
+`list_invoices` with overdue_only and sort largest: count, total and aging buckets
+from `totals`, and the five largest overdue by customer, amount and days past due.
+Use `aging_counts` and each invoice's `aging_bucket` rather than matching amounts to
+buckets yourself (several invoices can share one amount). If `more_not_shown` is
+above zero, say how many you did not list. Always offer to create follow-up tasks for
+whoever owns those customers (`create_task`), one per invoice, with approval.
 
 ## 5. Deals
 
-`list_deals` with state "won", then keep the ones closed in the month (check
-expected or actual close date on `fetch`). For each, say whether it shows a delivery
-date and a selling price. If the dealer allows cost visibility and the person can see
+`list_deals` with state "any", closed_from and closed_to set to the month: these are
+the deals actually closed in it (`actual_close_date`). For each, say whether it shows
+a delivery date and a selling price. A won deal with no `actual_close_date` cannot be
+placed in a month; list it separately as "won, close date missing" rather than
+guessing. If the dealer allows cost visibility and the person can see
 it, note deals with no unit cost, which leaves gross wrong. Do not compute gross
 yourself; read what the deal shows.
 

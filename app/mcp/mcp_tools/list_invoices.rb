@@ -4,7 +4,8 @@ module McpTools
   class ListInvoices < ListTool
     tool_name 'list_invoices'
     title 'List customer invoices'
-    description 'Customer invoices (accounts receivable), oldest due first. Defaults to open invoices (sent, viewed, ' \
+    description 'Customer invoices (accounts receivable), oldest due first, or largest balance first with ' \
+                'sort largest. Defaults to open invoices (sent, viewed, ' \
                 'partly paid or overdue; drafts are not owed yet). overdue_only lists past due ones. Filter by status ' \
                 'or an invoice number/customer search. totals.matching_invoices counts every invoice the filter ' \
                 'matched; totals.open_invoices, open_balance and the aging buckets cover the matching invoices that ' \
@@ -15,11 +16,12 @@ module McpTools
         status: { type: 'string', enum: %w[open draft finalized sent viewed partial overdue paid cancelled any] },
         overdue_only: { type: 'boolean' },
         query: { type: 'string', description: 'Invoice number or customer name contains' },
+        sort: { type: 'string', enum: %w[oldest largest], description: 'oldest due first (default) or largest amount due first' },
         limit: { type: 'integer', minimum: 1, maximum: Context::MAX_ROWS }
       }
     )
 
-    def self.perform(ctx, status: 'open', overdue_only: false, query: nil, limit: 20)
+    def self.perform(ctx, status: 'open', overdue_only: false, query: nil, sort: 'oldest', limit: 20)
       AccountingAccess.require!(ctx, 'finance', 'read')
       rel = AccountingAccess.invoices(ctx).includes(:contact)
       case status.to_s
@@ -40,9 +42,12 @@ module McpTools
       # always counts open invoices with a balance, the same set
       # accounting_summary counts.
       payload = { totals: { matching_invoices: rel.count }.merge(aging(rel)) }
-      rows = rel.order(Arel.sql('invoices.due_date ASC NULLS LAST'), :id).limit(ctx.row_limit(limit)).to_a
+      order = sort.to_s == 'largest' ? Arel.sql('invoices.amount_due DESC NULLS LAST, invoices.due_date ASC') : Arel.sql('invoices.due_date ASC NULLS LAST')
+      rows = rel.order(order, :id).limit(ctx.row_limit(limit)).to_a
       items = rows.map { |i| AccountingAccess.invoice(ctx, i) }
-      Base::Result.new(payload: { count: items.size, items: items }.merge(payload), count: items.size)
+      shown = { count: items.size, items: items }
+      shown[:more_not_shown] = payload[:totals][:matching_invoices] - items.size if payload[:totals][:matching_invoices] > items.size
+      Base::Result.new(payload: shown.merge(payload), count: items.size)
     end
 
     COUNTED = 'Open invoices with a balance due: status finalized, sent, viewed, partial or overdue, and amount due ' \

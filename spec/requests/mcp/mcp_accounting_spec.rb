@@ -322,6 +322,26 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
       expect(any).to include('matching_invoices' => 4, 'open_invoices' => 2)
     end
 
+    it 'lists the largest balances first on request and says how many it did not show' do
+      invoice!('INV-SMALL', status: 'overdue', due: Date.current - 400, owed: 100)
+      invoice!('INV-BIG', status: 'overdue', due: Date.current - 40, owed: 9000)
+      invoice!('INV-MID', status: 'overdue', due: Date.current - 90, owed: 500)
+
+      oldest = call_tool(token, 'list_invoices', overdue_only: true, limit: 2).first
+      expect(oldest['items'].map { |i| i['invoice_number'] }).to eq(%w[INV-SMALL INV-MID])
+      expect(oldest['more_not_shown']).to eq(1)
+
+      largest = call_tool(token, 'list_invoices', overdue_only: true, sort: 'largest', limit: 2).first
+      expect(largest['items'].map { |i| i['invoice_number'] }).to eq(%w[INV-BIG INV-MID])
+    end
+
+    it 'says which sections follow the dates, and splits the bank feed by period' do
+      summary = call_tool(token, 'accounting_summary', start_date: (Date.current - 10).iso8601,
+                                                        end_date: Date.current.iso8601).first
+      expect(summary['dates_apply_to']).to include('profit_and_loss only', 'as of today')
+      expect(summary['bank_feed'].keys).to include('unmatched_in_period', 'unmatched_through_period_end')
+    end
+
     it 'says when invoices and payments are not set to post, so a zero P&L is explained' do
       notes = call_tool(token, 'accounting_summary').first.dig('profit_and_loss', 'notes')
       expect(notes.join).to include('auto post invoices is off', 'auto post payments is off')

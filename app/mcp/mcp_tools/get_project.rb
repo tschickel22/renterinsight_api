@@ -31,6 +31,10 @@ module McpTools
         delivery_address: project.delivery_address_display.presence,
         customer_portal_on: project.client_visible,
         costs: (ProjectSupport.cost_fields(project) if costs),
+        costs_hidden: (unless costs
+                         'Job costs are hidden: the dealer has not turned on "Let AI apps see dealer cost and gross" ' \
+                           'under Settings, Integrations, AI Apps, or this person cannot read projects.'
+                       end),
         phases: phases.map { |ph| ProjectSupport.phase_detail(ctx, ph, costs: costs) },
         open_tasks: open_tasks.map { |t| ProjectSupport.task_summary(ctx, t, phase_name: phase_names[t.project_phase_id], costs: costs) },
         open_task_count: project.tasks.active.where(status: ProjectSupport::OPEN_TASK_STATUSES).count

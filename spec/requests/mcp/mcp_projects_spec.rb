@@ -88,11 +88,13 @@ RSpec.describe 'MCP project tools', :mcp, type: :request do
       expect(result['phases'].first['steps'].first).to include('title' => 'Pour footers', 'status' => 'pending')
       expect(result['open_tasks'].first).to include('title' => 'Order skirting', 'assigned_to' => user.full_name)
       expect(result).not_to have_key('costs')
+      expect(result['costs_hidden']).to include('Settings, Integrations, AI Apps')
       expect(result.to_s).not_to include('22000')
 
       Setting.set('Company', company.id, 'mcp_settings', { 'show_costs' => true })
       result, = call_tool(token, 'get_project', id: "project:#{p.id}")
       expect(result['costs']).to include('budget' => 20_000.0, 'actual_cost' => 22_000.0, 'over_budget' => true)
+      expect(result).not_to have_key('costs_hidden')
     end
 
     it 'lists steps and tasks across projects, using the phase date when a step has none' do
