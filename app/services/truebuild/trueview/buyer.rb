@@ -32,9 +32,11 @@ module Truebuild
       # url is the exact image the layers were cut against, so they line up.
       def call
         plan = self.plan
-        done = done_layers(plan)
-        skipped = skipped_layers(plan)
+        # A drawing under an older cut shows until its re-cut is done, so a
+        # Layer::VERSION bump does not blank every finish at once.
         hidden = hidden_layers(plan)
+        done = older_layers(plan).except(*hidden).merge(done_layers(plan))
+        skipped = skipped_layers(plan)
         requeue_stale(plan)
         drawing = rows(plan).where(status: %w[queued running]).count
         photos = plan.group_by { |p| p[:photo] }.map do |photo, items|
@@ -218,6 +220,14 @@ module Truebuild
       def hidden_layers(plan)
         rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
+      end
+
+      # [photo, selection_key, prompt] => layer_url of a passed drawing
+      # under an older cut, newest first.
+      def older_layers(plan)
+        rows(plan).done.where.not(layer_url: nil).order(:id)
+                  .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
       end
 
       # The newest drawing per finish made under an older cut. A rejected one

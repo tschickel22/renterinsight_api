@@ -37,15 +37,17 @@ module Truebuild
     end
 
     # Models whose TrueView is drawn: every photo it draws on has finishes
-    # drawn under the current cut. Cached briefly; a factory run moves it.
+    # drawn, under any cut. A new Layer::VERSION re-cuts drawings a model
+    # already has; counting only the current cut emptied Design Your Home
+    # on every bump until each model was visited again. Cached briefly; a
+    # factory run moves it.
     def self.trueview_ready(variant_ids)
       return Set.new if variant_ids.empty?
 
-      Rails.cache.fetch("truebuild:trueview_ready:v1:#{Digest::SHA256.hexdigest(variant_ids.sort.join(','))[0, 16]}", expires_in: 10.minutes) do
+      Rails.cache.fetch("truebuild:trueview_ready:v2:#{Digest::SHA256.hexdigest(variant_ids.sort.join(','))[0, 16]}", expires_in: 10.minutes) do
         variants = CatalogPlanVariant.where(id: variant_ids).to_a
         photos = variants.to_h { |v| [v.id, Trueview::PhotoChoice.photos(v).map(&:last)] }
         drawn = TruebuildRender.done.where(purpose: 'layer', model_key: Trueview::Buyer::MODEL, source_url: photos.values.flatten.uniq)
-                               .where("(usage->>'mask_version')::int >= ?", Trueview::Layer::VERSION)
                                .distinct.pluck(:source_url).to_set
         photos.select { |_, urls| urls.any? && urls.all? { |u| drawn.include?(u) } }.keys.to_set
       end

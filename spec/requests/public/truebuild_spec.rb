@@ -230,8 +230,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
     TruebuildRender.create!(catalog_plan_variant: variant, source_url: photo, room: 'exterior', purpose: 'layer', status: 'done',
                             selection: [{ 'surface' => 'Siding', 'value' => 'Clay' }], selection_key: 'k', model_key: 'nb2-lite',
                             provider: 'gemini', model: 'lite', prompt: 'p', layer_url: 'https://b/l.webp',
-                            usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+                            usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION - 1 })
     Rails.cache.clear
+    # Drawn under an older cut still counts: a version bump must not empty the list.
     expect(names.call(trueview_only: true)).to eq(['Belvidere'])
     expect(JSON.parse(response.body)['models'].first['trueview']).to be(true)
     # Only the sizes TrueView is drawn for: another size of the plan drops out.
@@ -399,6 +400,19 @@ RSpec.describe 'Public TrueBuild', type: :request do
       sets = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
       expect(sets['Siding']).to contain_exactly('White', 'Olive')
       expect(sets['Shutters']).to eq(['Black'])
+    end
+
+    it 'shows the older drawing while it is cut again, and not once the new check rejects it' do
+      trueview
+      clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
+      clay_row.update!(status: 'done', image_url: 'https://b/clay.png', layer_url: 'https://b/clay-old.webp', usage: { 'mask_version' => 2 })
+      expect(trueview['photos'].first['layers']).to include(clay.id.to_s => 'https://b/clay-old.webp')
+
+      recut = TruebuildRender.where("usage ? 'recut_from'").sole
+      recut.update!(status: 'rejected', layer_url: 'https://b/clay-new.webp', usage: recut.usage.merge('mask_version' => Truebuild::Trueview::Layer::VERSION))
+      body = trueview
+      expect(body['photos'].first['layers']).not_to have_key(clay.id.to_s)
+      expect(body['photos'].first['unavailable']).to include(clay.id)
     end
 
     it 'checks a held-back drawing again, cut again for free, rather than paying for a new one' do
