@@ -16,9 +16,6 @@ class Bill < ApplicationRecord
   belongs_to :journal_entry, optional: true
   belongs_to :payment_journal_entry, class_name: 'JournalEntry', optional: true
   belongs_to :created_by, class_name: 'User', optional: true
-  # Set on open bills carried over by a QuickBooks switch. The switch's
-  # opening entry already holds their payable, so they never post.
-  belongs_to :accounting_import, optional: true
 
   has_many :bill_line_items, dependent: :destroy
   has_many :bill_payments, dependent: :destroy
@@ -179,7 +176,6 @@ class Bill < ApplicationRecord
 
   def auto_post_bill_je
     return if journal_entry_id.present?
-    return if accounting_import_id.present?
     ap = resolve_ap_account
     return record_gl_post_failure!('No Accounts Payable account is set on the bill or in Accounting Settings') unless ap
     return if bill_line_items.empty?

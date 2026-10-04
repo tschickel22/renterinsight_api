@@ -24,13 +24,6 @@ class BankTransactionImportService
 
         next if txn_date.nil? || amount.nil? || amount.zero?
 
-        # Lines before the feed start date are already in the opening
-        # balances (set by the QuickBooks switch to the day after cutover).
-        if bank_account.feed_start_date && txn_date < bank_account.feed_start_date
-          skipped += 1
-          next
-        end
-
         fitid = Digest::SHA256.hexdigest(
           "#{txn_date}|#{amount}|#{description}|#{reference}"
         )[0..31]

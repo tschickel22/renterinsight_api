@@ -5,25 +5,12 @@ class AccountingImport < ApplicationRecord
   belongs_to :user
 
   SOURCE_TYPES = %w[quickbooks_online quickbooks_desktop freshbooks csv].freeze
-  # draft, posted and rolled_back belong to a QuickBooks Online switch
-  # (import_config['mode'] == 'migration'; see Accounting::QboMigration).
-  STATUSES = %w[pending in_progress completed failed partial draft posted rolled_back].freeze
-
-  has_many :invoices, dependent: :nullify
-  has_many :bills, dependent: :nullify
-  has_many :bank_reconciliations, dependent: :nullify
+  STATUSES = %w[pending in_progress completed failed partial].freeze
 
   validates :source_type, presence: true, inclusion: { in: SOURCE_TYPES }
   validates :status, inclusion: { in: STATUSES }
 
   scope :recent, -> { order(created_at: :desc) }
-  scope :migrations, -> { where(source_type: 'quickbooks_online').where("import_config->>'mode' = 'migration'") }
-
-  before_save :stringify_config_keys
-
-  def migration?
-    import_config.is_a?(Hash) && import_config['mode'] == 'migration'
-  end
 
   def in_progress?
     status == 'in_progress'
@@ -62,12 +49,5 @@ class AccountingImport < ApplicationRecord
       at: Time.current.iso8601
     }]
     save
-  end
-
-  private
-
-  def stringify_config_keys
-    self.import_config = import_config.deep_stringify_keys if import_config.is_a?(Hash)
-    self.results = results.deep_stringify_keys if results.is_a?(Hash)
   end
 end

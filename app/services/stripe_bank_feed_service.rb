@@ -58,10 +58,6 @@ class StripeBankFeedService
     end
 
     since = bank_account.stripe_fc_last_synced_at || 90.days.ago
-    # Lines before the feed start date are already in the opening balances
-    # (set by the QuickBooks switch to the day after cutover).
-    feed_start = bank_account.feed_start_date
-    since = [since, feed_start.beginning_of_day].max if feed_start
     imported = 0
     skipped = 0
     has_more = true
@@ -85,11 +81,6 @@ class StripeBankFeedService
 
       txn_list.data.each do |txn|
         if bank_account.bank_transactions.exists?(stripe_txn_id: txn.id)
-          skipped += 1
-          next
-        end
-
-        if feed_start && Time.at(txn.transacted_at).to_date < feed_start
           skipped += 1
           next
         end

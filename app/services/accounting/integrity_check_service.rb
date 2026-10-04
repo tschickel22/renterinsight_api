@@ -83,7 +83,6 @@ module Accounting
                         .where.not(total: 0)
                         .where('invoices.created_at < ?', 1.day.ago)
                         .where.not(id: posted)
-                        .where(accounting_import_id: nil) # carried over by a QuickBooks switch; never posts
       missing = missing.where(is_deleted: [false, nil]) if Invoice.column_names.include?('is_deleted')
       missing = missing.where.not(id: deal_sale_invoices.select(:id)) # booked by the deal; see deal_invoice_issues
       count = missing.count

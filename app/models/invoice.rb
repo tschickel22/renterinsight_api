@@ -42,9 +42,6 @@ class Invoice < ApplicationRecord
   belongs_to :source, polymorphic: true, optional: true
   belongs_to :recipient, polymorphic: true, optional: true
   belongs_to :sales_rep, class_name: 'User', optional: true
-  # Set on open invoices carried over by a QuickBooks switch. The switch's
-  # opening entry already holds their receivable, so they never post.
-  belongs_to :accounting_import, optional: true
   
   has_many :invoice_items, dependent: :destroy
   has_many :payment_applications, as: :applicable, dependent: :destroy
@@ -68,7 +65,6 @@ class Invoice < ApplicationRecord
   after_commit :auto_post_to_accounting, on: [:create, :update], if: :should_auto_post_to_accounting?
 
   def should_auto_post_to_accounting?
-    return false if accounting_import_id.present?
     return false unless previous_changes.key?('status') || saved_change_to_status?
     %w[finalized sent viewed partial paid overdue].include?(status)
   end
