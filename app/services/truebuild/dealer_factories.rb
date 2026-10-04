@@ -44,13 +44,18 @@ module Truebuild
 
     # Released factories the dealer does not have yet, within SUGGEST_MILES of
     # any of their locations, nearest first. Where a location or factory
-    # cannot be placed, a factory in the same state counts as near.
+    # cannot be placed, a factory in the same state counts as near; with no
+    # address anywhere, nothing is suggested and the search still lists all.
     # => [{ factory:, miles: }]
     def suggestions(company)
       given = company.dealer_factories.pluck(:factory_id)
-      locations = company.locations.where(is_deleted: [false, nil])
-      points = locations.filter_map { |l| ZipPoint.call(l.zip_code) }
-      states = locations.filter_map { |l| state(l.state) }.uniq
+      # Each location's address, or the company's where a location has none.
+      places = company.locations.where(is_deleted: [false, nil]).map do |l|
+        [l.zip_code.presence || company.zip_code, l.state.presence || company.state]
+      end
+      places = [[company.zip_code, company.state]] if places.empty?
+      points = places.filter_map { |zip, _| ZipPoint.call(zip) }.uniq
+      states = places.filter_map { |_, st| state(st) }.uniq
       Factory.truebuild_released.where.not(id: given).includes(:manufacturer).filter_map do |f|
         point = f.latitude && f.longitude ? [f.latitude, f.longitude] : ZipPoint.call(f.zip)
         miles = (points.map { |p| ZipPoint.miles(p, point) }.min if point && points.any?)

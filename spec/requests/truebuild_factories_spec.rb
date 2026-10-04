@@ -116,6 +116,12 @@ RSpec.describe 'TrueBuild factories', type: :request do
     get '/api/v1/truebuild_factories', headers: headers
     expect(JSON.parse(response.body)['suggestions']).to contain_exactly(include('name' => 'Topeka', 'miles' => 1))
 
+    # A location with no address uses the company's.
+    company.locations.update_all(zip_code: nil, state: nil)
+    company.update!(zip_code: '80202')
+    get '/api/v1/truebuild_factories', headers: headers
+    expect(JSON.parse(response.body)['suggestions']).to contain_exactly(include('name' => 'Topeka', 'miles' => 1))
+
     post '/api/v1/truebuild_factories', params: { factory_id: topeka.id }, headers: headers
     expect(response).to have_http_status(:created)
     expect(names.call).to eq(['Belvidere'])
