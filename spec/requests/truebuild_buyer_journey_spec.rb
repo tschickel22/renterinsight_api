@@ -13,6 +13,11 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
       c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true })
     end
   end
+  # The buyer is on the dealer's DealerTide site (TruebuildReach).
+  let!(:site) do
+    Website.create!(company_id: company.id, location_id: company.locations.create!(name: 'Main Lot').id, name: 'Summit',
+                    slug: "s-#{SecureRandom.hex(4)}", status: 'published')
+  end
   let(:rep) do
     User.create!(email: "r-#{SecureRandom.hex(4)}@example.com", first_name: 'R', last_name: 'P', password: 'Pass1234!',
                  company_id: company.id, role: 'platform_admin')
@@ -42,7 +47,7 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
 
   def save_design
     post '/public/truebuild/designs', params: {
-      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
+      token: company.public_inventory_token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
       contact: { first_name: 'Tia', last_name: 'May', email: 'tia@example.com' }
     }
     TruebuildDesign.last
@@ -221,13 +226,13 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(JSON.parse(response.body)['designs'].first['share_link']).not_to include('as=')
     expect(JSON.parse(response.body)['designs'].first['dealer_name']).to eq(company.name)
 
-    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: pass }
+    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, website_id: site.id, as: pass }
     expect(JSON.parse(response.body)).to include('signed_in' => true, 'first_name' => 'Tia', 'email' => 'tia@example.com')
 
     leads = Lead.count
     submissions = IntakeSubmission.count
     post '/public/truebuild/designs', params: {
-      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [], as: pass, copied_from: design.public_token
+      token: company.public_inventory_token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [], as: pass, copied_from: design.public_token
     }
     expect(response).to have_http_status(:created)
     version = TruebuildDesign.last
@@ -235,29 +240,30 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect([Lead.count, IntakeSubmission.count]).to eq([leads, submissions])
     expect(WorkflowEvent.where(event_type: 'lead.design_copied')).to be_empty # her own new version
 
-    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: 'forged' }
+    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, website_id: site.id, as: 'forged' }
     expect(JSON.parse(response.body)).to eq('signed_in' => false)
     other = create(:company).tap { |c| c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true }) }
-    get '/public/truebuild/buyer', params: { token: other.public_inventory_token, as: pass }
+    other_site = Website.create!(company_id: other.id, location_id: other.locations.create!(name: 'Lot').id, name: 'Other', slug: "o-#{SecureRandom.hex(4)}")
+    get '/public/truebuild/buyer', params: { token: other.public_inventory_token, website_id: other_site.id, as: pass }
     expect(JSON.parse(response.body)).to eq('signed_in' => false)
   end
 
   it 'saves another version without asking again, and without a second lead or intake entry' do
     post '/public/truebuild/designs', params: {
-      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
+      token: company.public_inventory_token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
       contact: { first_name: 'Sam', last_name: 'May', email: 'sam@example.com' }
     }
     first = TruebuildDesign.last
     pass = JSON.parse(response.body)['pass']
     expect(pass).to be_present
 
-    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, as: pass }
+    get '/public/truebuild/buyer', params: { token: company.public_inventory_token, website_id: site.id, as: pass }
     expect(JSON.parse(response.body)).to include('signed_in' => true, 'first_name' => 'Sam', 'email' => 'sam@example.com')
 
     leads = Lead.count
     submissions = IntakeSubmission.count
     post '/public/truebuild/designs', params: {
-      token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [], as: pass, copied_from: first.public_token
+      token: company.public_inventory_token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [], as: pass, copied_from: first.public_token
     }
     expect(response).to have_http_status(:created)
     expect(JSON.parse(response.body)['pass']).to eq(pass)
@@ -273,18 +279,18 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
       design = save_design
       expect(events('lead.design_saved').pluck(:entity_id)).to eq([design.lead_id])
 
-      2.times { get "/public/truebuild/designs/#{design.public_token}", params: { token: company.public_inventory_token } }
+      2.times { get "/public/truebuild/designs/#{design.public_token}", params: { token: company.public_inventory_token, website_id: site.id } }
       expect(design.reload.view_count).to eq(2)
       expect(events('lead.design_viewed').count).to eq(1)
 
-      post "/public/truebuild/designs/#{design.public_token}/events", params: { token: company.public_inventory_token, type: 'shared' }
+      post "/public/truebuild/designs/#{design.public_token}/events", params: { token: company.public_inventory_token, website_id: site.id, type: 'shared' }
       expect(response).to have_http_status(:no_content)
       expect(design.reload.share_count).to eq(1)
       expect(events('lead.design_shared').first.payload).to include('design_id' => design.id)
 
       # A family member saves their own copy from the link.
       post '/public/truebuild/designs', params: {
-        token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
+        token: company.public_inventory_token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
         copied_from: design.public_token, contact: { first_name: 'Sam', last_name: 'May', email: 'sam@example.com' }
       }
       copy = TruebuildDesign.last
@@ -309,7 +315,7 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     it 'does not count the buyer saving a new version of their own design as a copy' do
       design = save_design
       post '/public/truebuild/designs', params: {
-        token: company.public_inventory_token, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [],
+        token: company.public_inventory_token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [],
         copied_from: design.public_token, contact: { first_name: 'Tia', last_name: 'May', email: 'tia@example.com' }
       }
       expect(events('lead.design_copied')).to be_empty

@@ -15,6 +15,10 @@ class PlatformModule
     # is kept because plans and overrides already carry it.
     'sales.configurator' => { name: 'TrueBuild Home Designer', category: 'CRM & Sales', icon: 'Home',
                               description: 'Buyers design and price homes on your website with factory pricing and TrueView renderings' },
+    # TrueBuild on the dealer's own website (the inventory embed), not only on
+    # their DealerTide site. In no plan: granted dealer by dealer.
+    'sales.truebuild_embed' => { name: 'TrueBuild on your own website', category: 'CRM & Sales', icon: 'Globe',
+                                 description: 'Buyers design homes in the inventory embed on your own website, not only on your DealerTide site' },
     'sales.deal_desk' => { name: 'Deal Desk', category: 'CRM & Sales', icon: 'Calculator', description: 'Point-of-sale deal structuring: solve for payment, compare units, present a pencil' },
     
     # Inventory & Operations

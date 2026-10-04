@@ -15,7 +15,10 @@ class Public::TruebuildController < ApplicationController
   skip_before_action :set_company_scope, raise: false
   skip_before_action :set_current_attributes, raise: false
 
+  include TruebuildReach
+
   before_action :authenticate_inventory_token
+  before_action :require_truebuild_reach
 
   def home
     vehicle = @company.vehicles.where(is_deleted: [false, nil]).find_by(id: params[:vehicle_id])
@@ -124,6 +127,13 @@ class Public::TruebuildController < ApplicationController
   end
 
   private
+
+  # On the dealer's own website, only with the add-on (TruebuildReach).
+  def require_truebuild_reach
+    return if truebuild_reachable?
+
+    render json: { error: 'Design this home on our website', design_url: truebuild_site_url }.compact, status: :forbidden
+  end
 
   def vehicle
     return @vehicle if defined?(@vehicle)

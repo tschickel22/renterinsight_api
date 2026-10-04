@@ -12,6 +12,7 @@
 # - Token passed via params[:token] or X-Inventory-Token header
 # - Optional website_id/location_id for context-specific branding
 class Public::InventoryController < ApplicationController
+  include TruebuildReach
   skip_before_action :authenticate, raise: false  # Public endpoint - no user auth
   skip_before_action :set_company_scope, raise: false  # Company determined by token
   skip_before_action :set_current_attributes, raise: false  # No user context
@@ -140,7 +141,7 @@ class Public::InventoryController < ApplicationController
 
     # Homes a buyer can design (TrueBuild): not built yet and linked to a model.
     if ActiveModel::Type::Boolean.new.cast(params[:designable])
-      @vehicles = Truebuild::BuyerCatalog.designable_homes(@company, @vehicles)
+      @vehicles = truebuild_reachable? ? Truebuild::BuyerCatalog.designable_homes(@company, @vehicles) : @vehicles.none
     end
 
     # Vehicle filters
@@ -185,7 +186,12 @@ class Public::InventoryController < ApplicationController
     @vehicles = @vehicles.offset((page - 1) * per_page).limit(per_page)
     # Which homes on this page open the designer, and which show finishes on
     # their photos, for a badge on the card.
-    @designable_ids = Truebuild::BuyerCatalog.designable_homes(@company, @company.vehicles.where(id: @vehicles.map(&:id))).pluck(:id).to_set
+    # Off the DealerTide site without the add-on, none (TruebuildReach).
+    @designable_ids = if truebuild_reachable?
+                        Truebuild::BuyerCatalog.designable_homes(@company, @company.vehicles.where(id: @vehicles.map(&:id))).pluck(:id).to_set
+                      else
+                        Set.new
+                      end
     @trueview_variant_ids = Truebuild::ModelList.trueview_ready(@vehicles.select { |v| @designable_ids.include?(v.id) }.map(&:catalog_plan_variant_id).uniq)
     
     # Get branding (Location → Company → Platform hierarchy)
@@ -275,7 +281,7 @@ class Public::InventoryController < ApplicationController
       company: company_data,
       branding: branding,
       champion_disclaimer: @vehicle.source == 'champion_ims' ? ChampionDisclaimer.for_company(@company) : { show: false },
-      truebuild: { available: Truebuild::BuyerCatalog.designable_home?(@company, @vehicle) }
+      truebuild: truebuild_for(@vehicle)
     }
   end
   
@@ -363,7 +369,7 @@ class Public::InventoryController < ApplicationController
     
     render json: {
       # Homes a buyer can design (TrueBuild), so the filter shows only when there are some.
-      designable_count: Truebuild::BuyerCatalog.designable_homes(@company, vehicles).count,
+      designable_count: truebuild_reachable? ? Truebuild::BuyerCatalog.designable_homes(@company, vehicles).count : 0,
       makes: makes,
       models: models,
       models_by_make: models_by_make,
@@ -432,6 +438,15 @@ class Public::InventoryController < ApplicationController
   
   # Authenticate using public_inventory_token
   # Token can be in params[:token] or X-Inventory-Token header
+  # Whether this home can be designed here; on the dealer's own website
+  # without the add-on, where to design it instead (its DealerTide page).
+  def truebuild_for(vehicle)
+    designable = Truebuild::BuyerCatalog.designable_home?(@company, vehicle)
+    return { available: true } if designable && truebuild_reachable?
+
+    { available: false, design_url: (truebuild_site_url(vehicle) if designable) }.compact
+  end
+
   def authenticate_inventory_token
     token = params[:token] || request.headers['X-Inventory-Token']
     
