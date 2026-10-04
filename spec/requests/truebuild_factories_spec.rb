@@ -64,6 +64,16 @@ RSpec.describe 'TrueBuild factories', type: :request do
     expect(row(lancaster)).to include('stage' => 'not_started')
   end
 
+  it "shows the book that prices a factory's models, even when it is another plant's package" do
+    v = model(topeka, 'Belvidere', '2856H32392')
+    plan = CatalogPlan.create!(manufacturer: mfr, factory: lancaster, series: 'Aspire', name: 'Keystone')
+    keystone = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '2856H11111', width_ft: 28, length_ft: 56)
+    CatalogVariantPrice.create!(price_book: CatalogPriceBook.find_by(factory: topeka), variant: keystone, net_base_price: 70_000)
+    expect(v).to be_present
+    expect(row(lancaster)).to include('stage' => 'priced', 'models' => 1)
+    expect(row(lancaster)['book']).to include('name' => 'Topeka 2026', 'status' => 'published')
+  end
+
   it 'releases below the bar only with a reason, and shows that it was' do
     v = model(topeka, 'Belvidere', '2856H32392')
     model(topeka, 'Bay Port', '2856H32168')

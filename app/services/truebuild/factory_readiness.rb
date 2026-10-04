@@ -72,7 +72,7 @@ module Truebuild
       photographed = variants.select { |v| Trueview::PhotoChoice.photos(v).any? }.map(&:id).to_set
       drawn = ModelList.trueview_ready(photographed.to_a)
       held = held_back_by_variant(variants.map(&:id))
-      books = latest_books(ids)
+      books = latest_books(ids).merge(pricing_books(by_factory))
       runs = runs_by_factory(by_factory)
       dealers = DealerFactory.where(factory_id: ids).group(:factory_id).count
       share = ready_share
@@ -119,13 +119,33 @@ module Truebuild
                      .group(:catalog_plan_variant_id).count
     end
 
-    # Each factory's newest price book: the published one if there is one.
+    # The newest published book that prices each factory's models. One
+    # package can cover two plants (BookResolver), so this goes by the price
+    # rows, not the book's own plant: on staging Topeka's book prices the
+    # Decatur models, and Decatur has no book of its own.
+    def pricing_books(by_factory)
+      ids = by_factory.values.flatten.map(&:id)
+      return {} if ids.empty?
+
+      pairs = CatalogVariantPrice.joins(:price_book).merge(CatalogPriceBook.published)
+                                 .where(catalog_plan_variant_id: ids).distinct.pluck(:catalog_plan_variant_id, :catalog_price_book_id)
+      books = CatalogPriceBook.where(id: pairs.map(&:last).uniq).index_by(&:id)
+      book_ids = pairs.group_by(&:first).transform_values { |ps| ps.map(&:last) }
+      by_factory.filter_map do |factory_id, vs|
+        b = vs.flat_map { |v| book_ids[v.id] || [] }.uniq.map { |id| books[id] }.compact.max_by { |x| [x.published_at || x.created_at, x.id] }
+        [factory_id, book_json(b)] if b
+      end.to_h
+    end
+
+    # Each factory's own newest price book, for one not yet published or a
+    # factory with no priced models: the published one if there is one.
     def latest_books(factory_ids)
       CatalogPriceBook.where(factory_id: factory_ids).order(:created_at).to_a.group_by(&:factory_id).transform_values do |bs|
-        b = bs.select { |x| x.status == 'published' }.max_by { |x| x.published_at || x.created_at } || bs.last
-        { id: b.id, name: b.name, status: b.status, effective_on: b.effective_on, published_at: b.published_at }
+        book_json(bs.select { |x| x.status == 'published' }.max_by { |x| x.published_at || x.created_at } || bs.last)
       end
     end
+
+    def book_json(b) = { id: b.id, name: b.name, status: b.status, effective_on: b.effective_on, published_at: b.published_at }
 
     # Each factory's newest factory run: one for that factory, or one for its
     # manufacturer that drew some of its models.
