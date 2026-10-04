@@ -219,6 +219,9 @@ RSpec.describe 'TrueView rendering' do
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
         .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
       allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        # A 4's second look agrees; the first look's scores drive these specs.
+        next { input: { 'acceptable' => true }, input_tokens: 0, output_tokens: 0 } if tool[:name] == 'find_defects'
+
         expect(tool[:name]).to eq('judge_layer')
         { input: { 'score' => scores.shift, 'note' => 'The porch wall kept the old siding.' }, input_tokens: 2500, output_tokens: 40 }
       end
@@ -307,6 +310,46 @@ RSpec.describe 'TrueView rendering' do
       expect(prompts.last).to end_with('Checks of the earlier drawings found: Edges kept the old color. The island base is unchanged. Fix all of that.')
       expect(render.reload).to have_attributes(status: 'done')
       expect(render.usage['escalated']).to be(true)
+    end
+
+    it 'takes a second, skeptical look at a 4, and holds the layer back if that finds a defect' do
+      allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit)
+        .and_return(bytes: png((photo + 50).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 })
+      tools = []
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        tools << tool[:name]
+        input = if tool[:name] == 'find_defects'
+                  { 'acceptable' => false, 'spilled_onto' => 'The backsplash took the wall color.', 'old_finish_left' => 'none' }
+                else
+                  { 'score' => 4, 'note' => 'Small flaws.' }
+                end
+        { input: input, input_tokens: 1000, output_tokens: 50 }
+      end
+      verdict = Truebuild::Trueview::LayerCheck.judge(photo.jpegsave_buffer, png((photo + 50).cast(:uchar)), surface: 'Accent wall', value: 'Dogwood Harvest')
+      expect(tools).to eq(%w[judge_layer find_defects])
+      expect(verdict).to include('ok' => false, 'score' => 4, 'note' => 'The backsplash took the wall color.')
+      expect(verdict['cost_usd']).to be > 0.003
+    end
+
+    it 'trusts a 5, and a 4 the second look accepts, without asking twice' do
+      calls = Hash.new(0)
+      answers = { 'judge_layer' => [{ 'score' => 5 }, { 'score' => 4 }], 'find_defects' => [{ 'acceptable' => true }] }
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        calls[tool[:name]] += 1
+        { input: answers[tool[:name]].shift, input_tokens: 1, output_tokens: 1 }
+      end
+      layer = png((photo + 50).cast(:uchar))
+      expect(Truebuild::Trueview::LayerCheck.judge(photo.jpegsave_buffer, layer, surface: 'Siding', value: 'Clay')['ok']).to be(true)
+      expect(calls).to eq('judge_layer' => 1)
+      expect(Truebuild::Trueview::LayerCheck.judge(photo.jpegsave_buffer, layer, surface: 'Siding', value: 'Clay')['ok']).to be(true)
+      expect(calls).to eq('judge_layer' => 2, 'find_defects' => 1)
+    end
+
+    it "tells the drawing and the check what an abbreviated fridge looks like" do
+      prompt = Truebuild::Trueview.prompt(room: 'kitchen', selection: [{ 'surface' => 'Refrigerator', 'value' => '21 CF Stnls SxS Refer w/ice IPO 18.2CF' }])
+      expect(prompt).to include('which is stainless steel side-by-side refrigerator')
+      expect(Truebuild::Trueview::LayerCheck.scope('Refrigerator', '20.5CF O/U Refer w/o Ice IPO 18.2'))
+        .to include('it must show top-freezer refrigerator', 'A different style or finish is clearly wrong: score 2.')
     end
 
     it 'shows the layer when the check itself cannot run' do

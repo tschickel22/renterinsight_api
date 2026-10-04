@@ -76,6 +76,9 @@ module Truebuild
           "- #{f['surface']}: #{f['value']}, exactly as in sample image #{shown + 1} (color #{swatch.hex})"
         else
           hex = ColorSwatches.hex(f['value'])
+          look = OptionLook.describe(f['surface'], f['value'])
+          next "- #{f['surface']}: #{f['value']}, which is #{look}" if look
+
           "- #{f['surface']}: #{f['value']}#{" (color #{hex})" if hex}"
         end
       end
