@@ -54,7 +54,10 @@ module Accounting
 
         ActiveRecord::Base.transaction do
           entry = @company.journal_entries.find_by(id: @wizard.config.dig('posted', 'journal_entry_id'))
-          entry&.void!(user) unless entry&.is_void?
+          # Dated the cutover, like the entry it reverses: dated today it left
+          # the balances in the books as of the cutover and put the reversal,
+          # P&L lines included, into the current month.
+          entry&.void!(user, entry_date: entry.entry_date) unless entry&.is_void?
 
           reconciliations.each(&:destroy!)
           invoices.each(&:destroy!)
