@@ -544,6 +544,17 @@ RSpec.describe 'Public TrueBuild', type: :request do
       ENV.delete('TRUEVIEW_DAILY_LIMIT')
     end
 
+    it 'says which surface each finish paints, so Compare keeps cabinet chips and upgrades in one category' do
+      cabinets = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 8)
+      chip = option(cabinets, 'Destin White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
+      upgrade = option(cabinets, 'HW Timberwolf IPO Wrapped', dealer_cost: 900)
+      option(cabinets, 'HW DestinWhite IPO Wrapped', dealer_cost: 900) # two make the cabinet finish family
+      variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
+      surfaces = trueview['surfaces']
+      expect(surfaces.values_at(chip.id.to_s, upgrade.id.to_s)).to eq(%w[cabinets cabinets])
+      expect(surfaces[gas.id.to_s]).to eq('appliances')
+    end
+
     it 'draws a paid cabinet upgrade with its color chip, once, and gives appliance packages a layer' do
       cabinets = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 8)
       chip = option(cabinets, 'Destin White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })

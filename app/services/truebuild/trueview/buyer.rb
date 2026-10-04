@@ -49,7 +49,14 @@ module Truebuild
             # Picked but not in this photo (a house with no shutters), so the page can say so.
             not_shown: items.select { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq }
         end
-        { photos: photos, drawing: drawing }
+        # The surface each finish paints, so Compare treats the cabinet chips
+        # and the cabinet upgrades (or a fridge and an appliance package) as
+        # one category with one pick on each side, not two stacked layers.
+        surfaces = plan.to_h do |p|
+          key = Surfaces.category(p[:selection].first&.dig('surface'))
+          [p[:option_id], key == 'refrigerator' ? 'appliances' : key]
+        end
+        { photos: photos, drawing: drawing, surfaces: surfaces.compact }
       end
 
       # What BuyerCatalog does not offer, as option id sets, under the
