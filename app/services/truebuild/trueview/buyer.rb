@@ -142,7 +142,11 @@ module Truebuild
                                         selection: p[:selection], selection_key: p[:key], model_key: MODEL,
                                         provider: spec[:provider], model: old&.model || spec[:model], purpose: 'layer',
                                         prompt: p[:prompt], image_url: old&.image_url, usage: usage)
-          TruebuildRenderJob.set(queue: :low, priority: run ? FactoryRun::PRIORITY : 0).perform_later(row.id)
+          if run
+            FactoryRun.dispatch(row, run)
+          else
+            TruebuildRenderJob.set(queue: :low, priority: 0).perform_later(row.id)
+          end
           queued += 1
         end
         queued

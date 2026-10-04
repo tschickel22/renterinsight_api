@@ -28,7 +28,8 @@ class TruebuildRenderJob < ApplicationJob
   # the worker, or the enqueue was lost). Under Solid Queue that is any row
   # without an unfinished job; elsewhere it falls back to age.
   def self.orphaned(scope, stale_after:)
-    rows = scope.where(status: %w[queued running]).where(updated_at: ...GRACE.ago).to_a
+    # A batch run's drawings have no job: Batch submits and collects them.
+    rows = scope.where(status: %w[queued running]).where(updated_at: ...GRACE.ago).where("usage->>'batch' IS NULL").to_a
     live = live_render_ids
     return rows.select { |r| r.updated_at < stale_after.ago } if live.nil?
 

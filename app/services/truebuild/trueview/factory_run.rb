@@ -30,8 +30,9 @@ module Truebuild
 
       # What a run would draw and cost, per model and in total. Drawings one
       # model shares with another earlier in the list are counted once.
-      def estimate(variants)
-        rates = self.rates
+      # batch: priced at Gemini's batch rate (GeminiBatch::DISCOUNT).
+      def estimate(variants, batch: false)
+        rates = self.rates(batch: batch)
         seen = Set.new
         outlined = Set.new
         # Which are drawn and on dealer sites already, and when a run last
@@ -53,25 +54,48 @@ module Truebuild
           rates: rates }
       end
 
+      # A drawing a run made: a batch run's waits for its next batch
+      # (Batch.submit!), any other is drawn now, behind buyers.
+      def dispatch(row, run)
+        if run&.batch?
+          row.update_columns(usage: row.usage.merge('batch' => true))
+        else
+          TruebuildRenderJob.set(queue: :low, priority: PRIORITY).perform_later(row.id)
+        end
+      end
+
       # variant id => when the latest run that included it started.
       def last_runs
         TruebuildFactoryRun.order(:created_at).pluck(:variant_ids, :created_at)
                            .each_with_object({}) { |(ids, at), h| Array(ids).each { |id| h[id.to_i] = at } }
       end
 
-      def start!(variants, budget_usd:, scope:, by: nil)
+      # at: when to start (nil or past: now). batch: draw through Gemini's
+      # batch mode. A scheduled run waits; TruebuildFactoryRunTickJob starts it.
+      def start!(variants, budget_usd:, scope:, by: nil, at: nil, batch: false)
+        later = at.present? && at > 1.minute.from_now
         run = TruebuildFactoryRun.create!(manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id].presence,
                                           series: scope[:series].presence, budget_usd: budget_usd, created_by_id: by&.id,
-                                          variant_ids: variants.map(&:id), estimate: estimate(variants)[:totals])
-        TruebuildFactoryRunJob.perform_later(run.id)
+                                          variant_ids: variants.map(&:id), estimate: estimate(variants, batch: batch)[:totals],
+                                          mode: batch ? 'batch' : 'now', status: later ? 'scheduled' : 'running',
+                                          scheduled_at: later ? at : nil)
+        TruebuildFactoryRunJob.perform_later(run.id) unless later
         run
+      end
+
+      # A scheduled run whose time has come.
+      def begin!(run)
+        return unless run.status == 'scheduled'
+
+        run.update!(status: 'running')
+        TruebuildFactoryRunJob.perform_later(run.id)
       end
 
       # Model by model: Claude picks its photos if nobody has, then every
       # missing drawing is queued. Stops before a model that would go over
       # budget, and when stopped.
       def queue!(run)
-        rates = self.rates
+        rates = self.rates(batch: run.batch?)
         # Outlines are made as drawings run, so a later model with the same
         # photo must not be charged for one an earlier model has queued.
         seen = Set.new
@@ -90,7 +114,8 @@ module Truebuild
             variant.reload
             cost = model_cost(variant, rates, seen, outlined)
             if committed + cost[:cost_usd] > run.budget_usd.to_f
-              run.update!(status: 'budget_reached')
+              run.update!(status: 'budget_reached', stopped_at: Time.current)
+              run.notify_end
               return
             end
             Buyer.new(nil, variant).queue_missing!(run: run)
@@ -128,7 +153,7 @@ module Truebuild
       # One round. Returns the number of drawings queued again.
       def repair!(run)
         round = run.progress['repair_rounds'].to_i + 1
-        rates = self.rates
+        rates = self.rates(batch: run.batch?)
         spent = run.renders.sum(:cost_usd).to_f + run.progress['outline_repair_usd'].to_f
         variants = CatalogPlanVariant.where(id: run.variant_ids).to_a
         photos = variants.flat_map { |v| PhotoChoice.photos(v).map(&:last) }.uniq
@@ -157,7 +182,7 @@ module Truebuild
                                    .merge('reviewer_note' => notes(old), 'repair_round' => round,
                                           'draw_with' => STRONGER).compact)
           )
-          TruebuildRenderJob.set(queue: :low, priority: PRIORITY).perform_later(row.id)
+          dispatch(row, run)
           spent += cost
           queued += 1
         end
@@ -206,6 +231,7 @@ module Truebuild
 
       def finish!(run)
         run.update!(status: 'finished', stopped_at: Time.current)
+        run.notify_end
       end
 
       # A deploy can drop a run's jobs: the model queuing stops partway, or
@@ -231,8 +257,10 @@ module Truebuild
         counts = run.renders.group(:status).count
         open = counts.values_at('queued', 'running').compact.sum
         repair_queued = run.progress['repair_queued'].to_i
+        at_google = run.batch? && run.renders.where(status: 'running').where("usage ? 'batch_name'").exists?
         phase = if run.status != 'running' then run.status
                 elsif run.models_queued < run.variant_ids.size then 'queuing'
+                elsif at_google then 'waiting_on_google'
                 elsif open.positive? then repair_queued.positive? ? 'repairing' : 'drawing'
                 elsif repair_queued > run.progress['repair_rounds'].to_i then 'repairing'
                 else 'finished'
@@ -246,6 +274,7 @@ module Truebuild
           repair: { rounds: run.progress['repair_rounds'].to_i, redrawn: run.progress['repaired'].to_i },
           drawings: { done: counts['done'].to_i, held_back: counts['rejected'].to_i, not_in_photo: counts['skipped'].to_i,
                       failed: counts['failed'].to_i, waiting: open, cancelled: counts['cancelled'].to_i },
+          mode: run.mode, scheduled_at: run.scheduled_at, batches: Array(run.progress['batches']).size,
           created_at: run.created_at, stopped_at: run.stopped_at }
       end
 
@@ -282,11 +311,13 @@ module Truebuild
 
       # Average cost per drawing and per outline so far, by measurement once
       # there are enough of them.
-      def rates
+      def rates(batch: false)
         layers = TruebuildRender.where(purpose: 'layer', model_key: Buyer::MODEL, status: %w[done rejected]).where('cost_usd > 0')
+                                .where("usage->>'batch' IS NULL")
         outlines = TruebuildSurfaceMask.where("usage ? 'cost_usd'")
         layer = layers.count >= 50 ? layers.average(:cost_usd).to_f : LAYER_COST
         outline = outlines.count >= 50 ? outlines.average(Arel.sql("(usage->>'cost_usd')::numeric")).to_f : OUTLINE_COST
+        layer *= GeminiBatch::DISCOUNT if batch
         { layer: layer.round(4), outline: outline.round(4) }
       end
 

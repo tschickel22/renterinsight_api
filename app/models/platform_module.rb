@@ -169,7 +169,7 @@ class PlatformModule
       admin.settings admin.users
     ].freeze,
     professional: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
@@ -178,7 +178,7 @@ class PlatformModule
       admin.settings admin.users admin.locations
     ].freeze,
     enterprise: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
       marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting

@@ -167,7 +167,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
     variants = factory_run_variants
     return render json: { error: 'Choose a manufacturer' }, status: :unprocessable_entity unless variants
 
-    render json: Truebuild::Trueview::FactoryRun.estimate(variants)
+    render json: Truebuild::Trueview::FactoryRun.estimate(variants, batch: ActiveModel::Type::Boolean.new.cast(params[:batch]))
   end
 
   # GET /api/admin/trueview_lab/factory_runs
@@ -189,11 +189,15 @@ class Api::Admin::TrueviewLabController < ApplicationController
 
     scope = { manufacturer_id: params[:manufacturer_id].to_i, factory_id: params[:factory_id].presence&.to_i, series: params[:series].presence }
     # Only one that is really still going: a finished one is marked so as it is looked at.
-    going = TruebuildFactoryRun.where(status: 'running', manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id], series: scope[:series])
+    going = TruebuildFactoryRun.where(status: %w[running scheduled], manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id], series: scope[:series])
                                .any? { |r| Truebuild::Trueview::FactoryRun.progress(r)[:phase] != 'finished' }
     return render json: { error: 'A run for this is already going. Stop it first, or wait for it to finish.' }, status: :unprocessable_entity if going
 
-    run = Truebuild::Trueview::FactoryRun.start!(variants, budget_usd: budget, scope: scope, by: current_user)
+    at = start_time
+    return if performed?
+
+    run = Truebuild::Trueview::FactoryRun.start!(variants, budget_usd: budget, scope: scope, by: current_user, at: at,
+                                                           batch: ActiveModel::Type::Boolean.new.cast(params[:batch]))
     render json: Truebuild::Trueview::FactoryRun.progress(run), status: :created
   end
 
@@ -203,7 +207,7 @@ class Api::Admin::TrueviewLabController < ApplicationController
     run = TruebuildFactoryRun.find_by(id: params[:id])
     return render json: { error: 'Not found' }, status: :not_found unless run
 
-    run.stop! if run.status == 'running'
+    run.stop! if %w[running scheduled].include?(run.status)
     render json: Truebuild::Trueview::FactoryRun.progress(run)
   end
 
@@ -388,6 +392,23 @@ class Api::Admin::TrueviewLabController < ApplicationController
 
   # Drawings left 'queued' or 'running' for 15 minutes were lost (a deploy
   # restarted the worker); opening the review puts them back on the queue.
+  # start_at: "now" (or blank), "tonight" (11 pm Denver, tomorrow if that has
+  # passed) or an ISO time. nil means now.
+  def start_time
+    value = params[:start_at].to_s
+    return nil if value.blank? || value == 'now'
+
+    if value == 'tonight'
+      denver = Time.current.in_time_zone('America/Denver')
+      at = denver.change(hour: 23, min: 0)
+      return at > Time.current ? at : at + 1.day
+    end
+    Time.zone.parse(value) || raise(ArgumentError)
+  rescue ArgumentError
+    render json: { error: 'Choose a start time' }, status: :unprocessable_entity
+    nil
+  end
+
   def factory_run_variants
     return nil if params[:manufacturer_id].blank?
 

@@ -114,4 +114,11 @@ RSpec.describe ModuleAccessService, 'implied modules' do
     expect { access.has_module?('marketing.landing_pages') }.not_to raise_error
     expect { access.has_module?('marketing.automation') }.not_to raise_error
   end
+
+  # TrueBuild is turned on dealer by dealer (Tom, 2026-10-03), never by a plan.
+  it 'puts TrueBuild in no plan template' do
+    PlatformModule::PLAN_TEMPLATES.each_value do |keys|
+      expect(keys).not_to include('sales.configurator')
+    end
+  end
 end

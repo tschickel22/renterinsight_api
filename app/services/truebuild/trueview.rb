@@ -101,41 +101,9 @@ module Truebuild
     LAYER_ATTEMPTS = 2       # drawings per layer, for its check (LayerCheck)
 
     def perform!(render)
-      # A factory run's last repair round draws on a larger model; the row
-      # stays keyed to the buyer's model so buyers find the layer.
-      spec = MODELS.fetch(render.usage['draw_with'].presence || render.model_key)
       render.update!(status: 'running', error: nil)
-      source = fetch_source(render.source_url)
-      if render.purpose == 'layer'
-        mask = Surfaces.mask_for(render.source_url, source[:bytes], render.selection.first&.dig('surface'))
-        # The photo does not show this surface (no shutters on this home):
-        # nothing to paint, and no drawing paid for.
-        if mask && mask.status == 'done' && !mask.present?
-          return render.update!(status: 'skipped', error: 'Not in this photo', cost_usd: 0,
-                                usage: render.usage.merge('mask_version' => Layer::VERSION))
-        end
-        # Outlining this photo just failed on its shape: drawing would fail
-        # the same way, and be paid for.
-        if mask&.status == 'failed' && mask.error.to_s.include?('framing')
-          return render.update!(status: 'failed', error: "Not drawn: #{mask.error}", cost_usd: 0)
-        end
-        # No outline yet: cut by what each drawing changed, every accent
-        # color landed on a different wall. Drawn once the outline is found
-        # (Surfaces retries it), never without one.
-        if mask && mask.status != 'done'
-          return render.update!(status: 'failed', error: "Not drawn: no outline yet (#{mask.error.to_s.first(200)})", cost_usd: 0)
-        end
-      end
-      # The samples named when the row was made, in prompt order.
-      ids = Array(render.usage['swatch_ids'])
-      swatches = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact
-      samples = swatches.map { |sw| fetch_source(sw.image_url) }
-      # A layer changes one finish; its check compares against that sample.
-      check_with = { sample: samples.first&.dig(:bytes), hex: swatches.first&.hex }
-      prompt = render.prompt
-      # A reviewer's note on what was wrong with the last drawing. Added at
-      # draw time, not stored in the prompt, so buyers still find the layer.
-      prompt = "#{prompt}\n\nA reviewer rejected an earlier drawing: #{render.usage['reviewer_note']} Fix that." if render.usage['reviewer_note'].present?
+      ctx = prepare(render) or return
+      spec, source, mask, samples, check_with, prompt = ctx.values_at(:spec, :source, :mask, :samples, :check_with, :prompt)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # A layer cut by an older Layer::VERSION is cut again from its saved
       # drawing: no call to the image model, no charge.
@@ -183,6 +151,51 @@ module Truebuild
       render.update!(attrs)
     rescue StandardError => e
       render.update!(status: 'failed', error: e.message.to_s.first(1000))
+    end
+
+    # Everything a drawing needs before the image model is asked, shared by
+    # immediate drawings and a factory run's batches (Batch). Settles the row
+    # itself (and returns nil) when there is nothing to draw: the photo does
+    # not show the surface, or it has no outline yet.
+    def prepare(render)
+      # A factory run's repair draws on a larger model; the row stays keyed
+      # to the buyer's model so buyers find the layer.
+      spec = MODELS.fetch(render.usage['draw_with'].presence || render.model_key)
+      source = fetch_source(render.source_url)
+      mask = nil
+      if render.purpose == 'layer'
+        mask = Surfaces.mask_for(render.source_url, source[:bytes], render.selection.first&.dig('surface'))
+        # The photo does not show this surface (no shutters on this home):
+        # nothing to paint, and no drawing paid for.
+        if mask && mask.status == 'done' && !mask.present?
+          render.update!(status: 'skipped', error: 'Not in this photo', cost_usd: 0, usage: render.usage.merge('mask_version' => Layer::VERSION))
+          return nil
+        end
+        # Outlining this photo just failed on its shape: drawing would fail
+        # the same way, and be paid for.
+        if mask&.status == 'failed' && mask.error.to_s.include?('framing')
+          render.update!(status: 'failed', error: "Not drawn: #{mask.error}", cost_usd: 0)
+          return nil
+        end
+        # No outline yet: cut by what each drawing changed, every accent
+        # color landed on a different wall. Drawn once the outline is found
+        # (Surfaces retries it), never without one.
+        if mask && mask.status != 'done'
+          render.update!(status: 'failed', error: "Not drawn: no outline yet (#{mask.error.to_s.first(200)})", cost_usd: 0)
+          return nil
+        end
+      end
+      # The samples named when the row was made, in prompt order.
+      ids = Array(render.usage['swatch_ids'])
+      swatches = CatalogSwatch.where(id: ids).index_by(&:id).values_at(*ids).compact
+      samples = swatches.map { |sw| fetch_source(sw.image_url) }
+      prompt = render.prompt
+      # A reviewer's note on what was wrong with the last drawing. Added at
+      # draw time, not stored in the prompt, so buyers still find the layer.
+      prompt = "#{prompt}\n\nA reviewer rejected an earlier drawing: #{render.usage['reviewer_note']} Fix that." if render.usage['reviewer_note'].present?
+      # A layer changes one finish; its check compares against that sample.
+      { spec: spec, source: source, mask: mask, samples: samples, prompt: prompt,
+        check_with: { sample: samples.first&.dig(:bytes), hex: swatches.first&.hex } }
     end
 
     # Lite, twice, then once on the larger model with every note so far: a

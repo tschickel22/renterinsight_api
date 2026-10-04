@@ -373,6 +373,22 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(JSON.parse(response.body)['phase']).to eq('stopped')
     end
 
+    it 'schedules a batch run for tonight, and cancels it before it starts' do
+      travel_to Time.zone.parse('2026-10-03 18:00 UTC') do # noon in Denver
+        post '/api/admin/trueview_lab/factory_runs', headers: admin,
+             params: { manufacturer_id: mfr.id, factory_id: factory.id, budget_usd: 20, start_at: 'tonight', batch: true }.to_json
+        expect(response).to have_http_status(:created)
+        body = JSON.parse(response.body)
+        expect(body).to include('phase' => 'scheduled', 'mode' => 'batch')
+        expect(Time.zone.parse(body['scheduled_at'])).to eq(Time.zone.parse('2026-10-04 05:00 UTC')) # 11 pm Denver
+        post "/api/admin/trueview_lab/factory_runs/#{body['id']}/stop", headers: admin
+        expect(JSON.parse(response.body)['phase']).to eq('stopped')
+      end
+      post '/api/admin/trueview_lab/factory_runs', headers: admin,
+           params: { manufacturer_id: mfr.id, factory_id: factory.id, budget_usd: 20, start_at: 'whenever' }.to_json
+      expect(JSON.parse(response.body)['error']).to eq('Choose a start time')
+    end
+
     it 'is for platform admins only' do
       get '/api/admin/trueview_lab/factory_runs', headers: headers_for('company_admin')
       expect(response).to have_http_status(:forbidden)

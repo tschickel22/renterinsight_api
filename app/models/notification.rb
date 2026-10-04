@@ -80,6 +80,7 @@ class Notification < ApplicationRecord
     approval_required: { category: 'system', priority: 'high', title: 'Approval Required' },
     approval_completed: { category: 'system', priority: 'normal', title: 'Approval Completed' },
     truebuild_price_update: { category: 'sales', priority: 'normal', title: 'New Factory Prices' },
+    truebuild_factory_run: { category: 'system', priority: 'normal', title: 'TrueView Factory Run' },
     
     # Broadcast notifications
     broadcast_message: { category: 'broadcast', priority: 'normal', title: 'Company Announcement' },

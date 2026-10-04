@@ -25,6 +25,17 @@ module Truebuild
         # each one paid for. A photo between shapes is padded out to the
         # nearest one and the drawing cropped back to the photo.
         def edit(spec, source, prompt, samples: [], aspect: nil)
+          req = request(spec, source, prompt, samples: samples, aspect: aspect)
+          res = post_with_retries("#{BASE}/models/#{req[:model]}:generateContent", req[:body])
+          raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
+
+          read(res.parsed_response, req[:model], req[:box])
+        end
+
+        # The generateContent body for one drawing, the resolved model, and
+        # where the photo sits if it was padded to a shape Gemini draws. The
+        # same body goes to a batch (Batch), one line per drawing.
+        def request(spec, source, prompt, samples: [], aspect: nil)
           model = resolve(spec[:model])
           config = { responseModalities: ['IMAGE'] }
           image_config = {}
@@ -37,19 +48,22 @@ module Truebuild
           end
           config[:imageConfig] = image_config if image_config.any?
           images = [source, *samples].map { |img| { inline_data: { mime_type: img[:mime], data: Base64.strict_encode64(img[:bytes]) } } }
-          body = { contents: [{ role: 'user', parts: [{ text: prompt }, *images] }], generationConfig: config }
-          res = post_with_retries("#{BASE}/models/#{model}:generateContent", body)
-          raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
+          { model: model, box: box,
+            body: { contents: [{ role: 'user', parts: [{ text: prompt }, *images] }], generationConfig: config } }
+        end
 
-          parts = res.parsed_response.dig('candidates', 0, 'content', 'parts') || []
+        # A generateContent response (immediate or from a batch) as
+        # { bytes:, mime:, model:, usage: }, cropped back to the photo.
+        def read(response, model, box)
+          parts = response.dig('candidates', 0, 'content', 'parts') || []
           image = parts.find { |p| p['inlineData'] || p['inline_data'] }
           unless image
-            reason = res.parsed_response.dig('candidates', 0, 'finishReason') || parts.filter_map { |p| p['text'] }.join(' ').first(300)
+            reason = response.dig('candidates', 0, 'finishReason') || parts.filter_map { |p| p['text'] }.join(' ').first(300)
             raise Error, "Gemini returned no image (#{reason.presence || 'no reason given'})"
           end
 
           data = image['inlineData'] || image['inline_data']
-          meta = res.parsed_response['usageMetadata'] || {}
+          meta = response['usageMetadata'] || {}
           bytes = Base64.decode64(data['data'])
           mime = data['mimeType'] || data['mime_type'] || 'image/png'
           bytes, mime = cropped(bytes, box) if box
