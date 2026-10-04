@@ -24,6 +24,23 @@ module Truebuild
         run.renders.where(status: 'queued').where("usage->>'batch' = 'true'")
       end
 
+      STUCK_AFTER = 30.minutes
+
+      # A deploy can stop a job halfway: drawings prepared but never sent go
+      # back in line, and drawings Google returned but nobody checked are
+      # checked. Returns the number recovered.
+      def recover!(run)
+        rows = run.renders.where(status: 'running').where("usage->>'batch' = 'true'").where(updated_at: ...STUCK_AFTER.ago)
+        unsent = rows.where.not("usage ? 'batch_name'").where.not("usage ? 'batch_drawn'")
+        unchecked = rows.where("usage ? 'batch_drawn'").to_a
+        count = unsent.update_all(status: 'queued', updated_at: Time.current)
+        unchecked.each do |r|
+          r.touch
+          TruebuildBatchDrawingJob.set(queue: :low).perform_later(r.id)
+        end
+        count + unchecked.size
+      end
+
       # Sends what is waiting. Returns the number sent.
       def submit!(run)
         rows = waiting(run).order(:id).limit(SIZE).to_a

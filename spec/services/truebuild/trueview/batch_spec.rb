@@ -136,6 +136,22 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect { TruebuildFactoryRunTickJob.perform_now }.to have_enqueued_job(TruebuildBatchDrawingJob).twice
   end
 
+  it 'recovers drawings a deploy left halfway: prepared but not sent, or returned but not checked' do
+    run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+    TruebuildFactoryRunJob.perform_now(run.id)
+    unsent, unchecked = run.renders.order(:id).to_a
+    unsent.update_columns(status: 'running', updated_at: 1.hour.ago)
+    unchecked.update_columns(status: 'running', usage: unchecked.usage.merge('batch_drawn' => 'https://b/d'), updated_at: 1.hour.ago)
+    expect { expect(described_class.recover!(run)).to eq(2) }.to have_enqueued_job(TruebuildBatchDrawingJob).with(unchecked.id)
+    expect(unsent.reload.status).to eq('queued')
+  end
+
+  it 'puts back work a deploy dropped from a run nobody is watching' do
+    run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin)
+    run.update_columns(updated_at: 1.hour.ago) # queuing dropped, Factory Runs page closed
+    expect { TruebuildFactoryRunTickJob.perform_now }.to have_enqueued_job(TruebuildFactoryRunJob).with(run.id)
+  end
+
   it 'waits a drawing whose batch could not be sent for the next one, a few times' do
     run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
     TruebuildFactoryRunJob.perform_now(run.id)
