@@ -57,7 +57,8 @@ RSpec.describe Truebuild::Trueview::Batch do
     ActiveJob::Base.queue_adapter.enqueued_jobs.clear
     run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
     # Drawings at the batch rate; outlines are still made immediately, at the full rate.
-    expect(run_api.estimate([home], batch: true)[:rates][:layer]).to eq((run_api.estimate([home])[:rates][:layer] / 2).round(4))
+    # Until batch layers are measured: checks stay full price, only the drawing is halved.
+    expect(run_api.estimate([home], batch: true)[:rates][:layer]).to eq((run_api.estimate([home])[:rates][:layer] * 0.65).round(4))
     expect(run.estimate['cost_usd']).to eq(run_api.estimate([home], batch: true)[:totals][:cost_usd])
     TruebuildFactoryRunJob.perform_now(run.id)
     expect(ActiveJob::Base.queue_adapter.enqueued_jobs.map { |j| j[:job] }).not_to include(TruebuildRenderJob)

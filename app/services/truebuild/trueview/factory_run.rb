@@ -314,13 +314,24 @@ module Truebuild
 
       # Average cost per drawing and per outline so far, by measurement once
       # there are enough of them.
+      # Each rate is what a finished layer really cost, retries and checks
+      # included. A batch layer is measured from batch layers once there are
+      # enough: halving the immediate rate also halved the checks and the
+      # larger model's retries, which are not discounted.
+      BATCH_CHECK_SHARE = 0.3 # of an immediate layer's cost that batch does not halve, until measured
+
       def rates(batch: false)
-        layers = TruebuildRender.where(purpose: 'layer', model_key: Buyer::MODEL, status: %w[done rejected]).where('cost_usd > 0')
-                                .where("usage->>'batch' IS NULL")
+        finished = TruebuildRender.where(purpose: 'layer', model_key: Buyer::MODEL, status: %w[done rejected]).where('cost_usd > 0')
+        immediate = finished.where("usage->>'batch' IS NULL")
+        batched = finished.where("usage->>'batch' = 'true'")
         outlines = TruebuildSurfaceMask.where("usage ? 'cost_usd'")
-        layer = layers.count >= 50 ? layers.average(:cost_usd).to_f : LAYER_COST
+        layer = immediate.count >= 50 ? immediate.average(:cost_usd).to_f : LAYER_COST
+        if batch
+          layer = if batched.count >= 50 then batched.average(:cost_usd).to_f
+                  else layer * (BATCH_CHECK_SHARE + (1 - BATCH_CHECK_SHARE) * GeminiBatch::DISCOUNT)
+                  end
+        end
         outline = outlines.count >= 50 ? outlines.average(Arel.sql("(usage->>'cost_usd')::numeric")).to_f : OUTLINE_COST
-        layer *= GeminiBatch::DISCOUNT if batch
         { layer: layer.round(4), outline: outline.round(4) }
       end
 
