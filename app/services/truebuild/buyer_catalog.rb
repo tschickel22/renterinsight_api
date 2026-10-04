@@ -105,7 +105,7 @@ module Truebuild
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
                CatalogSwatch.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(variant.manufacturer_id), variant.updated_at].map { |t| t.try(:to_i) || t }
-      Rails.cache.fetch("truebuild:finish_groups:v6:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
+      Rails.cache.fetch("truebuild:finish_groups:v7:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
         catalog.instance_variable_set(:@book, book)
@@ -207,7 +207,7 @@ module Truebuild
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v12:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v13:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices

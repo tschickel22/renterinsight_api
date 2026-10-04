@@ -27,7 +27,10 @@ class CatalogSwatch < ApplicationRecord
   def self.names_match?(a, b)
     return true if a == b
 
-    short, long = [a, b].minmax_by(&:length)
+    # Not minmax_by: on two names of the same length it hands back the same
+    # name twice, and a name always contains itself, so "ozark shadow" matched
+    # "destin white" and drawings were shown the wrong factory sample.
+    short, long = a.length <= b.length ? [a, b] : [b, a]
     short.split.size >= 2 && " #{long} ".include?(" #{short} ")
   end
 
