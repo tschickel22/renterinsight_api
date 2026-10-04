@@ -935,6 +935,9 @@ module Api
                       MarketingConsentTransfer.call(from: @lead, to: account)
             Rails.logger.info "🔄 [ConvertLead] Marketing consent carried forward: #{carried} preference(s)"
 
+            # 5c. CARRY TRUEBUILD DESIGNS AND THE BUYER'S PORTAL LOGIN FORWARD
+            Truebuild::ConversionCarry.call(lead: @lead, contact: contact, account: account, deal: deal)
+
             # 6. MARK LEAD AS CONVERTED
             @lead.update!(
               is_converted: true,

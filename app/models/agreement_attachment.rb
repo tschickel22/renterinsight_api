@@ -1,4 +1,8 @@
 class AgreementAttachment < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :file_url
+
   belongs_to :agreement
   belongs_to :attachable, polymorphic: true, optional: true
   belongs_to :attached_by, class_name: 'User', optional: true

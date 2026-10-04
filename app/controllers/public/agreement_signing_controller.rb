@@ -30,8 +30,8 @@ module Public
           description: @agreement.description,
           agreement_number: @agreement.agreement_number,
           status: @agreement.status,
-          document_url: effective_doc_url,
-          document_urls: @agreement.document_urls,
+          document_url: PrivateFiles.url(effective_doc_url),
+          document_urls: @agreement.document_urls_links,
           content: @agreement.content,
           content_type: @agreement.content_type || (@agreement.document_urls.present? ? 'upload' : 'editor'),
           field_placements: combined_field_placements(@agreement),
@@ -71,6 +71,13 @@ module Public
     def sign
       signature_url = params[:signature_url] || params[:signature_data]
       signature_method = params[:signature_method]
+      initials_url = params[:initials_url] || params[:initials_data]
+
+      # A signer draws (a data URI) or types (plain text). A URL here would be
+      # fetched and stamped into the PDF from wherever it pointed.
+      if [signature_url, initials_url].any? { |v| v.to_s.match?(%r{\A[a-z][a-z0-9+.-]*://}i) }
+        return render json: { error: 'Signature must be drawn or typed' }, status: :unprocessable_entity
+      end
 
       if @signer.requires_signature? && signature_url.blank? && params[:typed_signature].blank?
         return render json: { error: 'Signature is required' }, status: :unprocessable_entity
@@ -88,7 +95,7 @@ module Public
       result = @signer.sign!(
         signature_url: signature_url,
         signature_method: signature_method,
-        initials_url: params[:initials_url] || params[:initials_data],
+        initials_url: initials_url,
         initials_method: params[:initials_method],
         typed_signature: params[:typed_signature],
         typed_initials: params[:typed_initials],
@@ -147,7 +154,8 @@ module Public
         }, status: :accepted
       end
 
-      url = @agreement.sealed_document_url
+      url = PrivateFiles.url(@agreement.sealed_document_url, filename: "#{@agreement.agreement_number}.pdf",
+                                                            disposition: 'attachment')
 
       AgreementAuditLog.log!(
         @agreement, AgreementAuditLog::ACTION_DOWNLOADED,

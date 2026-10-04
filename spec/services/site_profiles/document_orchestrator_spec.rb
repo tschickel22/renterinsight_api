@@ -61,7 +61,7 @@ RSpec.describe SiteProfiles::DocumentOrchestrator do
     it 'tags downloaded bytes as binary' do
       utf8_tagged = pdf_bytes.dup.force_encoding(Encoding::UTF_8)
       expect(utf8_tagged.valid_encoding?).to be(false)
-      allow_any_instance_of(S3UploadService).to receive(:download).and_return(utf8_tagged)
+      allow(PrivateFiles).to receive(:read).with('some/key.pdf').and_return(utf8_tagged)
 
       bytes = described_class.new.call('some/key.pdf')
 

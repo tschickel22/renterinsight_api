@@ -22,6 +22,12 @@ default: &default
   workflow_retention:
     class: WorkflowRetentionJob
     schedule: every sunday at 3am
+  # Scheduled TrueView factory runs start, and batch runs send and collect
+  # their Gemini batches.
+  truebuild_factory_run_tick:
+    class: TruebuildFactoryRunTickJob
+    queue: low
+    schedule: every 5 minutes
   champion_ims_weekly_sync:
     class: ChampionImsWeeklySyncJob
     schedule: every sunday at 2am
@@ -38,6 +44,11 @@ default: &default
     class: CatalogNightlySyncJob
     queue: default
     schedule: every day at 8am
+  # After the overnight crawls (8am UTC) have landed: 9am Denver in summer.
+  new_homes_digest:
+    class: NewHomesDigestJob
+    queue: low
+    schedule: every day at 3pm
   champion_lead_sync:
     class: ChampionLeadSyncJob
     queue: default

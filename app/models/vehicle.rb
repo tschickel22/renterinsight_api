@@ -52,7 +52,12 @@ class Vehicle < ApplicationRecord
   # Associations
   belongs_to :company, optional: true
   belongs_to :location, optional: true
-  belongs_to :floor_plan, optional: true
+  # floor_plan_id pointed at the retired configurator's floor_plans table
+  # (dropped; the column was empty everywhere). Ignored until it is dropped
+  # too, which is safe only once no running server still writes it.
+  self.ignored_columns += %w[floor_plan_id]
+  # TrueBuild: the factory model this home is, when the catalog knows it.
+  belongs_to :catalog_plan_variant, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
   # Service tickets attached to this home. Includes dealer-only (pre-sale)
@@ -236,6 +241,11 @@ class Vehicle < ApplicationRecord
   # Auto-compute discounted sale price when discount fields change
   before_save :compute_discounted_price
 
+  # TrueBuild: a home arriving from a Champion feed finds its factory model,
+  # and so its factory prices, by the Champion model id (see InventoryLinker).
+  before_save :link_catalog_variant,
+              if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? && (new_record? || will_save_change_to_champion_model_id?) }
+
   # Structured "landed" cost of the unit — the single source of truth for cost.
   # `total_cost` is authoritative when maintained; otherwise the sum of its components
   # (dealer_cost + freight_cost + pdi_cost). It is NOT maintained by any callback, so we
@@ -391,6 +401,10 @@ class Vehicle < ApplicationRecord
   end
 
   private
+
+  def link_catalog_variant
+    self.catalog_plan_variant_id = Catalog::PriceBooks::InventoryLinker.variant_for(self)&.id
+  end
 
   def normalize_fields
     # Champion catalog rows come pre-formatted from the manufacturer's master

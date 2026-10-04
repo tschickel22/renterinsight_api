@@ -37,13 +37,14 @@ module Api
 
         # Upload to S3
         begin
-          s3_service = S3UploadService.new
           folder = "custom-fields/#{@company.id}/#{module_name}/#{entity_id || 'new'}"
-          s3_result = s3_service.upload(file, folder: folder)
+          s3_result = PrivateFiles.upload(file, folder: folder)
 
-          # Return file metadata for storing in custom_field_values JSONB
+          # Return file metadata for storing in custom_field_values JSONB. The
+          # value is stored by the client in many places, so the link is a
+          # durable one rather than a presigned URL that would expire.
           render json: {
-            url: s3_result[:url],
+            url: PrivateFiles.durable_url(s3_result[:ref]),
             s3_key: s3_result[:key],
             filename: file.original_filename,
             size: s3_result[:size],
@@ -72,8 +73,9 @@ module Api
         end
 
         begin
-          s3_service = S3UploadService.new
-          s3_service.delete(s3_key)
+          [PrivateFiles.bucket, PrivateFiles.legacy_bucket].uniq.each do |b|
+            PrivateFiles.delete(PrivateFiles.ref(s3_key, b))
+          end
           render json: { message: 'File deleted' }
         rescue => e
           Rails.logger.error "Custom field file delete failed: #{e.message}"

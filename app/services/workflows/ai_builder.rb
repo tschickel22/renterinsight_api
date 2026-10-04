@@ -27,6 +27,8 @@ module Workflows
 
     TRIGGER_EVENT_TYPES = %w[
       lead.created lead.updated lead.status_changed lead.deleted
+      lead.design_saved lead.design_viewed lead.design_shared lead.design_copied
+      contact.design_saved contact.design_viewed contact.design_shared contact.design_copied
       deal.created deal.updated deal.status_changed deal.won deal.lost deal.deleted
       contact.created contact.updated contact.status_changed contact.deleted
       account.created account.updated account.status_changed account.deleted
@@ -395,7 +397,7 @@ module Workflows
         - Match the brand voice from context.company.brand_voice when set; lean on context.company.business_description / target_audience / unique_value_props for what to say.
         - When referring to the sender's own business in copy, use context.company.display_name (NOT {{company.name}}, which refers to the platform's company record).
         - Never use placeholders like "[Your name]". If context.sender.signature is present, use it verbatim at the end of email bodies. Otherwise build a sign-off from context.sender.full_name + title + phone + display_name (omit blank pieces, but display_name MUST be in the sign-off — that's how the recipient knows who's reaching out). SMS = first name only.
-        - If context.sender.booking_url is present, reps book through their own links. When an action's natural CTA is to schedule / demo / tour / talk live, link to {{entity.owner_booking_url}}, which fills in the booking link of the rep who owns that record when the message sends. Do not paste context.sender.booking_url: that is only the author's link, and one rule serves many reps. For send_email actions, render it as HTML, `<a href="{{entity.owner_booking_url}}">Book here</a>`, inside a body wrapped in `<p>` tags so the mail renderer treats it as HTML. For send_sms, include it with framing like "Book a time:". Don't shove it into unrelated steps.
+        - If context.sender.booking_url is present, reps book through their own links. When an action's natural CTA is to schedule / demo / tour / talk live, link to {{rep_booking_link}}, which fills in the booking link of the rep who owns that record when the message sends. Always spell it exactly {{rep_booking_link}} (it is the merge field dealers see in the picker); never write {{entity.owner_booking_url}} or invent another name. Do not paste context.sender.booking_url: that is only the author's link, and one rule serves many reps. For send_email actions, render it as HTML, `<a href="{{rep_booking_link}}">Book here</a>`, inside a body wrapped in `<p>` tags so the mail renderer treats it as HTML. For send_sms, include it with framing like "Book a time:". Don't shove it into unrelated steps.
       SYS
 
       mode == :refine ? base + "\n\nThe user is iterating on a previous plan. Apply their feedback and return the COMPLETE updated plan in the same JSON shape." : base

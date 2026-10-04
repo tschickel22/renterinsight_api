@@ -12,6 +12,7 @@ module Api
           merge_fields: decorate_with_source_metadata(merge_field_definitions),
           line_item_values: flattened_line_item_values,
           line_item_counts: line_item_counts,
+          option_lists: option_lists,
         }
       end
 
@@ -175,6 +176,10 @@ module Api
               { key: 'deal.probability', label: 'Probability', type: 'text', value: @deal.respond_to?(:probability) ? @deal.probability : nil },
               { key: 'deal.owner_name', label: 'Sales Person', type: 'text', value: @deal ? (@deal.respond_to?(:owner) ? [@deal.owner&.first_name, @deal.owner&.last_name].compact.join(' ').presence : @deal.try(:assigned_to_name)) : nil },
               { key: 'deal.customer_name', label: 'Customer Name', type: 'text', value: @deal&.customer_name },
+              # Buyer 2 on two-buyer forms: the deal's co-applicant contact.
+              { key: 'deal.co_buyer_name', label: 'Co-Buyer Name', type: 'text', value: co_buyer&.full_name.presence },
+              { key: 'deal.co_buyer_email', label: 'Co-Buyer Email', type: 'text', value: co_buyer&.email },
+              { key: 'deal.co_buyer_phone', label: 'Co-Buyer Phone', type: 'text', value: (co_buyer&.phone.presence || co_buyer&.try(:mobile_phone)) },
               { key: 'deal.delivery_street', label: 'Delivery Address', type: 'text', value: @deal&.delivery_street },
               { key: 'deal.delivery_city', label: 'Delivery City', type: 'text', value: @deal&.delivery_city },
               { key: 'deal.delivery_state', label: 'Delivery State', type: 'text', value: @deal&.delivery_state },
@@ -310,6 +315,12 @@ module Api
               { key: 'vehicle.gross_weight', label: 'GVWR', type: 'text', value: @vehicle.try(:gross_weight)&.to_s },
               { key: 'vehicle.hitch_weight', label: 'Hitch Weight', type: 'text', value: @vehicle.try(:hitch_weight)&.to_s },
               { key: 'vehicle.slide_outs', label: 'Slide Outs', type: 'text', value: (@vehicle.try(:slide_outs) || @vehicle.try(:slideouts))&.to_s },
+              # Features and finishes. The lists also feed dropdowns (option_lists).
+              { key: 'vehicle.features', label: 'Features', type: 'text', value: home_list(:features).join(', ').presence },
+              { key: 'vehicle.appliances', label: 'Appliances', type: 'text', value: home_list(:appliances).join(', ').presence },
+              { key: 'vehicle.special_features', label: 'Special Features / Upgrades', type: 'text', value: @vehicle.try(:special_features).presence },
+              { key: 'vehicle.siding_type', label: 'Siding', type: 'text', value: @vehicle.try(:siding_type).presence },
+              { key: 'vehicle.color', label: 'Color', type: 'text', value: @vehicle.try(:color).presence },
             ] + build_entity_custom_fields(@vehicle, 'vehicle')
           },
           invoice: {
@@ -400,6 +411,66 @@ module Api
       def line_items_subtotal
         return nil unless @deal
         deal_line_items_data.select { |li| yield(li) }.sum { |li| li[:line_total].to_f }.round(2)
+      end
+
+      # Dropdown choices for template fields, keyed by the field's options_from:
+      #   vehicle.features / vehicle.appliances  the home's own lists
+      #   catalog.<group key>                    the home manufacturer's options in that group
+      #   history.<field key>                    what this dealer entered before on this template
+      def option_lists
+        lists = {}
+        lists['vehicle.features'] = home_list(:features) if @vehicle
+        lists['vehicle.appliances'] = home_list(:appliances) if @vehicle
+        lists.merge!(catalog_option_lists)
+        lists.merge!(history_option_lists)
+        lists.reject { |_, v| v.blank? }
+      rescue => e
+        Rails.logger.error("[AgreementMergeFields] option_lists failed: #{e.message}")
+        {}
+      end
+
+      def home_list(attr)
+        Array(@vehicle.try(attr)).map { |v| v.is_a?(Hash) ? (v['name'] || v['label'] || v.values.first) : v }
+                                 .map { |v| v.to_s.strip }.reject(&:blank?).uniq
+      end
+
+      def catalog_option_lists
+        manufacturer_id = @vehicle&.catalog_plan_variant&.manufacturer_id
+        return {} unless manufacturer_id
+
+        CatalogOptionGroup.where(manufacturer_id: manufacturer_id).includes(:options).each_with_object({}) do |group, out|
+          names = group.options.select { |o| o.status == 'active' }.map(&:name)
+          out["catalog.#{group.key}"] = ((out["catalog.#{group.key}"] || []) + names).uniq
+        end
+      end
+
+      HISTORY_LIMIT = 25
+
+      def history_option_lists
+        template = params[:template_id].present? && AgreementTemplate.available_for_company(@company).find_by(id: params[:template_id])
+        return {} unless template
+
+        keys = Array(template.custom_field_definitions)
+               .select { |d| d['options_from'].to_s == 'history' }.map { |d| d['key'].to_s }
+        return {} if keys.empty?
+
+        counts = Hash.new { |h, k| h[k] = Hash.new(0) }
+        @company.agreements.where(agreement_template_id: template.id).order(created_at: :desc).limit(300)
+                .pluck(:custom_field_values).each do |values|
+          next unless values.is_a?(Hash)
+
+          keys.each do |k|
+            v = values[k].to_s.strip
+            counts[k][v] += 1 if v.present?
+          end
+        end
+        counts.to_h { |k, c| ["history.#{k}", c.sort_by { |v, n| [-n, v] }.first(HISTORY_LIMIT).map(&:first)] }
+      end
+
+      def co_buyer
+        return @co_buyer if defined?(@co_buyer)
+
+        @co_buyer = @deal&.co_applicant_contact_id && @company.contacts.find_by(id: @deal.co_applicant_contact_id)
       end
 
       # Selling price minus every discount column the deal exposes.

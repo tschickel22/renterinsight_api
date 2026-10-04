@@ -118,8 +118,9 @@ module Api
         if File.exist?(@job.file_url.to_s)
           send_file @job.file_url, disposition: 'attachment'
         else
-          url = S3UploadService.new.presigned_url(@job.file_url)
-          render json: { url: url }
+          # Exports are written to the instance's local disk, which a deploy or
+          # restart clears. There is no S3 copy to fall back to.
+          render json: { error: 'This export file is no longer available. Run the export again.' }, status: :gone
         end
       end
 
@@ -168,7 +169,8 @@ module Api
           status: j.status,
           format: j.format,
           row_count: j.row_count,
-          file_url: j.file_url,
+          # Never the server's file path; the download endpoint streams the file.
+          file_url: j.file_url.present? ? "/api/v1/export_jobs/#{j.id}/download" : nil,
           watermark_token: j.watermark_token,
           acknowledged_at: j.acknowledged_at,
           downloaded_at: j.downloaded_at,

@@ -88,13 +88,16 @@ RSpec.describe 'Deal Desk configurable write-back timing', type: :model do
     end
   end
 
+  # A new company is seeded with a full chart of accounts, so the accounts these
+  # examples create use numbers the seed leaves free (1190, 4090, 5090).
+
   # --- (a) on_close + selected: write-back AND GL reflects applied figures -----
   describe 'on_close mode with a selected scenario' do
     it 'writes the scenario back at close and the GL post reflects the applied figures' do
       selected_scenario
-      ar  = company.chart_of_accounts.create!(account_number: '1200', name: 'Accounts Receivable',
+      ar  = company.chart_of_accounts.create!(account_number: '1190', name: 'Accounts Receivable',
                                               account_type: 'asset', normal_balance: 'debit')
-      rev = company.chart_of_accounts.create!(account_number: '4000', name: 'Sales Revenue',
+      rev = company.chart_of_accounts.create!(account_number: '4090', name: 'Sales Revenue',
                                               account_type: 'revenue', normal_balance: 'credit')
       AccountingSettings.for_company(company)
                         .update!(default_ar_account: ar, default_sales_revenue_account: rev,
@@ -189,14 +192,15 @@ RSpec.describe 'Deal Desk configurable write-back timing', type: :model do
                                        location_id: location.id, date_in_stock: 10.days.ago)
       selected_scenario(vehicle: unit2, unit_price_snapshot: 65_000, unit_cost_snapshot: 55_000)
 
-      ar   = company.chart_of_accounts.create!(account_number: '1200', name: 'Accounts Receivable',
+      ar   = company.chart_of_accounts.create!(account_number: '1190', name: 'Accounts Receivable',
                                                account_type: 'asset', normal_balance: 'debit')
-      rev  = company.chart_of_accounts.create!(account_number: '4000', name: 'Sales Revenue',
+      rev  = company.chart_of_accounts.create!(account_number: '4090', name: 'Sales Revenue',
                                                account_type: 'revenue', normal_balance: 'credit')
-      cogs = company.chart_of_accounts.create!(account_number: '5000', name: 'COGS',
+      cogs = company.chart_of_accounts.create!(account_number: '5090', name: 'COGS',
                                                account_type: 'expense', normal_balance: 'debit')
-      company.chart_of_accounts.create!(account_number: '1210', name: 'Inventory',
-                                        account_type: 'asset', normal_balance: 'debit')
+      company.chart_of_accounts.find_or_create_by!(account_number: '1210') do |a|
+        a.assign_attributes(name: 'Inventory', account_type: 'asset', normal_balance: 'debit')
+      end
       AccountingSettings.for_company(company)
                         .update!(default_ar_account: ar, default_sales_revenue_account: rev,
                                  default_cogs_account: cogs, auto_post_deals: false)

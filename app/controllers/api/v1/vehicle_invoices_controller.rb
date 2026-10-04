@@ -80,7 +80,8 @@ module Api
             return nil
           end
           @scanned_document_id = doc.id
-          doc.file_url
+          # The scanner downloads over https; a short-lived link to the private file.
+          PrivateFiles.url(doc.file_url, expires_in: 10.minutes)
         elsif params[:file].present?
           params[:file]
         end

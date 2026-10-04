@@ -194,11 +194,10 @@ class Api::V1::JournalEntriesController < ApplicationController
     file = params[:file]
     return render json: { error: 'No file provided' }, status: :bad_request unless file
 
-    s3 = S3UploadService.new
-    result = s3.upload(file, folder: "journal_entries/#{@company.id}/#{je.id}")
+    result = PrivateFiles.upload(file, folder: "journal_entries/#{@company.id}/#{je.id}")
 
     attachment = {
-      'url' => result[:url],
+      'url' => result[:ref],
       's3_key' => result[:key],
       'filename' => file.original_filename,
       'size' => result[:size],
@@ -208,7 +207,7 @@ class Api::V1::JournalEntriesController < ApplicationController
     }
 
     je.update!(attachments: (je.attachments || []) + [attachment])
-    render json: attachment
+    render json: PrivateFiles.presign_attachments([attachment], 'url').first
   rescue => e
     render json: { error: "Upload failed: #{e.message}" }, status: :unprocessable_entity
   end
@@ -221,14 +220,12 @@ class Api::V1::JournalEntriesController < ApplicationController
     s3_key = params[:s3_key]
     return render json: { error: 'No s3_key provided' }, status: :bad_request unless s3_key.present?
 
-    begin
-      s3 = S3UploadService.new
-      s3.delete(s3_key)
-    rescue => e
-      Rails.logger.warn("[JE] S3 delete failed for #{s3_key}: #{e.message}")
-    end
+    # Only a file attached to this entry; the key comes from the client.
+    att = (je.attachments || []).find { |a| a['s3_key'] == s3_key }
+    return render json: { error: 'Attachment not found' }, status: :not_found unless att
 
-    je.update!(attachments: (je.attachments || []).reject { |a| a['s3_key'] == s3_key })
+    PrivateFiles.delete(att['url'].presence || s3_key)
+    je.update!(attachments: (je.attachments || []) - [att])
     render json: { message: 'Attachment deleted' }
   end
 

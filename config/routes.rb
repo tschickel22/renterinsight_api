@@ -91,6 +91,8 @@ Rails.application.routes.draw do
 
   # Public tokenized tracked-link redirects (nurture/campaign attachments)
   get 't/:token', to: 'public/tracked_links#show', as: :tracked_link_redirect
+  # Durable links to private files (custom field uploads). See PrivateFiles.durable_url.
+  get 'pf/:token', to: 'public/private_files#show', as: :private_file_redirect, constraints: { token: /[^\/]+/ }
 
   # ==================== PUBLIC CHAMPION LEAD ACCEPT/DECLINE (No Auth Required) ====================
   # One-click Accept/Decline links sent in the Champion lead notification email.
@@ -190,6 +192,17 @@ Rails.application.routes.draw do
       end
     end
 
+    # ==================== TRUEBUILD (design a home) ====================
+    get  'truebuild/homes/:vehicle_id', to: 'truebuild#home'
+    get  'truebuild/models', to: 'truebuild#models'
+    get  'truebuild/models/:variant_id', to: 'truebuild#model'
+    get  'truebuild/models/:variant_id/trueview', to: 'truebuild#trueview'
+    post 'truebuild/price', to: 'truebuild#price'
+    post 'truebuild/designs', to: 'truebuild#create_design'
+    get  'truebuild/designs/:design_token', to: 'truebuild#show_design'
+    post 'truebuild/designs/:design_token/events', to: 'truebuild#design_event'
+    get  'truebuild/buyer', to: 'truebuild#buyer'
+
     # ==================== PUBLIC LAND PARCELS ====================
     resources :land_parcels, only: [:index, :show], controller: 'land_parcels' do
       collection do
@@ -217,17 +230,6 @@ Rails.application.routes.draw do
     namespace :public do
       get 'invitations/verify', to: 'invitations#verify_token'
       post 'invitations/accept', to: 'invitations#accept'
-
-      # ==================== PUBLIC CONFIGURATION VIEWING ====================
-      get 'configurations/:token', to: 'configurations#show', as: :public_configuration
-
-      # ==================== PUBLIC CONFIGURATOR (Anonymous Builder) ====================
-      scope 'configurator/:subdomain' do
-        get 'info', to: 'configurator#company_info'
-        get 'floor-plans', to: 'configurator#floor_plans'
-        get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
-        post 'submit', to: 'configurator#submit'
-      end
     end
     
     # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================
@@ -269,6 +271,7 @@ Rails.application.routes.draw do
 
       # ==================== CATALOG SUBSCRIPTIONS (Surface A — dealer opt-in) ====================
       resources :catalog_subscriptions, only: %i[index create destroy]
+      resources :truebuild_factories, only: %i[index create destroy]
 
       # ==================== TRACKED LINKS (Attachment Engagement) ====================
       resources :tracked_links, only: %i[index show] do
@@ -286,6 +289,29 @@ Rails.application.routes.draw do
         end
       end
       resources :import_templates, only: %i[index show create update destroy]
+      # TrueBuild: this dealer's pricing layer over the platform catalog
+      get    'truebuild_pricing', to: 'truebuild_pricing#show'
+      put    'truebuild_pricing/terms', to: 'truebuild_pricing#update_terms'
+      post   'truebuild_pricing/rules', to: 'truebuild_pricing#create_rule'
+      patch  'truebuild_pricing/rules/:id', to: 'truebuild_pricing#update_rule'
+      delete 'truebuild_pricing/rules/:id', to: 'truebuild_pricing#destroy_rule'
+      get    'truebuild_pricing/plans', to: 'truebuild_pricing#plans'
+      get    'truebuild_pricing/options', to: 'truebuild_pricing#options'
+      get    'truebuild_pricing/option_search', to: 'truebuild_pricing#option_search'
+      get    'truebuild_pricing/option_names', to: 'truebuild_pricing#option_names'
+      post   'truebuild_pricing/preview', to: 'truebuild_pricing#preview'
+      get    'truebuild_pricing/addons', to: 'truebuild_pricing#addons'
+      post   'truebuild_pricing/addons', to: 'truebuild_pricing#create_addon'
+      patch  'truebuild_pricing/addons/:id', to: 'truebuild_pricing#update_addon'
+      delete 'truebuild_pricing/addons/:id', to: 'truebuild_pricing#destroy_addon'
+      get    'truebuild_designs', to: 'truebuild_designs#index'
+      get    'truebuild_homes', to: 'truebuild_homes#index'
+      patch  'truebuild_homes/:id', to: 'truebuild_homes#update'
+      post   'truebuild_designs/:id/quote', to: 'truebuild_designs#create_quote'
+      get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
+      post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'
+      post   'truebuild_pricing/updates/:id/decline', to: 'truebuild_pricing#decline_update'
+
       resources :export_jobs, only: %i[index show create] do
         member { get :download }
         collection { get :policy }
@@ -1556,16 +1582,6 @@ Rails.application.routes.draw do
         end
       end
       
-      # ==================== HOME CONFIGURATOR ====================
-      resources :floor_plans, path: 'floor-plans', only: [:index, :show]
-      resources :company_floor_plans, path: 'company-floor-plans', only: [:index, :show, :create, :update, :destroy]
-      resources :configurations do
-        member do
-          post :calculate_price, path: 'calculate-price'
-          post :share
-        end
-      end
-
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
@@ -3000,6 +3016,72 @@ Rails.application.routes.draw do
         end
       end
 
+      # Factory decor sheets and the finish samples read from them.
+      get    'catalog_swatches', to: 'catalog_swatches#index'
+      get    'catalog_swatches/color_checks', to: 'catalog_swatches#color_checks'
+      post   'catalog_swatches/upload', to: 'catalog_swatches#upload'
+      patch  'catalog_swatches/:id', to: 'catalog_swatches#update'
+      delete 'catalog_swatches/sheets/:id', to: 'catalog_swatches#destroy_sheet'
+      delete 'catalog_swatches/:id', to: 'catalog_swatches#destroy'
+
+      # TrueView lab: AI renderings of model photos, every image model side by side.
+      get  'trueview_lab', to: 'trueview_lab#index'
+      get  'trueview_lab/finishes', to: 'trueview_lab#finishes'
+      get  'trueview_lab/drawn', to: 'trueview_lab#drawn'
+      get  'trueview_lab/runs', to: 'trueview_lab#runs'
+      post 'trueview_lab/runs', to: 'trueview_lab#create_run'
+      get  'trueview_lab/runs/:id', to: 'trueview_lab#show_run'
+      get  'trueview_lab/review', to: 'trueview_lab#review'
+      post 'trueview_lab/layers/:id/flag', to: 'trueview_lab#flag_layer'
+      post 'trueview_lab/outlines/:id/flag', to: 'trueview_lab#flag_outline'
+      post 'trueview_lab/photos', to: 'trueview_lab#choose_photos'
+      post 'trueview_lab/photos/hide', to: 'trueview_lab#hide_photo'
+      get  'trueview_lab/factory_runs/scopes', to: 'trueview_lab#factory_run_scopes'
+      get  'trueview_lab/factory_runs/estimate', to: 'trueview_lab#factory_run_estimate'
+      get  'trueview_lab/factory_runs', to: 'trueview_lab#factory_runs'
+      post 'trueview_lab/factory_runs', to: 'trueview_lab#create_factory_run'
+      post 'trueview_lab/factory_runs/:id/stop', to: 'trueview_lab#stop_factory_run'
+      post 'trueview_lab/factory_runs/:id/continue', to: 'trueview_lab#continue_factory_run'
+      post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
+      get  'trueview_lab/attention', to: 'trueview_lab#attention'
+      get    'truebuild_factories', to: 'truebuild_factories#index'
+      put    'truebuild_factories/ready_share', to: 'truebuild_factories#update_ready_share'
+      post   'truebuild_factories/:id/release', to: 'truebuild_factories#release'
+      delete 'truebuild_factories/:id/release', to: 'truebuild_factories#unrelease'
+
+      # ==================== TRUEBUILD PRICE BOOKS (Platform Admin Only) ====================
+      # Factory price packages imported once for every dealer. See CatalogPriceBooksController.
+      resources :catalog_price_books do
+        collection do
+          get :factories
+        end
+        member do
+          post :upload
+          post :extract
+          get  :items
+          patch 'items/:item_id', action: :update_item, as: :update_item
+          post :bulk_review
+          post :auto_resolve
+          get  :catalog
+          get  :link_sources
+          post :link_catalog
+          post :publish
+          get  'documents/:document_id/download', action: :download_document, as: :download_document
+          post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
+          get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs
+          patch 'documents/:document_id/tabs', action: :update_tabs, as: :update_document_tabs
+          patch 'documents/:document_id/plant', action: :update_plant, as: :update_document_plant
+          post 'refresh_media'
+          # What Claude and admins decided about its options (CatalogOptionDecisionsController).
+          get  'option_decisions', to: 'catalog_option_decisions#index'
+          post 'option_review', to: 'catalog_option_decisions#review'
+          get  'options', to: 'catalog_option_decisions#options'
+        end
+      end
+      get   'option_decisions/patterns', to: 'catalog_option_decisions#patterns'
+      patch 'option_decisions/:id', to: 'catalog_option_decisions#update'
+      post  'option_decisions', to: 'catalog_option_decisions#create'
+
       # ==================== CATALOG SOURCES (Surface B — Platform Admin Only) ====================
       resources :catalog_sources do
         collection do
@@ -3143,6 +3225,7 @@ Rails.application.routes.draw do
       post 'auth/request_magic_link', to: 'auth#request_magic_link'
       post 'auth/magic-link', to: 'auth#request_magic_link'
       get 'auth/verify_magic_link', to: 'auth#verify_magic_link'
+      get 'auth/claim_design', to: 'auth#claim_design'
       post 'auth/request_reset', to: 'auth#request_reset'
       # Alias for request_reset. Used to point at a nonexistent auth#forgot_password,
       # so anything hitting this path got a 404 instead of a reset email.
@@ -3154,6 +3237,8 @@ Rails.application.routes.draw do
       post 'auth/complete_registration', to: 'auth#complete_registration'
       
       # Phase 4B - Quote Management
+      get 'truebuild_designs', to: 'truebuild_designs#index'
+      post 'truebuild_designs/:id/shared', to: 'truebuild_designs#shared'
       resources :quotes, only: [:index, :show] do
         member do
           patch :accept
@@ -3263,15 +3348,6 @@ Rails.application.routes.draw do
         member do
           get :download
         end
-      end
-
-      # Portal Home Configurator
-      scope 'configurator' do
-        get 'settings', to: 'configurator#settings'
-        get 'floor-plans', to: 'configurator#floor_plans'
-        get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
-        post 'submit', to: 'configurator#submit'
-        get 'my-configurations', to: 'configurator#my_configurations'
       end
     end
   end

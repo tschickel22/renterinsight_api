@@ -81,7 +81,7 @@ module Api
           performed_by: signer
         )
 
-        render json: { url: url }
+        render json: { url: PrivateFiles.url(url, filename: "#{agreement.agreement_number}.pdf", disposition: 'attachment') }
       end
 
       private
@@ -111,7 +111,7 @@ module Api
           agreement_number: agreement.agreement_number,
           status: agreement.status,
           category: agreement.category,
-          document_url: effective_doc_url,
+          document_url: PrivateFiles.url(effective_doc_url),
           sent_at: agreement.sent_at,
           completed_at: agreement.completed_at,
           expires_at: agreement.expires_at,

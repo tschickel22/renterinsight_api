@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your design is saved</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;">
+  <div style="background-color: #ffffff; border-radius: 8px; padding: 32px;">
+    <h1 style="margin: 0 0 16px; font-size: 24px; color: #111;">Your home design is saved</h1>
+    <p>Hi <%= @first_name.presence || 'there' %>,</p>
+    <p>Thanks for designing your home with <%= @company_name %>. Here is what you saved:</p>
+    <div style="background: #f7f7f8; border-radius: 6px; padding: 16px; margin: 16px 0;">
+      <p style="margin: 0; font-weight: 600;"><%= @design.name %></p>
+      <% if @options.any? %>
+        <p style="margin: 8px 0 0; color: #555;"><%= @options.first(12).join(', ') %><%= @options.size > 12 ? ", and #{@options.size - 12} more" : '' %></p>
+      <% end %>
+      <% if @price %>
+        <p style="margin: 8px 0 0;">Your price: <strong><%= @price %></strong></p>
+      <% end %>
+    </div>
+    <p style="text-align: center; margin: 24px 0;">
+      <a href="<%= @design_link %>" style="display: inline-block; background-color: #111827; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600;">Open my design</a>
+    </p>
+    <p>Your designs are also kept in your <%= @company_name %> account, where you can come back to them any time:</p>
+    <p style="text-align: center;">
+      <a href="<%= @portal_link %>" style="color: #4F46E5; font-weight: 600;">Go to my account</a>
+    </p>
+    <p style="color: #666; font-size: 13px;">Someone from <%= @company_name %> will be in touch about pricing, what is included, and delivery. Just reply to this email with any questions.</p>
+  </div>
+</body>
+</html>

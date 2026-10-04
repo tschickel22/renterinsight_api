@@ -11,6 +11,10 @@
 # Anything reading documents on a customer-facing surface MUST filter by
 # visibility — never expose the raw association without the scope.
 class VehicleDocument < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :file_url
+
   VISIBILITIES = %w[internal customer public].freeze
   CATEGORIES   = %w[factory title registration inspection warranty service other].freeze
 

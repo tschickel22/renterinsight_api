@@ -45,6 +45,32 @@ class BuyerPortalMailer < ApplicationMailer
     )
   end
   
+  # A buyer saved a home they designed on the dealer's website. Without a
+  # login yet, the account link claims one (Truebuild::PortalAccess.claim!);
+  # with one, it goes to sign in.
+  def truebuild_design_email(design, access: nil)
+    @design = design
+    @company_name = design.company.name.presence || Brand.current.name
+    @first_name = design.lead&.first_name
+    frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
+    @portal_link = if access
+                     "#{frontend_url}/client/login?email=#{CGI.escape(access.email)}"
+                   else
+                     "#{frontend_url}/magic-link?claim=#{CGI.escape(Truebuild::PortalAccess.claim_token(design))}&next=designs"
+                   end
+    @design_link = Truebuild::DesignSaver.design_url(design)
+    snap = design.price_snapshot
+    @price = snap['show_prices'] ? ActiveSupport::NumberHelper.number_to_currency(snap['total'], precision: 0) : nil
+    @options = CatalogOption.where(id: design.option_ids).pluck(:name)
+
+    configure_mailer_from_settings
+    # The email says "just reply": the dealer's name on it, and the reply
+    # threaded onto the buyer's lead (which notifies its owner) rather than
+    # into the platform's no-reply alerts box.
+    mail(to: design.buyer_email, from: "#{@company_name} <#{get_from_email}>", reply_to: truebuild_reply_to(design),
+         subject: "Your #{design.variant.catalog_plan.name} design is saved")
+  end
+
   # Password reset email
   def password_reset_email(buyer_access)
     @buyer_access = buyer_access
@@ -142,6 +168,14 @@ class BuyerPortalMailer < ApplicationMailer
   end
   
   private
+
+  def truebuild_reply_to(design)
+    if design.lead_id
+      "#{ReplyToAddressService::REPLY_PREFIX}+lead-#{design.lead_id}@#{ReplyToAddressService.mail_domain(company: design.company)}"
+    else
+      design.lead&.owner&.email.presence || design.company.try(:email).presence
+    end
+  end
 
   # The dealership's name, not the platform's. A buyer bought their home from a
   # specific dealer, so portal mail has to carry that dealer's brand. See the

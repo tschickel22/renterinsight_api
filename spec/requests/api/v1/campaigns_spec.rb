@@ -302,7 +302,8 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
       get "/api/v1/campaigns/merge_fields?source_type=Account", headers: auth_headers
       body = JSON.parse(response.body)
       keys = body["fields"].map { |f| f["key"] }
-      expect(keys).to include("account_name")
+      # Recipient, rep and company fields apply to every source; first_name is Lead/Contact only.
+      expect(keys).to include("full_name", "rep_name", "company.name")
       expect(keys).not_to include("first_name")
     end
 

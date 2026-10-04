@@ -185,6 +185,14 @@ module Api
           return render json: { error: 'Contact already has active portal access' }, status: :unprocessable_entity
         end
 
+        # A buyer who saved a TrueBuild design already has a design-only login
+        # on their lead. Inviting them upgrades that login to the whole portal
+        # (quotes, documents, projects) and keeps their saved homes, rather
+        # than failing because the email is taken.
+        if !existing_access && (lead_login = upgradeable_lead_login(contact))
+          return upgrade_lead_login(lead_login, contact)
+        end
+
         # Check if email is already used by another portal user (globally)
         email_to_use = (params[:email] || contact.email).downcase
         email_conflict = BuyerPortalAccess.find_by(email: email_to_use)
@@ -388,6 +396,33 @@ module Api
 
       private
 
+      # The design-only login of a lead that became this contact: one whose
+      # saved design was carried onto the contact, or a converted lead into
+      # the contact's account under the same email. Never a stranger's login.
+      def upgradeable_lead_login(contact)
+        lead_ids = contact.company.truebuild_designs.where(contact_id: contact.id).where.not(lead_id: nil).pluck(:lead_id)
+        if contact.email.present? && contact.account_id
+          lead_ids |= contact.company.leads.where(is_converted: true, converted_account_id: contact.account_id)
+                             .where('LOWER(email) = ?', contact.email.downcase).pluck(:id)
+        end
+        return nil if lead_ids.empty?
+
+        BuyerPortalAccess.where(company_id: contact.company_id, buyer_type: 'Lead', buyer_id: lead_ids).order(:id).last
+      end
+
+      def upgrade_lead_login(access, contact)
+        access.update!(buyer_type: 'Contact', buyer_id: contact.id, permissions: params[:permissions] || access.permissions)
+        contact.company.truebuild_designs.where(lead_id: access.buyer_id_previously_was).where(contact_id: nil)
+               .update_all(contact_id: contact.id) if access.buyer_id_previously_was
+        begin
+          send_portal_upgrade(access, contact)
+        rescue StandardError => e
+          Rails.logger.error("Portal upgrade email failed: #{e.message}")
+        end
+        render json: { message: 'Portal access upgraded: they keep their saved homes and now see the whole portal',
+                       upgraded: true, portal_user: { id: access.id, email: access.email, status: access.status } }
+      end
+
       # Helper to get the correct company_id for sensitive operations
       # Uses JWT company_id if set (from invite), otherwise current_company_id
       def secure_company_id
@@ -439,6 +474,24 @@ module Api
         }
       end
 
+      # The buyer already has an account (made when they saved a home), so
+      # this says what is new and asks them to sign in, not to sign up.
+      def send_portal_upgrade(access, contact)
+        company = contact.company
+        name = [contact.first_name, contact.last_name].compact.join(' ').strip.presence || 'there'
+        login_url = "#{ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'}/client/login?email=#{CGI.escape(access.email)}"
+        text = "Hi #{name},\n\nYour #{company.name} portal now has everything for your home in one place: your quotes, " \
+               "documents and your home's progress, alongside the homes you designed.\n\nSign in with the account you " \
+               "already have:\n#{login_url}\n\nBest regards,\n#{company.name}"
+        result = CommunicationService.send_email(
+          communicable: contact, to: access.email, subject: "Your #{company.name} portal has more for you",
+          body: PortalInvitationEmail.html(company: company, url: login_url, text: text, expires_in: nil, button: 'Sign in'),
+          category: 'transactional', portal_visible: false, skip_preference_check: true,
+          metadata: { portal_user_id: access.id, invitation_type: 'portal_upgrade' }
+        )
+        raise StandardError, result[:error] unless result[:success]
+      end
+
       def send_portal_invitation(portal_user, contact)
         # Use CommunicationService to send invitation
         recipient_name = "#{contact.first_name} #{contact.last_name}".strip
@@ -468,22 +521,31 @@ module Api
         
         # IMPORTANT: Set both portal_url and registration_url to registration page
         # This ensures templates using either variable work correctly
+        expires_in = '7 days' # BuyerPortalAccess#generate_invitation_token
         template_context = {
           recipient_name: recipient_name,
           portal_url: registration_url,
           registration_url: registration_url,
-          company_name: company.name
+          company_name: company.name,
+          expires_in: expires_in
         }
 
-        # Render the template
+        # Render the template. A plain text one (the default, and most dealers')
+        # is laid out as a branded email; HTML a dealer wrote goes as written.
         rendered = template.render(template_context)
+        body = rendered[:body].to_s
+        unless PortalInvitationEmail.html?(body)
+          # Older auto-generated templates promised 15 minutes; the link lasts a week.
+          text = body.gsub(/This link will expire in 15 minutes\.?/i, '').strip
+          body = PortalInvitationEmail.html(company: company, url: registration_url, text: text, expires_in: expires_in)
+        end
 
         # Send email via CommunicationService
         result = CommunicationService.send_email(
           communicable: contact,
           to: portal_user.email,
           subject: rendered[:subject],
-          body: rendered[:body],
+          body: body,
           category: 'transactional',
           portal_visible: false,
           skip_preference_check: true,
@@ -646,8 +708,6 @@ module Api
 
             Click here to create your account:
             {{registration_url}}
-
-            This link will expire in 15 minutes.
 
             Best regards,
             {{company_name}}

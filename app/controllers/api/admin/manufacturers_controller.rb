@@ -13,6 +13,12 @@ class Api::Admin::ManufacturersController < ApplicationController
       manufacturers = manufacturers.where(industry_type: params[:industry_type])
     end
 
+    # platform=true: manufacturers shared by every dealer (no owning company),
+    # as TrueBuild price books need. Dealer-created ones carry a company_id.
+    if params[:platform].to_s == 'true'
+      manufacturers = manufacturers.where(company_id: nil)
+    end
+
     if params[:active].present?
       manufacturers = manufacturers.where(active: params[:active] == 'true')
     end

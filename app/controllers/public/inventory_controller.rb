@@ -12,6 +12,7 @@
 # - Token passed via params[:token] or X-Inventory-Token header
 # - Optional website_id/location_id for context-specific branding
 class Public::InventoryController < ApplicationController
+  include TruebuildReach
   skip_before_action :authenticate, raise: false  # Public endpoint - no user auth
   skip_before_action :set_company_scope, raise: false  # Company determined by token
   skip_before_action :set_current_attributes, raise: false  # No user context
@@ -52,7 +53,7 @@ class Public::InventoryController < ApplicationController
       get_public_statuses
     end
     
-    @vehicles = @company.vehicles
+    @vehicles = @company.vehicles.includes(:catalog_plan_variant)
                        .where(status: statuses)
                        .where(is_deleted: [false, nil])
     
@@ -138,6 +139,11 @@ class Public::InventoryController < ApplicationController
       )
     end
 
+    # Homes a buyer can design (TrueBuild): not built yet and linked to a model.
+    if ActiveModel::Type::Boolean.new.cast(params[:designable])
+      @vehicles = truebuild_reachable? ? Truebuild::BuyerCatalog.designable_homes(@company, @vehicles) : @vehicles.none
+    end
+
     # Vehicle filters
     @vehicles = @vehicles.where(make: params[:make]) if params[:make].present?
     @vehicles = @vehicles.where(model: params[:model]) if params[:model].present?
@@ -178,6 +184,15 @@ class Public::InventoryController < ApplicationController
     total_pages = (total_count.to_f / per_page).ceil
     
     @vehicles = @vehicles.offset((page - 1) * per_page).limit(per_page)
+    # Which homes on this page open the designer, and which show finishes on
+    # their photos, for a badge on the card.
+    # Off the DealerTide site without the add-on, none (TruebuildReach).
+    @designable_ids = if truebuild_reachable?
+                        Truebuild::BuyerCatalog.designable_homes(@company, @company.vehicles.where(id: @vehicles.map(&:id))).pluck(:id).to_set
+                      else
+                        Set.new
+                      end
+    @trueview_variant_ids = Truebuild::ModelList.trueview_ready(@vehicles.select { |v| @designable_ids.include?(v.id) }.map(&:catalog_plan_variant_id).uniq)
     
     # Get branding (Location → Company → Platform hierarchy)
     location = params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : nil
@@ -265,7 +280,8 @@ class Public::InventoryController < ApplicationController
       vehicle: vehicle_detail_json(@vehicle),
       company: company_data,
       branding: branding,
-      champion_disclaimer: @vehicle.source == 'champion_ims' ? ChampionDisclaimer.for_company(@company) : { show: false }
+      champion_disclaimer: @vehicle.source == 'champion_ims' ? ChampionDisclaimer.for_company(@company) : { show: false },
+      truebuild: truebuild_for(@vehicle)
     }
   end
   
@@ -352,6 +368,8 @@ class Public::InventoryController < ApplicationController
     end
     
     render json: {
+      # Homes a buyer can design (TrueBuild), so the filter shows only when there are some.
+      designable_count: truebuild_reachable? ? Truebuild::BuyerCatalog.designable_homes(@company, vehicles).count : 0,
       makes: makes,
       models: models,
       models_by_make: models_by_make,
@@ -420,6 +438,15 @@ class Public::InventoryController < ApplicationController
   
   # Authenticate using public_inventory_token
   # Token can be in params[:token] or X-Inventory-Token header
+  # Whether this home can be designed here; on the dealer's own website
+  # without the add-on, where to design it instead (its DealerTide page).
+  def truebuild_for(vehicle)
+    designable = Truebuild::BuyerCatalog.designable_home?(@company, vehicle)
+    return { available: true } if designable && truebuild_reachable?
+
+    { available: false, design_url: (truebuild_site_url(vehicle) if designable) }.compact
+  end
+
   def authenticate_inventory_token
     token = params[:token] || request.headers['X-Inventory-Token']
     
@@ -592,8 +619,28 @@ class Public::InventoryController < ApplicationController
   # Matterport walkthrough beats a generic 360 embed, which beats the legacy
   # column kept from an older import.
   def tour_url_for(vehicle)
-    [vehicle.matterport_url, vehicle.virtual_tour_url, vehicle.try(:virtual_tour)]
-      .find(&:present?)
+    [vehicle.matterport_url, vehicle.virtual_tour_url, vehicle.try(:virtual_tour),
+     catalog_media(vehicle)['matterport_url']].find(&:present?)
+  end
+
+  # A home's own photos; a home linked to a catalog model and photographed by
+  # nobody yet shows the manufacturer's photos of that model instead of a
+  # blank card (Truebuild::ModelMedia).
+  def display_image_urls(vehicle)
+    own = extract_image_urls(vehicle.images)
+    return own if own.any?
+
+    media = catalog_media(vehicle)
+    (Array(media['photos']).map { |p| p['url'] } + Array(media['elevations'])).compact.first(24)
+  end
+
+  def display_floor_plans(vehicle)
+    own = extract_image_urls(vehicle.floor_plan_images)
+    own.any? ? own : Array(catalog_media(vehicle)['floor_plans'])
+  end
+
+  def catalog_media(vehicle)
+    vehicle.catalog_plan_variant_id ? (vehicle.catalog_plan_variant&.shown_media || {}) : {}
   end
 
   # Extract plain URL strings from images array
@@ -697,9 +744,9 @@ class Public::InventoryController < ApplicationController
       location_state: vehicle.location&.state,
       
       # Images (extract URL strings from hash objects if needed)
-      primary_image_url: extract_image_urls(vehicle.images).first,
-      image_urls: extract_image_urls(vehicle.images),
-      floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
+      primary_image_url: display_image_urls(vehicle).first,
+      image_urls: display_image_urls(vehicle),
+      floor_plan_images: display_floor_plans(vehicle),
       
       # Media flags for list view icons
       has_virtual_tour: vehicle.virtual_tour_url.present?,
@@ -728,6 +775,11 @@ class Public::InventoryController < ApplicationController
       #
       # Principal and interest only — see Websites::CalculatorSettings.
       monthly_payment: estimated_monthly_payment(vehicle),
+
+      # TrueBuild: the buyer can design this home (choose its options and
+      # finishes), and see them on its photos when trueview is true.
+      designable: @designable_ids.to_a.include?(vehicle.id),
+      trueview: @designable_ids.to_a.include?(vehicle.id) && @trueview_variant_ids.to_a.include?(vehicle.catalog_plan_variant_id),
 
       # Computed fields
       display_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,
@@ -805,7 +857,7 @@ class Public::InventoryController < ApplicationController
       # What a visitor should actually be sent to, already resolved.
       tour_url: tour_url_for(vehicle),
       video_url: vehicle.video_url,
-      floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
+      floor_plan_images: display_floor_plans(vehicle),
       
       # Identifiers
       vin: vehicle.vin,

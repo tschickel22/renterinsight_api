@@ -11,7 +11,14 @@ class PlatformModule
     'crm.contacts' => { name: 'Contact Management', category: 'CRM & Sales', icon: 'UserCircle', description: 'Contact database and communication' },
     'crm.deals' => { name: 'Sales Pipeline', category: 'CRM & Sales', icon: 'TrendingUp', description: 'Deal tracking and sales process' },
     'crm.quotes' => { name: 'Quote Builder', category: 'CRM & Sales', icon: 'FileText', description: 'Professional quote generation' },
-    'sales.configurator' => { name: 'Home Configurator', category: 'CRM & Sales', icon: 'Home', description: 'Configure and quote manufactured homes' },
+    # TrueBuild. The key predates it (the retired March 2026 configurator) and
+    # is kept because plans and overrides already carry it.
+    'sales.configurator' => { name: 'TrueBuild Home Designer', category: 'CRM & Sales', icon: 'Home',
+                              description: 'Buyers design and price homes on your website with factory pricing and TrueView renderings' },
+    # TrueBuild on the dealer's own website (the inventory embed), not only on
+    # their DealerTide site. In no plan: granted dealer by dealer.
+    'sales.truebuild_embed' => { name: 'TrueBuild on your own website', category: 'CRM & Sales', icon: 'Globe',
+                                 description: 'Buyers design homes in the inventory embed on your own website, not only on your DealerTide site' },
     'sales.deal_desk' => { name: 'Deal Desk', category: 'CRM & Sales', icon: 'Calculator', description: 'Point-of-sale deal structuring: solve for payment, compare units, present a pencil' },
     
     # Inventory & Operations
@@ -166,7 +173,7 @@ class PlatformModule
       admin.settings admin.users
     ].freeze,
     professional: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
@@ -175,7 +182,7 @@ class PlatformModule
       admin.settings admin.users admin.locations
     ].freeze,
     enterprise: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
       marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting

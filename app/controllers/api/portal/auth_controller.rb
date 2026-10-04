@@ -6,6 +6,7 @@ module Api
         :login, 
         :request_magic_link, 
         :verify_magic_link, 
+        :claim_design,
         :request_reset, 
         :reset_password,
         :verify_invitation,
@@ -57,6 +58,21 @@ module Api
         end
       end
       
+      # GET /api/portal/auth/claim_design?token=
+      # The link in a saved-design email: creates the buyer's login on first
+      # use (Truebuild::PortalAccess.claim!) and signs them in.
+      def claim_design
+        buyer_access = Truebuild::PortalAccess.claim!(params[:token])
+        unless buyer_access
+          return render json: { success: false, error: 'This link has expired or is no longer valid' }, status: :unauthorized
+        end
+
+        buyer_access.record_login!(request.remote_ip)
+        profile = buyer_profile(buyer_access)
+        render json: { success: true, token: JsonWebToken.encode(buyer_portal_access_id: buyer_access.id),
+                       user: profile.merge(user_type: 'client'), buyer: profile }, status: :ok
+      end
+
       def verify_magic_link
         buyer_access = BuyerPortalAccess.find_by(login_token: params[:token])
         
@@ -66,13 +82,15 @@ module Api
           
           token = JsonWebToken.encode(buyer_portal_access_id: buyer_access.id)
           
-          # Format response to match frontend expectations (success + user)
-          user_data = buyer_profile(buyer_access).merge(user_type: 'client')
-          
+          # The portal sign in reads `buyer` (as claim_design sends it); the
+          # unified sign in reads `user`. Sending only `user` crashed the
+          # portal page on every magic link ("reading 'id'").
+          profile = buyer_profile(buyer_access)
           render json: {
             success: true,
             token: token,
-            user: user_data
+            user: profile.merge(user_type: 'client'),
+            buyer: profile
           }, status: :ok
         else
           render json: {
@@ -187,6 +205,9 @@ module Api
           render json: {
             ok: true,
             email: buyer_access.email,
+            # Already signed up (or signed in by email link): the page offers
+            # sign in and password reset instead of a second account.
+            has_account: buyer_access.password_digest.present? || buyer_access.last_login_at.present?,
             buyer_type: buyer_access.buyer_type,
             first_name: first_name,
             last_name: last_name,
@@ -251,6 +272,10 @@ module Api
       end
       
       private
+
+      # A lead-level login (from a saved TrueBuild design) may read its own profile.
+      def lead_portal_allowed? = true
+
       
       def buyer_profile(buyer_access)
         {

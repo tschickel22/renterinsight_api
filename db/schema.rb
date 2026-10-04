@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_04_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1494,6 +1494,222 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["receipt_date"], name: "index_cash_receipts_on_receipt_date"
   end
 
+  create_table "catalog_import_items", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.bigint "catalog_price_book_document_id"
+    t.string "item_type", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.jsonb "source_ref", default: {}, null: false
+    t.jsonb "flags", default: [], null: false
+    t.string "change_type"
+    t.jsonb "previous_values"
+    t.string "review_status", default: "pending", null: false
+    t.bigint "reviewed_by_id"
+    t.datetime "reviewed_at"
+    t.string "matched_type"
+    t.bigint "matched_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_document_id"], name: "index_catalog_import_items_on_catalog_price_book_document_id"
+    t.index ["catalog_price_book_id", "item_type"], name: "idx_on_catalog_price_book_id_item_type_09bc4d8aa9"
+    t.index ["catalog_price_book_id", "review_status"], name: "idx_on_catalog_price_book_id_review_status_0384f22096"
+    t.index ["catalog_price_book_id"], name: "index_catalog_import_items_on_catalog_price_book_id"
+    t.index ["matched_type", "matched_id"], name: "index_catalog_import_items_on_matched"
+    t.index ["reviewed_by_id"], name: "index_catalog_import_items_on_reviewed_by_id"
+  end
+
+  create_table "catalog_option_decisions", force: :cascade do |t|
+    t.bigint "manufacturer_id"
+    t.string "option_key", null: false
+    t.string "kind", null: false
+    t.string "value"
+    t.string "source", default: "claude", null: false
+    t.string "status", default: "active", null: false
+    t.string "suggestion"
+    t.text "note"
+    t.bigint "catalog_price_book_id"
+    t.bigint "reviewed_by_id"
+    t.datetime "reviewed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_id"], name: "index_catalog_option_decisions_on_catalog_price_book_id"
+    t.index ["manufacturer_id", "option_key", "kind"], name: "idx_catalog_option_decisions_unique", unique: true
+    t.index ["manufacturer_id"], name: "index_catalog_option_decisions_on_manufacturer_id"
+    t.index ["reviewed_by_id"], name: "index_catalog_option_decisions_on_reviewed_by_id"
+    t.index ["suggestion"], name: "index_catalog_option_decisions_on_suggestion"
+  end
+
+  create_table "catalog_option_groups", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "series"
+    t.string "key", null: false
+    t.string "name", null: false
+    t.string "selection_type", default: "single", null: false
+    t.boolean "required", default: false, null: false
+    t.integer "position", default: 0, null: false
+    t.string "render_surface"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "manufacturer_id, COALESCE(factory_id, (0)::bigint), COALESCE(series, ''::character varying), key", name: "idx_catalog_option_groups_unique_key", unique: true
+    t.index ["factory_id"], name: "index_catalog_option_groups_on_factory_id"
+    t.index ["manufacturer_id"], name: "index_catalog_option_groups_on_manufacturer_id"
+  end
+
+  create_table "catalog_option_prices", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.bigint "catalog_option_id", null: false
+    t.decimal "dealer_cost", precision: 12, scale: 2
+    t.decimal "suggested_retail", precision: 12, scale: 2
+    t.boolean "is_standard", default: false, null: false
+    t.bigint "catalog_plan_variant_id"
+    t.string "series"
+    t.integer "min_length_ft"
+    t.integer "max_length_ft"
+    t.integer "width_ft"
+    t.string "section_type"
+    t.string "construction"
+    t.string "building_code"
+    t.jsonb "source_ref", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_option_id"], name: "index_catalog_option_prices_on_catalog_option_id"
+    t.index ["catalog_plan_variant_id"], name: "index_catalog_option_prices_on_catalog_plan_variant_id"
+    t.index ["catalog_price_book_id", "catalog_option_id"], name: "idx_catalog_option_prices_book_option"
+    t.index ["catalog_price_book_id"], name: "index_catalog_option_prices_on_catalog_price_book_id"
+  end
+
+  create_table "catalog_option_rules", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "catalog_option_id", null: false
+    t.string "rule_type", null: false
+    t.bigint "target_option_id", null: false
+    t.jsonb "conditions", default: {}, null: false
+    t.jsonb "source_ref", default: {}, null: false
+    t.text "notes"
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "index_catalog_option_rules_on_approved_by_id"
+    t.index ["catalog_option_id", "rule_type", "target_option_id"], name: "idx_catalog_option_rules_unique", unique: true
+    t.index ["catalog_option_id"], name: "index_catalog_option_rules_on_catalog_option_id"
+    t.index ["manufacturer_id"], name: "index_catalog_option_rules_on_manufacturer_id"
+    t.index ["target_option_id"], name: "index_catalog_option_rules_on_target_option_id"
+  end
+
+  create_table "catalog_options", force: :cascade do |t|
+    t.bigint "catalog_option_group_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.string "key", null: false
+    t.string "factory_code"
+    t.string "name", null: false
+    t.text "description"
+    t.string "kind", default: "upgrade", null: false
+    t.string "in_place_of"
+    t.jsonb "package_items", default: [], null: false
+    t.string "swatch_url"
+    t.string "render_surface"
+    t.string "floor_plan_layer"
+    t.string "status", default: "active", null: false
+    t.date "discontinued_on"
+    t.bigint "replaced_by_id"
+    t.integer "position", default: 0, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_option_group_id"], name: "index_catalog_options_on_catalog_option_group_id"
+    t.index ["manufacturer_id", "factory_code"], name: "index_catalog_options_on_manufacturer_id_and_factory_code"
+    t.index ["manufacturer_id", "key"], name: "index_catalog_options_on_manufacturer_id_and_key", unique: true
+    t.index ["manufacturer_id"], name: "index_catalog_options_on_manufacturer_id"
+    t.index ["replaced_by_id"], name: "index_catalog_options_on_replaced_by_id"
+  end
+
+  create_table "catalog_plan_variants", force: :cascade do |t|
+    t.bigint "catalog_plan_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.string "model_number", null: false
+    t.string "model_number_as_printed"
+    t.string "building_code", null: false
+    t.integer "width_ft"
+    t.integer "length_ft"
+    t.integer "beds"
+    t.decimal "baths", precision: 3, scale: 1
+    t.integer "square_feet"
+    t.string "home_type"
+    t.string "status", default: "active", null: false
+    t.jsonb "external_ids", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "series"
+    t.jsonb "media", default: {}, null: false
+    t.index "((external_ids ->> 'champion_model_id'::text))", name: "idx_catalog_plan_variants_champion_model_id"
+    t.index "manufacturer_id, COALESCE(series, ''::character varying), model_number", name: "idx_catalog_plan_variants_unique_model", unique: true
+    t.index ["catalog_plan_id"], name: "index_catalog_plan_variants_on_catalog_plan_id"
+    t.index ["manufacturer_id", "model_number"], name: "idx_on_manufacturer_id_model_number_bef02c020a"
+    t.index ["manufacturer_id"], name: "index_catalog_plan_variants_on_manufacturer_id"
+  end
+
+  create_table "catalog_plans", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "series", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "plan_code"
+    t.text "description"
+    t.string "status", default: "active", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["factory_id"], name: "index_catalog_plans_on_factory_id"
+    t.index ["manufacturer_id", "series", "slug"], name: "index_catalog_plans_on_manufacturer_id_and_series_and_slug", unique: true
+    t.index ["manufacturer_id"], name: "index_catalog_plans_on_manufacturer_id"
+  end
+
+  create_table "catalog_price_book_documents", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.string "filename", null: false
+    t.string "content_type"
+    t.bigint "byte_size"
+    t.string "checksum_sha256", null: false
+    t.string "storage_bucket"
+    t.string "storage_key"
+    t.string "kind", default: "unknown", null: false
+    t.integer "page_count"
+    t.string "extraction_status", default: "pending", null: false
+    t.text "extraction_error"
+    t.datetime "extracted_at"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_id", "checksum_sha256"], name: "idx_catalog_pb_documents_unique_file", unique: true
+    t.index ["catalog_price_book_id"], name: "index_catalog_price_book_documents_on_catalog_price_book_id"
+  end
+
+  create_table "catalog_price_books", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "name", null: false
+    t.string "status", default: "draft", null: false
+    t.date "effective_on"
+    t.datetime "published_at"
+    t.bigint "published_by_id"
+    t.bigint "created_by_id"
+    t.bigint "supersedes_id"
+    t.text "notes"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_id"], name: "index_catalog_price_books_on_created_by_id"
+    t.index ["factory_id"], name: "index_catalog_price_books_on_factory_id"
+    t.index ["manufacturer_id", "factory_id"], name: "idx_catalog_price_books_one_published", unique: true, where: "((status)::text = 'published'::text)"
+    t.index ["manufacturer_id", "status"], name: "index_catalog_price_books_on_manufacturer_id_and_status"
+    t.index ["manufacturer_id"], name: "index_catalog_price_books_on_manufacturer_id"
+    t.index ["published_by_id"], name: "index_catalog_price_books_on_published_by_id"
+    t.index ["supersedes_id"], name: "index_catalog_price_books_on_supersedes_id"
+  end
+
   create_table "catalog_sources", force: :cascade do |t|
     t.string "name", null: false
     t.string "adapter_type", null: false
@@ -1511,6 +1727,67 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.datetime "updated_at", null: false
     t.index ["adapter_type"], name: "index_catalog_sources_on_adapter_type"
     t.index ["enabled", "is_deleted"], name: "index_catalog_sources_on_enabled_and_is_deleted"
+  end
+
+  create_table "catalog_standard_features", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.string "series"
+    t.string "building_code"
+    t.string "category", null: false
+    t.string "name", null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_id", "series"], name: "idx_on_catalog_price_book_id_series_7560d0c7d0"
+    t.index ["catalog_price_book_id"], name: "index_catalog_standard_features_on_catalog_price_book_id"
+  end
+
+  create_table "catalog_swatch_sheets", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "filename", null: false
+    t.string "storage_ref", null: false
+    t.string "status", default: "queued", null: false
+    t.text "error"
+    t.integer "swatch_count", default: 0, null: false
+    t.jsonb "missed", default: [], null: false
+    t.decimal "cost_usd", precision: 10, scale: 4
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["factory_id"], name: "index_catalog_swatch_sheets_on_factory_id"
+    t.index ["manufacturer_id"], name: "index_catalog_swatch_sheets_on_manufacturer_id"
+  end
+
+  create_table "catalog_swatches", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.bigint "catalog_swatch_sheet_id"
+    t.string "set_name", null: false
+    t.string "name", null: false
+    t.string "note"
+    t.string "hex"
+    t.string "image_url", null: false
+    t.integer "page"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "manufacturer_id, COALESCE(factory_id, (0)::bigint), lower((set_name)::text), lower((name)::text)", name: "idx_catalog_swatches_unique_name", unique: true
+    t.index ["catalog_swatch_sheet_id"], name: "index_catalog_swatches_on_catalog_swatch_sheet_id"
+    t.index ["factory_id"], name: "index_catalog_swatches_on_factory_id"
+    t.index ["manufacturer_id"], name: "index_catalog_swatches_on_manufacturer_id"
+  end
+
+  create_table "catalog_variant_prices", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.bigint "catalog_plan_variant_id", null: false
+    t.decimal "net_base_price", precision: 12, scale: 2, null: false
+    t.jsonb "required_adders", default: [], null: false
+    t.decimal "total_base_price", precision: 12, scale: 2
+    t.jsonb "source_ref", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_plan_variant_id"], name: "index_catalog_variant_prices_on_catalog_plan_variant_id"
+    t.index ["catalog_price_book_id", "catalog_plan_variant_id"], name: "idx_catalog_variant_prices_unique", unique: true
+    t.index ["catalog_price_book_id"], name: "index_catalog_variant_prices_on_catalog_price_book_id"
   end
 
   create_table "champion_ims_retailers", force: :cascade do |t|
@@ -2102,38 +2379,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["company_id"], name: "index_company_email_connections_on_company_id", unique: true
   end
 
-  create_table "company_floor_plan_option_overrides", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "floor_plan_option_id", null: false
-    t.decimal "dealer_cost", precision: 10, scale: 2
-    t.decimal "retail_price", precision: 10, scale: 2
-    t.boolean "is_hidden", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "floor_plan_option_id"], name: "idx_company_option_overrides_unique", unique: true
-    t.index ["company_id"], name: "index_company_floor_plan_option_overrides_on_company_id"
-    t.index ["floor_plan_option_id"], name: "idx_on_floor_plan_option_id_8747bca926"
-  end
-
-  create_table "company_floor_plans", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "floor_plan_id", null: false
-    t.boolean "is_visible", default: true, null: false
-    t.decimal "dealer_cost", precision: 10, scale: 2
-    t.decimal "retail_price", precision: 10, scale: 2
-    t.string "markup_type"
-    t.decimal "markup_value", precision: 10, scale: 2
-    t.string "custom_name"
-    t.text "custom_description"
-    t.integer "display_order", default: 0
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "floor_plan_id"], name: "index_company_floor_plans_on_company_id_and_floor_plan_id", unique: true
-    t.index ["company_id"], name: "index_company_floor_plans_on_company_id"
-    t.index ["floor_plan_id"], name: "index_company_floor_plans_on_floor_plan_id"
-    t.index ["is_visible"], name: "index_company_floor_plans_on_is_visible"
-  end
-
   create_table "company_hidden_roles", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "role_id", null: false
@@ -2162,39 +2407,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
     t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
     t.index ["manufacturer_id"], name: "index_company_manufacturers_on_manufacturer_id"
-  end
-
-  create_table "configurations", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "floor_plan_id", null: false
-    t.bigint "user_id"
-    t.string "configurable_type"
-    t.bigint "configurable_id"
-    t.string "name"
-    t.jsonb "selections", default: []
-    t.decimal "base_price", precision: 10, scale: 2
-    t.decimal "options_total", precision: 10, scale: 2
-    t.decimal "total_price", precision: 10, scale: 2
-    t.decimal "price_range_low", precision: 10, scale: 2
-    t.decimal "price_range_high", precision: 10, scale: 2
-    t.string "public_token", null: false
-    t.string "status", default: "draft", null: false
-    t.string "customer_name"
-    t.string "customer_email"
-    t.string "customer_phone"
-    t.datetime "shared_at"
-    t.datetime "viewed_at"
-    t.datetime "quoted_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "status"], name: "index_configurations_on_company_id_and_status"
-    t.index ["company_id"], name: "index_configurations_on_company_id"
-    t.index ["configurable_type", "configurable_id"], name: "index_configurations_on_configurable"
-    t.index ["configurable_type", "configurable_id"], name: "index_configurations_on_configurable_type_and_configurable_id"
-    t.index ["floor_plan_id"], name: "index_configurations_on_floor_plan_id"
-    t.index ["public_token"], name: "index_configurations_on_public_token", unique: true
-    t.index ["status"], name: "index_configurations_on_status"
-    t.index ["user_id"], name: "index_configurations_on_user_id"
   end
 
   create_table "contact_activities", force: :cascade do |t|
@@ -2702,6 +2914,76 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["company_id"], name: "index_dealer_catalog_subscriptions_on_company_id"
   end
 
+  create_table "dealer_catalog_terms", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "manufacturer_id"
+    t.string "price_update_policy", default: "review", null: false
+    t.string "price_display", default: "hidden", null: false
+    t.decimal "program_discount_pct", precision: 7, scale: 4, default: "0.0", null: false
+    t.decimal "freight_per_mile", precision: 10, scale: 2
+    t.decimal "freight_flat", precision: 12, scale: 2
+    t.decimal "margin_floor_pct", precision: 7, scale: 4
+    t.integer "round_retail_to"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "freight_miles"
+    t.string "buyer_view", default: "curated", null: false
+    t.jsonb "buyer_featured_option_ids", default: [], null: false
+    t.jsonb "buyer_hidden_option_ids", default: [], null: false
+    t.jsonb "buyer_hidden_groups", default: [], null: false
+    t.index "company_id, COALESCE(manufacturer_id, (0)::bigint)", name: "idx_dealer_catalog_terms_unique", unique: true
+    t.index ["company_id"], name: "index_dealer_catalog_terms_on_company_id"
+    t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"
+  end
+
+  create_table "dealer_factories", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "factory_id", null: false
+    t.bigint "added_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "factory_id"], name: "index_dealer_factories_on_company_id_and_factory_id", unique: true
+    t.index ["company_id"], name: "index_dealer_factories_on_company_id"
+    t.index ["factory_id"], name: "index_dealer_factories_on_factory_id"
+  end
+
+  create_table "dealer_markup_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "scope_type", null: false
+    t.bigint "manufacturer_id"
+    t.string "scope_value"
+    t.bigint "scope_id"
+    t.string "applies_to", default: "base_and_options", null: false
+    t.string "markup_type", null: false
+    t.decimal "value", precision: 12, scale: 4, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "company_id, COALESCE(location_id, (0)::bigint), scope_type, COALESCE(manufacturer_id, (0)::bigint), COALESCE(scope_value, ''::character varying), COALESCE(scope_id, (0)::bigint), applies_to", name: "idx_dealer_markup_rules_unique_scope", unique: true
+    t.index ["company_id"], name: "index_dealer_markup_rules_on_company_id"
+    t.index ["location_id"], name: "index_dealer_markup_rules_on_location_id"
+    t.index ["manufacturer_id"], name: "index_dealer_markup_rules_on_manufacturer_id"
+  end
+
+  create_table "dealer_price_book_adoptions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "catalog_price_book_id", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "decided_at"
+    t.bigint "decided_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "summary", default: {}, null: false
+    t.datetime "notified_at"
+    t.bigint "previous_book_id"
+    t.index ["catalog_price_book_id"], name: "index_dealer_price_book_adoptions_on_catalog_price_book_id"
+    t.index ["company_id", "catalog_price_book_id"], name: "idx_dealer_pb_adoptions_unique", unique: true
+    t.index ["company_id"], name: "index_dealer_price_book_adoptions_on_company_id"
+    t.index ["decided_by_id"], name: "index_dealer_price_book_adoptions_on_decided_by_id"
+    t.index ["previous_book_id"], name: "index_dealer_price_book_adoptions_on_previous_book_id"
+  end
+
   create_table "deals", force: :cascade do |t|
     t.string "name", null: false
     t.integer "account_id"
@@ -2974,6 +3256,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.boolean "is_active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "truebuild_released_at"
+    t.bigint "truebuild_released_by_id"
+    t.text "truebuild_release_note"
     t.index ["is_active"], name: "index_factories_on_is_active"
     t.index ["manufacturer_id", "code"], name: "index_factories_on_manufacturer_id_and_code", unique: true
     t.index ["manufacturer_id"], name: "index_factories_on_manufacturer_id"
@@ -3021,91 +3306,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["company_id", "fiscal_year", "period_number"], name: "idx_fiscal_periods_company_year_period", unique: true
     t.index ["company_id", "status"], name: "index_fiscal_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_fiscal_periods_on_company_id"
-  end
-
-  create_table "floor_plan_option_applicabilities", force: :cascade do |t|
-    t.bigint "floor_plan_id", null: false
-    t.bigint "floor_plan_option_id", null: false
-    t.boolean "is_default_for_model", default: false, null: false
-    t.decimal "price_dealer_override", precision: 10, scale: 2
-    t.decimal "price_retail_override", precision: 10, scale: 2
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["floor_plan_id", "floor_plan_option_id"], name: "idx_fp_option_applicability_unique", unique: true
-    t.index ["floor_plan_id"], name: "index_floor_plan_option_applicabilities_on_floor_plan_id"
-    t.index ["floor_plan_option_id"], name: "idx_on_floor_plan_option_id_e985b29c0c"
-    t.index ["is_default_for_model"], name: "idx_on_is_default_for_model_2782a513db"
-  end
-
-  create_table "floor_plan_options", force: :cascade do |t|
-    t.bigint "option_category_id", null: false
-    t.string "name", null: false
-    t.text "description"
-    t.string "image_url"
-    t.decimal "price_impact_low", precision: 10, scale: 2
-    t.decimal "price_impact_high", precision: 10, scale: 2
-    t.jsonb "compatibility_rules", default: {}
-    t.integer "display_order", default: 0
-    t.boolean "is_default", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.string "option_code"
-    t.decimal "price_dealer", precision: 10, scale: 2
-    t.decimal "price_retail", precision: 10, scale: 2
-    t.string "swatch_image_url"
-    t.string "material_type"
-    t.string "dimensions"
-    t.string "series_restriction"
-    t.bigint "factory_id"
-    t.boolean "is_standard_included", default: false, null: false
-    t.index ["factory_id", "option_code"], name: "index_floor_plan_options_on_factory_id_and_option_code"
-    t.index ["factory_id"], name: "index_floor_plan_options_on_factory_id"
-    t.index ["is_default"], name: "index_floor_plan_options_on_is_default"
-    t.index ["is_standard_included"], name: "index_floor_plan_options_on_is_standard_included"
-    t.index ["option_category_id", "display_order"], name: "idx_on_option_category_id_display_order_92fbf53154"
-    t.index ["option_category_id"], name: "index_floor_plan_options_on_option_category_id"
-    t.index ["option_code"], name: "index_floor_plan_options_on_option_code"
-    t.index ["series_restriction"], name: "index_floor_plan_options_on_series_restriction"
-  end
-
-  create_table "floor_plans", force: :cascade do |t|
-    t.bigint "manufacturer_id", null: false
-    t.bigint "factory_id"
-    t.string "name", null: false
-    t.string "model_code", null: false
-    t.string "series"
-    t.integer "beds"
-    t.decimal "baths", precision: 3, scale: 1
-    t.integer "sqft"
-    t.decimal "width_feet", precision: 6, scale: 2
-    t.decimal "length_feet", precision: 6, scale: 2
-    t.jsonb "specifications", default: {}
-    t.jsonb "images_array", default: []
-    t.decimal "base_price_low", precision: 10, scale: 2
-    t.decimal "base_price_high", precision: 10, scale: 2
-    t.decimal "suggested_retail_low", precision: 10, scale: 2
-    t.decimal "suggested_retail_high", precision: 10, scale: 2
-    t.boolean "is_active", default: true, null: false
-    t.string "scraper_source_url"
-    t.datetime "last_scraped_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.decimal "net_price", precision: 10, scale: 2
-    t.string "box_size"
-    t.string "home_type", default: "hud"
-    t.string "s3_folder_path"
-    t.string "virtual_tour_url"
-    t.string "spec_sheet_url"
-    t.date "price_effective_date"
-    t.string "brand"
-    t.index ["brand"], name: "index_floor_plans_on_brand"
-    t.index ["factory_id"], name: "index_floor_plans_on_factory_id"
-    t.index ["home_type"], name: "index_floor_plans_on_home_type"
-    t.index ["is_active"], name: "index_floor_plans_on_is_active"
-    t.index ["manufacturer_id", "model_code"], name: "index_floor_plans_on_manufacturer_id_and_model_code", unique: true
-    t.index ["manufacturer_id"], name: "index_floor_plans_on_manufacturer_id"
-    t.index ["net_price"], name: "index_floor_plans_on_net_price"
-    t.index ["series"], name: "index_floor_plans_on_series"
   end
 
   create_table "fni_products", force: :cascade do |t|
@@ -4711,27 +4911,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["company_id"], name: "index_offline_sync_logs_on_company_id"
     t.index ["device_id"], name: "index_offline_sync_logs_on_device_id"
     t.index ["user_id"], name: "index_offline_sync_logs_on_user_id"
-  end
-
-  create_table "option_categories", force: :cascade do |t|
-    t.bigint "floor_plan_id"
-    t.string "name", null: false
-    t.text "description"
-    t.integer "display_order", default: 0
-    t.boolean "is_required", default: false, null: false
-    t.boolean "allow_multiple_selections", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.string "scope", default: "factory", null: false
-    t.string "category_key"
-    t.string "series"
-    t.bigint "factory_id"
-    t.index ["category_key"], name: "index_option_categories_on_category_key"
-    t.index ["factory_id", "category_key"], name: "index_option_categories_on_factory_id_and_category_key"
-    t.index ["factory_id"], name: "index_option_categories_on_factory_id"
-    t.index ["floor_plan_id", "display_order"], name: "index_option_categories_on_floor_plan_id_and_display_order"
-    t.index ["floor_plan_id"], name: "index_option_categories_on_floor_plan_id"
-    t.index ["scope"], name: "index_option_categories_on_scope"
   end
 
   create_table "package_templates", force: :cascade do |t|
@@ -7018,6 +7197,121 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.index ["vehicle_id"], name: "index_tracked_links_on_vehicle_id"
   end
 
+  create_table "truebuild_addons", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "source_type", null: false
+    t.bigint "source_id", null: false
+    t.string "mode", default: "included", null: false
+    t.decimal "price_override", precision: 12, scale: 2
+    t.bigint "manufacturer_id"
+    t.integer "position", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "source_type", "source_id"], name: "idx_on_company_id_source_type_source_id_ac014cffc1", unique: true
+    t.index ["company_id"], name: "index_truebuild_addons_on_company_id"
+    t.index ["manufacturer_id"], name: "index_truebuild_addons_on_manufacturer_id"
+  end
+
+  create_table "truebuild_designs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "catalog_plan_variant_id", null: false
+    t.bigint "vehicle_id"
+    t.bigint "lead_id"
+    t.bigint "intake_submission_id"
+    t.bigint "catalog_price_book_id"
+    t.string "public_token", null: false
+    t.string "name"
+    t.string "status", default: "saved", null: false
+    t.jsonb "option_ids", default: [], null: false
+    t.jsonb "price_snapshot", default: {}, null: false
+    t.string "buyer_email"
+    t.string "buyer_name"
+    t.integer "view_count", default: 0, null: false
+    t.datetime "last_viewed_at"
+    t.integer "share_count", default: 0, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "contact_id"
+    t.bigint "account_id"
+    t.bigint "deal_id"
+    t.bigint "quote_id"
+    t.index ["account_id"], name: "index_truebuild_designs_on_account_id"
+    t.index ["catalog_plan_variant_id"], name: "index_truebuild_designs_on_catalog_plan_variant_id"
+    t.index ["catalog_price_book_id"], name: "index_truebuild_designs_on_catalog_price_book_id"
+    t.index ["company_id", "created_at"], name: "index_truebuild_designs_on_company_id_and_created_at"
+    t.index ["company_id"], name: "index_truebuild_designs_on_company_id"
+    t.index ["contact_id"], name: "index_truebuild_designs_on_contact_id"
+    t.index ["deal_id"], name: "index_truebuild_designs_on_deal_id"
+    t.index ["intake_submission_id"], name: "index_truebuild_designs_on_intake_submission_id"
+    t.index ["lead_id"], name: "index_truebuild_designs_on_lead_id"
+    t.index ["public_token"], name: "index_truebuild_designs_on_public_token", unique: true
+    t.index ["quote_id"], name: "index_truebuild_designs_on_quote_id"
+    t.index ["vehicle_id"], name: "index_truebuild_designs_on_vehicle_id"
+  end
+
+  create_table "truebuild_factory_runs", force: :cascade do |t|
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "series"
+    t.string "status", default: "running", null: false
+    t.decimal "budget_usd", precision: 10, scale: 2, null: false
+    t.jsonb "variant_ids", default: [], null: false
+    t.jsonb "estimate", default: {}, null: false
+    t.jsonb "progress", default: {}, null: false
+    t.bigint "created_by_id"
+    t.datetime "stopped_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "mode", default: "now", null: false
+    t.datetime "scheduled_at"
+    t.index ["manufacturer_id"], name: "index_truebuild_factory_runs_on_manufacturer_id"
+    t.index ["status", "scheduled_at"], name: "index_truebuild_factory_runs_on_status_and_scheduled_at"
+  end
+
+  create_table "truebuild_renders", force: :cascade do |t|
+    t.bigint "catalog_plan_variant_id"
+    t.string "room"
+    t.string "source_url", null: false
+    t.jsonb "selection", default: [], null: false
+    t.string "selection_key", null: false
+    t.string "model_key", null: false
+    t.string "provider", null: false
+    t.string "model", null: false
+    t.string "status", default: "queued", null: false
+    t.string "image_url"
+    t.decimal "cost_usd", precision: 10, scale: 4
+    t.integer "latency_ms"
+    t.jsonb "usage", default: {}, null: false
+    t.text "prompt"
+    t.text "error"
+    t.string "lab_run"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "purpose", default: "full", null: false
+    t.string "layer_url"
+    t.decimal "mask_coverage", precision: 5, scale: 4
+    t.index ["catalog_plan_variant_id"], name: "index_truebuild_renders_on_catalog_plan_variant_id"
+    t.index ["lab_run"], name: "index_truebuild_renders_on_lab_run"
+    t.index ["source_url", "selection_key", "model_key"], name: "idx_on_source_url_selection_key_model_key_0cffdeaa5e"
+  end
+
+  create_table "truebuild_surface_masks", force: :cascade do |t|
+    t.string "source_url", null: false
+    t.string "surface", null: false
+    t.integer "version", default: 1, null: false
+    t.string "status", default: "done", null: false
+    t.string "mask_url"
+    t.decimal "coverage", precision: 5, scale: 4
+    t.string "model"
+    t.text "error"
+    t.jsonb "usage", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["source_url", "surface", "version"], name: "idx_truebuild_surface_masks_unique", unique: true
+  end
+
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "sub_account_sid"
@@ -7478,7 +7772,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
     t.datetime "catalog_last_seen_at"
     t.jsonb "catalog_last_synced_values", default: {}, null: false
     t.date "estimated_delivery_date"
+    t.bigint "catalog_plan_variant_id"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
+    t.index ["catalog_plan_variant_id"], name: "index_vehicles_on_catalog_plan_variant_id"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
@@ -8131,6 +8427,42 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "cash_receipts", "journal_entries"
   add_foreign_key "cash_receipts", "locations"
   add_foreign_key "cash_receipts", "users", column: "created_by_id"
+  add_foreign_key "catalog_import_items", "catalog_price_book_documents"
+  add_foreign_key "catalog_import_items", "catalog_price_books"
+  add_foreign_key "catalog_import_items", "users", column: "reviewed_by_id"
+  add_foreign_key "catalog_option_decisions", "catalog_price_books", on_delete: :nullify
+  add_foreign_key "catalog_option_decisions", "manufacturers"
+  add_foreign_key "catalog_option_decisions", "users", column: "reviewed_by_id", on_delete: :nullify
+  add_foreign_key "catalog_option_groups", "factories"
+  add_foreign_key "catalog_option_groups", "manufacturers"
+  add_foreign_key "catalog_option_prices", "catalog_options"
+  add_foreign_key "catalog_option_prices", "catalog_plan_variants"
+  add_foreign_key "catalog_option_prices", "catalog_price_books"
+  add_foreign_key "catalog_option_rules", "catalog_options"
+  add_foreign_key "catalog_option_rules", "catalog_options", column: "target_option_id"
+  add_foreign_key "catalog_option_rules", "manufacturers"
+  add_foreign_key "catalog_option_rules", "users", column: "approved_by_id"
+  add_foreign_key "catalog_options", "catalog_option_groups"
+  add_foreign_key "catalog_options", "catalog_options", column: "replaced_by_id"
+  add_foreign_key "catalog_options", "manufacturers"
+  add_foreign_key "catalog_plan_variants", "catalog_plans"
+  add_foreign_key "catalog_plan_variants", "manufacturers"
+  add_foreign_key "catalog_plans", "factories"
+  add_foreign_key "catalog_plans", "manufacturers"
+  add_foreign_key "catalog_price_book_documents", "catalog_price_books"
+  add_foreign_key "catalog_price_books", "catalog_price_books", column: "supersedes_id"
+  add_foreign_key "catalog_price_books", "factories"
+  add_foreign_key "catalog_price_books", "manufacturers"
+  add_foreign_key "catalog_price_books", "users", column: "created_by_id"
+  add_foreign_key "catalog_price_books", "users", column: "published_by_id"
+  add_foreign_key "catalog_standard_features", "catalog_price_books"
+  add_foreign_key "catalog_swatch_sheets", "factories", on_delete: :nullify
+  add_foreign_key "catalog_swatch_sheets", "manufacturers"
+  add_foreign_key "catalog_swatches", "catalog_swatch_sheets", on_delete: :nullify
+  add_foreign_key "catalog_swatches", "factories", on_delete: :nullify
+  add_foreign_key "catalog_swatches", "manufacturers"
+  add_foreign_key "catalog_variant_prices", "catalog_plan_variants"
+  add_foreign_key "catalog_variant_prices", "catalog_price_books"
   add_foreign_key "champion_ims_retailers", "companies"
   add_foreign_key "champion_ims_retailers", "locations"
   add_foreign_key "champion_ims_sync_events", "champion_ims_sync_runs"
@@ -8173,17 +8505,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "company_allowance_defaults", "companies"
   add_foreign_key "company_domains", "companies"
   add_foreign_key "company_domains", "websites"
-  add_foreign_key "company_floor_plan_option_overrides", "companies"
-  add_foreign_key "company_floor_plan_option_overrides", "floor_plan_options"
-  add_foreign_key "company_floor_plans", "companies"
-  add_foreign_key "company_floor_plans", "floor_plans"
   add_foreign_key "company_hidden_roles", "companies"
   add_foreign_key "company_hidden_roles", "roles"
   add_foreign_key "company_manufacturers", "companies"
   add_foreign_key "company_manufacturers", "manufacturers"
-  add_foreign_key "configurations", "companies"
-  add_foreign_key "configurations", "floor_plans"
-  add_foreign_key "configurations", "users"
   add_foreign_key "contact_activities", "accounts"
   add_foreign_key "contact_activities", "contact_activities", column: "related_activity_id"
   add_foreign_key "contact_activities", "contacts"
@@ -8233,6 +8558,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
   add_foreign_key "dealer_catalog_subscriptions", "catalog_sources"
   add_foreign_key "dealer_catalog_subscriptions", "companies"
+  add_foreign_key "dealer_catalog_terms", "companies"
+  add_foreign_key "dealer_catalog_terms", "manufacturers"
+  add_foreign_key "dealer_factories", "companies"
+  add_foreign_key "dealer_factories", "factories"
+  add_foreign_key "dealer_markup_rules", "companies"
+  add_foreign_key "dealer_markup_rules", "locations"
+  add_foreign_key "dealer_markup_rules", "manufacturers"
+  add_foreign_key "dealer_price_book_adoptions", "catalog_price_books"
+  add_foreign_key "dealer_price_book_adoptions", "catalog_price_books", column: "previous_book_id"
+  add_foreign_key "dealer_price_book_adoptions", "companies"
+  add_foreign_key "dealer_price_book_adoptions", "users", column: "decided_by_id"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
@@ -8257,12 +8593,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "fiscal_periods", "companies"
   add_foreign_key "fiscal_periods", "users", column: "closed_by_id"
-  add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"
-  add_foreign_key "floor_plan_option_applicabilities", "floor_plans"
-  add_foreign_key "floor_plan_options", "factories"
-  add_foreign_key "floor_plan_options", "option_categories"
-  add_foreign_key "floor_plans", "factories"
-  add_foreign_key "floor_plans", "manufacturers"
   add_foreign_key "fni_products", "companies"
   add_foreign_key "import_jobs", "companies"
   add_foreign_key "import_jobs", "users"
@@ -8379,8 +8709,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "oauth_tokens", "oauth_grants"
   add_foreign_key "offline_sync_logs", "companies"
   add_foreign_key "offline_sync_logs", "users"
-  add_foreign_key "option_categories", "factories"
-  add_foreign_key "option_categories", "floor_plans"
   add_foreign_key "package_templates", "companies"
   add_foreign_key "page_visit_events", "page_visits"
   add_foreign_key "page_visits", "campaigns"
@@ -8392,7 +8720,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "part_categories", "users", column: "updated_by_id"
   add_foreign_key "parts", "companies"
   add_foreign_key "parts", "factories"
-  add_foreign_key "parts", "floor_plans"
   add_foreign_key "parts", "manufacturers"
   add_foreign_key "parts", "part_categories", column: "category_id"
   add_foreign_key "parts", "users", column: "created_by_id"
@@ -8566,6 +8893,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "tracked_link_events", "tracked_links"
   add_foreign_key "tracked_links", "communications"
   add_foreign_key "tracked_links", "companies"
+  add_foreign_key "truebuild_addons", "companies"
+  add_foreign_key "truebuild_addons", "manufacturers"
+  add_foreign_key "truebuild_designs", "accounts", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "catalog_plan_variants"
+  add_foreign_key "truebuild_designs", "catalog_price_books"
+  add_foreign_key "truebuild_designs", "companies"
+  add_foreign_key "truebuild_designs", "contacts", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "deals", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "intake_submissions", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "leads", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "quotes", on_delete: :nullify
+  add_foreign_key "truebuild_designs", "vehicles", on_delete: :nullify
+  add_foreign_key "truebuild_factory_runs", "manufacturers"
+  add_foreign_key "truebuild_renders", "catalog_plan_variants", on_delete: :nullify
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"
@@ -8588,8 +8929,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_01_000500) do
   add_foreign_key "vehicle_invoices", "companies"
   add_foreign_key "vehicle_invoices", "vehicle_documents", column: "scanned_document_id", on_delete: :nullify
   add_foreign_key "vehicle_invoices", "vehicles"
+  add_foreign_key "vehicles", "catalog_plan_variants"
   add_foreign_key "vehicles", "companies"
-  add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"
   add_foreign_key "vehicles", "vehicles", column: "cloned_from_id"
   add_foreign_key "vendors", "companies"

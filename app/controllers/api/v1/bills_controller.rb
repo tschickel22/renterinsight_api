@@ -211,11 +211,10 @@ class Api::V1::BillsController < ApplicationController
     file = params[:file]
     return render json: { error: 'No file provided' }, status: :bad_request unless file
 
-    s3 = S3UploadService.new
-    result = s3.upload(file, folder: "bills/#{@company.id}/#{@bill.id}")
+    result = PrivateFiles.upload(file, folder: "bills/#{@company.id}/#{@bill.id}")
 
     attachment = {
-      'url' => result[:url],
+      'url' => result[:ref],
       's3_key' => result[:key],
       'filename' => file.original_filename,
       'size' => result[:size],
@@ -226,7 +225,7 @@ class Api::V1::BillsController < ApplicationController
 
     @bill.update!(attachments: (@bill.attachments || []) + [attachment])
 
-    render json: attachment
+    render json: PrivateFiles.presign_attachments([attachment], 'url').first
   rescue => e
     Rails.logger.error("[Bills] Attachment upload failed for bill #{@bill.id}: #{e.message}")
     render json: { error: "Upload failed: #{e.message}" }, status: :unprocessable_entity
@@ -348,9 +347,12 @@ class Api::V1::BillsController < ApplicationController
     return unless authorize_action!('bills', 'update')
 
     key = params[:s3_key]
-    remaining = (@bill.attachments || []).reject { |a| a['s3_key'] == key }
-    S3UploadService.new.delete(key) rescue nil
-    @bill.update!(attachments: remaining)
+    # Only a file attached to this bill; the key comes from the URL.
+    att = (@bill.attachments || []).find { |a| a['s3_key'] == key }
+    return render json: { error: 'Attachment not found' }, status: :not_found unless att
+
+    PrivateFiles.delete(att['url'].presence || key)
+    @bill.update!(attachments: (@bill.attachments || []) - [att])
     head :no_content
   end
 

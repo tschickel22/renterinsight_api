@@ -169,7 +169,7 @@ class Api::V1::Public::ProjectProgressController < ApplicationController
       task_name: task.name,
       contractor_name: assignment.contractor&.name || assignment.contractor&.contact_name,
       completion_summary: assignment.completion_summary,
-      completion_photos: assignment.completion_photos || [],
+      completion_photos: assignment.completion_photos_links,
       submitted_at: assignment.submitted_for_review_at
     }
   end

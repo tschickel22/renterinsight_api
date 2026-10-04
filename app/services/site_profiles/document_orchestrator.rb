@@ -166,8 +166,11 @@ module SiteProfiles
       def call(s3_key)
         return nil if s3_key.blank?
 
-        bytes = S3UploadService.new.download(s3_key)
+        # A reference to the private bucket, or a bare key from before the move.
+        bytes = PrivateFiles.read(s3_key)
         bytes&.dup&.force_encoding(Encoding::BINARY)
+      rescue PrivateFiles::Forbidden, Aws::S3::Errors::NoSuchKey
+        nil
       end
     end
   end

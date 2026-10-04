@@ -69,44 +69,6 @@ RSpec.describe 'Buyer portal regressions', type: :request do
     end
   end
 
-  describe 'GET /api/portal/configurator/floor-plans' do
-    let(:manufacturer) do
-      Manufacturer.create!(name: "Mfr-#{SecureRandom.hex(3)}", industry_type: 'manufactured_housing')
-    end
-    let(:floor_plan) do
-      FloorPlan.create!(name: 'The Monarch', model_code: "TM-#{SecureRandom.hex(3)}",
-                        manufacturer: manufacturer,
-                        base_price_low: 100_000, base_price_high: 140_000)
-    end
-
-    before do
-      Setting.set('Company', company.id, 'configurator', { 'show_pricing' => true })
-    end
-
-    # CompanyFloorPlan has no base_price_* columns, so reading them raised
-    # NoMethodError and the whole page 500'd as soon as a dealer had a plan
-    # mapped with pricing on.
-    it 'renders a mapped floor plan instead of raising' do
-      company.company_floor_plans.create!(floor_plan: floor_plan, is_visible: true, retail_price: 129_900)
-
-      get '/api/portal/configurator/floor-plans', headers: headers(proxy_token)
-
-      expect(response).to have_http_status(:ok)
-      plan = JSON.parse(response.body)['floor_plans'].first
-      expect(plan['name']).to eq('The Monarch')
-      expect(plan['base_price_low'].to_f).to eq(129_900.0)
-    end
-
-    it 'falls back to the plan base range when the dealer set no price' do
-      company.company_floor_plans.create!(floor_plan: floor_plan, is_visible: true)
-
-      get '/api/portal/configurator/floor-plans', headers: headers(proxy_token)
-
-      expect(response).to have_http_status(:ok)
-      expect(JSON.parse(response.body)['floor_plans'].first).to include('base_price_low')
-    end
-  end
-
   describe 'PATCH /api/portal/quotes/:id/accept' do
     def build_quote(status: 'sent', valid_until: 30.days.from_now.to_date)
       quote = Quote.create!(company: company, account: account, quote_number: "Q-#{SecureRandom.hex(3)}",

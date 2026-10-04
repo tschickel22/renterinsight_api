@@ -330,9 +330,22 @@ class ApplicationController < ActionController::API
   end
 
   def authenticate_portal_buyer!
-    return if current_portal_buyer
+    unless current_portal_buyer
+      return render json: portal_auth_error, status: :unauthorized
+    end
+    return unless current_portal_buyer.buyer_type == 'Lead' && !lead_portal_allowed?
 
-    render json: portal_auth_error, status: :unauthorized
+    render json: LEAD_PORTAL_ERROR, status: :forbidden
+  end
+
+  # A portal login whose buyer is still a lead (made when a website visitor
+  # saved a TrueBuild design). Portal pages read a contact's quotes, invoices
+  # and documents by the buyer's id, so a lead's id must never reach them:
+  # only controllers that say so (designs, branding, profile) serve leads.
+  LEAD_PORTAL_ERROR = { error: 'Available once your dealer sets up your account', code: 'lead_portal' }.freeze
+
+  def lead_portal_allowed?
+    false
   end
 
   # Why the portal request could not be authenticated, in a form the client can

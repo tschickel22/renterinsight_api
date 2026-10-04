@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class User < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :signature_url, :initials_url
+
   has_secure_password
   
   # Associations

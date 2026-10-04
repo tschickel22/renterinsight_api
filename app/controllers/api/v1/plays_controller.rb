@@ -24,6 +24,7 @@ module Api
         include_dismissed = ActiveModel::Type::Boolean.new.cast(params[:include_dismissed])
         plays = Plays::Registry.all_for(@company).select do |play|
           next false if play.hidden? && active_installation(play).nil?
+          next false if !Plays::Registry.offered_to?(play, @company) && active_installation(play).nil?
 
           include_dismissed || !dismissed?(play)
         end

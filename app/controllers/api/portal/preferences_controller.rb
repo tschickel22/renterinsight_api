@@ -86,6 +86,10 @@ module Api
 
       private
 
+      # Branding, module switches and preferences are safe for a lead-level login.
+      def lead_portal_allowed? = true
+
+
       # BaseController has already resolved and authorized the portal session,
       # so the access record comes straight from it rather than being looked up
       # again from token claims.

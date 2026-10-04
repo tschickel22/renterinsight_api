@@ -6,7 +6,12 @@ module Plays
   module Registry
     def self.all
       [Plays::NewFacebookLead, Plays::WalkInVisit, Plays::PromoLandingPage, Plays::WeeklyHomesEmail, Plays::WakeUpColdLeads,
-       Plays::DealToSold, Plays::NewLeadAnyChannel]
+       Plays::DealToSold, Plays::NewLeadAnyChannel, Plays::SavedHomeDesign]
+    end
+
+    # A play can be for some dealers only (Saved home design needs TrueBuild).
+    def self.offered_to?(play, company)
+      !play.respond_to?(:offered_to?) || play.offered_to?(company)
     end
 
     def self.offered

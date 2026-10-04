@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class ContractorAssignment < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_lists :completion_photos
+
   REVIEW_STATUS_PENDING = 'pending_review'
   REVIEW_STATUS_APPROVED = 'approved'
   REVIEW_STATUS_REVISION_REQUESTED = 'revision_requested'

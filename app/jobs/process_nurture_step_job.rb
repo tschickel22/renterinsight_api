@@ -413,7 +413,11 @@ class ProcessNurtureStepJob < ApplicationJob
     context[:phone] = entity.phone if entity.respond_to?(:phone)
     context[:company_name] = entity.company&.name if entity.respond_to?(:company)
     context[:location_name] = entity.location&.name if entity.respond_to?(:location)
-    
+    # The owning rep's calendar, the same {{rep_booking_link}} campaigns and
+    # workflows fill. Always set so a rep without one leaves nothing literal.
+    owner = entity.respond_to?(:owner) ? entity.owner : nil
+    context[:rep_booking_link] = owner.try(:booking_url).presence || ''
+
     # Entity-specific fields
     case entity.class.name
     when 'Lead'
@@ -483,7 +487,7 @@ class ProcessNurtureStepJob < ApplicationJob
 
     attachments.each do |att|
       filename      = att['filename']
-      s3_key        = att['s3_key']
+      s3_key        = att['file_ref'].presence || att['s3_key']
       content_type  = att['content_type']
       file_size     = att['size']
       delivery_mode = att['delivery_mode'].presence || 'tracked_link'
@@ -542,19 +546,10 @@ class ProcessNurtureStepJob < ApplicationJob
   end
 
   def download_s3_object_as_upload(s3_key:, filename:, content_type:)
-    require 'aws-sdk-s3'
-    s3 = Aws::S3::Client.new(
-      region: ENV['AWS_REGION'] || 'us-west-2',
-      access_key_id: ENV['AWS_ACCESS_KEY_ID'],
-      secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
-    )
-    bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
-
+    # A reference to the private bucket, or a bare key from before the move.
     tempfile = Tempfile.new(['nurture_att', File.extname(filename)])
     tempfile.binmode
-    s3.get_object({ bucket: bucket, key: s3_key }) do |chunk|
-      tempfile.write(chunk)
-    end
+    tempfile.write(PrivateFiles.read(s3_key))
     tempfile.rewind
 
     ActionDispatch::Http::UploadedFile.new(

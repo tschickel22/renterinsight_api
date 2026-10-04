@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class ProjectCostItem < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_columns :receipt_url
+
   COST_TYPES = %w[labor materials subcontractor permit inspection equipment freight other].freeze
   CATEGORIES = %w[foundation electrical plumbing hvac skirting roofing transport setup trim drywall utility_hookup other].freeze
   STATUSES = %w[pending approved paid disputed].freeze

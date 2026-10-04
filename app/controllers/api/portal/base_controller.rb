@@ -49,6 +49,14 @@ module Api
           # Store buyer_access for controllers that need it
           @current_buyer_access = buyer_access
 
+          # A login made when a website visitor saved a TrueBuild design
+          # belongs to a lead until the dealer converts them. The rest of the
+          # portal reads a contact's quotes, invoices and documents, so a
+          # lead sees only the pages built for it.
+          if buyer_access.buyer_type == 'Lead' && !lead_portal_allowed?
+            return render json: LEAD_PORTAL_ERROR, status: :forbidden
+          end
+
         # No JWT::ExpiredSignature / JWT::DecodeError rescues here: decode
         # catches both itself and returns nil, so those clauses were dead and
         # the expiry case above is what actually reports it.

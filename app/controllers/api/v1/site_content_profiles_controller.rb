@@ -190,7 +190,9 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     # trusting a value we already know is a guess.
     content_type = nil if unknown_type
 
-    uploaded = S3UploadService.new.upload(upload, folder: "site-profiles/uploads/#{@company.id}")
+    # A dealer's own document (price sheets, brochures before they are public):
+    # private bucket, stored as a reference.
+    uploaded = PrivateFiles.upload(upload, folder: "site-profiles/uploads/#{@company.id}")
     if uploaded.blank? || uploaded[:key].blank?
       return render json: { error: 'The document could not be stored. Try again.' },
                     status: :service_unavailable
@@ -203,7 +205,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       source_kind: 'document',
       source_url: nil,
       document_filename: upload.original_filename,
-      document_s3_key: uploaded[:key],
+      document_s3_key: uploaded[:ref],
       document_content_type: content_type,
       document_byte_size: upload.size,
       display_name: params[:display_name].presence || File.basename(upload.original_filename.to_s, '.*'),

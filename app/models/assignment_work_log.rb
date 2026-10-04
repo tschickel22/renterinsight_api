@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class AssignmentWorkLog < ApplicationRecord
+  # Confidential files: stored as references, served as expiring links (PrivateFiles).
+  include PrivateFileColumns
+  private_file_attachments :attachments, %w[url thumbnail_url]
+
   # FK column was renamed contractor_id -> vendor_id in the unify-vendors migration.
   alias_attribute :contractor_id, :vendor_id
 

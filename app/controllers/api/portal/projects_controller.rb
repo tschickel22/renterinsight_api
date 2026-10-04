@@ -276,7 +276,7 @@ module Api
           taskName: task.name,
           contractorName: assignment.contractor&.name || assignment.contractor&.contact_name,
           completionSummary: assignment.completion_summary,
-          completionPhotos: assignment.completion_photos || [],
+          completionPhotos: assignment.completion_photos_links,
           submittedAt: assignment.submitted_for_review_at
         }
       end
