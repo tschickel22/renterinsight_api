@@ -69,6 +69,16 @@ RSpec.describe Truebuild::DrawingTransfer do
     expect(TruebuildRender.sole.catalog_plan_variant_id).to eq(variant.id)
   end
 
+  it 'carries every attempt at a drawing, not only the first' do
+    first = TruebuildRender.find_by(selection_key: 'k1')
+    first.update_columns(status: 'rejected', usage: first.usage.merge('mask_version' => 20))
+    TruebuildRender.create!(first.attributes.except('id', 'created_at', 'updated_at').merge('status' => 'done', 'usage' => { 'mask_version' => 21 }))
+    rows = round_trip('renders')
+    TruebuildRender.delete_all
+    described_class.import!('renders', rows)
+    expect(TruebuildRender.where(selection_key: 'k1').pluck(:status)).to contain_exactly('rejected', 'done')
+  end
+
   it 'says what it could not place' do
     rows = round_trip('photos').map { |r| r.merge('model_number' => 'NOPE') }
     expect(described_class.import!('photos', rows)[:skipped].sole).to include('no model')
