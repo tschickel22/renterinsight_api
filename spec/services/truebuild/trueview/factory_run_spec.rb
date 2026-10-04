@@ -128,6 +128,18 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(by[topeka_home.id]).to include(already_drawn: 0)
   end
 
+  it "counts the outlines made for the run's photos in what it spent" do
+    run = described_class.start!([topeka_home], budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    TruebuildFactoryRunJob.perform_now(run.id)
+    run.renders.first.update!(cost_usd: 0.05)
+    TruebuildSurfaceMask.create!(source_url: front, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION, status: 'done',
+                                 mask_url: 'https://b/m.png', coverage: 0.3, usage: { 'cost_usd' => 0.07 })
+    TruebuildSurfaceMask.create!(source_url: front, surface: 'shutters', version: 1, status: 'done', mask_url: 'https://b/o.png',
+                                 coverage: 0.3, usage: { 'cost_usd' => 9 }, created_at: 1.day.ago) # before the run
+    expect(run.spent_usd).to be_within(0.001).of(0.12)
+    expect(described_class.progress(run)[:spent_usd]).to eq(0.12)
+  end
+
   it 'stops before a model that would go over budget' do
     run = described_class.start!(everything, budget_usd: 0.1, scope: { manufacturer_id: mfr.id })
     TruebuildFactoryRunJob.perform_now(run.id)

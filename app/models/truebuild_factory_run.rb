@@ -30,6 +30,21 @@ class TruebuildFactoryRun < ApplicationRecord
   end
 
   def batch? = mode == 'batch'
+
+  # Everything the run has cost: its drawings and checks, and the outlines
+  # made for its photos while it ran. Outlines were left out until run 4
+  # (34 of them, $3.17), so a run reported $6.84 and spent about $10.
+  def spent_usd
+    renders.sum(:cost_usd).to_f + outline_usd
+  end
+
+  def outline_usd
+    photos = renders.distinct.pluck(:source_url)
+    return 0.0 if photos.empty?
+
+    TruebuildSurfaceMask.where(source_url: photos, created_at: created_at..(stopped_at || Time.current))
+                        .sum(Arel.sql("COALESCE((usage->>'cost_usd')::numeric, 0)")).to_f
+  end
   def models_queued = progress['models_queued'].to_i
   def committed_usd = progress['committed_usd'].to_f
 
@@ -48,7 +63,7 @@ class TruebuildFactoryRun < ApplicationRecord
   def continue!(budget_usd)
     raise ArgumentError, 'This run cannot be continued' unless continuable?
 
-    spent = renders.sum(:cost_usd).to_f + progress['outline_repair_usd'].to_f
+    spent = spent_usd
     raise ArgumentError, "Set a budget above the #{format('$%.2f', spent)} already spent" unless budget_usd.to_f > spent
 
     update!(status: 'running', budget_usd: budget_usd, stopped_at: nil)
@@ -63,7 +78,7 @@ class TruebuildFactoryRun < ApplicationRecord
   def notify_end
     return unless created_by
 
-    spent = renders.sum(:cost_usd).to_f + progress['outline_repair_usd'].to_f
+    spent = spent_usd
     counts = renders.group(:status).count
     what = { 'finished' => 'finished', 'stopped' => 'was stopped', 'budget_reached' => 'reached its budget' }[status] || status
     NotificationService.create(

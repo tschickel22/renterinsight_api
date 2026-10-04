@@ -359,4 +359,12 @@ RSpec.describe 'TrueView rendering' do
     end.to raise_error(Truebuild::Trueview::Error)
     expect(sent.dig('generationConfig', 'imageConfig', 'aspectRatio')).to eq('3:2')
   end
+
+  it 'fetches a photo whose address has spaces in it' do
+    url = 'https://s7d9.scene7.com/is/image/championhomes/Aspire 3272H32186 Master Bath'
+    expect(HTTParty).to receive(:get).with("#{url.gsub(' ', '%20')}?wid=1600&fmt=jpeg&qlt=90", timeout: 30)
+                                     .and_return(instance_double(HTTParty::Response, code: 200, body: 'x', headers: {}))
+    RSpec::Mocks.space.proxy_for(Truebuild::Trueview).reset
+    expect(Truebuild::Trueview.fetch_source(url)[:bytes]).to eq('x')
+  end
 end

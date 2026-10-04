@@ -286,8 +286,11 @@ module Truebuild
 
     # Only photos already on the model are rendered, fetched at a size the
     # models work well with. Champion serves them from scene7.
+    # Spaces escaped: Champion names some photos in words ("Aspire 3272H32186
+    # Master Bath"), which the HTTP client refused, failing every Winston
+    # drawing before it was drawn. The url stays as stored everywhere else.
     def fetch_source(url)
-      res = HTTParty.get(sized(url), timeout: 30)
+      res = HTTParty.get(sized(url).gsub(' ', '%20'), timeout: 30)
       raise Error, "Source photo returned #{res.code}" unless res.code == 200
 
       { bytes: res.body, mime: res.headers['content-type'].presence || 'image/jpeg' }

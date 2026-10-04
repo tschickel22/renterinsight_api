@@ -108,7 +108,7 @@ module Truebuild
           variant = CatalogPlanVariant.find_by(id: id)
           # What was actually spent, when retries made it more than the
           # estimate: Aspire's first run spent $5.75 of a $5 budget.
-          committed = [run.committed_usd, run.renders.sum(:cost_usd).to_f].max
+          committed = [run.committed_usd, run.spent_usd].max
           if variant && Array(variant.shown_media['photos']).any?
             PhotoChoice.pick!(variant) if PhotoChoice.needs_pick?(variant)
             variant.reload
@@ -154,7 +154,7 @@ module Truebuild
       def repair!(run)
         round = run.progress['repair_rounds'].to_i + 1
         rates = self.rates(batch: run.batch?)
-        spent = run.renders.sum(:cost_usd).to_f + run.progress['outline_repair_usd'].to_f
+        spent = run.spent_usd
         variants = CatalogPlanVariant.where(id: run.variant_ids).to_a
         photos = variants.flat_map { |v| PhotoChoice.photos(v).map(&:last) }.uniq
 
@@ -163,7 +163,6 @@ module Truebuild
         # in parallel. Outlining them all in this job took many minutes, and a
         # worker restart ran it twice over the same outlines.
         failed_outlines(photos).each { |mask| Surfaces.make_due!(mask) }
-        outline_usd = 0.0
 
         queued = 0
         held = run.renders.where(status: 'rejected').to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
@@ -203,7 +202,6 @@ module Truebuild
         end
 
         run.update!(progress: run.progress.merge('repair_rounds' => queued.zero? ? REPAIR_ROUNDS : round,
-                                                 'outline_repair_usd' => (run.progress['outline_repair_usd'].to_f + outline_usd).round(4),
                                                  'repaired' => run.progress['repaired'].to_i + queued))
         finish!(run) if queued.zero?
         queued
@@ -269,7 +267,7 @@ module Truebuild
         # stayed "running" for ever and blocked the next run of its scope.
         finish!(run) if phase == 'finished' && run.status == 'running' && run.updated_at < LOST_AFTER.ago
         { id: run.id, phase: phase, manufacturer: run.manufacturer&.name, factory_id: run.factory_id, series: run.series,
-          budget_usd: run.budget_usd.to_f, committed_usd: run.committed_usd, spent_usd: (run.renders.sum(:cost_usd).to_f + run.progress['outline_repair_usd'].to_f).round(2),
+          budget_usd: run.budget_usd.to_f, committed_usd: run.committed_usd, spent_usd: run.spent_usd.round(2),
           models: run.variant_ids.size, models_queued: run.models_queued, estimate: run.estimate,
           repair: { rounds: run.progress['repair_rounds'].to_i, redrawn: run.progress['repaired'].to_i },
           drawings: { done: counts['done'].to_i, held_back: counts['rejected'].to_i, not_in_photo: counts['skipped'].to_i,
