@@ -15,8 +15,10 @@ module Truebuild
     def self.available?(company, variant)
       return false unless variant && BookResolver.current_for(variant)
       return false unless company.has_module?(MODULE)
+      return false unless company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
 
-      company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
+      # Only factories a platform admin gave this dealer, while released (E64).
+      DealerFactories.offered?(company, variant)
     end
 
     # A home on the lot can be designed only while it is not built yet: a
@@ -36,7 +38,8 @@ module Truebuild
       linked = vehicles.where(status: DESIGNABLE_STATUSES)
                        .where(catalog_plan_variant_id: CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id))
                                                                           .select(:catalog_plan_variant_id))
-      ready = ModelList.trueview_ready(linked.distinct.pluck(:catalog_plan_variant_id))
+      offered = DealerFactories.offered_variant_ids(company, linked.distinct.pluck(:catalog_plan_variant_id))
+      ready = ModelList.trueview_ready(offered)
       linked.where(catalog_plan_variant_id: ready.to_a)
     end
 

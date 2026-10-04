@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_03_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_04_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2942,6 +2942,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_03_180000) do
     t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"
   end
 
+  create_table "dealer_factories", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "factory_id", null: false
+    t.bigint "added_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "factory_id"], name: "index_dealer_factories_on_company_id_and_factory_id", unique: true
+    t.index ["company_id"], name: "index_dealer_factories_on_company_id"
+    t.index ["factory_id"], name: "index_dealer_factories_on_factory_id"
+  end
+
   create_table "dealer_markup_rules", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -3251,6 +3262,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_03_180000) do
     t.boolean "is_active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "truebuild_released_at"
+    t.bigint "truebuild_released_by_id"
+    t.text "truebuild_release_note"
     t.index ["is_active"], name: "index_factories_on_is_active"
     t.index ["manufacturer_id", "code"], name: "index_factories_on_manufacturer_id_and_code", unique: true
     t.index ["manufacturer_id"], name: "index_factories_on_manufacturer_id"
@@ -8554,6 +8568,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_03_180000) do
   add_foreign_key "dealer_catalog_subscriptions", "companies"
   add_foreign_key "dealer_catalog_terms", "companies"
   add_foreign_key "dealer_catalog_terms", "manufacturers"
+  add_foreign_key "dealer_factories", "companies"
+  add_foreign_key "dealer_factories", "factories"
   add_foreign_key "dealer_markup_rules", "companies"
   add_foreign_key "dealer_markup_rules", "locations"
   add_foreign_key "dealer_markup_rules", "manufacturers"

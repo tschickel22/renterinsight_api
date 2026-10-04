@@ -8,6 +8,8 @@ RSpec.describe 'TrueBuild dealer add-ons', type: :request do
   let(:company) do
     create(:company, name: 'Summit Homes').tap do |c|
       c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) # TrueBuild on the plan
+      # Called with no website id, as the dealer's own site would: needs the embed add-on (E60).
+      c.tenant_module_overrides.create!(module_key: TruebuildReach::EMBED_MODULE, is_enabled: true)
       c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true })
     end
   end
@@ -28,6 +30,9 @@ RSpec.describe 'TrueBuild dealer add-ons', type: :request do
 
   before do
     CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 80_000)
+    # A platform admin released the factory and gave it to this dealer (E64).
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'percent', value: 25)
     company.dealer_catalog_terms.create!(price_display: 'full')
   end

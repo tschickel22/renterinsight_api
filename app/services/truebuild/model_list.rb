@@ -79,6 +79,11 @@ module Truebuild
       variants = CatalogPlanVariant.where(id: CatalogVariantPrice.where(catalog_price_book_id: books.select(:id)).select(:catalog_plan_variant_id))
                                    .where(status: 'active').includes(:catalog_plan, :manufacturer).to_a
 
+      # Only factories a platform admin gave this dealer, while released (E64).
+      offered = DealerFactories.offered_ids(@company)
+      makers = DealerFactories.offered_manufacturer_ids(offered)
+      variants = variants.select { |v| DealerFactories.offered?(@company, v, offered, makers) }
+
       variants.group_by(&:catalog_plan).filter_map do |plan, vs|
         priced = vs.filter_map { |v| (r = base_retail(v)) ? [v, r] : nil }
         next if priced.empty? # no retail for any size: nothing a buyer can price
@@ -112,8 +117,11 @@ module Truebuild
       stamp = [@company.dealer_markup_rules.maximum(:updated_at), @company.dealer_catalog_terms.maximum(:updated_at),
                @company.truebuild_addons.maximum(:updated_at),
                @company.dealer_price_book_adoptions.maximum(:updated_at), CatalogPriceBook.published.maximum(:published_at),
-               CatalogPlanVariant.maximum(:updated_at), @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:models:v2:#{@company.id}:#{manufacturer_id}:#{stamp}"
+               CatalogPlanVariant.maximum(:updated_at), @company.updated_at,
+               @company.dealer_factories.maximum(:updated_at), Factory.maximum(:updated_at)].map { |t| t&.to_i }.join('-')
+      # The count too: removing a dealer's factory leaves no newer timestamp.
+      stamp += "-#{@company.dealer_factories.count}"
+      "truebuild:models:v3:#{@company.id}:#{manufacturer_id}:#{stamp}"
     end
   end
 end

@@ -22,6 +22,8 @@ class Company < ApplicationRecord
   has_many :leads, dependent: :destroy
   has_many :vehicles, dependent: :destroy
   has_many :dealer_catalog_subscriptions, dependent: :destroy
+  # The factories a platform admin gave this dealer for TrueBuild (backlog E64).
+  has_many :dealer_factories, dependent: :destroy
   has_many :vehicle_invoices, dependent: :destroy
   has_many :package_templates, dependent: :destroy
   has_many :inventory_packages, through: :vehicles

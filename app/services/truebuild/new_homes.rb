@@ -17,8 +17,8 @@ module Truebuild
 
     def digest!(now: Time.current)
       since = last_digest_at || now - 1.day
-      report = collect(since, now)
-      notify!(report, since) if report[:homes].any? || report[:models].any?
+      report = collect(since, now).merge(factories: FactoryReadiness.stage_changes!)
+      notify!(report, since) if report[:homes].any? || report[:models].any? || report[:factories].any?
       Setting.set('platform', nil, MARK, now.iso8601(6))
       report
     end
@@ -70,7 +70,9 @@ module Truebuild
       parts = []
       parts << "#{report[:homes].size} new #{'home'.pluralize(report[:homes].size)}" if report[:homes].any?
       parts << "#{report[:models].size} new #{'model'.pluralize(report[:models].size)}" if report[:models].any?
-      "#{parts.join(' and ')} from the feeds"
+      return "#{parts.join(' and ')} from the feeds" if parts.any?
+
+      "#{report[:factories].size} #{'factory'.pluralize(report[:factories].size)} changed stage"
     end
 
     def message(report, since)
@@ -94,6 +96,10 @@ module Truebuild
       lines << "No factory prices yet, so it cannot be configured: #{listed(unpriced)}." if unpriced.any?
       lines << "Not matched to any model: #{listed(unmatched)}." if unmatched.any?
       lines << 'Every new home matches a drawn model.' if homes.any? && needs.empty? && unpriced.empty? && unmatched.empty?
+      if report[:factories].any?
+        moves = report[:factories].map { |c| "#{c[:name]} #{FactoryReadiness::LABELS[c[:from]] || 'new'} to #{FactoryReadiness::LABELS[c[:to]]}" }
+        lines << "Factories: #{listed(moves)}."
+      end
       lines.join(' ')
     end
 

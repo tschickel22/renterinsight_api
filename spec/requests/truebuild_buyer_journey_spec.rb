@@ -41,6 +41,9 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
 
   before do
     CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 80_000)
+    # A platform admin released the factory and gave it to this dealer (E64).
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'percent', value: 25)
     company.dealer_catalog_terms.create!(price_display: 'full')
   end

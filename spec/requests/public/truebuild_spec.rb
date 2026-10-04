@@ -54,6 +54,9 @@ RSpec.describe 'Public TrueBuild', type: :request do
     book.standard_features.create!(series: 'Dutch Aspire Sectionals', category: 'Kitchen', name: 'Shaker cabinets')
     book.standard_features.create!(series: 'Dutch Aspire Singles', category: 'Kitchen', name: 'Not for a sectional')
     book.standard_features.create!(series: 'Genesis Homes', category: 'Kitchen', name: 'Not for Aspire')
+    # A platform admin released the factory and gave it to this dealer (E64).
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'percent', value: 25)
     # These examples read the full list; the buyer view has its own below.
     company.dealer_catalog_terms.create!(price_display: 'full', buyer_view: 'everything')

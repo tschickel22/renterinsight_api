@@ -271,6 +271,7 @@ Rails.application.routes.draw do
 
       # ==================== CATALOG SUBSCRIPTIONS (Surface A — dealer opt-in) ====================
       resources :catalog_subscriptions, only: %i[index create destroy]
+      resources :truebuild_factories, only: %i[index create destroy]
 
       # ==================== TRACKED LINKS (Attachment Engagement) ====================
       resources :tracked_links, only: %i[index show] do
@@ -3059,6 +3060,10 @@ Rails.application.routes.draw do
       post 'trueview_lab/factory_runs/:id/continue', to: 'trueview_lab#continue_factory_run'
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
+      get    'truebuild_factories', to: 'truebuild_factories#index'
+      put    'truebuild_factories/ready_share', to: 'truebuild_factories#update_ready_share'
+      post   'truebuild_factories/:id/release', to: 'truebuild_factories#release'
+      delete 'truebuild_factories/:id/release', to: 'truebuild_factories#unrelease'
 
       # ==================== TRUEBUILD PRICE BOOKS (Platform Admin Only) ====================
       # Factory price packages imported once for every dealer. See CatalogPriceBooksController.
