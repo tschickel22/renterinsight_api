@@ -546,7 +546,8 @@ module Accounting
                          'vendor to apply to. It stays in the opening entry; enter it as a vendor credit after posting.'
         end
 
-        blockers = blockers(include_preview: false)
+        blocker_list = blocker_items(include_preview: false)
+        blockers = blocker_list.map { |b| b[:message] }
         {
           trial_balance: entry[:rows].map do |r|
             { dealertide_account: r[:label], qbo_accounts: r[:qbo_names], debit: self.class.money(r[:debit]),
@@ -578,6 +579,7 @@ module Accounting
           equity_plug: self.class.money(entry[:plug]),
           differences: differences,
           blockers: blockers,
+          blocker_items: blocker_list,
           can_post: blockers.empty?
         }
       end
@@ -706,17 +708,30 @@ module Accounting
       end
 
       def blockers(include_preview: true)
+        blocker_items(include_preview: include_preview).map { |b| b[:message] }
+      end
+
+      # Each blocker with the wizard step where it is fixed (nil when it is
+      # fixed outside the switch), so the preview can link straight to it:
+      # "enter the bank statement balance" used to sit there with no way to
+      # reach the box it meant.
+      def blocker_items(include_preview: true)
         return [] unless draft?
 
         out = []
+        steps = []
+        # Tags the messages added since the last call with the step that fixes them.
+        tag = ->(step) { steps.fill(step, steps.size...out.size) }
         rows = account_rows
         unmapped = rows.count { |r| self.class.d(r['tb_balance']).nonzero? && !(r['confirmed'] && r['choice'].present?) }
         out << "#{unmapped} #{unmapped == 1 ? 'account' : 'accounts'} with a balance #{unmapped == 1 ? 'is' : 'are'} not confirmed yet" if unmapped.positive?
 
+        tag.call('accounts')
         bank_rows.each do |b|
           out << "#{b['name']} is not matched to a bank account" if b['match'].blank?
           bank_match_problems(b).each { |problem| out << "#{b['name']}: #{problem}" }
         end
+        tag.call('banks')
         matched_banks.each do |b|
           diff = uncleared_difference(b)
           if diff.nil?
@@ -730,10 +745,12 @@ module Accounting
           end
         end
 
+        tag.call('uncleared')
         tb = config['trial_balance'] || {}
         tb_diff = self.class.d(tb['total_debit']) - self.class.d(tb['total_credit'])
         out << "The QuickBooks trial balance does not balance (out by #{fmt(tb_diff.abs)})" if tb_diff.nonzero?
 
+        tag.call(nil)
         rows.each do |r|
           choice = r['choice'] || {}
           next unless r['confirmed']
@@ -754,6 +771,7 @@ module Accounting
           end
         end
 
+        tag.call('accounts')
         closed = closed_period_on(cutover_date)
         out << "The cutover date is in a closed period (FY#{closed.fiscal_year} period #{closed.period_number})" if closed
 
@@ -772,8 +790,10 @@ module Accounting
           out << 'Add a location in DealerTide first: every invoice and credit memo needs one'
         end
 
+        tag.call(nil)
         out << 'Open the preview before posting' if include_preview && config['preview_viewed_at'].blank?
-        out
+        tag.call('preview')
+        out.zip(steps).map { |message, step| { message: message, step: step } }
       end
 
       def migration_json
@@ -784,7 +804,8 @@ module Accounting
           cutover_date: cutover_date&.iso8601,
           quickbooks_company_name: config['quickbooks_company_name'],
           steps: steps,
-          blockers: blockers,
+          blockers: (items = blocker_items).map { |b| b[:message] },
+          blocker_items: items,
           posted_at: config.dig('posted', 'posted_at'),
           rollback_available: @import.status == 'posted' && Rollback.new(self).refusal.nil?
         }
