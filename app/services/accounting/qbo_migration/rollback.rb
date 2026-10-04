@@ -3,7 +3,8 @@
 module Accounting
   module QboMigration
     # Undoes a posted migration: voids the opening entry and removes the open
-    # invoices, bills and opening reconciliations it created. Allowed only
+    # invoices, bills, customer credit memos and opening reconciliations it
+    # created. Allowed only
     # while nothing has built on it: no fiscal period from the cutover on is
     # closed, no imported invoice or bill has a payment or credit applied,
     # and no bank reconciliation has been completed after the opening one.
@@ -36,6 +37,9 @@ module Accounting
         bills.each do |bill|
           return "Bill #{bill.reference_number || bill.bill_number} has a payment applied since the switch" if bill.bill_payments.exists?
         end
+        credit_memos.each do |memo|
+          return "Credit memo #{memo.credit_memo_number} has been applied since the switch" if memo.credit_memo_applications.exists?
+        end
 
         reconciliations.each do |rec|
           later = rec.bank_account.bank_reconciliations.where.not(id: rec.id).where('statement_date > ?', rec.statement_date)
@@ -55,6 +59,7 @@ module Accounting
           reconciliations.each(&:destroy!)
           invoices.each(&:destroy!)
           bills.each(&:destroy!)
+          credit_memos.each(&:destroy!)
 
           Array(@wizard.config.dig('posted', 'bank_gl_links')).each do |ba_id|
             @company.bank_accounts.find_by(id: ba_id)&.update_column(:chart_of_account_id, nil)
@@ -86,6 +91,10 @@ module Accounting
 
       def bills
         @bills ||= @company.bills.where(accounting_import_id: @import.id).to_a
+      end
+
+      def credit_memos
+        @credit_memos ||= @company.credit_memos.where(accounting_import_id: @import.id).to_a
       end
 
       def reconciliations

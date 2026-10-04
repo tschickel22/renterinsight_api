@@ -339,7 +339,9 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       get "#{base}/#{id}/preview", headers: headers
       expect(response).to have_http_status(:ok)
       expect(json).to include('can_post' => true, 'blockers' => [], 'equity_plug' => 0.0, 'differences' => [])
-      expect(json['open_invoices']).to eq('count' => 10, 'total' => 52_290.4, 'ar_balance' => 52_290.4, 'difference' => 0.0)
+      expect(json['open_invoices']).to eq('count' => 10, 'total' => 52_290.4, 'ar_balance' => 52_290.4, 'difference' => 0.0,
+                                          'invoices_total' => 52_290.4, 'customer_credits_total' => 0.0,
+                                          'customer_credits_count' => 0, 'unapplied_customer_credits' => 0.0)
       expect(json['totals']['debit']).to eq(json['totals']['credit'])
       expect(json['totals']['carries_every_balance']).to be(true)
       table_debits = json['trial_balance'].sum { |r| r['debit'] }

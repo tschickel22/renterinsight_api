@@ -242,28 +242,53 @@ module Accounting
         out
       end
 
+      # Customer credits (credit memos, unapplied payments) come off the same
+      # customer's open invoices, oldest first, so each invoice carries what
+      # is really still owed. A credit no open invoice absorbs comes over as an
+      # issued credit memo, ready to apply to the customer's next invoice. The
+      # opening entry already holds AR net of all of it, so none of this posts.
       def save_invoices!(contacts)
+        invoices = Array(@wizard.config['open_invoices']).sort_by { |i| [i['date'].to_s, i['external_id'].to_s] }
+                                                          .map { |i| i.merge('carry' => d(i['balance']).round(2)) }
+        leftovers = []
+        @wizard.customer_credits.each do |credit|
+          left = d(credit['balance']).round(2)
+          label = credit_label(credit)
+          invoices.select { |i| i['customer_external_id'] == credit['customer_external_id'] }.each do |inv|
+            break if left.zero?
+
+            take = [left, inv['carry']].min
+            next if take.zero?
+
+            inv['carry'] -= take
+            (inv['credits'] ||= []) << "#{label} #{@wizard.fmt(take)}"
+            left -= take
+          end
+          leftovers << credit.merge('left' => left) if left.positive?
+        end
+
+        location_id = @wizard.default_location_id
         created = 0
         skipped = 0
-        location_id = @wizard.default_location_id
-        Array(@wizard.config['open_invoices']).each do |inv|
-          if @company.invoices.exists?(quickbooks_id: inv['external_id'])
+        invoices.each do |inv|
+          if inv['carry'] <= 0 || @company.invoices.exists?(quickbooks_id: inv['external_id'])
             skipped += 1
             next
           end
 
-          balance = d(inv['balance']).round(2)
+          balance = inv['carry']
           doc = inv['invoice_number'].presence || "QB-#{inv['external_id']}"
-          number = @company.invoices.exists?(invoice_number: doc) ? "QB-#{doc}" : doc
           contact = contacts[inv['customer_external_id'].to_s]
           date = inv['date'].present? ? Date.parse(inv['date']) : @wizard.cutover_date
+          notes = +"Carried over from QuickBooks Online invoice #{doc}. Original total #{@wizard.fmt(inv['total'])}, " \
+                   "open balance at #{@wizard.cutover_date.iso8601} #{@wizard.fmt(inv['balance'])}."
+          notes << " Customer credits applied: #{inv['credits'].join(', ')}." if inv['credits'].present?
           invoice = @company.invoices.build(
-            invoice_number: number, invoice_date: date, due_date: inv['due_date'].presence && Date.parse(inv['due_date']),
+            invoice_number: free_invoice_number(doc), invoice_date: date,
+            due_date: inv['due_date'].presence && Date.parse(inv['due_date']),
             status: 'sent', sent_at: date.to_time, contact_id: contact&.id, location_id: location_id,
             billing_category: 'customer', quickbooks_id: inv['external_id'], quickbooks_synced_at: Time.current,
-            accounting_import_id: @import.id, tax_rate: 0,
-            notes: "Carried over from QuickBooks Online invoice #{doc}. Original total #{@wizard.fmt(inv['total'])}, " \
-                   "open balance at #{@wizard.cutover_date.iso8601} #{@wizard.fmt(balance)}."
+            accounting_import_id: @import.id, tax_rate: 0, notes: notes
           )
           invoice.invoice_items.build(
             description: "Open balance from QuickBooks invoice #{doc}", quantity: 1, rate: balance,
@@ -272,7 +297,53 @@ module Accounting
           invoice.save!
           created += 1
         end
-        @results[:open_invoices] = { created: created, skipped: skipped }
+
+        credit_memos = save_leftover_credits!(leftovers, contacts, location_id)
+        @results[:open_invoices] = { created: created, skipped: skipped, credit_memos: credit_memos }
+      end
+
+      def save_leftover_credits!(leftovers, contacts, location_id)
+        leftovers.count do |credit|
+          next false if @company.credit_memos.exists?(quickbooks_id: credit_quickbooks_id(credit))
+
+          label = credit_label(credit)
+          memo = @company.credit_memos.build(
+            location_id: location_id, contact_id: contacts[credit['customer_external_id'].to_s]&.id,
+            memo_date: credit['date'].present? ? Date.parse(credit['date']) : @wizard.cutover_date,
+            reason: "Carried over from QuickBooks Online: #{label}",
+            notes: "Open credit at #{@wizard.cutover_date.iso8601} #{@wizard.fmt(credit['left'])}, with no open invoice to apply it to.",
+            quickbooks_id: credit_quickbooks_id(credit), quickbooks_synced_at: Time.current,
+            accounting_import_id: @import.id, created_by_id: @user&.id
+          )
+          memo.credit_memo_items.build(description: "Open credit from QuickBooks: #{label}", quantity: 1,
+                                       rate: credit['left'], taxable: false, skip_tax: true)
+          memo.save!
+          memo.issue!
+          true
+        end
+      end
+
+      def credit_label(credit)
+        kind = credit['kind'] == 'unapplied_payment' ? 'unapplied payment' : 'credit memo'
+        "#{kind} #{credit['doc_number'].presence || credit['external_id']}"
+      end
+
+      # QuickBooks ids are per entity, so the kind keeps a credit memo and a
+      # payment with the same id apart.
+      def credit_quickbooks_id(credit)
+        "#{credit['kind'] == 'unapplied_payment' ? 'Payment' : 'CreditMemo'}:#{credit['external_id']}"
+      end
+
+      # QuickBooks lets two invoices share a number (the sandbox does), and the
+      # dealer may already use the number in DealerTide; the 2026-10-04
+      # sandbox post stopped on "Invoice number has already been taken". Keep
+      # QuickBooks' number when it is free, else QB-<number>, then a suffix.
+      def free_invoice_number(doc)
+        @used_invoice_numbers ||= @company.invoices.pluck(:invoice_number).to_set
+        candidate = [doc, "QB-#{doc}"].find { |n| !@used_invoice_numbers.include?(n) }
+        candidate ||= (2..).lazy.map { |n| "QB-#{doc}-#{n}" }.find { |n| !@used_invoice_numbers.include?(n) }
+        @used_invoice_numbers << candidate
+        candidate
       end
 
       # Vendor credits come off the same vendor's open bills, oldest first.
