@@ -19,6 +19,16 @@ class ChartOfAccount < ApplicationRecord
     sales_revenue service_revenue other_revenue
     operating_expense payroll_expense other_expense
   ].freeze
+  # Which sub types belong to which account type. Used where a sub type is
+  # chosen for a new account (the QuickBooks switch); the column validation
+  # above stays the flat list so existing rows are not re-judged.
+  SUB_TYPES_BY_TYPE = {
+    'asset' => %w[bank accounts_receivable inventory prepaid fixed_asset accumulated_depreciation],
+    'liability' => %w[accounts_payable current_liability long_term_liability],
+    'equity' => %w[owners_equity retained_earnings],
+    'revenue' => %w[sales_revenue service_revenue other_revenue],
+    'expense' => %w[cost_of_goods_sold operating_expense payroll_expense other_expense]
+  }.freeze
   NORMAL_BALANCES = %w[debit credit].freeze
 
   validates :account_number, presence: true, uniqueness: { scope: :company_id }

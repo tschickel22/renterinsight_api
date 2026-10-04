@@ -28,7 +28,8 @@ module Accounting
         - Map only to an account of the same account_type (asset, liability, equity, revenue, expense). A floor plan payable is a liability; inventory is an asset; cost of homes sold is an expense.
         - Prefer mapping when an existing account serves the same purpose, even if the name differs (for example "Floor Plan Payable - Triad" to a floor plan liability). Keep separate lenders, banks and cards in separate accounts rather than merging them.
         - Never map two different bank or credit card accounts to one account.
-        - For "create", pick a number not already used in the DealerTide chart, following its numbering ranges, and use one of these sub types: %<sub_types>s.
+        - For "create", pick a number not already used in the DealerTide chart, following its numbering ranges, and use a sub type that belongs to the account_type: %<sub_types>s.
+        - Answer for every QuickBooks account you are given, one entry each.
         - reason: one short plain sentence a bookkeeper can check. No dashes.
         - confidence: "high" when the match is plain, "medium" when it is a judgment call, "low" when you are unsure.
 
@@ -67,8 +68,25 @@ module Accounting
               sug = clean_ai(ai[row['qbo_account_id']], row, chart, rows)
               row['suggestion'] = sug
             end
-            missing = for_ai.count { |r| r['suggestion'].nil? }
-            notes['suggest'] = "#{missing} #{missing == 1 ? 'account has' : 'accounts have'} no suggestion. Choose them by hand." if missing.positive?
+
+            # The answer can skip rows, or offer one the checks above reject
+            # (an account of another type, a header). On the 2026-10-04 sandbox
+            # run 10 of 90 came back empty, including a 36,642.84 income
+            # account. Ask once more for just those, then fall back to a new
+            # account with the QuickBooks name so no row is left blank.
+            missing = for_ai.select { |r| r['suggestion'].nil? }
+            if missing.any?
+              Rails.logger.info("[QboMigration] #{missing.size} rows without a usable suggestion, asking again: #{missing.map { |r| r['qbo_name'] }.join(', ')}")
+              retry_ai = begin
+                ask_claude(missing, chart)
+              rescue StandardError => e
+                Rails.logger.warn("[QboMigration] second suggestion pass failed: #{e.class}: #{e.message}")
+                {}
+              end
+              missing.each do |row|
+                row['suggestion'] = clean_ai(retry_ai[row['qbo_account_id']], row, chart, rows) || fallback_create(row, chart, rows)
+              end
+            end
           rescue StandardError => e
             Rails.logger.warn("[QboMigration] account suggestions failed: #{e.class}: #{e.message}")
             for_ai.each { |row| row['suggestion'] = nil }
@@ -169,7 +187,8 @@ module Accounting
       end
 
       def ask_claude(rows, chart)
-        system = format(SYSTEM_PROMPT, sub_types: ChartOfAccount::SUB_TYPES.join(', '))
+        sub_types = ChartOfAccount::SUB_TYPES_BY_TYPE.map { |type, subs| "#{type}: #{subs.join(', ')}" }.join('; ')
+        system = format(SYSTEM_PROMPT, sub_types: sub_types)
         payload = {
           dealer_industry: @company.try(:industry),
           dealertide_chart: chart.map do |a|
@@ -218,13 +237,29 @@ module Accounting
         when 'create'
           na = sug['new_account'].to_h
           type = ChartOfAccount::TYPES.include?(na['account_type']) ? na['account_type'] : row['dt_account_type']
-          sub_type = ChartOfAccount::SUB_TYPES.include?(na['sub_type']) ? na['sub_type'] : row['dt_sub_type']
+          sub_type = fitting_sub_type(na['sub_type'], type) || fitting_sub_type(row['dt_sub_type'], type)
           name = na['name'].to_s.gsub(/\s*[\u2013\u2014]\s*/, ' ').squish.presence || row['qbo_name']
           number = free_number(na['number'].to_s.strip.presence || row['qbo_number'], type, chart, rows, row)
           base.merge('action' => 'create',
                      'new_account' => { 'number' => number, 'name' => name, 'account_type' => type, 'sub_type' => sub_type,
                                         'parent_id' => nil })
         end
+      end
+
+      # A new account named after the QuickBooks one, for a row the AI left
+      # without a usable answer. Low confidence, so it is never confirmed in
+      # bulk by Confirm all suggested.
+      def fallback_create(row, chart, rows)
+        type = row['dt_account_type'].presence_in(ChartOfAccount::TYPES) || 'expense'
+        number = free_number(row['qbo_number'].to_s.strip.presence, type, chart, rows, row)
+        { 'action' => 'create', 'source' => 'ai', 'confidence' => 'low',
+          'reason' => 'No existing account clearly fits, so this creates one with the QuickBooks name. Check it or pick an existing account.',
+          'new_account' => { 'number' => number, 'name' => row['qbo_name'].to_s.squish.first(100), 'account_type' => type,
+                             'sub_type' => fitting_sub_type(row['dt_sub_type'], type), 'parent_id' => nil } }
+      end
+
+      def fitting_sub_type(sub_type, type)
+        sub_type.presence_in(ChartOfAccount::SUB_TYPES_BY_TYPE.fetch(type, []))
       end
 
       def free_number(wanted, type, chart, rows, row)

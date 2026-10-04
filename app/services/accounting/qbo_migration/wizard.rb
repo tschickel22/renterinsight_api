@@ -896,7 +896,10 @@ module Accounting
         sub_type = attrs['sub_type'].presence
         return [nil, 'a new account needs a number and a name'] if number.blank? || name.blank?
         return [nil, "#{type} is not an account type"] unless ChartOfAccount::TYPES.include?(type)
-        return [nil, "#{sub_type} is not an account sub type"] if sub_type && !ChartOfAccount::SUB_TYPES.include?(sub_type)
+        if sub_type && !ChartOfAccount::SUB_TYPES_BY_TYPE.fetch(type, []).include?(sub_type)
+          allowed = ChartOfAccount::SUB_TYPES_BY_TYPE.fetch(type, []).map { |t| t.tr('_', ' ') }.join(', ')
+          return [nil, "#{sub_type.tr('_', ' ')} is not a detail type for #{type} accounts (choose #{allowed}, or none)"]
+        end
         return [nil, "account number #{number} is already taken"] if @company.chart_of_accounts.exists?(account_number: number)
 
         clash = all_rows.find do |r|
