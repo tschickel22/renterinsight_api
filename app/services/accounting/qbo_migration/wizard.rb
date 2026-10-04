@@ -722,14 +722,20 @@ module Accounting
         steps = []
         # Tags the messages added since the last call with the step that fixes them.
         tag = ->(step) { steps.fill(step, steps.size...out.size) }
+        # And with the QuickBooks account they are about, so the step can
+        # scroll to that row and say what to fix there.
+        ids = []
+        about = ->(id) { ids.fill(id, ids.size...out.size) }
         rows = account_rows
         unmapped = rows.count { |r| self.class.d(r['tb_balance']).nonzero? && !(r['confirmed'] && r['choice'].present?) }
         out << "#{unmapped} #{unmapped == 1 ? 'account' : 'accounts'} with a balance #{unmapped == 1 ? 'is' : 'are'} not confirmed yet" if unmapped.positive?
+        about.call(nil)
 
         tag.call('accounts')
         bank_rows.each do |b|
           out << "#{b['name']} is not matched to a bank account" if b['match'].blank?
           bank_match_problems(b).each { |problem| out << "#{b['name']}: #{problem}" }
+          about.call(b['qbo_account_id'])
         end
         tag.call('banks')
         matched_banks.each do |b|
@@ -743,12 +749,14 @@ module Accounting
           if ba && ba.bank_reconciliations.completed.where('statement_date >= ?', cutover_date).exists?
             out << "#{b['name']}: the matched bank account already has a reconciliation on or after the cutover date"
           end
+          about.call(b['qbo_account_id'])
         end
 
         tag.call('uncleared')
         tb = config['trial_balance'] || {}
         tb_diff = self.class.d(tb['total_debit']) - self.class.d(tb['total_credit'])
         out << "The QuickBooks trial balance does not balance (out by #{fmt(tb_diff.abs)})" if tb_diff.nonzero?
+        about.call(nil)
 
         tag.call(nil)
         rows.each do |r|
@@ -769,6 +777,7 @@ module Accounting
               out << "#{r['qbo_name']}: account number #{number} is already taken in DealerTide"
             end
           end
+          about.call(r['qbo_account_id'])
         end
 
         tag.call('accounts')
@@ -793,7 +802,8 @@ module Accounting
         tag.call(nil)
         out << 'Open the preview before posting' if include_preview && config['preview_viewed_at'].blank?
         tag.call('preview')
-        out.zip(steps).map { |message, step| { message: message, step: step } }
+        about.call(nil)
+        out.each_index.map { |i| { message: out[i], step: steps[i], qbo_account_id: ids[i] } }
       end
 
       def migration_json
