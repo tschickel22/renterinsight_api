@@ -56,6 +56,19 @@ RSpec.describe Truebuild::DrawingTransfer do
     expect([CatalogSwatch.count, TruebuildSurfaceMask.count, TruebuildRender.count]).to eq([1, 1, 1])
   end
 
+  it 'links a drawing copied before its model existed when run again' do
+    rows = round_trip('renders')
+    TruebuildRender.delete_all
+    stash = variant.model_number
+    variant.update_columns(model_number: 'NOT-YET')
+    described_class.import!('renders', rows)
+    expect(TruebuildRender.sole.catalog_plan_variant_id).to be_nil
+
+    variant.update_columns(model_number: stash) # the price book arrives
+    described_class.import!('renders', rows)
+    expect(TruebuildRender.sole.catalog_plan_variant_id).to eq(variant.id)
+  end
+
   it 'says what it could not place' do
     rows = round_trip('photos').map { |r| r.merge('model_number' => 'NOPE') }
     expect(described_class.import!('photos', rows)[:skipped].sole).to include('no model')

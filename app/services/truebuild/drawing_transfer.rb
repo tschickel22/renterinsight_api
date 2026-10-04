@@ -116,9 +116,14 @@ module Truebuild
     def import_render(row)
       existing = TruebuildRender.where(source_url: row['source_url'], selection_key: row['selection_key'], model_key: row['model_key'],
                                        purpose: 'layer', prompt: row['prompt'])
-      return :updated if existing.exists? # the receiving side has this drawing (or drew its own)
-
       variant = row['model_ref'] && find_variant(row['model_ref'])
+      if (found = existing.first)
+        # Copied before this side had the model: link it now. A second run
+        # after the price books are published finishes the job.
+        found.update_columns(catalog_plan_variant_id: variant.id) if variant && found.catalog_plan_variant_id.nil?
+        return :updated # the receiving side has this drawing (or drew its own)
+      end
+
       attrs = row.slice('room', 'source_url', 'selection', 'selection_key', 'model_key', 'provider', 'model', 'status', 'cost_usd',
                         'latency_ms', 'prompt', 'error', 'purpose', 'mask_coverage')
       # Sample ids name the sending side's rows; the prompt already says
