@@ -384,7 +384,13 @@ module Truebuild
       def strict_fit(key, verdict)
         fit = verdict['fit'].to_i
         onto = verdict['spills_onto'].to_s
-        harmless = onto.blank? || onto == 'none' || outranks?(onto, key) || verdict['spill_size'] == 'slight'
+        # Furniture standing in front of a surface (stools at an island, a chair
+        # by a wall) is inside any outline of it, and the drawing leaves it as
+        # it is; the drawing's own check catches one that repaints it. Bay
+        # Port's kitchen cabinets were turned down for the bar stools, so no
+        # cabinet color was ever drawn there.
+        harmless = onto.blank? || onto == 'none' || onto == 'furniture or decor' || outranks?(onto, key) ||
+                   verdict['spill_size'] == 'slight'
         missed = verdict['misses'].present? && !verdict['misses'].to_s.strip.match?(/\Anone\.?\z/i)
         # Marked down for nothing but a slight or harmless spill: Brighton's
         # roof and Woodward's counter scored 3 for "slightly" touching trim.
