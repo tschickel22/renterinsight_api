@@ -500,6 +500,20 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(sets).to include('Siding', 'Corner posts')
     end
 
+    it 'still offers a backsplash the kitchen photo does not show: a plain wall is not proof the home has none' do
+      tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'backsplash', name: 'Backsplash & Tile', position: 9)
+      gris = option(tile, '1 Row Inhale Gris (ceramic)', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Backsplash' })
+      variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
+      trueview
+      skipped = TruebuildRender.where("selection->0->>'surface' = 'Backsplash'")
+                               .update_all(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      expect(skipped).to be_positive
+      Rails.cache.clear
+      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
+      backsplash = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.find { |st| st['name'] == 'Backsplash' }
+      expect(backsplash['options'].map { |o| o['id'] }).to include(gris.id)
+    end
+
     it 'shows the older drawing while it is cut again, and not once the new check rejects it' do
       trueview
       clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")

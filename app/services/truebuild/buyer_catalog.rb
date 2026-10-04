@@ -81,6 +81,8 @@ module Truebuild
     # home photographed without shutters, and then not "None" alone either.
     # Paid upgrades stay; a kitchen photo without the fridge does not mean
     # the fridge upgrade is not real.
+    UNSEEN_MEANS_ABSENT = %w[shutters].freeze
+
     def without_failed_drawings(groups)
       held = Trueview::Buyer.held_back(@company, @variant)
       failed = held[:failed]
@@ -89,7 +91,13 @@ module Truebuild
 
       groups.map do |g|
         sets = g[:color_sets].filter_map do |st|
-          shown = st[:options].reject { |o| gone.include?(o[:id]) }
+          # Only where the photo settles it: an exterior photo shows the whole
+          # front, so no shutters there means the home has none. An interior
+          # photo with a plain wall says nothing: Bay Port's kitchen shows no
+          # tile, yet its book includes a 1 row backsplash, and hiding the set
+          # left the buyer no way to choose its color.
+          unseen = UNSEEN_MEANS_ABSENT.include?(Trueview::Surfaces.category(st[:name])) ? gone : Set.new
+          shown = st[:options].reject { |o| unseen.include?(o[:id]) }
           next nil if shown.size < st[:options].size && shown.all? { |o| o[:name].to_s.match?(Trueview::Buyer::NOTHING) }
 
           kept = shown.reject { |o| failed.include?(o[:id]) }
@@ -210,7 +218,7 @@ module Truebuild
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v13:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v14:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
