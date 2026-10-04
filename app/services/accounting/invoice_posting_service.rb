@@ -8,6 +8,8 @@ module Accounting
     end
 
     def post!
+      # Carried over by a QuickBooks switch: the opening entry holds its AR.
+      return if @invoice.try(:accounting_import_id).present?
       return unless should_post?
       return if already_posted?
       # A deal's invoice is booked by the deal's closing entry (GL approval

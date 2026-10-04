@@ -1,0 +1,326 @@
+{
+  "QueryResponse": {
+    "Customer": [
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Jake and Maria Thompson",
+        "PrintOnCheckName": "Jake and Maria Thompson",
+        "FullyQualifiedName": "Jake and Maria Thompson",
+        "BillAddr": {
+          "Id": "601",
+          "Line1": "707 County Road 11",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "101",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Jake",
+        "FamilyName": "Thompson",
+        "PrimaryEmailAddr": {
+          "Address": "jake.thompson@example.com"
+        },
+        "PrimaryPhone": {
+          "FreeFormNumber": "(720) 555-0141"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Lakeview Estates LLC",
+        "PrintOnCheckName": "Lakeview Estates LLC",
+        "FullyQualifiedName": "Lakeview Estates LLC",
+        "BillAddr": {
+          "Id": "602",
+          "Line1": "714 County Road 12",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "102",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "CompanyName": "Lakeview Estates LLC",
+        "PrimaryEmailAddr": {
+          "Address": "ap@lakeviewestates.example.com"
+        },
+        "PrimaryPhone": {
+          "FreeFormNumber": "(303) 555-0187"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Robert Kline",
+        "PrintOnCheckName": "Robert Kline",
+        "FullyQualifiedName": "Robert Kline",
+        "BillAddr": {
+          "Id": "603",
+          "Line1": "721 County Road 13",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "103",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Robert",
+        "FamilyName": "Kline",
+        "PrimaryEmailAddr": {
+          "Address": "rkline@example.com"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Diane Foster",
+        "PrintOnCheckName": "Diane Foster",
+        "FullyQualifiedName": "Diane Foster",
+        "BillAddr": {
+          "Id": "604",
+          "Line1": "728 County Road 14",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "104",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Diane",
+        "FamilyName": "Foster",
+        "PrimaryEmailAddr": {
+          "Address": "diane.foster@example.com"
+        },
+        "PrimaryPhone": {
+          "FreeFormNumber": "(719) 555-0110"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Pine Ridge Community",
+        "PrintOnCheckName": "Pine Ridge Community",
+        "FullyQualifiedName": "Pine Ridge Community",
+        "BillAddr": {
+          "Id": "605",
+          "Line1": "735 County Road 15",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "105",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Ellen",
+        "FamilyName": "Marsh",
+        "CompanyName": "Pine Ridge Community",
+        "PrimaryEmailAddr": {
+          "Address": "office@pineridge.example.com"
+        },
+        "PrimaryPhone": {
+          "FreeFormNumber": "(970) 555-0122"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Marcus Hill",
+        "PrintOnCheckName": "Marcus Hill",
+        "FullyQualifiedName": "Marcus Hill",
+        "BillAddr": {
+          "Id": "606",
+          "Line1": "742 County Road 16",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "106",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Marcus",
+        "FamilyName": "Hill",
+        "PrimaryPhone": {
+          "FreeFormNumber": "(720) 555-0199"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Sandra Ortiz",
+        "PrintOnCheckName": "Sandra Ortiz",
+        "FullyQualifiedName": "Sandra Ortiz",
+        "BillAddr": {
+          "Id": "607",
+          "Line1": "749 County Road 17",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "107",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Sandra",
+        "FamilyName": "Ortiz",
+        "PrimaryEmailAddr": {
+          "Address": "sortiz@example.com"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Tom and Kelly Brandt",
+        "PrintOnCheckName": "Tom and Kelly Brandt",
+        "FullyQualifiedName": "Tom and Kelly Brandt",
+        "BillAddr": {
+          "Id": "608",
+          "Line1": "756 County Road 18",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "108",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Tom",
+        "FamilyName": "Brandt",
+        "PrimaryEmailAddr": {
+          "Address": "brandts@example.com"
+        },
+        "PrimaryPhone": {
+          "FreeFormNumber": "(303) 555-0133"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": false,
+        "DisplayName": "Hillside MHC",
+        "PrintOnCheckName": "Hillside MHC",
+        "FullyQualifiedName": "Hillside MHC",
+        "BillAddr": {
+          "Id": "609",
+          "Line1": "763 County Road 19",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "109",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "CompanyName": "Hillside MHC",
+        "PrimaryEmailAddr": {
+          "Address": "billing@hillsidemhc.example.com"
+        }
+      },
+      {
+        "Taxable": true,
+        "Job": false,
+        "BillWithParent": false,
+        "Balance": 0,
+        "PreferredDeliveryMethod": "Email",
+        "Active": true,
+        "DisplayName": "Gary Wendt",
+        "PrintOnCheckName": "Gary Wendt",
+        "FullyQualifiedName": "Gary Wendt",
+        "BillAddr": {
+          "Id": "610",
+          "Line1": "770 County Road 20",
+          "City": "Elizabeth",
+          "CountrySubDivisionCode": "CO",
+          "PostalCode": "80107"
+        },
+        "domain": "QBO",
+        "Id": "110",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-09-20T12:00:00-06:00"
+        },
+        "GivenName": "Gary",
+        "FamilyName": "Wendt",
+        "PrimaryEmailAddr": {
+          "Address": "gwendt@example.com"
+        },
+        "PrimaryPhone": {
+          "FreeFormNumber": "(720) 555-0175"
+        }
+      }
+    ],
+    "startPosition": 1,
+    "maxResults": 10
+  },
+  "time": "2026-10-03T10:00:00.000-07:00"
+}

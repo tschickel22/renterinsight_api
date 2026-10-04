@@ -98,7 +98,185 @@ class Api::V1::AccountingImportsController < ApplicationController
     render json: { error: "Invalid CSV: #{e.message}" }, status: :unprocessable_entity
   end
 
+  # ── Switching from QuickBooks Online ──────────────────────────
+  # Contract: qbo_migration_contract.md. All state lives on the
+  # AccountingImport (Accounting::QboMigration::Wizard).
+
+  # POST /api/v1/accounting_imports/migrations { cutover_date }
+  def create_migration
+    return unless authorize_action!('accounting', 'create')
+
+    date = parse_cutover(params[:cutover_date])
+    return render(json: { error: 'Choose a cutover date' }, status: :unprocessable_entity) unless date
+
+    import = Accounting::QboMigration::Wizard.start!(company: @company, user: current_user, cutover_date: date)
+    render json: { migration: wizard_for(import).migration_json }, status: :created
+  rescue Accounting::QboMigration::Error, QuickbooksApiError, QuickbooksAuthError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/accounting_imports/:id/migration
+  def migration
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: { migration: wizard.migration_json }
+  end
+
+  # PATCH /api/v1/accounting_imports/:id/migration { cutover_date }
+  def update_migration
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    date = parse_cutover(params[:cutover_date])
+    return render(json: { error: 'Choose a cutover date' }, status: :unprocessable_entity) unless date
+
+    with_migration_errors { wizard.change_cutover!(date) } or return
+    render json: { migration: wizard_for(wizard.import.reload).migration_json }
+  end
+
+  # GET /api/v1/accounting_imports/:id/accounts
+  def accounts
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: accounts_payload(wizard)
+  end
+
+  # POST /api/v1/accounting_imports/:id/accounts/suggest
+  def suggest_accounts
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    with_migration_errors { Accounting::QboMigration::AccountSuggester.new(wizard).run! } or return
+    render json: accounts_payload(wizard)
+  end
+
+  # PATCH /api/v1/accounting_imports/:id/accounts
+  def update_accounts
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    permitted = params.permit(:confirm_suggested, accounts: [:qbo_account_id, :action, :chart_of_account_id, :confirmed,
+                                                             { new_account: %i[number name account_type sub_type parent_id] }])
+    with_migration_errors do
+      wizard.update_accounts!(Array(permitted[:accounts]).map(&:to_h),
+                              confirm_suggested: ActiveModel::Type::Boolean.new.cast(permitted[:confirm_suggested]))
+    end or return
+    render json: accounts_payload(wizard).merge(migration: wizard.migration_json)
+  end
+
+  # GET /api/v1/accounting_imports/:id/banks
+  def banks
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: wizard.banks_json
+  end
+
+  # PATCH /api/v1/accounting_imports/:id/banks { matches: [...] }
+  def update_banks
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    permitted = params.permit(matches: %i[qbo_account_id bank_account_id closed])
+    with_migration_errors { wizard.update_banks!(Array(permitted[:matches]).map(&:to_h)) } or return
+    render json: wizard.banks_json.merge(migration: wizard.migration_json)
+  end
+
+  # GET /api/v1/accounting_imports/:id/uncleared
+  def uncleared
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: wizard.uncleared_json
+  end
+
+  # PUT /api/v1/accounting_imports/:id/uncleared { banks: [...] }
+  def update_uncleared
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    permitted = params.permit(banks: [:qbo_account_id, :statement_balance,
+                                      { items: %i[id date kind payee reference amount] }])
+    raw_banks = Array(params[:banks])
+    banks = Array(permitted[:banks]).each_with_index.map do |bank, idx|
+      bank = bank.to_h
+      # An emptied list arrives as items: [], which permit drops.
+      raw = raw_banks[idx]
+      bank['items'] = [] if raw.respond_to?(:key?) && raw.key?(:items) && !bank.key?('items')
+      bank
+    end
+    with_migration_errors { wizard.update_uncleared!(banks) } or return
+    render json: wizard.uncleared_json
+  end
+
+  # GET /api/v1/accounting_imports/:id/preview
+  def migration_preview
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: wizard.preview_json
+  end
+
+  # POST /api/v1/accounting_imports/:id/post
+  def post_migration
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    results = Accounting::QboMigration::Poster.new(wizard, current_user).post!
+    render json: { migration: wizard_for(wizard.import.reload).migration_json, results: results }
+  rescue Accounting::QboMigration::Poster::BlockedError => e
+    render json: { error: 'This switch cannot post yet', blockers: e.blockers }, status: :unprocessable_entity
+  rescue Accounting::QboMigration::Error, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/accounting_imports/:id/rollback
+  def rollback_migration
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    Accounting::QboMigration::Rollback.new(wizard).run!(current_user)
+    render json: { migration: wizard_for(wizard.import.reload).migration_json }
+  rescue Accounting::QboMigration::Error, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
+
+  def load_wizard
+    import = @company.accounting_imports.find_by(id: params[:id])
+    unless import&.migration?
+      render json: { error: 'Not found' }, status: :not_found
+      return nil
+    end
+    wizard_for(import)
+  end
+
+  def wizard_for(import)
+    Accounting::QboMigration::Wizard.new(import)
+  end
+
+  def accounts_payload(wizard)
+    { accounts: wizard.accounts_json, dealertide_accounts: wizard.dealertide_accounts_json,
+      note: wizard.config.dig('notes', 'suggest') }
+  end
+
+  # Runs the block; on a migration error renders 422 and returns false.
+  def with_migration_errors
+    yield
+    true
+  rescue Accounting::QboMigration::Error, QuickbooksApiError, QuickbooksAuthError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+    false
+  end
+
+  def parse_cutover(value)
+    value.present? ? Date.iso8601(value.to_s) : nil
+  rescue Date::Error
+    nil
+  end
 
   def read_uploaded_text
     if params[:file].present? && params[:file].respond_to?(:read)

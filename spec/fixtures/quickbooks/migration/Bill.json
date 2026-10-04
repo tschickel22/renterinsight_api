@@ -1,0 +1,289 @@
+{
+  "QueryResponse": {
+    "Bill": [
+      {
+        "DueDate": "2026-10-02",
+        "Balance": 3450.0,
+        "DocNumber": "CS-88213",
+        "TxnDate": "2026-09-02",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 3450.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "33",
+                "name": "Delivery and Setup Costs"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "201",
+          "name": "Clayton Supply Co"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 3450.0,
+        "domain": "QBO",
+        "Id": "501",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      },
+      {
+        "DueDate": "2026-10-08",
+        "Balance": 2800.0,
+        "DocNumber": "TT-5521",
+        "TxnDate": "2026-09-08",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 2800.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "33",
+                "name": "Delivery and Setup Costs"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "202",
+          "name": "Triad Transport"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 2800.0,
+        "domain": "QBO",
+        "Id": "502",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      },
+      {
+        "DueDate": "2026-10-20",
+        "Balance": 1950.0,
+        "DocNumber": "TT-5560",
+        "TxnDate": "2026-09-20",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 1950.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "33",
+                "name": "Delivery and Setup Costs"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "202",
+          "name": "Triad Transport"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 1950.0,
+        "domain": "QBO",
+        "Id": "503",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      },
+      {
+        "DueDate": "2026-10-12",
+        "Balance": 1640.0,
+        "DocNumber": "SS-1092",
+        "TxnDate": "2026-09-12",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 2640.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "33",
+                "name": "Delivery and Setup Costs"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "203",
+          "name": "Southern Skirting Co"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 2640.0,
+        "domain": "QBO",
+        "Id": "504",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      },
+      {
+        "DueDate": "2026-10-15",
+        "Balance": 612.11,
+        "DocNumber": "Sept electric",
+        "TxnDate": "2026-09-25",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 612.11,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "38",
+                "name": "Utilities"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "204",
+          "name": "Xcel Energy"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 612.11,
+        "domain": "QBO",
+        "Id": "505",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      },
+      {
+        "DueDate": "2026-10-26",
+        "Balance": 0.0,
+        "DocNumber": "MHPD-7781",
+        "TxnDate": "2026-09-26",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 1850.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "8",
+                "name": "Parts and Supplies Inventory"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "205",
+          "name": "Mobile Home Parts Depot"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 1850.0,
+        "domain": "QBO",
+        "Id": "506",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      },
+      {
+        "DueDate": "2026-10-29",
+        "Balance": 1700.0,
+        "DocNumber": "CS-88290",
+        "TxnDate": "2026-09-29",
+        "CurrencyRef": {
+          "value": "USD"
+        },
+        "Line": [
+          {
+            "Id": "1",
+            "LineNum": 1,
+            "Amount": 1700.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "33",
+                "name": "Delivery and Setup Costs"
+              },
+              "BillableStatus": "NotBillable"
+            }
+          }
+        ],
+        "VendorRef": {
+          "value": "201",
+          "name": "Clayton Supply Co"
+        },
+        "APAccountRef": {
+          "value": "13",
+          "name": "Accounts Payable (A/P)"
+        },
+        "TotalAmt": 1700.0,
+        "domain": "QBO",
+        "Id": "507",
+        "SyncToken": "0",
+        "MetaData": {
+          "CreateTime": "2023-02-01T09:00:00-07:00",
+          "LastUpdatedTime": "2026-10-03T08:00:00-06:00"
+        }
+      }
+    ],
+    "startPosition": 1,
+    "maxResults": 7
+  },
+  "time": "2026-10-03T10:00:00.000-07:00"
+}
