@@ -141,12 +141,15 @@ class JournalEntry < ApplicationRecord
     end
   end
 
-  def void!(user)
+  # entry_date: when the reversal lands, today by default. Undoing a QuickBooks
+  # switch passes the opening entry's own date, so the books as of the cutover
+  # and the month after it are left as if it never posted.
+  def void!(user, entry_date: Date.current)
     return if is_void?
 
     transaction do
       reversing = company.journal_entries.build(
-        entry_date: Date.current,
+        entry_date: entry_date,
         memo: "VOID: #{memo}",
         source_type: 'auto',
         source_entity: source_entity,

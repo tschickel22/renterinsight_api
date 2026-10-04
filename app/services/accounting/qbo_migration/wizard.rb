@@ -354,9 +354,16 @@ module Accounting
         gl = ba.chart_of_account
         if gl
           wanted = card ? 'liability' : 'asset'
-          unless gl.account_type == wanted
+          if gl.account_type != wanted
             problems << "#{name} posts to #{gl.account_number} #{gl.name}, a#{'n' if gl.account_type.to_s.start_with?('a', 'e')} " \
                         "#{gl.account_type} account; a #{card ? 'card' : 'bank'} needs #{wanted == 'asset' ? 'an asset' : 'a liability'} account"
+          elsif !card && gl.sub_type.present? && gl.sub_type != 'bank'
+            # An asset is not enough: on the 2026-10-04 sandbox run a bank
+            # linked to 1110 Customer Receivables put the Savings balance into
+            # receivables.
+            kind = gl.sub_type.tr('_', ' ')
+            problems << "#{name} posts to #{gl.account_number} #{gl.name}, a#{'n' if kind.match?(/\A[aeiou]/)} #{kind} account, not a bank account. " \
+                        'Link it to a bank account under Bank Accounts, or match a different bank'
           end
           shared = bank_rows.find do |other|
             next false if other['qbo_account_id'] == bank['qbo_account_id']
@@ -589,6 +596,21 @@ module Accounting
         }
       end
 
+      # Open QuickBooks invoices already in DealerTide (an earlier QuickBooks
+      # sync) whose balance there differs from QuickBooks. The switch skips an
+      # invoice it finds by QuickBooks id, so these would leave receivables
+      # short: on the 2026-10-04 sandbox run 40 such invoices held 243,579.36
+      # in QuickBooks and were drafts, paid or zero in DealerTide.
+      def conflicting_existing_invoices
+        open = Array(config['open_invoices']).index_by { |i| i['external_id'].to_s }
+        return [] if open.empty?
+
+        @company.invoices.where(quickbooks_id: open.keys)
+                .where('accounting_import_id IS NULL OR accounting_import_id <> ?', @import.id)
+                .to_a.reject { |inv| inv.amount_due.to_d.round(2) == self.class.d(open[inv.quickbooks_id.to_s]['balance']).round(2) }
+                .map { |inv| { invoice: inv, qbo_balance: self.class.d(open[inv.quickbooks_id.to_s]['balance']) } }
+      end
+
       # Customer credits open at the cutover (credit memos, unapplied
       # payments). A draft started before they were read has none stored; they
       # are read once from QuickBooks then, with any customer they name.
@@ -676,6 +698,7 @@ module Accounting
       end
 
       def needs_attention?(row)
+        return true if type_mismatch(row)
         return false if row['confirmed']
 
         sug = row['suggestion']
@@ -715,6 +738,10 @@ module Accounting
           choice = r['choice'] || {}
           next unless r['confirmed']
 
+          if (problem = type_mismatch(r)) && self.class.d(r['tb_balance']).nonzero?
+            out << "#{r['qbo_name']}: #{problem}"
+          end
+
           if choice['action'] == 'map'
             acct = @company.chart_of_accounts.find_by(id: choice['chart_of_account_id'])
             out << "#{r['qbo_name']} is mapped to an account that no longer exists" if acct.nil?
@@ -729,6 +756,17 @@ module Accounting
 
         closed = closed_period_on(cutover_date)
         out << "The cutover date is in a closed period (FY#{closed.fiscal_year} period #{closed.period_number})" if closed
+
+        conflicts = conflicting_existing_invoices
+        if conflicts.any?
+          qbo = conflicts.sum(BigDecimal('0')) { |c| c[:qbo_balance] }
+          here = conflicts.sum(BigDecimal('0')) { |c| c[:invoice].amount_due.to_d }
+          sample = conflicts.first(5).map { |c| c[:invoice].invoice_number }.join(', ')
+          out << "#{conflicts.size} open QuickBooks #{conflicts.size == 1 ? 'invoice is' : 'invoices are'} already in DealerTide " \
+                 "from an earlier QuickBooks sync, owing #{fmt(here)} here against #{fmt(qbo)} in QuickBooks " \
+                 "(#{sample}#{conflicts.size > 5 ? ', ...' : ''}). The switch would skip them and leave receivables short. " \
+                 'Delete or void them in DealerTide first'
+        end
 
         if (Array(config['open_invoices']).any? || Array(config['customer_credits']).any?) && default_location_id.nil?
           out << 'Add a location in DealerTide first: every invoice and credit memo needs one'
@@ -803,6 +841,37 @@ module Accounting
         }
       end
 
+      # A balance sent to an account of another type lands on the wrong
+      # statement: on the 2026-10-04 sandbox run, 36,642.84 of income went to
+      # 1110 Customer Receivables. Nil when the types agree, or the row
+      # follows a matched bank (bank_match_problems checks that GL).
+      def type_mismatch(row)
+        return nil if row['bank_match']
+
+        want = row['dt_account_type']
+        choice = row['choice'] || {}
+        got, label =
+          case choice['action']
+          when 'map'
+            acct = chart_by_id[choice['chart_of_account_id'].to_i]
+            acct && [acct.account_type, "#{acct.account_number} #{acct.name}"]
+          when 'create'
+            [choice.dig('new_account', 'account_type'), "the new account #{choice.dig('new_account', 'number')} #{choice.dig('new_account', 'name')}"]
+          end
+        return nil if want.blank? || got.blank? || got == want
+
+        "it is #{type_phrase(want)} in QuickBooks but goes to #{label}, #{type_phrase(got)}. Choose #{type_phrase(want)}"
+      end
+
+      def type_phrase(type)
+        { 'asset' => 'an asset account', 'liability' => 'a liability account', 'equity' => 'an equity account',
+          'revenue' => 'an income account', 'expense' => 'an expense account' }.fetch(type, "a #{type} account")
+      end
+
+      def chart_by_id
+        @chart_by_id ||= @company.chart_of_accounts.index_by(&:id)
+      end
+
       def public_row(row)
         {
           qbo_account_id: row['qbo_account_id'], qbo_name: row['qbo_name'], qbo_number: row['qbo_number'],
@@ -810,7 +879,8 @@ module Accounting
           account_type: row['dt_account_type'],
           balance_at_cutover: self.class.money(row['balance_at_cutover']),
           suggestion: row['suggestion'], choice: row['choice'], confirmed: row['confirmed'] ? true : false,
-          bank_match: row['bank_match'] ? true : false
+          bank_match: row['bank_match'] ? true : false,
+          type_problem: type_mismatch(row)
         }
       end
 

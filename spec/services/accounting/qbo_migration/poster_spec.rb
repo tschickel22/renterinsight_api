@@ -165,7 +165,11 @@ RSpec.describe Accounting::QboMigration::Poster do
 
       import = wizard.import.reload
       expect(import.status).to eq('rolled_back')
-      expect(company.journal_entries.find(import.import_config.dig('posted', 'journal_entry_id')).is_void).to be(true)
+      entry = company.journal_entries.find(import.import_config.dig('posted', 'journal_entry_id'))
+      expect(entry.is_void).to be(true)
+      # The reversal is dated the cutover, not today, so neither the cutover
+      # month nor the month after it carries any of it.
+      expect(entry.reversed_by.entry_date).to eq(QboMigrationHelpers::CUTOVER)
       expect(company.invoices.where(accounting_import_id: import.id)).to be_empty
       expect(company.bills.where(accounting_import_id: import.id)).to be_empty
       expect(company.bank_reconciliations.where(accounting_import_id: import.id)).to be_empty
