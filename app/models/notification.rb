@@ -81,6 +81,7 @@ class Notification < ApplicationRecord
     approval_completed: { category: 'system', priority: 'normal', title: 'Approval Completed' },
     truebuild_price_update: { category: 'sales', priority: 'normal', title: 'New Factory Prices' },
     truebuild_factory_run: { category: 'system', priority: 'normal', title: 'TrueView Factory Run' },
+    new_homes_digest: { category: 'system', priority: 'normal', title: 'New Homes From the Feeds' },
     
     # Broadcast notifications
     broadcast_message: { category: 'broadcast', priority: 'normal', title: 'Company Announcement' },

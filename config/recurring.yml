@@ -44,6 +44,11 @@ default: &default
     class: CatalogNightlySyncJob
     queue: default
     schedule: every day at 8am
+  # After the overnight crawls (8am UTC) have landed: 9am Denver in summer.
+  new_homes_digest:
+    class: NewHomesDigestJob
+    queue: low
+    schedule: every day at 3pm
   champion_lead_sync:
     class: ChampionLeadSyncJob
     queue: default
