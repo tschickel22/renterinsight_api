@@ -2319,6 +2319,9 @@ Rails.application.routes.draw do
         end
       end
 
+      post 'bank_feeds/session', to: 'bank_feeds#session_start'
+      post 'bank_feeds/connect', to: 'bank_feeds#connect'
+
       scope 'bank_accounts/:bank_account_id/feed', controller: 'bank_account_feeds' do
         post :create_session
         post :complete_connection
