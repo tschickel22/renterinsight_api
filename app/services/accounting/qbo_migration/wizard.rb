@@ -612,7 +612,7 @@ module Accounting
         lists = config['lists'] || {}
         matched_count = banks.count { |b| b['match'].present? }
         {
-          connect: { done: QboMigration.fixture_mode? || QboMigration.connection_for(@company).present? || !draft? },
+          connect: { done: QboMigration.fixture_mode? || QboMigration.connected?(@company) || !draft? },
           banks: { done: matched_count == banks.size && banks.none? { |b| bank_match_problems(b).any? },
                    matched: matched_count, total: banks.size,
                    problems: banks.sum { |b| bank_match_problems(b).size } },

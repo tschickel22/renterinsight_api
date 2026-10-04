@@ -400,23 +400,36 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: u.id, company_id: rbac_company.id)}" }
     end
 
-    it 'lets a reader look but not start, change, post or roll back' do
-      reader = rbac_user(%w[read])
-      post "#{base}/migrations", params: { cutover_date: '2026-09-30' }, headers: reader, as: :json
-      expect(response).to have_http_status(:forbidden)
-
+    # Platform admins only until the switch has run on real QuickBooks
+    # companies (backlog E62). The accounting RBAC checks stay behind it.
+    it 'keeps the switch from dealer users, even with full accounting rights' do
+      dealer = rbac_user(%w[read create update delete])
       admin = User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'A', last_name: 'D',
                            password: 'Pass1234!', company_id: rbac_company.id, role: 'platform_admin')
       import = Accounting::QboMigration::Wizard.start!(company: rbac_company, user: admin, cutover_date: QboMigrationHelpers::CUTOVER)
 
-      get "#{base}/#{import.id}/migration", headers: reader
+      post "#{base}/migrations", params: { cutover_date: '2026-09-30' }, headers: dealer, as: :json
+      expect(response).to have_http_status(:forbidden)
+      get "#{base}/#{import.id}/migration", headers: dealer
+      expect(response).to have_http_status(:forbidden)
+      patch "#{base}/#{import.id}/accounts", params: { confirm_suggested: true }, headers: dealer, as: :json
+      expect(response).to have_http_status(:forbidden)
+      post "#{base}/#{import.id}/post", headers: dealer, as: :json
+      expect(response).to have_http_status(:forbidden)
+      post "#{base}/#{import.id}/rollback", headers: dealer, as: :json
+      expect(response).to have_http_status(:forbidden)
+
+      get base, headers: dealer
       expect(response).to have_http_status(:ok)
-      patch "#{base}/#{import.id}/accounts", params: { confirm_suggested: true }, headers: reader, as: :json
-      expect(response).to have_http_status(:forbidden)
-      post "#{base}/#{import.id}/post", headers: reader, as: :json
-      expect(response).to have_http_status(:forbidden)
-      post "#{base}/#{import.id}/rollback", headers: reader, as: :json
-      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'lets a platform admin run it while impersonating a dealer user' do
+      dealer = company.users.create!(email: "d-#{SecureRandom.hex(4)}@example.com", first_name: 'D', last_name: 'U',
+                                     password: 'Pass1234!', role: 'company_admin')
+      as_dealer = { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: dealer.id, company_id: company.id, impersonated_by: user.id)}" }
+
+      post "#{base}/migrations", params: { cutover_date: '2026-09-30' }, headers: as_dealer, as: :json
+      expect(response).to have_http_status(:created)
     end
 
     it 'refuses everything to a user without accounting' do
