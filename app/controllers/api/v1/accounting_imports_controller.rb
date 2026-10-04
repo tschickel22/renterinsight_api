@@ -13,8 +13,11 @@ class Api::V1::AccountingImportsController < ApplicationController
   def index
     return unless authorize_action!('accounting', 'read')
 
+    # import_config is left out: for a QuickBooks switch it holds the whole
+    # QuickBooks company (accounts, lists, open items). migration marks the
+    # rows the switch wizard opens.
     imports = @company.accounting_imports.recent
-    render json: { items: imports }
+    render json: { items: imports.map { |i| i.as_json(except: :import_config).merge('migration' => i.migration?) } }
   end
 
   def show

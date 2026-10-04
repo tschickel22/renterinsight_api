@@ -763,6 +763,7 @@ module Accounting
         {
           qbo_account_id: row['qbo_account_id'], qbo_name: row['qbo_name'], qbo_number: row['qbo_number'],
           qbo_type: row['qbo_type'], qbo_sub_type: row['qbo_sub_type'], active: row['active'],
+          account_type: row['dt_account_type'],
           balance_at_cutover: self.class.money(row['balance_at_cutover']),
           suggestion: row['suggestion'], choice: row['choice'], confirmed: row['confirmed'] ? true : false,
           bank_match: row['bank_match'] ? true : false

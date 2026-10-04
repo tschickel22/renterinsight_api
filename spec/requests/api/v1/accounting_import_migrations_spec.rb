@@ -63,6 +63,19 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
     end
   end
 
+  describe 'GET / (import history)' do
+    it 'marks the switch so it can be reopened, without sending the QuickBooks data' do
+      id = start_migration
+      company.accounting_imports.create!(user: user, source_type: 'csv', status: 'completed')
+      get base, headers: headers
+      expect(response).to have_http_status(:ok)
+      items = json['items'].index_by { |i| i['id'] }
+      expect(items[id]).to include('migration' => true, 'status' => 'draft', 'source_type' => 'quickbooks_online')
+      expect(items[id]).not_to have_key('import_config')
+      expect(items.values.find { |i| i['source_type'] == 'csv' }).to include('migration' => false)
+    end
+  end
+
   describe 'GET and PATCH /:id/migration' do
     it 'changes the cutover date and moves the feed start dates with it' do
       id = start_migration
@@ -89,7 +102,7 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       rows = json['accounts'].index_by { |r| r['qbo_account_id'] }
       expect(rows['15']).to include('qbo_name' => 'Floor Plan Payable - Triad', 'qbo_number' => '2100',
                                     'qbo_type' => 'Other Current Liability', 'qbo_sub_type' => 'LoanPayable',
-                                    'active' => true, 'balance_at_cutover' => 1_102_500.0, 'confirmed' => false)
+                                    'active' => true, 'account_type' => 'liability', 'balance_at_cutover' => 1_102_500.0, 'confirmed' => false)
       expect(rows['10']).to include('active' => false, 'balance_at_cutover' => 5000.0) # inactive with a balance
       expect(rows.keys).not_to include('3', '30') # inactive and empty
       expect(json['dealertide_accounts'].first.keys).to match_array(%w[id number name account_type sub_type])
