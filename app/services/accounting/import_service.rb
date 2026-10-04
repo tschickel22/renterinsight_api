@@ -145,13 +145,16 @@ module Accounting
       imported = 0; skipped = 0; errors = 0
 
       contacts = adapter.fetch_contacts
+      quickbooks_source = adapter.is_a?(Accounting::Adapters::QuickbooksOnlineAdapter)
       contacts.each do |contact_data|
-        if contact_data[:email].present? && @company.contacts.exists?(email: contact_data[:email])
-          skipped += 1
-          next
-        end
-
-        if @company.contacts.where(first_name: contact_data[:first_name], last_name: contact_data[:last_name]).exists?
+        qb_id = quickbooks_source ? contact_data[:external_id].presence : nil
+        existing = (qb_id && @company.contacts.find_by(quickbooks_id: qb_id)) ||
+                   (contact_data[:email].present? && @company.contacts.find_by(email: contact_data[:email])) ||
+                   (contact_data[:first_name].present? &&
+                     @company.contacts.find_by(first_name: contact_data[:first_name], last_name: contact_data[:last_name]))
+        if existing
+          # Keep the QuickBooks id on a contact matched by email or name.
+          existing.update_column(:quickbooks_id, qb_id) if qb_id && existing.quickbooks_id.blank?
           skipped += 1
           next
         end
@@ -165,7 +168,8 @@ module Accounting
           street: contact_data[:street],
           city: contact_data[:city],
           state: contact_data[:state],
-          zip: contact_data[:zip]
+          zip: contact_data[:zip],
+          quickbooks_id: qb_id
         )
 
         if contact.save
@@ -186,8 +190,13 @@ module Accounting
       imported = 0; skipped = 0; errors = 0
 
       vendors = adapter.fetch_vendors
+      quickbooks_source = adapter.is_a?(Accounting::Adapters::QuickbooksOnlineAdapter)
       vendors.each do |vendor_data|
-        if @company.suppliers.where('LOWER(name) = ?', vendor_data[:name]&.downcase).exists?
+        qb_id = quickbooks_source ? vendor_data[:external_id].presence : nil
+        existing = (qb_id && @company.suppliers.find_by(qb_vendor_id: qb_id)) ||
+                   @company.suppliers.where('LOWER(name) = ?', vendor_data[:name]&.downcase).first
+        if existing
+          existing.update_column(:qb_vendor_id, qb_id) if qb_id && existing.qb_vendor_id.blank?
           skipped += 1
           next
         end
@@ -200,7 +209,8 @@ module Accounting
           city: vendor_data[:city],
           state: vendor_data[:state],
           zip_code: vendor_data[:zip],
-          active: true
+          active: true,
+          qb_vendor_id: qb_id
         )
 
         if supplier.save
@@ -223,28 +233,31 @@ module Accounting
 
       posting_service = Accounting::ManualPostingService.new(@company)
       lines = []
+      # A header account can't take a line, and one match on a header
+      # (QuickBooks 1000 against a seeded 1000 header) failed the whole entry.
+      postable = @company.chart_of_accounts.where(is_header: [false, nil])
 
       balances.each do |bal|
         account = if bal[:external_id].present?
-                    @company.chart_of_accounts.find_by(qbo_account_id: bal[:external_id])
+                    postable.find_by(qbo_account_id: bal[:external_id])
                   end
-        account ||= @company.chart_of_accounts.find_by(account_number: bal[:account_number])
-        account ||= @company.chart_of_accounts.find_by(name: bal[:account_name])
+        account ||= postable.find_by(account_number: bal[:account_number])
+        account ||= postable.find_by(name: bal[:account_name])
 
         next unless account
         next if bal[:balance].nil? || bal[:balance].zero?
 
         if account.normal_balance == 'debit'
           if bal[:balance] >= 0
-            lines << { chart_of_account_id: account.id, debit_amount: bal[:balance].abs, credit_amount: 0, memo: "Opening balance — #{account.name}" }
+            lines << { chart_of_account_id: account.id, debit_amount: bal[:balance].abs, credit_amount: 0, memo: "Opening balance: #{account.name}" }
           else
-            lines << { chart_of_account_id: account.id, debit_amount: 0, credit_amount: bal[:balance].abs, memo: "Opening balance — #{account.name}" }
+            lines << { chart_of_account_id: account.id, debit_amount: 0, credit_amount: bal[:balance].abs, memo: "Opening balance: #{account.name}" }
           end
         else
           if bal[:balance] >= 0
-            lines << { chart_of_account_id: account.id, debit_amount: 0, credit_amount: bal[:balance].abs, memo: "Opening balance — #{account.name}" }
+            lines << { chart_of_account_id: account.id, debit_amount: 0, credit_amount: bal[:balance].abs, memo: "Opening balance: #{account.name}" }
           else
-            lines << { chart_of_account_id: account.id, debit_amount: bal[:balance].abs, credit_amount: 0, memo: "Opening balance — #{account.name}" }
+            lines << { chart_of_account_id: account.id, debit_amount: bal[:balance].abs, credit_amount: 0, memo: "Opening balance: #{account.name}" }
           end
         end
       end
@@ -255,9 +268,14 @@ module Accounting
         diff = total_debits - total_credits
 
         if diff != 0
-          obe_account = @company.chart_of_accounts.find_by(account_number: '3000') ||
+          # The plug used to be skipped when no equity account existed, so the
+          # entry never balanced and never posted. Opening Balance Equity is
+          # created if it is missing, as for an account's own opening balance.
+          obe_account = @company.chart_of_accounts.find_by(name: Accounting::OpeningBalancePostingService::OBE_NAME) ||
+                        @company.chart_of_accounts.find_by(account_number: '3000') ||
                         @company.chart_of_accounts.find_by(name: "Owner's Equity / Capital") ||
-                        @company.chart_of_accounts.where(account_type: 'equity').first
+                        @company.chart_of_accounts.where(account_type: 'equity', is_header: [false, nil]).first ||
+                        create_opening_balance_equity!
 
           if obe_account
             if diff > 0
@@ -286,31 +304,42 @@ module Accounting
       end
     end
 
+    # Open invoices carry their remaining balance as one line and are tagged
+    # with the import, so they never post: the opening balance entry already
+    # holds the receivable. They used to save as sent or partial, which fired
+    # Invoice#auto_post_to_accounting and counted AR twice. The totals were
+    # also set by hand with no items, so calculate_totals zeroed them.
     def import_open_invoices(adapter, import_record)
       imported = 0; skipped = 0; errors = 0
 
-      invoices = adapter.fetch_open_invoices
+      as_of = import_record.cutover_date
+      invoices = adapter.method(:fetch_open_invoices).arity.zero? ? adapter.fetch_open_invoices : adapter.fetch_open_invoices(as_of)
+      location_id = Current.location_id.presence || @company.locations.order(:id).first&.id
       invoices.each do |inv_data|
-        if inv_data[:invoice_number].present? && @company.invoices.exists?(invoice_number: inv_data[:invoice_number])
+        qb_id = adapter.is_a?(Accounting::Adapters::QuickbooksOnlineAdapter) ? inv_data[:external_id].presence : nil
+        if (qb_id && @company.invoices.exists?(quickbooks_id: qb_id)) ||
+           (inv_data[:invoice_number].present? && @company.invoices.exists?(invoice_number: inv_data[:invoice_number]))
           skipped += 1
           next
         end
 
-        contact = find_or_skip_contact(inv_data[:customer_name], inv_data[:customer_email])
+        contact = (inv_data[:customer_external_id].present? && @company.contacts.find_by(quickbooks_id: inv_data[:customer_external_id])) ||
+                  find_or_skip_contact(inv_data[:customer_name], inv_data[:customer_email])
+        balance = (inv_data[:balance] || inv_data[:amount]).to_d
 
         invoice = @company.invoices.build(
-          invoice_number: inv_data[:invoice_number],
-          invoice_date: inv_data[:date],
+          invoice_number: inv_data[:invoice_number].presence || "IMP-#{SecureRandom.hex(3).upcase}",
+          invoice_date: inv_data[:date] || as_of,
           due_date: inv_data[:due_date],
-          subtotal: inv_data[:amount],
-          tax_amount: inv_data[:tax] || 0,
-          total: inv_data[:total] || inv_data[:amount],
-          amount_due: inv_data[:balance] || inv_data[:amount],
-          amount_paid: (inv_data[:total] || inv_data[:amount]).to_d - (inv_data[:balance] || inv_data[:amount]).to_d,
-          status: inv_data[:balance] == inv_data[:total] ? 'sent' : 'partial',
+          status: 'sent',
           contact_id: contact&.id,
-          notes: "Imported from #{adapter.source_name}"
+          location_id: location_id,
+          quickbooks_id: qb_id,
+          accounting_import_id: import_record.id,
+          notes: "Imported from #{adapter.source_name}. Original total #{inv_data[:total] || inv_data[:amount]}, open balance #{balance}."
         )
+        invoice.invoice_items.build(description: "Open balance from #{adapter.source_name} invoice #{inv_data[:invoice_number]}",
+                                    quantity: 1, rate: balance, item_type: 'custom', taxable: false, skip_tax: true)
 
         if invoice.save
           imported += 1
@@ -355,6 +384,16 @@ module Accounting
         parts = name.split(' ', 2)
         @company.contacts.find_by(first_name: parts[0], last_name: parts[1])
       end
+    end
+
+    def create_opening_balance_equity!
+      taken = @company.chart_of_accounts.pluck(:account_number).to_set
+      number = (3900..3999).map(&:to_s).find { |n| !taken.include?(n) } || "3900-#{SecureRandom.hex(2)}"
+      @company.chart_of_accounts.create!(
+        account_number: number, name: Accounting::OpeningBalancePostingService::OBE_NAME, account_type: 'equity',
+        sub_type: 'owners_equity', normal_balance: 'credit',
+        description: 'Offsets imported opening balances. Clear it into owner\'s equity once they are final.'
+      )
     end
 
     def resolve_parent_relationships(adapter, _accounts_data)

@@ -2403,6 +2403,22 @@ Rails.application.routes.draw do
           post :run_import
           post :parse_iif
           post :parse_csv
+          # Switching from QuickBooks Online (Accounting::QboMigration)
+          post :migrations, action: :create_migration
+        end
+        member do
+          get   :migration
+          patch :migration, action: :update_migration
+          get   :accounts
+          patch :accounts, action: :update_accounts
+          post  'accounts/suggest', action: :suggest_accounts
+          get   :banks
+          patch :banks, action: :update_banks
+          get   :uncleared
+          put   :uncleared, action: :update_uncleared
+          get   :preview, action: :migration_preview
+          post  :post, action: :post_migration
+          post  :rollback, action: :rollback_migration
         end
       end
 

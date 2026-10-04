@@ -178,6 +178,15 @@ class Quickbooks::Client
     get("/v3/company/#{@realm_id}/query", query: sql)
   end
 
+  # ── Reports ───────────────────────────────────────────────────
+  # GET /v3/company/{realm}/reports/{name}?params, e.g. TrialBalance with
+  # start_date, end_date and accounting_method. Returns the report JSON
+  # (Header, Columns, Rows).
+
+  def report(name, params = {})
+    get("/v3/company/#{@realm_id}/reports/#{name}", params.compact.transform_keys(&:to_s))
+  end
+
   private
 
   def get(path, params = {})

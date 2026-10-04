@@ -1,0 +1,33 @@
+{
+  "QueryResponse": {
+    "VendorCredit": [
+      {
+        "TxnDate": "2026-09-15",
+        "DocNumber": "VC-55",
+        "TotalAmt": 500.0,
+        "Balance": 500.0,
+        "VendorRef": {
+          "value": "201",
+          "name": "Clayton Supply Co"
+        },
+        "Line": [
+          {
+            "Amount": 500.0,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "AccountBasedExpenseLineDetail": {
+              "AccountRef": {
+                "value": "33"
+              }
+            }
+          }
+        ],
+        "Id": "701",
+        "domain": "QBO",
+        "SyncToken": "0"
+      }
+    ],
+    "startPosition": 1,
+    "maxResults": 1
+  },
+  "time": "2026-10-03T10:00:00.000-07:00"
+}

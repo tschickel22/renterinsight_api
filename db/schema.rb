@@ -819,6 +819,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.string "check_bank_state"
     t.string "check_aba_fractional_number"
     t.string "check_signature_heading"
+    t.date "feed_start_date"
     t.index ["chart_of_account_id"], name: "index_bank_accounts_on_chart_of_account_id"
     t.index ["company_id", "location_id"], name: "index_bank_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_bank_accounts_on_company_id"
@@ -859,6 +860,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "accounting_import_id"
+    t.index ["accounting_import_id"], name: "index_bank_reconciliations_on_accounting_import_id", where: "(accounting_import_id IS NOT NULL)"
     t.index ["bank_account_id", "statement_date"], name: "idx_on_bank_account_id_statement_date_e24fec856a"
     t.index ["bank_account_id"], name: "index_bank_reconciliations_on_bank_account_id"
     t.index ["company_id", "status"], name: "index_bank_reconciliations_on_company_id_and_status"
@@ -999,6 +1002,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.datetime "updated_at", null: false
     t.text "gl_post_error"
     t.datetime "gl_post_failed_at"
+    t.bigint "accounting_import_id"
+    t.string "quickbooks_id"
+    t.index ["accounting_import_id"], name: "index_bills_on_accounting_import_id", where: "(accounting_import_id IS NOT NULL)"
     t.index ["ap_account_id"], name: "index_bills_on_ap_account_id"
     t.index ["company_id", "bill_number"], name: "index_bills_on_company_id_and_bill_number", unique: true, where: "(bill_number IS NOT NULL)"
     t.index ["company_id", "due_date"], name: "index_bills_on_company_id_and_due_date"
@@ -3669,6 +3675,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.decimal "amount_credited", precision: 10, scale: 2, default: "0.0"
     t.text "gl_post_error"
     t.datetime "gl_post_failed_at"
+    t.bigint "accounting_import_id"
+    t.index ["accounting_import_id"], name: "index_invoices_on_accounting_import_id", where: "(accounting_import_id IS NOT NULL)"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"

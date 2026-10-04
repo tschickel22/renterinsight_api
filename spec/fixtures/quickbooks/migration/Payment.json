@@ -1,0 +1,66 @@
+{
+  "QueryResponse": {
+    "Payment": [
+      {
+        "TxnDate": "2026-09-20",
+        "TotalAmt": 5000.0,
+        "CustomerRef": {
+          "value": "102"
+        },
+        "Line": [
+          {
+            "Amount": 5000.0,
+            "LinkedTxn": [
+              {
+                "TxnId": "302",
+                "TxnType": "Invoice"
+              }
+            ]
+          }
+        ],
+        "Id": "401"
+      },
+      {
+        "TxnDate": "2026-10-02",
+        "TotalAmt": 3000.0,
+        "CustomerRef": {
+          "value": "110"
+        },
+        "Line": [
+          {
+            "Amount": 3000.0,
+            "LinkedTxn": [
+              {
+                "TxnId": "310",
+                "TxnType": "Invoice"
+              }
+            ]
+          }
+        ],
+        "Id": "402"
+      },
+      {
+        "TxnDate": "2026-10-04",
+        "TotalAmt": 8750.0,
+        "CustomerRef": {
+          "value": "109"
+        },
+        "Line": [
+          {
+            "Amount": 8750.0,
+            "LinkedTxn": [
+              {
+                "TxnId": "309",
+                "TxnType": "Invoice"
+              }
+            ]
+          }
+        ],
+        "Id": "403"
+      }
+    ],
+    "startPosition": 1,
+    "maxResults": 3
+  },
+  "time": "2026-10-03T10:00:00.000-07:00"
+}

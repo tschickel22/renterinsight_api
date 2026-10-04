@@ -1,0 +1,600 @@
+{
+  "Header": {
+    "Time": "2026-10-03T10:00:05-07:00",
+    "ReportName": "TrialBalance",
+    "ReportBasis": "Accrual",
+    "StartPeriod": "2026-01-01",
+    "EndPeriod": "2026-09-30",
+    "SummarizeColumnsBy": "Total",
+    "Currency": "USD",
+    "Option": [
+      {
+        "Name": "NoReportData",
+        "Value": "false"
+      }
+    ]
+  },
+  "Columns": {
+    "Column": [
+      {
+        "ColTitle": "",
+        "ColType": "Account"
+      },
+      {
+        "ColTitle": "Debit",
+        "ColType": "Money"
+      },
+      {
+        "ColTitle": "Credit",
+        "ColType": "Money"
+      }
+    ]
+  },
+  "Rows": {
+    "Row": [
+      {
+        "ColData": [
+          {
+            "value": "1000 Chase Operating Checking",
+            "id": "1"
+          },
+          {
+            "value": "182450.25"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1010 Wells Fargo Payroll",
+            "id": "2"
+          },
+          {
+            "value": "24310.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1100 Accounts Receivable (A/R)",
+            "id": "4"
+          },
+          {
+            "value": "52290.40"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1150 Undeposited Funds",
+            "id": "5"
+          },
+          {
+            "value": "3200.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1200 New Home Inventory",
+            "id": "6"
+          },
+          {
+            "value": "1248600.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1210 Pre-Owned Home Inventory",
+            "id": "7"
+          },
+          {
+            "value": "186400.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1250 Parts and Supplies Inventory",
+            "id": "8"
+          },
+          {
+            "value": "18750.40"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1300 Prepaid Insurance",
+            "id": "9"
+          },
+          {
+            "value": "7200.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1400 Escrow Deposits Held",
+            "id": "10"
+          },
+          {
+            "value": "5000.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1500 Lot Equipment and Vehicles",
+            "id": "11"
+          },
+          {
+            "value": "96500.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "1510 Accumulated Depreciation",
+            "id": "12"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "41250.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2000 Accounts Payable (A/P)",
+            "id": "13"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "13502.11"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2050 Amex Business Card",
+            "id": "14"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "6842.17"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2100 Floor Plan Payable - Triad",
+            "id": "15"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "1102500.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2110 Floor Plan Payable - 21st Mortgage",
+            "id": "16"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "146200.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2200 Sales Tax Payable",
+            "id": "17"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "9815.60"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2300 Customer Deposits",
+            "id": "18"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "42000.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2400 Accrued Payroll",
+            "id": "19"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "11430.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "2700 Shop Truck Loan",
+            "id": "20"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "28900.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "3000 Owner's Equity",
+            "id": "21"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "150000.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "3100 Owner Draws",
+            "id": "22"
+          },
+          {
+            "value": "60000.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "3900 Retained Earnings",
+            "id": "23"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "38292.02"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "4000 New Home Sales",
+            "id": "25"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "2415000.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "4010 Pre-Owned Home Sales",
+            "id": "26"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "412000.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "4100 Delivery and Setup Income",
+            "id": "27"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "96400.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "4200 Parts and Service Income",
+            "id": "28"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "38215.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "4300 Finance Reserve Income",
+            "id": "29"
+          },
+          {
+            "value": ""
+          },
+          {
+            "value": "22800.00"
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "5000 Cost of New Homes Sold",
+            "id": "31"
+          },
+          {
+            "value": "1932000.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "5010 Cost of Pre-Owned Homes Sold",
+            "id": "32"
+          },
+          {
+            "value": "318500.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "5100 Delivery and Setup Costs",
+            "id": "33"
+          },
+          {
+            "value": "71300.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "5200 Floor Plan Interest",
+            "id": "34"
+          },
+          {
+            "value": "54210.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6000 Salaries and Wages",
+            "id": "35"
+          },
+          {
+            "value": "214500.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6100 Advertising and Marketing",
+            "id": "36"
+          },
+          {
+            "value": "28640.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6200 Lot Rent",
+            "id": "37"
+          },
+          {
+            "value": "36000.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6300 Utilities",
+            "id": "38"
+          },
+          {
+            "value": "8420.55"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6400 Insurance Expense",
+            "id": "39"
+          },
+          {
+            "value": "14400.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6500 Bank Charges",
+            "id": "40"
+          },
+          {
+            "value": "1125.30"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6600 Depreciation Expense",
+            "id": "41"
+          },
+          {
+            "value": "9000.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "ColData": [
+          {
+            "value": "6900 Trade Show Expense (retired)",
+            "id": "42"
+          },
+          {
+            "value": "2350.00"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      {
+        "Summary": {
+          "ColData": [
+            {
+              "value": "TOTAL"
+            },
+            {
+              "value": "4575146.90"
+            },
+            {
+              "value": "4575146.90"
+            }
+          ]
+        },
+        "type": "Section",
+        "group": "GrandTotal"
+      }
+    ]
+  }
+}
