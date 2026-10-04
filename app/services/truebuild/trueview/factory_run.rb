@@ -304,7 +304,12 @@ module Truebuild
         new_outlines = surfaces.reject { |s| have.include?(s) || outlined.include?(s) }
         outlined.merge(new_outlines)
         drawings = ids.size - shared
-        { photos: photos.size, drawings: drawings, recuts: recut_ids.size, shared: shared, already_drawn: plan.size - fresh.size,
+        # Drawings, not options: a color chip and the paid upgrade of the same
+        # color are one drawing, and counting options called 26 never-drawn
+        # Aspire models "Partly drawn" (four such pairs each).
+        all_drawings = plan.map { |p| [p[:photo], p[:key]] }.uniq.size
+        open_drawings = unpicked ? all_drawings : missing.map { |p, _| [p[:photo], p[:key]] }.uniq.size
+        { photos: photos.size, drawings: drawings, recuts: recut_ids.size, shared: shared, already_drawn: all_drawings - open_drawings,
           outlines: new_outlines.size,
           cost_usd: (drawings * rates[:layer] + new_outlines.size * rates[:outline] + recut_ids.size * RECUT_COST).round(2) }
       end

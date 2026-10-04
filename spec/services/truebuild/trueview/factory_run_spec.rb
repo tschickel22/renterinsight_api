@@ -116,6 +116,18 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(jobs).to include(TruebuildFactoryRunJob)
   end
 
+  it 'counts a model with nothing drawn as nothing drawn, though two options share one drawing' do
+    o = CatalogOption.create!(group: exterior, manufacturer: mfr, key: 'exterior--siding-white-again', name: 'White',
+                              kind: 'color', metadata: { 'color_set' => 'Siding Upgrade' })
+    CatalogOptionPrice.create!(price_book: book, option: o, is_standard: true)
+    allow_any_instance_of(Truebuild::Trueview::Buyer).to receive(:plan).and_wrap_original do |m|
+      plan = m.call
+      plan + [plan.first.merge(option_id: o.id)] # a second option drawn as the first
+    end
+    by = described_class.estimate(everything)[:models].index_by { |m| m[:id] }
+    expect(by[topeka_home.id]).to include(already_drawn: 0)
+  end
+
   it 'stops before a model that would go over budget' do
     run = described_class.start!(everything, budget_usd: 0.1, scope: { manufacturer_id: mfr.id })
     TruebuildFactoryRunJob.perform_now(run.id)
