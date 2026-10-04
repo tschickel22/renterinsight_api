@@ -134,6 +134,8 @@ RSpec.describe 'TrueView rendering' do
       expect(fit.call('countertop', 'fit' => 4, 'spills_onto' => 'cabinets', 'spill_size' => 'clear')).to eq(3)
       expect(fit.call('accent wall', 'fit' => 4, 'walls' => 3)).to eq(2)
       expect(fit.call('accent wall', 'fit' => 5, 'walls' => 1)).to eq(5)
+      # Stools in front of an island: the drawing leaves furniture as it is.
+      expect(fit.call('cabinets', 'fit' => 3, 'spills_onto' => 'furniture or decor', 'spill_size' => 'clear', 'misses' => 'none')).to eq(4)
     end
 
     it 'outlines again, told why, a surface whose outline Claude turned down, a few times' do
@@ -343,6 +345,25 @@ RSpec.describe 'TrueView rendering' do
       expect(calls).to eq('judge_layer' => 1)
       expect(Truebuild::Trueview::LayerCheck.judge(photo.jpegsave_buffer, layer, surface: 'Siding', value: 'Clay')['ok']).to be(true)
       expect(calls).to eq('judge_layer' => 2, 'find_defects' => 1)
+    end
+
+    it 'asks again about a drawing held back only for a mirror reflection or gable cladding, and nothing else' do
+      calls = Hash.new(0)
+      answers = { 'judge_layer' => [{ 'score' => 3, 'note' => 'The cabinet reflected in the mirror kept its old color.' },
+                                    { 'score' => 3, 'note' => 'The cabinet reflected in the mirror kept its old color.' },
+                                    { 'score' => 2, 'note' => 'The countertop edge kept its old color.' }],
+                  'reconsider' => [{ 'acceptable' => true, 'other_defect' => 'none' },
+                                   { 'acceptable' => false, 'other_defect' => 'The door fronts are streaked.' }] }
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        calls[tool[:name]] += 1
+        { input: answers[tool[:name]].shift, input_tokens: 1, output_tokens: 1 }
+      end
+      layer = png((photo + 50).cast(:uchar))
+      judge = -> { Truebuild::Trueview::LayerCheck.judge(photo.jpegsave_buffer, layer, surface: 'Cabinets', value: 'Destin White') }
+      expect(judge.call).to include('ok' => true, 'reconsidered' => include('acceptable' => true))
+      expect(judge.call).to include('ok' => false, 'note' => 'The door fronts are streaked.')
+      expect(judge.call).to include('ok' => false, 'note' => 'The countertop edge kept its old color.')
+      expect(calls).to eq('judge_layer' => 3, 'reconsider' => 2)
     end
 
     it "tells the drawing and the check what an abbreviated fridge looks like" do

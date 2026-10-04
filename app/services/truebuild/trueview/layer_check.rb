@@ -59,12 +59,13 @@ module Truebuild
         score = result[:input]['score'].to_i
         verdict = { 'score' => score, 'note' => result[:input]['note'].to_s.strip.presence, 'ok' => score >= MIN_SCORE,
                     'cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4) }
-        return verdict unless score == MIN_SCORE
-
-        second = second_look(photo, composite, surface: surface, value: value, sample: sample, hex: hex)
-        verdict.merge('second' => second.except('cost_usd'), 'cost_usd' => (verdict['cost_usd'] + second['cost_usd']).round(4),
-                      'ok' => second['acceptable'] != false,
-                      'note' => second['acceptable'] == false ? second['defect'] : verdict['note'])
+        if score == MIN_SCORE
+          second = second_look(photo, composite, surface: surface, value: value, sample: sample, hex: hex)
+          verdict = verdict.merge('second' => second.except('cost_usd'), 'cost_usd' => (verdict['cost_usd'] + second['cost_usd']).round(4),
+                                  'ok' => second['acceptable'] != false,
+                                  'note' => second['acceptable'] == false ? second['defect'] : verdict['note'])
+        end
+        reconsider(verdict, photo, composite, surface: surface, value: value, sample: sample, hex: hex)
       rescue Catalog::PriceBooks::ClaudeClient::Error => e
         # The check could not run: show the layer rather than hide good work,
         # and say so in review.
@@ -84,6 +85,54 @@ module Truebuild
         "#{text} If the photo already showed this finish, little or no change is correct (score 4 or 5). An appliance " \
           'package may leave the range hood as it was. Anything added or doubled (a second pull or knob on a door, new ' \
           'hardware, a new object) is clearly wrong: score 2.'
+      end
+
+      # Held back for a reason that is not a defect: Summit Park's Bay Port
+      # bath held back every cabinet color but one for the cabinet reflected
+      # in the mirror, and its siding for the shakes in the gable, which
+      # Champion sells as a separate option. Saying so in the main question
+      # moved other verdicts both ways on the hand-labelled set (29 of 36 right
+      # fell to 26), so the main check stays as it is and only a drawing held
+      # back for one of these reasons is asked again, with the reason set aside.
+      FALSE_ALARM = /reflect|mirror|gable/i
+      SET_ASIDE = 'That reason is not a defect here: a reflection in a mirror, window or glass is not the surface, and ' \
+                  'shakes, board and batten or other cladding in a gable that differs from the main walls is a separate ' \
+                  'surface, correctly left as it was.'
+
+      RECONSIDER = {
+        name: 'reconsider',
+        description: 'Judge a rendering again with a mistaken objection set aside.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            other_defect: { type: 'string', description: 'Any other visible defect (old finish left on the surface itself, the new finish on a neighboring surface, a color unlike the sample, anything added), or "none".' },
+            acceptable: { type: 'boolean', description: 'With that objection set aside, a buyer would accept this as the named finish.' }
+          },
+          required: %w[other_defect acceptable]
+        }
+      }.freeze
+
+      def reconsider(verdict, photo, composite, surface:, value:, sample:, hex:)
+        return verdict if verdict['ok'] || !verdict['note'].to_s.match?(FALSE_ALARM)
+
+        result = Catalog::PriceBooks::ClaudeClient.call(
+          system: 'You check renderings for a home configurator before buyers see them. Be specific and skeptical.',
+          tool: RECONSIDER, max_tokens: 400, temperature: 0,
+          content: [{ type: 'text', text: 'The photo as built:' }, image(photo), *sample_content(sample, value, hex),
+                    { type: 'text', text: "The same photo with the #{surface} changed to #{value}. A first reviewer held it back: " \
+                                          "\"#{verdict['note']}\" #{SET_ASIDE} Setting that reason aside, look again region by region." \
+                                          "#{scope(surface, value)}#{match_rule(sample, hex)}" },
+                    image(composite)]
+        )
+        input = result[:input]
+        cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
+        other = input['other_defect'].to_s.strip
+        passed = input['acceptable'] == true
+        verdict.merge('ok' => passed, 'reconsidered' => { 'acceptable' => passed, 'other_defect' => other.first(300) },
+                      'note' => passed ? verdict['note'] : (other.match?(/\Anone\b/i) ? verdict['note'] : other.first(300)),
+                      'cost_usd' => (verdict['cost_usd'].to_f + cost).round(4))
+      rescue Catalog::PriceBooks::ClaudeClient::Error
+        verdict
       end
 
       SECOND = {
