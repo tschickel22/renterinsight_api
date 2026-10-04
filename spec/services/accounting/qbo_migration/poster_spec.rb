@@ -136,7 +136,7 @@ RSpec.describe Accounting::QboMigration::Poster do
   it 'refuses with the blockers when a step is not done' do
     wizard = start
     expect { described_class.new(wizard, user).post! }
-      .to raise_error(described_class::BlockedError) { |e| expect(e.blockers).to include(match(/not mapped/)) }
+      .to raise_error(described_class::BlockedError) { |e| expect(e.blockers).to include(match(/not confirmed yet/)) }
     expect(company.journal_entries.count).to eq(0)
   end
 
@@ -171,6 +171,8 @@ RSpec.describe Accounting::QboMigration::Poster do
       expect(company.bank_reconciliations.where(accounting_import_id: import.id)).to be_empty
       expect(gl_net(books[:chart]['1110'])).to eq(0)
       expect(books[:banks][:amex].reload.chart_of_account_id).to be_nil
+      # Feeds go back to where they started, so September's lines show again.
+      expect(books[:banks][:chase].reload.feed_start_date).to be_nil
     end
 
     it 'refuses once an imported invoice has a payment applied' do

@@ -60,6 +60,17 @@ module Accounting
             @company.bank_accounts.find_by(id: ba_id)&.update_column(:chart_of_account_id, nil)
           end
 
+          # Each matched bank feed was set to start the day after cutover; with
+          # the switch undone it goes back to where it was, or September's
+          # bank lines stay hidden for books that no longer hold them.
+          @wizard.matched_banks.each do |bank|
+            ba = @company.bank_accounts.find_by(id: bank.dig('match', 'bank_account_id'))
+            next unless ba && ba.feed_start_date == @wizard.cutover_date + 1
+
+            prior = bank.dig('match', 'previous_feed_start_date').presence
+            ba.update_column(:feed_start_date, prior && Date.iso8601(prior))
+          end
+
           @wizard.config['rolled_back_at'] = Time.current.iso8601
           @wizard.config['rolled_back_by_id'] = user&.id
           @import.status = 'rolled_back'

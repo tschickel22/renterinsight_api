@@ -36,10 +36,10 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
                            'quickbooks_company_name' => 'Prairie Wind Homes LLC', 'posted_at' => nil,
                            'rollback_available' => false)
       expect(m['steps']['connect']).to eq('done' => true)
-      expect(m['steps']['banks']).to eq('done' => false, 'matched' => 0, 'total' => 3)
+      expect(m['steps']['banks']).to eq('done' => false, 'matched' => 0, 'problems' => 0, 'total' => 3)
       expect(m['steps']['lists']).to eq('done' => true, 'customers' => 10, 'vendors' => 5)
       expect(m['steps']['accounts']).to include('done' => false, 'confirmed' => 0)
-      expect(m['blockers']).to include(match(/accounts with a balance are not mapped/), 'Chase Operating Checking is not matched to a bank account')
+      expect(m['blockers']).to include(match(/accounts with a balance are not confirmed yet/), 'Chase Operating Checking is not matched to a bank account')
     end
 
     it 'returns the existing draft instead of starting another' do
@@ -112,6 +112,31 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(rows.values.map { |r| r['suggestion'] }).to all(be_present)
     end
 
+    # Browser test 2026-10-03: a rerun gave a row a new suggestion, but its
+    # choice stayed on the old one, so the screen showed the old account.
+    it 'moves a choice that only followed the old suggestion, and keeps one the person picked' do
+      id = start_migration
+      answer = fake_claude_answer(company)
+      allow_any_instance_of(Accounting::QboMigration::AccountSuggester).to receive(:request_claude) { |_i, s, t| answer.call(s, t) }
+      post "#{base}/#{id}/accounts/suggest", headers: headers, as: :json
+      first = json['accounts'].index_by { |r| r['qbo_account_id'] }
+
+      wrong = company.chart_of_accounts.find_by!(account_number: '6020')
+      import = company.accounting_imports.find(id)
+      rows = import.import_config['accounts']
+      followed = rows.find { |r| r['qbo_account_id'] == '15' }
+      followed['suggestion'] = { 'action' => 'map', 'chart_of_account_id' => wrong.id, 'source' => 'exact', 'confidence' => 'high' }
+      followed['choice'] = { 'action' => 'map', 'chart_of_account_id' => wrong.id }
+      picked = rows.find { |r| r['qbo_account_id'] == '33' }
+      picked['choice'] = { 'action' => 'map', 'chart_of_account_id' => wrong.id }
+      import.update!(import_config: import.import_config)
+
+      post "#{base}/#{id}/accounts/suggest", headers: headers, as: :json
+      after = json['accounts'].index_by { |r| r['qbo_account_id'] }
+      expect(after['15']['choice']).to eq(first['15']['choice'])
+      expect(after['33']['choice']).to eq('action' => 'map', 'chart_of_account_id' => wrong.id)
+    end
+
     it 'never overwrites a confirmed row' do
       id = start_migration
       payroll = company.chart_of_accounts.find_by!(account_number: '6020')
@@ -176,6 +201,51 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(json['error']).to match(/already taken/)
     end
+  end
+
+  describe 'bank match checks' do
+    it 'drops the GL pin when a matched bank is closed instead' do
+      id = start_migration
+      get "#{base}/#{id}/banks", headers: headers
+      checking = json['qbo_bank_accounts'].find { |b| b['kind'] == 'bank' }
+      patch "#{base}/#{id}/banks", params: { matches: [{ qbo_account_id: checking['qbo_account_id'], bank_account_id: books[:banks][:chase].id }] },
+                                   headers: headers, as: :json
+      pinned = json_accounts_row(id, checking['qbo_account_id'])
+      expect(pinned).to include('bank_match' => true, 'confirmed' => true)
+
+      patch "#{base}/#{id}/banks", params: { matches: [{ qbo_account_id: checking['qbo_account_id'], bank_account_id: nil, closed: true }] },
+                                   headers: headers, as: :json
+      row = json_accounts_row(id, checking['qbo_account_id'])
+      expect(row).to include('bank_match' => false, 'confirmed' => false, 'choice' => nil)
+    end
+
+    # Browser test 2026-10-03: a card matched to a checking account, and two
+    # QuickBooks accounts on one GL, both reached the preview without a word.
+    it 'flags a card matched to a checking account and two accounts sharing a GL, and blocks posting' do
+      id = start_migration
+      get "#{base}/#{id}/banks", headers: headers
+      qbo = json['qbo_bank_accounts']
+      card = qbo.find { |b| b['kind'] == 'credit_card' }
+      checking = qbo.find { |b| b['kind'] == 'bank' }
+      second_checking = company.bank_accounts.create!(bank_name: 'Chase Two', account_type: 'checking', account_purpose: 'sync_only',
+                                                      account_mask: '9999', chart_of_account: books[:banks][:chase].chart_of_account)
+      patch "#{base}/#{id}/banks", params: { matches: [
+        { qbo_account_id: checking['qbo_account_id'], bank_account_id: books[:banks][:chase].id, closed: false },
+        { qbo_account_id: card['qbo_account_id'], bank_account_id: second_checking.id, closed: false }
+      ] }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+
+      rows = json['qbo_bank_accounts'].index_by { |b| b['qbo_account_id'] }
+      expect(rows[card['qbo_account_id']]['problems'].join).to include('credit card in QuickBooks', 'asset account')
+      expect(rows[checking['qbo_account_id']]['problems'].join).to include('same GL account')
+      expect(json['migration']['steps']['banks']['done']).to be(false)
+      expect(json['migration']['blockers'].join).to include('credit card in QuickBooks')
+    end
+  end
+
+  def json_accounts_row(id, qbo_account_id)
+    get "#{base}/#{id}/accounts", headers: headers
+    json['accounts'].find { |r| r['qbo_account_id'] == qbo_account_id }
   end
 
   describe 'banks' do
@@ -258,6 +328,9 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(json).to include('can_post' => true, 'blockers' => [], 'equity_plug' => 0.0, 'differences' => [])
       expect(json['open_invoices']).to eq('count' => 10, 'total' => 52_290.4, 'ar_balance' => 52_290.4, 'difference' => 0.0)
       expect(json['totals']['debit']).to eq(json['totals']['credit'])
+      expect(json['totals']['carries_every_balance']).to be(true)
+      table_debits = json['trial_balance'].sum { |r| r['debit'] }
+      expect(json['totals']['debit']).to be_within(0.005).of(table_debits) # totals are the table's, netted per account
       expect(json['trial_balance'].first.keys).to match_array(%w[dealertide_account qbo_accounts debit credit])
 
       post "#{base}/#{id}/post", headers: headers, as: :json

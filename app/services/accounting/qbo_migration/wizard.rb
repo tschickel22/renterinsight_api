@@ -263,7 +263,8 @@ module Accounting
             {
               qbo_account_id: b['qbo_account_id'], name: b['name'], kind: b['kind'],
               balance_at_cutover: self.class.money(rows.dig(b['qbo_account_id'], 'balance_at_cutover')),
-              match: match && { bank_account_id: match['bank_account_id'], closed: match['closed'] ? true : false }
+              match: match && { bank_account_id: match['bank_account_id'], closed: match['closed'] ? true : false },
+              problems: bank_match_problems(b)
             }
           end,
           bank_accounts: company_bank_accounts.map do |ba|
@@ -323,6 +324,49 @@ module Accounting
         reapply_bank_matches!
         config.delete('preview_viewed_at')
         save!
+      end
+
+      # Why a matched bank cannot carry its QuickBooks balance as matched. A
+      # bank's balance is an asset and a card's is owed, so a card matched to
+      # a checking account (or one whose GL is cash) would book what is owed
+      # as money in the bank, and two accounts sharing a GL net into one
+      # balance. Found in the 2026-10-03 browser test, where both happened
+      # without a word.
+      def bank_match_problems(bank)
+        ba_id = bank.dig('match', 'bank_account_id')
+        return [] unless ba_id
+
+        ba = company_bank_accounts.find { |a| a.id == ba_id }
+        return [] unless ba
+
+        card = bank['kind'] == 'credit_card'
+        name = ba.institution_name.presence || ba.bank_name || 'the matched account'
+        problems = []
+        if card && ba.account_type != 'credit_card'
+          problems << "it is a credit card in QuickBooks but #{name} is a #{ba.account_type.to_s.tr('_', ' ')} account"
+        elsif !card && ba.account_type == 'credit_card'
+          problems << "it is a bank account in QuickBooks but #{name} is a credit card"
+        end
+
+        # A bank account with no GL account yet takes the one its QuickBooks
+        # account is mapped to when the switch posts, so only a linked GL can
+        # disagree with the kind.
+        gl = ba.chart_of_account
+        if gl
+          wanted = card ? 'liability' : 'asset'
+          unless gl.account_type == wanted
+            problems << "#{name} posts to #{gl.account_number} #{gl.name}, a#{'n' if gl.account_type.to_s.start_with?('a', 'e')} " \
+                        "#{gl.account_type} account; a #{card ? 'card' : 'bank'} needs #{wanted == 'asset' ? 'an asset' : 'a liability'} account"
+          end
+          shared = bank_rows.find do |other|
+            next false if other['qbo_account_id'] == bank['qbo_account_id']
+
+            other_ba = company_bank_accounts.find { |a| a.id == other.dig('match', 'bank_account_id') }
+            other_ba && other_ba.chart_of_account_id == gl.id
+          end
+          problems << "#{name} posts to the same GL account as #{shared['name']}, so their balances would merge" if shared
+        end
+        problems
       end
 
       # ── Uncleared items ─────────────────────────────────────────
@@ -450,6 +494,16 @@ module Accounting
 
       # ── Preview ─────────────────────────────────────────────────
 
+      # Every QuickBooks account with a balance lands in the entry, and the
+      # entry's accounts net to exactly what QuickBooks holds for them.
+      def carries_every_balance?(entry)
+        with_balance = account_rows.reject { |r| self.class.d(r['tb_balance']).zero? }
+        carried = entry[:rows].sum { |r| r[:qbo_names].size }
+        qbo_net = with_balance.sum(BigDecimal('0')) { |r| self.class.d(r['tb_balance']) }
+        entry_net = entry[:rows].sum(BigDecimal('0')) { |r| r[:debit] - r[:credit] }
+        carried == with_balance.size && (qbo_net - entry_net).abs < BigDecimal('0.005')
+      end
+
       def preview_json(mark_viewed: true)
         if mark_viewed && draft?
           config['preview_viewed_at'] = Time.current.iso8601
@@ -485,9 +539,19 @@ module Accounting
             { dealertide_account: r[:label], qbo_accounts: r[:qbo_names], debit: self.class.money(r[:debit]),
               credit: self.class.money(r[:credit]) }
           end,
+          # Totals of the table, each DealerTide account netted. The posted
+          # entry can have more lines (a matched bank is split into its
+          # statement balance plus one line per uncleared item), and two
+          # QuickBooks accounts sent to one DealerTide account net together,
+          # so these can be lower than QuickBooks' totals with every balance
+          # still carried; carries_every_balance says whether it is.
           totals: {
-            debit: self.class.money(entry[:total_debit]), credit: self.class.money(entry[:total_credit]),
-            qbo_debit: self.class.money(tb['total_debit']), qbo_credit: self.class.money(tb['total_credit'])
+            debit: self.class.money(entry[:rows].sum(BigDecimal('0')) { |r| r[:debit] }),
+            credit: self.class.money(entry[:rows].sum(BigDecimal('0')) { |r| r[:credit] }),
+            qbo_debit: self.class.money(tb['total_debit']), qbo_credit: self.class.money(tb['total_credit']),
+            entry_debit: self.class.money(entry[:total_debit]), entry_credit: self.class.money(entry[:total_credit]),
+            carries_every_balance: carries_every_balance?(entry),
+            combined_accounts: entry[:rows].count { |r| r[:qbo_names].size > 1 }
           },
           open_invoices: inv.slice(:count, :total, :ar_balance, :difference).transform_values { |v| v.is_a?(Integer) ? v : self.class.money(v) },
           open_bills: {
@@ -549,7 +613,9 @@ module Accounting
         matched_count = banks.count { |b| b['match'].present? }
         {
           connect: { done: QboMigration.fixture_mode? || QboMigration.connection_for(@company).present? || !draft? },
-          banks: { done: matched_count == banks.size, matched: matched_count, total: banks.size },
+          banks: { done: matched_count == banks.size && banks.none? { |b| bank_match_problems(b).any? },
+                   matched: matched_count, total: banks.size,
+                   problems: banks.sum { |b| bank_match_problems(b).size } },
           accounts: {
             done: with_balance.all? { |r| r['confirmed'] && r['choice'].present? },
             confirmed: rows.count { |r| r['confirmed'] }, total: rows.size,
@@ -557,7 +623,10 @@ module Accounting
           },
           lists: { done: config['lists'].present?, customers: Array(lists['customers']).size,
                    vendors: Array(lists['vendors']).size },
-          uncleared: { done: matched_banks.all? { |b| uncleared_difference(b)&.zero? } },
+          # Not done before the banks are decided: with nothing matched yet,
+          # all? on an empty list read as "ties out".
+          uncleared: { done: bank_rows.all? { |b| b['match'].present? } &&
+                             matched_banks.all? { |b| uncleared_difference(b)&.zero? } },
           preview: { done: config['preview_viewed_at'].present? || !draft? }
         }
       end
@@ -575,10 +644,11 @@ module Accounting
         out = []
         rows = account_rows
         unmapped = rows.count { |r| self.class.d(r['tb_balance']).nonzero? && !(r['confirmed'] && r['choice'].present?) }
-        out << "#{unmapped} #{unmapped == 1 ? 'account' : 'accounts'} with a balance #{unmapped == 1 ? 'is' : 'are'} not mapped" if unmapped.positive?
+        out << "#{unmapped} #{unmapped == 1 ? 'account' : 'accounts'} with a balance #{unmapped == 1 ? 'is' : 'are'} not confirmed yet" if unmapped.positive?
 
         bank_rows.each do |b|
           out << "#{b['name']} is not matched to a bank account" if b['match'].blank?
+          bank_match_problems(b).each { |problem| out << "#{b['name']}: #{problem}" }
         end
         matched_banks.each do |b|
           diff = uncleared_difference(b)
@@ -703,6 +773,7 @@ module Accounting
       # balance goes, so the row is pinned to it and confirmed.
       def reapply_bank_matches!
         rows = account_rows.index_by { |r| r['qbo_account_id'] }
+        was_pinned = rows.select { |_id, r| r['bank_match'] }.keys
         rows.each_value { |r| r['bank_match'] = false }
         bank_rows.each do |b|
           row = rows[b['qbo_account_id']]
@@ -719,6 +790,18 @@ module Accounting
           row['choice'] = { 'action' => 'map', 'chart_of_account_id' => gl.id }
           row['confirmed'] = true
         end
+        # A row pinned to a bank account's GL that is no longer matched (closed,
+        # unmatched or matched elsewhere) drops the pin, so it does not keep
+        # posting to the old bank's GL account. Found in the 2026-10-03
+        # browser test: Wells Fargo, marked closed, still went to a card's GL.
+        was_pinned.each do |id|
+          row = rows[id]
+          next if row.nil? || row['bank_match']
+
+          row['suggestion'] = nil
+          row['choice'] = nil
+          row['confirmed'] = false
+        end
         config['accounts'] = rows.values
       end
 
@@ -731,9 +814,13 @@ module Accounting
         rows = account_rows.index_by { |r| r['qbo_account_id'] }
         bank = bank_rows.find { |b| b.dig('match', 'bank_account_id') == ba.id }
         row = bank && rows[bank['qbo_account_id']]
+        # Dropping the pin entirely (not just unconfirming) so the row does not
+        # keep the released bank's GL account as its choice.
         if row&.dig('bank_match')
           row['confirmed'] = false
           row['bank_match'] = false
+          row['suggestion'] = nil
+          row['choice'] = nil
         end
       end
 

@@ -48,10 +48,14 @@ module Accounting
         rows = @wizard.account_rows
         pending = rows.reject { |r| r['confirmed'] }
 
-        pending.each do |row|
-          sug = deterministic(row, chart)
-          row['suggestion'] = sug if sug
+        # Every unconfirmed row is suggested afresh: an old exact match that the
+        # rule no longer makes must not survive and skip the AI. Remember what
+        # the old suggestion would have chosen, so a choice that merely
+        # followed it can follow the new one (a choice the person picked stays).
+        followed = pending.to_h do |row|
+          [row['qbo_account_id'], row['choice'].present? && row['choice'] == @wizard.choice_from(row['suggestion'])]
         end
+        pending.each { |row| row['suggestion'] = deterministic(row, chart) }
 
         for_ai = pending.reject { |r| r.dig('suggestion', 'source') == 'exact' }
         notes = (@wizard.config['notes'] ||= {})
@@ -73,9 +77,12 @@ module Accounting
           end
         end
 
-        # A suggestion fills an empty choice, never one the person made.
+        # A suggestion fills an empty choice, or one that only followed the
+        # previous suggestion; never one the person made.
         pending.each do |row|
-          row['choice'] = @wizard.choice_from(row['suggestion']) if row['choice'].blank? && row['suggestion']
+          next unless row['choice'].blank? || followed[row['qbo_account_id']]
+
+          row['choice'] = row['suggestion'] ? @wizard.choice_from(row['suggestion']) : nil
         end
 
         @wizard.config['accounts'] = rows
@@ -126,14 +133,31 @@ module Accounting
 
         # Two charts can share a number by coincidence (QuickBooks 1010
         # "Wells Fargo Payroll" against DealerTide 1010 "Operating Checking"),
-        # so the names must share a word too; the rest goes to the AI.
+        # so the names must also agree on what the account is for. Words every
+        # chart uses (inventory, expense, payable) do not count: in the
+        # 2026-10-03 browser test they paired 1250 "Parts and Supplies
+        # Inventory" with "Land / Lot Inventory" and 6600 "Depreciation
+        # Expense" with "Vehicle Expense - Fuel". The rest goes to the AI.
         match = chart.find do |a|
-          a.account_number == number && a.account_type == type && (name_words(a.name) & name_words(row['qbo_name'])).any?
+          a.account_number == number && a.account_type == type && names_agree?(a.name, row['qbo_name'])
         end
-        match && exact(match, 'Same account number and type')
+        match && exact(match, 'Same account number, type and name')
       end
 
       STOP_WORDS = %w[and of the a an for to account accounts acct].freeze
+      GENERIC_WORDS = %w[inventory expense income revenue payable receivable cost sale sold home other general misc
+                         miscellaneous asset liability equity fee charge].freeze
+
+      # At least half of the distinctive words of the shorter name appear in
+      # the other. A name with no distinctive words never matches here.
+      def names_agree?(left, right)
+        a = name_words(left) - GENERIC_WORDS
+        b = name_words(right) - GENERIC_WORDS
+        return false if a.empty? || b.empty?
+
+        shared = (a & b).size
+        shared.positive? && shared * 2 >= [a.size, b.size].min
+      end
 
       def name_words(name)
         name.to_s.downcase.scan(/[a-z]+/).map { |w| w.sub(/s\z/, '') }.reject { |w| w.size < 3 || STOP_WORDS.include?(w) }
