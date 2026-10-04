@@ -121,15 +121,18 @@ module Truebuild
       :created
     end
 
+    # Every row comes across, matched by the sending side's id: one finish on
+    # one photo often has several (an attempt held back, then the drawing
+    # that passed; a drawing under an older cut), and a designer picks among
+    # them as it does at home. Matching by photo, finish and prompt kept the
+    # oldest of each and dropped 1,160 of 1,809 on the first copy.
     def import_render(row)
-      existing = TruebuildRender.where(source_url: row['source_url'], selection_key: row['selection_key'], model_key: row['model_key'],
-                                       purpose: 'layer', prompt: row['prompt'])
       variant = row['model_ref'] && find_variant(row['model_ref'])
-      if (found = existing.first)
+      if (found = TruebuildRender.find_by("usage->>'copied_from' = ?", row['id'].to_s))
         # Copied before this side had the model: link it now. A second run
         # after the price books are published finishes the job.
         found.update_columns(catalog_plan_variant_id: variant.id) if variant && found.catalog_plan_variant_id.nil?
-        return :updated # the receiving side has this drawing (or drew its own)
+        return :updated
       end
 
       attrs = row.slice('room', 'source_url', 'selection', 'selection_key', 'model_key', 'provider', 'model', 'status', 'cost_usd',
