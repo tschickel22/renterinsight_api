@@ -3,9 +3,11 @@
 require 'net/http'
 
 module Truebuild
-  # Copies TrueView work already paid for from one environment to another
-  # (staging to production): the factories' decor samples, the photos chosen
-  # for each model, the surface outlines and the finished drawings. Run by
+  # Copies TrueBuild and TrueView work already paid for from one environment
+  # to another (staging to production): the published price books with their
+  # factories and models (BookTransfer), the factories' decor samples, the
+  # photos chosen for each model, the surface outlines and the finished
+  # drawings. Run by
   # script/truebuild_transfer.rb, which pages export on one side into import
   # on the other through the admin API.
   #
@@ -15,14 +17,15 @@ module Truebuild
   # so it never depends on the other's. Importing twice changes nothing.
   #
   # A designer finds a drawing by its photo, finish and exact prompt, and the
-  # prompt names the factory's sample for the finish. So samples and photo
-  # choices go first, and the receiving side needs the same price books
-  # published, or it builds different prompts and draws again.
+  # prompt names the option as the price book words it and the factory's
+  # sample for the finish. So the books go first, then samples and photo
+  # choices, then outlines and drawings.
   module DrawingTransfer
     module_function
 
-    KINDS = %w[swatches photos masks renders].freeze
-    ONE = { 'swatches' => 'swatch', 'photos' => 'photo', 'masks' => 'mask', 'renders' => 'render' }.freeze
+    # books first: the price books (BookTransfer), then what TrueView drew on them.
+    KINDS = %w[books swatches photos masks renders].freeze
+    ONE = { 'books' => 'book', 'swatches' => 'swatch', 'photos' => 'photo', 'masks' => 'mask', 'renders' => 'render' }.freeze
     PAGE = 100
     RENDER_STATUSES = %w[done skipped rejected].freeze
     PHOTO_KEYS = %w[trueview_photos trueview_auto hidden_photos].freeze
@@ -30,6 +33,7 @@ module Truebuild
     # => { rows: [...], next_after: id or nil }
     def export(kind, after_id: 0, limit: PAGE)
       scope = case kind
+              when 'books' then BookTransfer.scope.includes(:manufacturer, :factory)
               when 'swatches' then CatalogSwatch.includes(:manufacturer, :factory)
               when 'photos'
                 CatalogPlanVariant.includes(:catalog_plan, :manufacturer)
@@ -43,6 +47,10 @@ module Truebuild
       rows = scope.where('id > ?', after_id.to_i).order(:id).limit(limit.to_i.clamp(1, 500)).to_a
       { rows: rows.map { |r| send("#{ONE[kind]}_row", r) }, next_after: rows.size == limit.to_i ? rows.last.id : nil }
     end
+
+    def book_row(b) = BookTransfer.export(b)
+
+    def import_book(row) = BookTransfer.import!(row)
 
     def swatch_row(s)
       { id: s.id, manufacturer: s.manufacturer&.name, factory_code: s.factory&.code,

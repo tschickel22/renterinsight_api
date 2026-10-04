@@ -1,8 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Copies TrueView work already paid for from one environment to another:
-# decor samples, chosen photos, outlines, then drawings. Plain Ruby, run from
+# Copies TrueBuild and TrueView work already paid for from one environment
+# to another: published price books (with their factories, models and
+# options), decor samples, chosen photos, outlines, then drawings. Plain Ruby, run from
 # a laptop; both ends are the admin API (Truebuild::DrawingTransfer).
 #
 #   FROM_URL=https://renterinsight-api-staging.onrender.com FROM_TOKEN=... \
@@ -10,20 +11,20 @@
 #   ruby script/truebuild_transfer.rb [kinds] [--dry-run]
 #
 # Tokens are a platform admin's sign-in token on each side (localStorage
-# authToken in the browser). kinds defaults to swatches,photos,masks,renders.
+# authToken in the browser). kinds defaults to books,swatches,photos,masks,renders.
 # Safe to run again: what the receiving side already has is left alone, and
 # the run resumes from the start each time. --dry-run only counts.
 #
-# Publish the same price books on the receiving side first: drawings are
-# found by their prompt, which comes from the book's option names and the
-# factory's samples.
+# Books go first: a drawing is found by its prompt, which uses the book's
+# option names and the factory's samples, so the receiving side gets the
+# same book rather than importing the factory's files again.
 
 require 'json'
 require 'net/http'
 require 'uri'
 
-KINDS = %w[swatches photos masks renders].freeze
-BATCH = { 'swatches' => 50, 'photos' => 100, 'masks' => 20, 'renders' => 15 }.freeze # rows a request; each file is copied
+KINDS = %w[books swatches photos masks renders].freeze
+BATCH = { 'books' => 1, 'swatches' => 50, 'photos' => 100, 'masks' => 20, 'renders' => 15 }.freeze # rows a request; each file is copied
 
 def env!(key)
   ENV.fetch(key) { abort "Set #{key}" }
