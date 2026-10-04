@@ -17,7 +17,7 @@ module Accounting
     #                                 previous_feed_start_date } }]
     #   uncleared                  { qbo_account_id => { statement_balance, items: [...] } }
     #   lists                      { customers: [...], vendors: [...] }
-    #   open_invoices, open_bills, vendor_credits
+    #   open_invoices, customer_credits, open_bills, vendor_credits
     #   notes                      { suggest:, uncleared: } messages for the person
     #   preview_viewed_at, posted, rolled_back_at
     class Wizard
@@ -516,8 +516,14 @@ module Accounting
         bills = open_bills_summary
         differences = []
         if inv[:difference].nonzero?
-          differences << "Open invoices total #{fmt(inv[:total])} but receivables in QuickBooks are #{fmt(inv[:ar_balance])} " \
-                         "(difference #{fmt(inv[:difference])}). Unapplied payments or credit memos in QuickBooks are the usual cause."
+          differences << "Open invoices less customer credits total #{fmt(inv[:total])} but receivables in QuickBooks are " \
+                         "#{fmt(inv[:ar_balance])} (difference #{fmt(inv[:difference])}). A payment applied in QuickBooks after the " \
+                         'cutover to an earlier unapplied payment is the usual cause; run the A/R Aging report in QuickBooks as of the ' \
+                         'cutover to find it.'
+        end
+        if inv[:unapplied_customer_credits].positive?
+          differences << "#{fmt(inv[:unapplied_customer_credits])} of customer credits has no open invoice from the same " \
+                         'customer to apply to. It comes over as credit memos, ready to apply to their next invoice.'
         end
         if bills[:difference].nonzero?
           differences << "Open bills less vendor credits total #{fmt(bills[:total])} but payables in QuickBooks are " \
@@ -553,7 +559,9 @@ module Accounting
             carries_every_balance: carries_every_balance?(entry),
             combined_accounts: entry[:rows].count { |r| r[:qbo_names].size > 1 }
           },
-          open_invoices: inv.slice(:count, :total, :ar_balance, :difference).transform_values { |v| v.is_a?(Integer) ? v : self.class.money(v) },
+          open_invoices: inv.slice(:count, :total, :ar_balance, :difference, :invoices_total, :customer_credits_total,
+                                   :customer_credits_count, :unapplied_customer_credits)
+                            .transform_values { |v| v.is_a?(Integer) ? v : self.class.money(v) },
           open_bills: {
             count: bills[:count], total: self.class.money(bills[:total]), ap_balance: self.class.money(bills[:ap_balance]),
             difference: self.class.money(bills[:difference]),
@@ -569,9 +577,45 @@ module Accounting
 
       def open_invoices_summary
         list = Array(config['open_invoices'])
-        total = list.sum(BigDecimal('0')) { |i| self.class.d(i['balance']) }
+        credits = customer_credits
+        invoices_total = list.sum(BigDecimal('0')) { |i| self.class.d(i['balance']) }
+        credits_total = credits.sum(BigDecimal('0')) { |c| self.class.d(c['balance']) }
+        total = invoices_total - credits_total
         ar = control_balance('Accounts Receivable')
-        { count: list.size, total: total, ar_balance: ar, difference: total - ar }
+        {
+          count: list.size, total: total, ar_balance: ar, difference: total - ar, invoices_total: invoices_total,
+          customer_credits_total: credits_total, customer_credits_count: credits.size,
+          unapplied_customer_credits: unapplied_customer_credits
+        }
+      end
+
+      # Customer credits open at the cutover (credit memos, unapplied
+      # payments). A draft started before they were read has none stored; they
+      # are read once from QuickBooks then, with any customer they name.
+      def customer_credits
+        unless config.key?('customer_credits')
+          return [] unless draft?
+
+          credits = adapter.fetch_open_customer_credits(cutover_date)
+          lists = (config['lists'] ||= {})
+          known = Array(lists['customers']).map { |c| c['external_id'].to_s }.to_set
+          missing = credits.map { |c| c[:customer_external_id] }.compact.uniq.reject { |id| known.include?(id.to_s) }
+          lists['customers'] = Array(lists['customers']) + adapter.fetch_customers_by_id(missing).map { |c| jsonable(c) } if missing.any?
+          config['customer_credits'] = credits.map { |c| jsonable(c) }
+          save!
+        end
+        Array(config['customer_credits'])
+      end
+
+      # Customer credits with no open invoice from the same customer to absorb
+      # them. They come over as credit memos.
+      def unapplied_customer_credits
+        open_by_customer = Array(config['open_invoices']).group_by { |i| i['customer_external_id'] }
+        customer_credits.group_by { |c| c['customer_external_id'] }.sum(BigDecimal('0')) do |customer, credits|
+          open = Array(open_by_customer[customer]).sum(BigDecimal('0')) { |i| self.class.d(i['balance']) }
+          credit = credits.sum(BigDecimal('0')) { |c| self.class.d(c['balance']) }
+          [credit - open, 0].max
+        end
       end
 
       def open_bills_summary
@@ -686,8 +730,8 @@ module Accounting
         closed = closed_period_on(cutover_date)
         out << "The cutover date is in a closed period (FY#{closed.fiscal_year} period #{closed.period_number})" if closed
 
-        if Array(config['open_invoices']).any? && default_location_id.nil?
-          out << 'Add a location in DealerTide first: every invoice needs one'
+        if (Array(config['open_invoices']).any? || Array(config['customer_credits']).any?) && default_location_id.nil?
+          out << 'Add a location in DealerTide first: every invoice and credit memo needs one'
         end
 
         out << 'Open the preview before posting' if include_preview && config['preview_viewed_at'].blank?
@@ -827,11 +871,12 @@ module Accounting
 
       def fetch_open_items!
         invoices = adapter.fetch_open_invoices(cutover_date)
+        customer_credits = adapter.fetch_open_customer_credits(cutover_date)
         bills = adapter.fetch_open_bills(cutover_date)
         credits = adapter.fetch_open_vendor_credits(cutover_date)
 
         customers = adapter.fetch_contacts
-        missing = invoices.map { |i| i[:customer_external_id] }.compact.uniq - customers.map { |c| c[:external_id] }
+        missing = (invoices + customer_credits).map { |i| i[:customer_external_id] }.compact.uniq - customers.map { |c| c[:external_id] }
         customers += adapter.fetch_customers_by_id(missing) if missing.any?
         vendors = adapter.fetch_vendors
         missing = (bills + credits).map { |b| b[:vendor_external_id] }.compact.uniq - vendors.map { |v| v[:external_id] }
@@ -839,6 +884,7 @@ module Accounting
 
         config['lists'] = { 'customers' => customers.map { |c| jsonable(c) }, 'vendors' => vendors.map { |v| jsonable(v) } }
         config['open_invoices'] = invoices.map { |i| jsonable(i) }
+        config['customer_credits'] = customer_credits.map { |c| jsonable(c) }
         config['open_bills'] = bills.map { |b| jsonable(b) }
         config['vendor_credits'] = credits.map { |c| jsonable(c) }
       end

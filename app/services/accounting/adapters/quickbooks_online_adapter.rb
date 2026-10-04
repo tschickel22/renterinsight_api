@@ -292,6 +292,30 @@ module Accounting
         end
       end
 
+      # Customer credits open at the cutover: credit memos with credit left and
+      # payments with an unapplied amount. Both lower receivables without being
+      # open invoices, so without them open invoices overstate AR (the
+      # 2026-10-04 sandbox run was 785.65 over). A credit memo used after the
+      # cutover is added back the way a payment is for invoices. An unapplied
+      # payment reads as unapplied today: one applied since the cutover is
+      # missed, and the preview's receivables difference shows it.
+      def fetch_open_customer_credits(as_of_date)
+        used_later = linked_amounts('Payment', as_of_date, 'CreditMemo')
+        memos = query_all('CreditMemo', "TxnDate <= '#{as_of_date.iso8601}'").filter_map do |cm|
+          balance = cm['RemainingCredit'].to_d + used_later.fetch(cm['Id'].to_s, 0)
+          next if balance <= 0
+
+          customer_credit_hash(cm, 'credit_memo', cm['DocNumber'], balance)
+        end
+        payments = query_all('Payment', "TxnDate <= '#{as_of_date.iso8601}'").filter_map do |pmt|
+          balance = pmt['UnappliedAmt'].to_d
+          next if balance <= 0
+
+          customer_credit_hash(pmt, 'unapplied_payment', pmt['PaymentRefNum'], balance)
+        end
+        memos + payments
+      end
+
       # ── Uncleared bank items ───────────────────────────────────
 
       # QuickBooks Online's v3 entities carry no cleared or reconciled flag.
@@ -487,6 +511,19 @@ module Accounting
           zip: addr['PostalCode'],
           account_number: vendor['AcctNum'],
           active: vendor['Active'] != false
+        }
+      end
+
+      def customer_credit_hash(txn, kind, doc_number, balance)
+        {
+          external_id: txn['Id'],
+          kind: kind,
+          doc_number: doc_number.presence,
+          date: parse_date(txn['TxnDate']),
+          customer_external_id: txn.dig('CustomerRef', 'value'),
+          customer_name: txn.dig('CustomerRef', 'name'),
+          total: txn['TotalAmt'].to_d,
+          balance: balance.to_d
         }
       end
 
