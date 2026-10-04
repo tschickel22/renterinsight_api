@@ -8,7 +8,15 @@ RSpec.describe 'Api::V1 bank feeds (connect a bank)', type: :request do
     User.create!(email: "bf-#{SecureRandom.hex(4)}@example.com", first_name: 'B', last_name: 'F',
                  password: 'Pass1234!', company_id: company.id, role: 'company_admin')
   end
-  let(:headers) { { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id)}" } }
+  let(:admin) do
+    User.create!(email: "pa-#{SecureRandom.hex(4)}@example.com", first_name: 'P', last_name: 'A',
+                 password: 'Pass1234!', company_id: company.id, role: 'platform_admin')
+  end
+  # A platform admin impersonating the dealer's admin, as Tom works on a tenant.
+  let(:headers) do
+    { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id, impersonated_by: admin.id)}" }
+  end
+  let(:dealer_headers) { { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id)}" } }
 
   it 'starts a session and connects every account it holds' do
     service = instance_double(StripeBankFeedService)
@@ -33,5 +41,13 @@ RSpec.describe 'Api::V1 bank feeds (connect a bank)', type: :request do
   it 'needs a session id' do
     post '/api/v1/bank_feeds/connect', params: {}, headers: headers, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
+  end
+
+  it 'is platform admins only for now' do
+    expect(StripeBankFeedService).not_to receive(:new)
+    post '/api/v1/bank_feeds/session', headers: dealer_headers
+    expect(response).to have_http_status(:forbidden)
+    post '/api/v1/bank_feeds/connect', params: { session_id: 'fcsess_1' }, headers: dealer_headers, as: :json
+    expect(response).to have_http_status(:forbidden)
   end
 end
