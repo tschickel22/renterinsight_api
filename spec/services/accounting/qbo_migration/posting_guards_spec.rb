@@ -66,4 +66,17 @@ RSpec.describe 'QuickBooks switch posting guards' do
     expect(blockers.join).to include(differing.invoice_number)
     expect(blockers.join).not_to include(matching.invoice_number)
   end
+
+  it 'says which step fixes each blocker' do
+    import = Accounting::QboMigration::Wizard.start!(company: company, user: user, cutover_date: QboMigrationHelpers::CUTOVER)
+    wizard = Accounting::QboMigration::Wizard.new(import)
+    wizard.update_banks!([{ qbo_account_id: '1', bank_account_id: books[:banks][:chase].id, closed: false }])
+
+    items = Accounting::QboMigration::Wizard.new(import.reload).preview_json[:blocker_items]
+    by_step = items.group_by { |i| i[:step] }
+    expect(by_step['accounts'].map { |i| i[:message] }.join).to include('not confirmed yet')
+    expect(by_step['banks'].map { |i| i[:message] }.join).to include('is not matched to a bank account')
+    expect(by_step['uncleared'].map { |i| i[:message] }.join).to include('enter the bank statement balance at cutover')
+    expect(items.map { |i| i[:message] }).to eq(Accounting::QboMigration::Wizard.new(import.reload).blockers(include_preview: false))
+  end
 end
