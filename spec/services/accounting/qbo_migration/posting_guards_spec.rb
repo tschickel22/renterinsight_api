@@ -77,6 +77,9 @@ RSpec.describe 'QuickBooks switch posting guards' do
     expect(by_step['accounts'].map { |i| i[:message] }.join).to include('not confirmed yet')
     expect(by_step['banks'].map { |i| i[:message] }.join).to include('is not matched to a bank account')
     expect(by_step['uncleared'].map { |i| i[:message] }.join).to include('enter the bank statement balance at cutover')
+    expect(by_step['uncleared']).to include(a_hash_including(qbo_account_id: '1', message: a_string_including('statement balance')))
+    expect(by_step['accounts'].first[:qbo_account_id]).to be_nil # the count of unconfirmed accounts is about no one row
+    expect(by_step['banks'].map { |i| i[:qbo_account_id] }).to all(be_present)
     expect(items.map { |i| i[:message] }).to eq(Accounting::QboMigration::Wizard.new(import.reload).blockers(include_preview: false))
   end
 end
