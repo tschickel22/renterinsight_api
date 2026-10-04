@@ -21,6 +21,38 @@ class StripeBankFeedService
     { error: e.message }
   end
 
+  # Connecting a bank, not one account: one sign in at the bank, and every
+  # account the person ticks in Stripe's window (checking, savings, cards)
+  # becomes a DealerTide bank account with its feed on. Used by Bank
+  # Transactions and the QuickBooks switch's banks step.
+  def create_company_session
+    customer_id = ensure_stripe_customer(nil)
+
+    session = Stripe::FinancialConnections::Session.create({
+      account_holder: { type: 'customer', customer: customer_id },
+      permissions: ['transactions', 'balances'],
+      filters: { countries: ['US'] }
+    })
+
+    { client_secret: session.client_secret, session_id: session.id }
+  rescue Stripe::StripeError => e
+    Rails.logger.error("[StripeBankFeed] Session creation failed: #{e.message}")
+    { error: e.message }
+  end
+
+  # The accounts come from the session itself, read from Stripe with our key,
+  # never from ids the browser sends. Each one connects to the DealerTide
+  # bank account already holding it, else to an unconnected one added by hand
+  # with the same last four and type, else to a new one. Returns a row per
+  # account: { bank_account:, status: 'created' | 'connected' | 'reconnected' | 'skipped', reason: }.
+  def connect_session_accounts!(session_id)
+    session = Stripe::FinancialConnections::Session.retrieve(session_id)
+    customer_id = session.try(:account_holder).try(:customer)
+    raise ArgumentError, 'This bank connection belongs to another company' unless own_customer?(customer_id)
+
+    Array(session.accounts&.data).map { |fc| connect_fc_account!(fc, customer_id) }
+  end
+
   def complete_connection(bank_account, fc_account_id)
     fc_account = Stripe::FinancialConnections::Account.retrieve(fc_account_id)
 
@@ -156,13 +188,32 @@ class StripeBankFeedService
     end
   end
 
+  # A session's customer is this company's when one of its bank accounts
+  # already uses it, or Stripe tags it with this company (set at creation).
+  def own_customer?(customer_id)
+    return false if customer_id.blank?
+    return true if @company.bank_accounts.exists?(stripe_customer_id: customer_id)
+
+    Stripe::Customer.retrieve(customer_id).try(:metadata).try(:[], 'ri_company_id').to_s == @company.id.to_s
+  rescue Stripe::StripeError
+    false
+  end
+
+  # bank_account is nil for a company-level connection (connect a bank),
+  # which reuses the customer the company's bank accounts already have.
   def ensure_stripe_customer(bank_account)
-    return bank_account.stripe_customer_id if bank_account.stripe_customer_id.present?
+    return bank_account.stripe_customer_id if bank_account&.stripe_customer_id.present?
+
+    existing = @company.bank_accounts.where.not(stripe_customer_id: [nil, '']).pick(:stripe_customer_id)
+    if existing
+      bank_account&.update_column(:stripe_customer_id, existing)
+      return existing
+    end
 
     # Check if company already has a Stripe customer via AccountingSettings
     settings = AccountingSettings.for_company(@company) rescue nil
     if settings&.respond_to?(:stripe_customer_id) && settings.stripe_customer_id.present?
-      bank_account.update_column(:stripe_customer_id, settings.stripe_customer_id)
+      bank_account&.update_column(:stripe_customer_id, settings.stripe_customer_id)
       return settings.stripe_customer_id
     end
 
@@ -175,7 +226,7 @@ class StripeBankFeedService
       }
     })
 
-    bank_account.update_column(:stripe_customer_id, customer.id)
+    bank_account&.update_column(:stripe_customer_id, customer.id)
 
     # Save to AccountingSettings for reuse
     if settings
@@ -183,6 +234,58 @@ class StripeBankFeedService
     end
 
     customer.id
+  end
+
+  def connect_fc_account!(fc, customer_id)
+    type = fc_account_type(fc)
+    return { bank_account: nil, status: 'skipped', name: fc_name(fc), reason: 'Only bank and credit card accounts have feeds here' } unless type
+
+    institution = fc.try(:institution_name).presence
+    last4 = fc.try(:last4).presence
+    scope = @company.bank_accounts.where(is_deleted: [false, nil])
+
+    bank = scope.find_by(stripe_fc_account_id: fc.id)
+    status = bank ? 'reconnected' : nil
+    unless bank
+      bank = scope.where(stripe_fc_account_id: [nil, ''], account_type: type)
+                  .where('account_mask = :l OR display_last_four = :l', l: last4).first if last4
+      status = 'connected' if bank
+    end
+    unless bank
+      bank = scope.create!(bank_name: fc_name(fc), account_type: type, account_purpose: BankAccount::ACCOUNT_PURPOSE_SYNC_ONLY,
+                           stripe_customer_id: customer_id)
+      status = 'created'
+    end
+
+    bank.update!(stripe_fc_account_id: fc.id, stripe_fc_status: 'active',
+                 institution_name: institution || bank.institution_name, account_mask: last4 || bank.account_mask,
+                 stripe_customer_id: bank.stripe_customer_id.presence || customer_id)
+    begin
+      Stripe::FinancialConnections::Account.subscribe(fc.id, { features: ['transactions'] })
+    rescue Stripe::StripeError => e
+      Rails.logger.warn("[StripeBankFeed] Subscribe failed (non-fatal): #{e.message}")
+    end
+    # The first pull is best effort: a failure here leaves the account
+    # connected, and the next sync picks the lines up.
+    begin
+      sync_transactions(bank)
+    rescue StandardError => e
+      Rails.logger.warn("[StripeBankFeed] First sync failed for bank account #{bank.id}: #{e.message}")
+    end
+    { bank_account: bank.reload, status: status, name: bank.bank_name }
+  end
+
+  # cash/checking, cash/savings and credit/credit_card have feeds; anything
+  # else (investments, loans) has no account type here.
+  def fc_account_type(fc)
+    case fc.try(:category).to_s
+    when 'credit' then 'credit_card'
+    when 'cash' then fc.try(:subcategory).to_s == 'savings' ? 'savings' : 'checking'
+    end
+  end
+
+  def fc_name(fc)
+    [fc.try(:institution_name).presence, fc.try(:display_name).presence].compact.uniq.join(' ').presence || 'Bank account'
   end
 
   def handle_stripe_error(bank_account, error)
