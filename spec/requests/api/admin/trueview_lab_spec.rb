@@ -371,6 +371,12 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
 
       post "/api/admin/trueview_lab/factory_runs/#{run_id}/stop", headers: admin
       expect(JSON.parse(response.body)['phase']).to eq('stopped')
+
+      post "/api/admin/trueview_lab/factory_runs/#{run_id}/continue", headers: admin, params: { budget_usd: 30 }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)).to include('phase' => 'queuing', 'budget_usd' => 30.0)
+      post "/api/admin/trueview_lab/factory_runs/#{run_id}/continue", headers: admin, params: { budget_usd: 40 }.to_json
+      expect(JSON.parse(response.body)['error']).to eq('This run cannot be continued') # already going
     end
 
     it 'schedules a batch run for tonight, and cancels it before it starts' do

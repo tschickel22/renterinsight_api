@@ -35,10 +35,28 @@ class TruebuildFactoryRun < ApplicationRecord
 
   def stop!
     update!(status: 'stopped', stopped_at: Time.current)
-    # Drawings waiting for a batch, or in one, are not drawn now either.
+    # Drawings not started yet are not drawn now. Ones already at Google are
+    # paid for, so they are still collected and checked (TruebuildFactoryRunTickJob).
     renders.where(status: 'queued').update_all(status: 'cancelled', updated_at: Time.current)
-    renders.where(status: 'running').where("usage->>'batch' = 'true'").update_all(status: 'cancelled', updated_at: Time.current)
     notify_end
+  end
+
+  def continuable? = %w[stopped budget_reached].include?(status)
+
+  # Picks up where the run stopped, with a new budget: the next model, and the
+  # drawings it cancelled. Nothing it drew or outlined is paid for again.
+  def continue!(budget_usd)
+    raise ArgumentError, 'This run cannot be continued' unless continuable?
+
+    spent = renders.sum(:cost_usd).to_f + progress['outline_repair_usd'].to_f
+    raise ArgumentError, "Set a budget above the #{format('$%.2f', spent)} already spent" unless budget_usd.to_f > spent
+
+    update!(status: 'running', budget_usd: budget_usd, stopped_at: nil)
+    renders.where(status: 'cancelled').find_each do |row|
+      row.update!(status: 'queued')
+      Truebuild::Trueview::FactoryRun.dispatch(row, self)
+    end
+    TruebuildFactoryRunJob.perform_later(id)
   end
 
   # Tells the admin who started the run how it ended.

@@ -201,6 +201,18 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: Truebuild::Trueview::FactoryRun.progress(run), status: :created
   end
 
+  # POST /api/admin/trueview_lab/factory_runs/:id/continue { budget_usd }
+  # A stopped or budget-reached run picks up where it left off.
+  def continue_factory_run
+    run = TruebuildFactoryRun.find_by(id: params[:id])
+    return render json: { error: 'Not found' }, status: :not_found unless run
+
+    run.continue!(params[:budget_usd])
+    render json: Truebuild::Trueview::FactoryRun.progress(run)
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # POST /api/admin/trueview_lab/factory_runs/:id/stop
   # Drawings already started finish; the rest are cancelled.
   def stop_factory_run

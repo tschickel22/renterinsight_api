@@ -3040,6 +3040,7 @@ Rails.application.routes.draw do
       get  'trueview_lab/factory_runs', to: 'trueview_lab#factory_runs'
       post 'trueview_lab/factory_runs', to: 'trueview_lab#create_factory_run'
       post 'trueview_lab/factory_runs/:id/stop', to: 'trueview_lab#stop_factory_run'
+      post 'trueview_lab/factory_runs/:id/continue', to: 'trueview_lab#continue_factory_run'
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
 

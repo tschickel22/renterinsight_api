@@ -97,6 +97,25 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(by[decatur_home.id]).to include(on_sites: false, last_run_at: nil)
   end
 
+  it 'continues a stopped run where it left off, with a new budget, paying for nothing twice' do
+    run = described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    TruebuildFactoryRunJob.perform_now(run.id)
+    done = run.renders.first
+    done.update!(status: 'done', cost_usd: 0.04, layer_url: 'https://b/l.webp')
+    run.stop!
+    expect(run.renders.where(status: 'cancelled').count).to eq(2)
+
+    expect { run.continue!(0.02) }.to raise_error(ArgumentError, /above the \$0.04 already spent/)
+    ActiveJob::Base.queue_adapter.enqueued_jobs.clear
+    run.continue!(8)
+    expect(run.reload).to have_attributes(status: 'running', budget_usd: 8, stopped_at: nil)
+    expect(run.renders.where(status: 'queued').count).to eq(2)
+    expect(done.reload.status).to eq('done')
+    jobs = ActiveJob::Base.queue_adapter.enqueued_jobs.map { |j| j[:job] }
+    expect(jobs.count(TruebuildRenderJob)).to eq(2)
+    expect(jobs).to include(TruebuildFactoryRunJob)
+  end
+
   it 'stops before a model that would go over budget' do
     run = described_class.start!(everything, budget_usd: 0.1, scope: { manufacturer_id: mfr.id })
     TruebuildFactoryRunJob.perform_now(run.id)

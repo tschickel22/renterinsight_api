@@ -10,10 +10,16 @@ class TruebuildFactoryRunTickJob < ApplicationJob
 
   def perform
     TruebuildFactoryRun.due.find_each { |run| Truebuild::Trueview::FactoryRun.begin!(run) }
-    TruebuildFactoryRun.where(status: 'running', mode: 'batch').find_each do |run|
+    # A stopped or budget-reached batch run still has its batches at Google
+    # collected: those drawings are paid for. Only a running one sends more.
+    TruebuildFactoryRun.where(status: %w[running stopped budget_reached], mode: 'batch').find_each do |run|
       batch = Truebuild::Trueview::Batch
+      next unless run.status == 'running' || run.renders.where(status: 'running').where("usage ? 'batch_name'").exists?
+
       batch.poll!(run)
-      batch.submit!(run) if run.reload.status == 'running'
+      next unless run.reload.status == 'running'
+
+      batch.submit!(run)
       Truebuild::Trueview::FactoryRun.drawing_finished!(run.reload)
     rescue StandardError => e
       Rails.logger.warn("TruebuildFactoryRunTickJob run #{run.id}: #{e.message}")

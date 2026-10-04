@@ -121,6 +121,21 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect(note).to have_attributes(notification_type: 'truebuild_factory_run', title: 'TrueView factory run was stopped')
   end
 
+  it 'still collects the drawings already at Google when a batch run is stopped, and sends no more' do
+    run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+    TruebuildFactoryRunJob.perform_now(run.id)
+    allow(Truebuild::Trueview::GeminiBatch).to receive(:submit).and_return('batches/abc')
+    described_class.submit!(run)
+    run.reload.stop!
+    expect(run.renders.pluck(:status).uniq).to eq(['running']) # paid for: not cancelled
+
+    allow(Truebuild::Trueview::GeminiBatch).to receive(:status).and_return(done: true, failed: false, state: 'JOB_STATE_SUCCEEDED', responses_file: 'files/out')
+    allow(Truebuild::Trueview::GeminiBatch).to receive(:results)
+      .and_return([run.renders.to_h { |r| ["r#{r.id}", response_for((photo + 50).cast(:uchar))] }, {}])
+    expect(described_class).not_to receive(:submit!)
+    expect { TruebuildFactoryRunTickJob.perform_now }.to have_enqueued_job(TruebuildBatchDrawingJob).twice
+  end
+
   it 'waits a drawing whose batch could not be sent for the next one, a few times' do
     run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
     TruebuildFactoryRunJob.perform_now(run.id)
