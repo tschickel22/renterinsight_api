@@ -163,6 +163,10 @@ module Truebuild
         # in parallel. Outlining them all in this job took many minutes, and a
         # worker restart ran it twice over the same outlines.
         failed_outlines(photos).each { |mask| Surfaces.make_due!(mask) }
+        # Once, before redrawing anything: an outline behind several held-back
+        # colors is redone and its drawings cut again, not each one redrawn.
+        recutting = (round == 1 ? Patterns.review!(run) : []).select { |p| p['cause'] == 'outline' }
+                                                             .to_set { |p| [p['photo'], p['surface']] }
 
         queued = 0
         held = run.renders.where(status: 'rejected').to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
@@ -170,6 +174,7 @@ module Truebuild
         cost = rates[:layer] * 2 # on the larger model
         held.each do |old|
           next if passed.include?([old.source_url, old.selection_key, old.prompt])
+          next if recutting.include?([old.source_url, Surfaces.category(old.selection.first&.dig('surface'))])
           break if spent + cost > run.budget_usd.to_f
 
           old.update!(status: 'superseded')
@@ -273,6 +278,7 @@ module Truebuild
           drawings: { done: counts['done'].to_i, held_back: counts['rejected'].to_i, not_in_photo: counts['skipped'].to_i,
                       failed: counts['failed'].to_i, waiting: open, cancelled: counts['cancelled'].to_i },
           mode: run.mode, scheduled_at: run.scheduled_at, batches: Array(run.progress['batches']).size,
+          patterns: Array(run.progress['patterns']).map { |p| p.slice('surface', 'held', 'of', 'cause', 'summary', 'action') },
           created_at: run.created_at, stopped_at: run.stopped_at }
       end
 

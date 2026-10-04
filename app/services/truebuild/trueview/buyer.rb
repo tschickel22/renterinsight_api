@@ -246,7 +246,11 @@ module Truebuild
       # Held back under the current cut without the larger model having
       # tried it (drawn before that try existed): [photo, key, prompt] => row.
       def held_before_escalation(plan)
+        waiting = TruebuildSurfaceMask.where(source_url: plan.map { |p| p[:photo] }.uniq, version: Surfaces::VERSION)
+                                      .where("usage->>'redo_pending' = 'true'").where(updated_at: 1.hour.ago..) # a failed redo stops holding them
+                                      .pluck(:source_url, :surface).to_set
         rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                  .reject { |r| waiting.include?([r.source_url, Surfaces.category(r.selection.first&.dig('surface'))]) }
                   .reject { |r| r.usage['escalated'] || r.usage['draw_with'] == Trueview::ESCALATE_TO }
                   .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r] }
       end

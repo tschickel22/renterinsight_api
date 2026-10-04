@@ -85,10 +85,18 @@ class TruebuildFactoryRun < ApplicationRecord
       recipient: created_by, notification_type: :truebuild_factory_run,
       title: "TrueView factory run #{what}",
       message: "#{manufacturer&.name} #{series}".squish + " #{what}: #{counts['done'].to_i} drawn, #{counts['rejected'].to_i} held back, " \
-               "#{format('$%.2f', spent)} of #{format('$%.2f', budget_usd)} spent.",
+               "#{format('$%.2f', spent)} of #{format('$%.2f', budget_usd)} spent.#{pattern_note}",
       action_url: '/settings?tab=integrations', action_text: 'Open the runs', company_id: created_by.company_id
     )
   rescue StandardError => e
     Rails.logger.warn("TruebuildFactoryRun #{id} notify_end: #{e.message}")
+  end
+
+  # Causes the run could not fix by redrawing (Truebuild::Trueview::Patterns).
+  def pattern_note
+    left = Array(progress['patterns']).reject { |p| p['cause'] == 'outline' }
+    return '' if left.empty?
+
+    " Needs a look: #{left.first(3).map { |p| p['summary'] }.join(' ')}"
   end
 end
