@@ -3060,6 +3060,8 @@ Rails.application.routes.draw do
       post 'trueview_lab/factory_runs/:id/continue', to: 'trueview_lab#continue_factory_run'
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
+      get    'trueview_transfer', to: 'trueview_transfer#export'
+      post   'trueview_transfer', to: 'trueview_transfer#import'
       get    'truebuild_factories', to: 'truebuild_factories#index'
       put    'truebuild_factories/ready_share', to: 'truebuild_factories#update_ready_share'
       post   'truebuild_factories/:id/release', to: 'truebuild_factories#release'
