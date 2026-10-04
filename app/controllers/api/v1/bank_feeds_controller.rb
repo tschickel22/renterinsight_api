@@ -6,6 +6,10 @@
 # per-account feed endpoints stay in BankAccountFeedsController.
 class Api::V1::BankFeedsController < ApplicationController
   before_action :set_company_scope
+  # Platform admins only (impersonating counts) until Connect a bank has run
+  # against live Stripe and a real bank (backlog E66). The frontend hides it
+  # the same way (useBankConnectAccess). Remove this line to offer it to dealers.
+  before_action :require_platform_admin!
 
   # POST /api/v1/bank_feeds/session
   def session_start
