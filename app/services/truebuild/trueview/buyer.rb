@@ -125,6 +125,8 @@ module Truebuild
       # factory run (run:) pays from its own budget, checked before it gets
       # here, and waits behind buyers in the queue. Returns the number queued.
       def queue_missing!(run: nil)
+        return 0 if Credits.out? # each would fail at once, and spend the daily limit doing it
+
         spec = MODELS.fetch(MODEL)
         queued = 0
         missing.each do |p, old, held|
