@@ -104,7 +104,7 @@ namespace :site_scan do
   #   bundle exec rake "site_scan:probe[https://thehomeplus.com]"
   desc 'Report how this server fares fetching and rendering a URL'
   task :probe, [:url] => :environment do |_t, args|
-    url = args[:url].presence || abort('usage: rake "site_scan:probe[https://example.com]"')
+    url = args[:url].presence || abort('usage: bundle exec rake "site_scan:probe[https://example.com]"')
 
     ENV['SITE_SCAN_RENDERER'] ||= 'chrome'
 
@@ -153,9 +153,9 @@ namespace :site_scan do
   # profile is sent up. Images were already rehosted onto S3 during the scan, so
   # they load from anywhere.
   #
-  #   TOKEN=... rake "site_scan:push[https://theirsite.com]"
+  #   TOKEN=... bundle exec rake "site_scan:push[https://theirsite.com]"
   #   TOKEN=... TARGET=https://renterinsight-api-prod.onrender.com \
-  #     rake "site_scan:push[https://theirsite.com,Their Label]"
+  #     bundle exec rake "site_scan:push[https://theirsite.com,Their Label]"
   #
   # Two kinds of credential work, and one of them is much better here.
   #
@@ -177,11 +177,11 @@ namespace :site_scan do
   # COMPANY_ID decides WHOSE Demo Sites list it appears in, and is usually the
   # thing you actually want to set: a platform-level key defaults to its own
   # owner's tenant, so a demo built for a client lands somewhere that client
-  # cannot see. rake site_scan:lots prints the ids. LOT sets the inventory lot
+  # cannot see. bundle exec rake site_scan:lots prints the ids. LOT sets the inventory lot
   # the demo borrows, and defaults to the same tenant.
   desc 'Scan a site locally and push the finished profile to staging or production'
   task :push, %i[url label] => :environment do |_t, args|
-    url = args[:url].presence || abort('usage: rake "site_scan:push[https://example.com]"')
+    url = args[:url].presence || abort('usage: bundle exec rake "site_scan:push[https://example.com]"')
     target = SiteScanTasks.target
     # Where a human signs in, which is not where the API lives. The token is
     # copied from the browser, so the message has to name the address the
@@ -206,7 +206,7 @@ namespace :site_scan do
 
         or pass it for one run:
 
-            TOKEN=eyJhbGci... rake "site_scan:push[#{url}]"
+            TOKEN=eyJhbGci... bundle exec rake "site_scan:push[#{url}]"
       TEXT
     end
 
@@ -291,7 +291,7 @@ namespace :site_scan do
     # A platform-level key defaults to its owner's tenant, so a demo built for a
     # client can land in the wrong list and be invisible to the person who
     # wanted to build a site from it. Set COMPANY_ID to choose, and
-    # rake site_scan:lots prints the ids.
+    # bundle exec rake site_scan:lots prints the ids.
     where = remote['company_name'] || "company #{remote['company_id']}"
     puts "\nadded to Demo Sites for #{where}"
     puts "#{app}/preview/templates/#{remote['preview_token']}"
@@ -305,12 +305,12 @@ namespace :site_scan do
   # deliberately incomplete, so a credential that works answers 422 for the
   # missing profile rather than storing a demo.
   #
-  #   rake site_scan:check
+  #   bundle exec rake site_scan:check
   desc 'Check the push credential and target without scanning anything'
   task check: :environment do
     target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
-    abort('No token. See rake site_scan:push for where it comes from.') if token.blank?
+    abort('No token. See bundle exec rake site_scan:push for where it comes from.') if token.blank?
 
     puts "credential: #{SiteScanTasks.describe(token)}"
     puts "target:     #{target}"
@@ -324,12 +324,12 @@ namespace :site_scan do
   # wants. Only lots that would actually render: public inventory on, a token
   # issued, and homes to show.
   #
-  #   rake site_scan:lots
+  #   bundle exec rake site_scan:lots
   desc 'List the inventory lots a demo can be pointed at'
   task lots: :environment do
     target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
-    abort('No token. See rake site_scan:push.') if token.blank?
+    abort('No token. See bundle exec rake site_scan:push.') if token.blank?
 
     data = SiteScanTasks.request_json(:get, target, 'api/v1/site_content_profiles/inventory_lots',
                                       token, company_id: ENV['COMPANY_ID'])
@@ -341,13 +341,13 @@ namespace :site_scan do
   # in a prospect's inbox.
   #
   #   TEMPLATES=cedar-ridge-community,coastal-living LOT=47 \
-  #     rake "site_scan:configure[<preview token>]"
+  #     bundle exec rake "site_scan:configure[<preview token>]"
   desc 'Set the designs and inventory lot on an existing demo'
   task :configure, [:preview_token] => :environment do |_t, args|
-    preview_token = args[:preview_token].presence || abort('usage: rake "site_scan:configure[<preview token>]"')
+    preview_token = args[:preview_token].presence || abort('usage: bundle exec rake "site_scan:configure[<preview token>]"')
     target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
-    abort('No token. See rake site_scan:push.') if token.blank?
+    abort('No token. See bundle exec rake site_scan:push.') if token.blank?
 
     templates = (ENV['TEMPLATES'] || '').split(',').map(&:strip).reject(&:empty?)
     lot = ENV['LOT'].presence
@@ -382,14 +382,14 @@ namespace :site_scan do
   # same content, no six minute scan, no second trip to the client's site. The
   # original is left alone.
   #
-  #   COMPANY_ID=21 rake "site_scan:clone[<preview token>]"
+  #   COMPANY_ID=21 bundle exec rake "site_scan:clone[<preview token>]"
   desc "Copy an existing demo into another tenant's demo list"
   task :clone, [:preview_token] => :environment do |_t, args|
-    preview_token = args[:preview_token].presence || abort('usage: rake "site_scan:clone[<preview token>]"')
+    preview_token = args[:preview_token].presence || abort('usage: bundle exec rake "site_scan:clone[<preview token>]"')
     target = SiteScanTasks.target
     token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
-    abort('No token. See rake site_scan:push.') if token.blank?
-    company_id = ENV['COMPANY_ID'].presence || abort('COMPANY_ID is required — which tenant should own it. rake site_scan:lots lists them.')
+    abort('No token. See bundle exec rake site_scan:push.') if token.blank?
+    company_id = ENV['COMPANY_ID'].presence || abort('COMPANY_ID is required — which tenant should own it. bundle exec rake site_scan:lots lists them.')
 
     # Read from the authenticated detail rather than the public preview.
     #
