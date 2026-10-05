@@ -154,9 +154,10 @@ module SiteProfiles
     # exists. Telling someone to upload a brochure instead — or naming an
     # environment variable at them — buries the one thing that works.
     LOCAL_SCAN_ADVICE = <<~TEXT.squish
-      It will scan from a computer that can open the site: run
-      rake "site_scan:push[URL]" there. Otherwise upload a brochure or build the
-      demo by hand.
+      It will scan from a computer that can open the site: in the backend
+      checkout there (~/src/renterinsight_api), run
+      bundle exec rake "site_scan:push[URL]". Otherwise upload a brochure or
+      build the demo by hand.
     TEXT
 
     def unreadable_message(root)
