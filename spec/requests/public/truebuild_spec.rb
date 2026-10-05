@@ -444,9 +444,19 @@ RSpec.describe 'Public TrueBuild', type: :request do
 
     def trueview = (get "/public/truebuild/models/#{variant.id}/trueview", params: { token: token, website_id: site.id }) && JSON.parse(response.body)
 
-    it 'queues a layer per exterior finish on the first visit and shows each as it is drawn' do
+    # Only a factory run draws; a buyer's visit uses what is there.
+    let(:run) { TruebuildFactoryRun.create!(manufacturer: mfr, status: 'running', budget_usd: 5, variant_ids: [variant.id]) }
+    def draw! = Truebuild::Trueview::Buyer.new(nil, variant).queue_missing!(run: run)
+
+    it 'draws nothing on a visit; a factory run draws each exterior finish, and the designer shows each as it is drawn' do
       body = nil
-      expect { body = trueview }.to have_enqueued_job(TruebuildRenderJob).on_queue('low').exactly(5).times
+      expect { body = trueview }.not_to have_enqueued_job(TruebuildRenderJob)
+      expect(body['photos'].first['pending']).to include(clay.id, white.id) # not drawn yet: shown as built
+      expect(TruebuildRender.count).to eq(0)
+
+      expect { draw! }.to have_enqueued_job(TruebuildRenderJob).on_queue('low').exactly(5).times
+      Rails.cache.clear
+      body = trueview
       expect(body['photos'].first).to include('room' => 'exterior', 'url' => "#{front}?wid=1600&fmt=jpeg&qlt=90", 'layers' => {})
       expect(body['photos'].first['pending']).to include(clay.id, white.id)
       expect(body['drawing']).to eq(5)
@@ -462,14 +472,12 @@ RSpec.describe 'Public TrueBuild', type: :request do
     end
 
     it 'cuts an older drawing again for free instead of paying for a new one' do
-      trueview
+      draw!
       clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
       clay_row.update!(status: 'done', image_url: 'https://b/clay.png', layer_url: 'https://b/clay-v2.webp', usage: { 'mask_version' => 2 })
       TruebuildRender.where.not(id: clay_row.id).delete_all
 
-      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
-      ENV['TRUEVIEW_DAILY_LIMIT'] = '0'
-      trueview
+      draw!
       recut = TruebuildRender.where("usage ? 'recut_from'").sole
       expect(recut).to have_attributes(image_url: 'https://b/clay.png', status: 'queued')
       expect(recut.usage['recut_from']).to eq(clay_row.id)
@@ -478,7 +486,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
     end
 
     it 'does not offer a finish whose drawing failed its check, unless it is the last in its set' do
-      trueview
+      draw!
       TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
                      .update!(status: 'rejected', layer_url: 'https://b/clay.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
       TruebuildRender.find_by("selection->0->>'value' = 'Black'")
@@ -490,7 +498,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
     end
 
     it 'does not offer colors for a surface no photo shows, such as shutters on a home without them' do
-      trueview
+      draw!
       TruebuildRender.find_by("selection->0->>'surface' = 'Shutters'")
                      .update!(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
       option(floor_plan, 'None', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Shutters' })
@@ -504,7 +512,7 @@ RSpec.describe 'Public TrueBuild', type: :request do
       tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'backsplash', name: 'Backsplash & Tile', position: 9)
       gris = option(tile, '1 Row Inhale Gris (ceramic)', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Backsplash' })
       variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
-      trueview
+      draw!
       skipped = TruebuildRender.where("selection->0->>'surface' = 'Backsplash'")
                                .update_all(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
       expect(skipped).to be_positive
@@ -515,13 +523,17 @@ RSpec.describe 'Public TrueBuild', type: :request do
     end
 
     it 'shows the older drawing while it is cut again, and not once the new check rejects it' do
-      trueview
+      draw!
       clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
       clay_row.update!(status: 'done', image_url: 'https://b/clay.png', layer_url: 'https://b/clay-old.webp', usage: { 'mask_version' => 2, 'outlined' => true })
+      draw!
+      Rails.cache.clear
       expect(trueview['photos'].first['layers']).to include(clay.id.to_s => 'https://b/clay-old.webp')
 
       recut = TruebuildRender.where("usage ? 'recut_from'").sole
       recut.update!(status: 'rejected', layer_url: 'https://b/clay-new.webp', usage: recut.usage.merge('mask_version' => Truebuild::Trueview::Layer::VERSION))
+      draw!
+      Rails.cache.clear
       body = trueview
       expect(body['photos'].first['layers']).not_to have_key(clay.id.to_s)
       # Held back before the larger model tried it: it gets that one try, told what the check found.
@@ -532,16 +544,27 @@ RSpec.describe 'Public TrueBuild', type: :request do
     end
 
     it 'checks a held-back drawing again, cut again for free, rather than paying for a new one' do
-      trueview
+      draw!
       clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
       clay_row.update!(status: 'rejected', image_url: 'https://b/clay.png', layer_url: 'https://b/clay.webp', usage: { 'mask_version' => 2 })
       TruebuildRender.where.not(id: clay_row.id).delete_all
-      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
-      ENV['TRUEVIEW_DAILY_LIMIT'] = '0'
-      trueview
+      draw!
       expect(TruebuildRender.where("usage ? 'recut_from'").sole.usage['recut_from']).to eq(clay_row.id)
-    ensure
-      ENV.delete('TRUEVIEW_DAILY_LIMIT')
+    end
+
+    it 'shows a drawing made before the prompt was reworded, instead of counting it missing' do
+      draw!
+      clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
+      clay_row.update!(status: 'done', layer_url: 'https://b/clay.webp', prompt: "#{clay_row.prompt}\nOlder wording.",
+                       usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      Rails.cache.clear
+      body = trueview
+      expect(body['photos'].first['layers']).to include(clay.id.to_s => 'https://b/clay.webp')
+      expect(body['photos'].first['pending']).not_to include(clay.id)
+      # And a factory run does not pay for it again.
+      queued = TruebuildRender.count
+      draw!
+      expect(TruebuildRender.count).to eq(queued)
     end
 
     it 'says which surface each finish paints, so Compare keeps cabinet chips and upgrades in one category' do
@@ -569,29 +592,21 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(by_option[gas.id][:prompt]).to include('Appliances means the refrigerator')
 
       # One drawing for the chip and the upgrade.
-      expect { trueview }.to have_enqueued_job(TruebuildRenderJob).exactly(plan.map { |p| p[:key] }.uniq.size).times
+      expect { draw! }.to have_enqueued_job(TruebuildRenderJob).exactly(plan.map { |p| p[:key] }.uniq.size).times
     end
 
-    it 'has Claude pick the photos before drawing anything when a room has several' do
+    it 'leaves picking photos to the factory run too: a visit spends nothing' do
       variant.update!(media: { 'photos' => [{ 'url' => front, 'room' => 'exterior' }, { 'url' => "#{front}-2", 'room' => 'exterior' }] })
-      expect { trueview }.to have_enqueued_job(TruebuildPhotoPickJob).with(company.id, variant.id)
+      expect { trueview }.not_to have_enqueued_job(TruebuildPhotoPickJob)
       expect(TruebuildRender.count).to eq(0)
     end
 
     it 'puts a job lost in a restart back on the queue' do
-      trueview
+      draw!
       lost = TruebuildRender.first
       lost.update_columns(status: 'running', updated_at: 1.hour.ago)
       expect { trueview }.to have_enqueued_job(TruebuildRenderJob).with(lost.id)
       expect(lost.reload.status).to eq('queued')
-    end
-
-    it 'stops drawing for the day at the platform limit' do
-      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
-      ENV['TRUEVIEW_DAILY_LIMIT'] = '2'
-      expect { trueview }.to have_enqueued_job(TruebuildRenderJob).exactly(2).times
-    ensure
-      ENV.delete('TRUEVIEW_DAILY_LIMIT')
     end
 
     it 'draws nothing when the image key is not set' do

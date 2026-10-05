@@ -51,18 +51,17 @@ class Public::TruebuildController < ApplicationController
   end
 
   # GET /public/truebuild/models/:variant_id/trueview
-  # The model's photos with a layer per finish drawn so far. The first visit
-  # queues the rest in the background; poll while drawing is above zero.
+  # The model's photos with a layer per finish drawn so far; poll while
+  # drawing (a factory run's) is above zero.
   def trueview
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
 
-    # Asked every 20 seconds while layers draw, from every open designer:
-    # answered from a 15 second cache so drawing and serving do not compete.
+    # Asked every 20 seconds while a factory run draws, from every open
+    # designer: answered from a 15 second cache. A visit draws nothing; only
+    # factory runs do (Buyer#queue_missing!).
     body = Rails.cache.fetch("truebuild:trueview:buyer:#{@company.id}:#{variant.id}", expires_in: 15.seconds) do
-      buyer = Truebuild::Trueview::Buyer.new(@company, variant)
-      buyer.predraw!
-      buyer.call
+      Truebuild::Trueview::Buyer.new(@company, variant).call
     end
     render json: body
   end
