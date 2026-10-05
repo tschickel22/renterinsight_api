@@ -93,6 +93,44 @@ RSpec.describe Catalog::RunService do
 
       expect(seen).to eq [0, 1, 2]
     end
+
+    # A crawl longer than PROGRESS_STALE_AFTER was reaped while still working,
+    # and the reap re-queued a second run of the same source alongside it.
+    it 'keeps the run row fresh while crawling so a long crawl is not reaped' do
+      homes = %w[1 2 3].map { |k| FakeCatalogAdapter.home(k) }
+      stale_seen = []
+
+      adapter = FakeCatalogAdapter.new(homes)
+      allow(source).to receive(:adapter).and_return(adapter)
+      allow(adapter).to receive(:fetch).and_wrap_original do |orig, key|
+        run = source.scrape_runs.last
+        # Pretend the crawl has been quiet for longer than the stale window.
+        run.update_columns(updated_at: (ScrapeRun::PROGRESS_STALE_AFTER + 1.minute).ago) if key == '2'
+        stale_seen << ScrapeRun.stale.exists?(run.id) if key == '3'
+        orig.call(key)
+      end
+
+      run = described_class.new(source, trigger: 'manual').call
+
+      expect(stale_seen).to eq [false]
+      expect(run.reload.status).to eq 'success'
+    end
+
+    it 'counts only homes tried and lost as failed while in flight' do
+      homes = %w[1 2 3].map { |k| FakeCatalogAdapter.home(k) }
+      seen  = []
+
+      adapter = FakeCatalogAdapter.new(homes)
+      allow(source).to receive(:adapter).and_return(adapter)
+      allow(adapter).to receive(:fetch).and_wrap_original do |orig, *args|
+        seen << source.scrape_runs.last&.reload&.homes_failed
+        orig.call(*args)
+      end
+
+      described_class.new(source, trigger: 'manual').call
+
+      expect(seen).to eq [0, 0, 0]
+    end
   end
 
   # The call site is where this broke: RunService did config[...].to_i, turning

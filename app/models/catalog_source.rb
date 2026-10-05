@@ -90,9 +90,20 @@ class CatalogSource < ApplicationRecord
   end
 
   # Dealers may only subscribe to a source that is BOTH enabled and validated.
-  # "never_run" sources are not selectable — they must pass a run first.
+  # "never_run" sources are not selectable: they must pass a run first.
+  #
+  # Judged on the latest FINISHED run, not last_run_status. That column reads
+  # "running" for the length of every crawl and "partial" whenever one page of
+  # seventy has a problem, and either one used to drop the manufacturer out of
+  # the picker entirely (Kabco vanished on 2026-10-05 over a single home). The
+  # degradation threshold is the health bar; a partial run that clears it is
+  # fit to subscribe to. Interrupted runs are skipped: a deploy killing a crawl
+  # says nothing about the source.
   def selectable_for_dealers?
-    enabled && passed_clean_run?
+    return false unless enabled && !is_deleted
+
+    run = scrape_runs.where(status: %w[success partial failed]).order(created_at: :desc).first
+    run.present? && %w[success partial].include?(run.status) && !run.degraded
   end
 
   # worst per-field extraction rate from the latest run (nil if no run yet)

@@ -210,7 +210,9 @@ module Catalog
           src = first_attr(img, %w[data-orig-src data-lazy-src src])
           next if src.blank?
           next unless src.include?('/wp-content/uploads/')
-          next if src.match?(/logo|icon/i)
+          # Whole filename tokens only: a bare /icon/ matched "Rub-icon" and threw
+          # away every photo of the MD-62-32 Rubicon, failing its smoke check.
+          next if File.basename(src).match?(/(?<![a-z])(?:logo|icon)s?(?![a-z])/i)
 
           seen[src] ||= {
             'source_url'   => src,

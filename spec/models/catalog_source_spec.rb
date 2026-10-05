@@ -38,4 +38,48 @@ RSpec.describe CatalogSource do
       expect(source.due?).to be(false)
     end
   end
+
+  # Kabco dropped out of the dealer picker on 2026-10-05: one home of seventy
+  # failed a smoke check, the run finished "partial", and the next crawl set the
+  # source to "running". Either one hid it.
+  describe '#selectable_for_dealers?' do
+    let(:source) { create(:catalog_source, enabled: true) }
+
+    def finished(status, degraded: false, at: 1.hour.ago)
+      create(:scrape_run, catalog_source: source, status: status, degraded: degraded,
+                          started_at: at, finished_at: at, created_at: at)
+    end
+
+    it 'is false before any run has finished' do
+      expect(source.selectable_for_dealers?).to be(false)
+    end
+
+    it 'accepts a partial run that cleared the degradation threshold' do
+      finished('partial')
+      expect(source.selectable_for_dealers?).to be(true)
+    end
+
+    it 'rejects a degraded or failed latest run' do
+      finished('partial', degraded: true)
+      expect(source.selectable_for_dealers?).to be(false)
+
+      finished('failed', at: 10.minutes.ago)
+      expect(source.selectable_for_dealers?).to be(false)
+    end
+
+    it 'stays selectable while the next crawl is running or after one was interrupted' do
+      finished('success', at: 2.hours.ago)
+      finished('interrupted', at: 1.hour.ago)
+      create(:scrape_run, catalog_source: source, status: 'running', started_at: Time.current, finished_at: nil)
+      source.update_columns(last_run_status: 'running')
+
+      expect(source.selectable_for_dealers?).to be(true)
+    end
+
+    it 'is false when the source is disabled' do
+      finished('success')
+      source.update!(enabled: false)
+      expect(source.selectable_for_dealers?).to be(false)
+    end
+  end
 end
