@@ -37,6 +37,15 @@ module SiteProfiles
       # it was the only thing a failed scan said.
       raise Fetcher::FetchError, unreadable_message(nil) if root.nil?
 
+      # A bot check the browser could not clear is final for this server: every
+      # other page on the site answers the same way. Carrying on from the
+      # archive cost two minutes of browser per page (easyhomesource.com, a
+      # Trove site, ran 20+ minutes on 2026-10-05) to build a demo from a stale
+      # copy, when the scan run from a laptop reads the live site in seconds.
+      # Fail now and say so. nil, not root: the archive answering is not the
+      # problem, and naming it would bury the advice.
+      raise Fetcher::FetchError, unreadable_message(nil) if render_verdict == :still_challenged
+
       @from_archive = root.try(:from_archive?).present?
       @rendered_pages += 1 if root.try(:rendered?)
 
