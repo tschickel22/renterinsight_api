@@ -17,6 +17,16 @@ module SiteScanTasks
     (ENV['TARGET'].presence || ENV['SITE_SCAN_PUSH_TARGET'].presence || STAGING).chomp('/')
   end
 
+  # The credential for that host. A key only works on the host that issued it,
+  # so .env can hold one per host (SITE_SCAN_PUSH_TOKEN_STAGING and
+  # SITE_SCAN_PUSH_TOKEN_PRODUCTION) and the command the app hands out, which
+  # names TARGET, works for either without pasting a key. TOKEN= inline wins;
+  # plain SITE_SCAN_PUSH_TOKEN is the fallback for a single-host setup.
+  def token(target)
+    host_key = target.include?('staging') ? 'SITE_SCAN_PUSH_TOKEN_STAGING' : 'SITE_SCAN_PUSH_TOKEN_PRODUCTION'
+    ENV['TOKEN'].presence || ENV[host_key].presence || ENV['SITE_SCAN_PUSH_TOKEN'].presence
+  end
+
   # The far side of the pair, named in a 401 so the fix is in the message.
   def counterpart(target)
     target.include?('staging') ? PRODUCTION : STAGING
@@ -187,7 +197,7 @@ namespace :site_scan do
     # copied from the browser, so the message has to name the address the
     # browser knows.
     app = target.include?('staging') ? 'https://staging.dealertide.com' : 'https://app.dealertide.com'
-    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    token = SiteScanTasks.token(target)
     if token.blank?
       abort(<<~TEXT)
         No push token.
@@ -200,9 +210,9 @@ namespace :site_scan do
           your browser login: sign in to #{app}, DevTools,
           Application, Local Storage, copy authToken (lasts 7 days).
 
-        Then either put it in this repo's .env:
+        Then either put it in this repo's .env, one line per host:
 
-            SITE_SCAN_PUSH_TOKEN=eyJhbGci...
+            SITE_SCAN_PUSH_TOKEN_#{target.include?('staging') ? 'STAGING' : 'PRODUCTION'}=ri_live_...
 
         or pass it for one run:
 
@@ -309,7 +319,7 @@ namespace :site_scan do
   desc 'Check the push credential and target without scanning anything'
   task check: :environment do
     target = SiteScanTasks.target
-    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    token = SiteScanTasks.token(target)
     abort('No token. See bundle exec rake site_scan:push for where it comes from.') if token.blank?
 
     puts "credential: #{SiteScanTasks.describe(token)}"
@@ -328,7 +338,7 @@ namespace :site_scan do
   desc 'List the inventory lots a demo can be pointed at'
   task lots: :environment do
     target = SiteScanTasks.target
-    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    token = SiteScanTasks.token(target)
     abort('No token. See bundle exec rake site_scan:push.') if token.blank?
 
     data = SiteScanTasks.request_json(:get, target, 'api/v1/site_content_profiles/inventory_lots',
@@ -346,7 +356,7 @@ namespace :site_scan do
   task :configure, [:preview_token] => :environment do |_t, args|
     preview_token = args[:preview_token].presence || abort('usage: bundle exec rake "site_scan:configure[<preview token>]"')
     target = SiteScanTasks.target
-    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    token = SiteScanTasks.token(target)
     abort('No token. See bundle exec rake site_scan:push.') if token.blank?
 
     templates = (ENV['TEMPLATES'] || '').split(',').map(&:strip).reject(&:empty?)
@@ -387,7 +397,7 @@ namespace :site_scan do
   task :clone, [:preview_token] => :environment do |_t, args|
     preview_token = args[:preview_token].presence || abort('usage: bundle exec rake "site_scan:clone[<preview token>]"')
     target = SiteScanTasks.target
-    token = ENV['SITE_SCAN_PUSH_TOKEN'].presence || ENV['TOKEN'].presence
+    token = SiteScanTasks.token(target)
     abort('No token. See bundle exec rake site_scan:push.') if token.blank?
     company_id = ENV['COMPANY_ID'].presence || abort('COMPANY_ID is required — which tenant should own it. bundle exec rake site_scan:lots lists them.')
 
