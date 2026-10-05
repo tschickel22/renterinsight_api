@@ -125,7 +125,12 @@ module Truebuild
       # factory run (run:) pays from its own budget, checked before it gets
       # here, and waits behind buyers in the queue. Returns the number queued.
       def queue_missing!(run: nil)
-        return 0 if Credits.out? # each would fail at once, and spend the daily limit doing it
+        # Only a factory run draws (Tom, 2026-10-05): a buyer's visit uses
+        # what was already paid for and draws nothing, so every cent spent
+        # is a run someone started and budgeted. What is not drawn yet shows
+        # the home as photographed.
+        return 0 unless run
+        return 0 if Credits.out? # each would fail at once
 
         spec = MODELS.fetch(MODEL)
         queued = 0
@@ -216,15 +221,35 @@ module Truebuild
         PhotoChoice.photos(@variant)
       end
 
+      # A drawing belongs to the plan by its photo and finish, whatever words
+      # drew it. Matched by the exact prompt, every wording improvement threw
+      # away what was paid for: on staging's Bay Port, 278 of 543 drawings
+      # stopped matching after appliance descriptions and decor samples were
+      # added to prompts, and buyers' visits drew them all again. A drawing
+      # made with the current words wins over an older one for the same finish.
+      def planned_prompts(plan)
+        plan.to_h { |p| [[p[:photo], p[:key]], p[:prompt]] }
+      end
+
+      def plan_key(row, prompts)
+        [row.source_url, row.selection_key, prompts[[row.source_url, row.selection_key]] || row.prompt]
+      end
+
+      # Current wording last, so it wins in a hash built from these rows.
+      def current_last(rows, prompts)
+        rows.sort_by { |r| [prompts[[r.source_url, r.selection_key]] == r.prompt ? 1 : 0, r.id] }
+      end
+
       # [photo, selection_key, prompt] => layer_url, current cut only.
       def done_layers(plan)
         return {} if plan.empty?
 
-        TruebuildRender.done.where(purpose: 'layer', model_key: MODEL, source_url: plan.map { |p| p[:photo] }.uniq,
-                                   selection_key: plan.map { |p| p[:key] }.uniq)
-                       .where.not(layer_url: nil)
-                       .select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
-                       .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
+        prompts = planned_prompts(plan)
+        rows = TruebuildRender.done.where(purpose: 'layer', model_key: MODEL, source_url: plan.map { |p| p[:photo] }.uniq,
+                                          selection_key: plan.map { |p| p[:key] }.uniq)
+                              .where.not(layer_url: nil)
+                              .select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+        current_last(rows, prompts).to_h { |r| [plan_key(r, prompts), r.layer_url] }
       end
 
       # Lost jobs go back on the queue, or the page would say "still drawing"
@@ -247,9 +272,10 @@ module Truebuild
       def skipped_layers(plan)
         due = TruebuildSurfaceMask.where(source_url: plan.map { |p| p[:photo] }.uniq, version: Surfaces::VERSION).to_a
                                   .select { |m| Surfaces.retry_due?(m) }.to_set { |m| [m.source_url, m.surface] }
+        prompts = planned_prompts(plan)
         rows(plan).where(status: 'skipped').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .reject { |r| due.include?([r.source_url, Surfaces.category(r.selection.first&.dig('surface'))]) }
-                  .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
+                  .to_set { |r| plan_key(r, prompts) }
       end
 
       # Held back under the current cut without the larger model having
@@ -261,39 +287,44 @@ module Truebuild
         rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .reject { |r| waiting.include?([r.source_url, Surfaces.category(r.selection.first&.dig('surface'))]) }
                   .reject { |r| r.usage['escalated'] || r.usage['draw_with'] == Trueview::ESCALATE_TO }
-                  .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r] }
+                  .then { |rs| current_last(rs, planned_prompts(plan)) }
+                  .to_h { |r| [plan_key(r, planned_prompts(plan)), r] }
       end
 
       # Failed their check under the current cut: not redrawn on every visit.
       def hidden_layers(plan)
+        prompts = planned_prompts(plan)
         rows(plan).where(status: 'rejected').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
-                  .to_set { |r| [r.source_url, r.selection_key, r.prompt] }
+                  .to_set { |r| plan_key(r, prompts) }
       end
 
       # [photo, selection_key, prompt] => layer_url of a passed drawing
       # under an older cut, newest first. Only one cut by its surface's
       # outline: cut by what it changed, each accent color sat on its own wall.
       def older_layers(plan)
-        rows(plan).done.where.not(layer_url: nil).order(:id)
-                  .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
-                  .select { |r| r.usage['outlined'] || Surfaces.category(r.selection.first&.dig('surface')).nil? }
-                  .to_h { |r| [[r.source_url, r.selection_key, r.prompt], r.layer_url] }
+        prompts = planned_prompts(plan)
+        rows = rows(plan).done.where.not(layer_url: nil).order(:id)
+                         .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+                         .select { |r| r.usage['outlined'] || Surfaces.category(r.selection.first&.dig('surface')).nil? }
+        current_last(rows, prompts).to_h { |r| [plan_key(r, prompts), r.layer_url] }
       end
 
       # Failed under the current cut, including one set aside for a retry on
       # the larger model: its older drawing must not show meanwhile.
       def failed_now(plan)
+        prompts = planned_prompts(plan)
         rows(plan).where(status: %w[rejected superseded]).select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
-                  .map { |r| [r.source_url, r.selection_key, r.prompt] }.uniq
+                  .map { |r| plan_key(r, prompts) }.uniq
       end
 
       # The newest drawing per finish made under an older cut. A rejected one
       # counts: cut again, it is checked again (now against the factory's
       # sample) for the price of the check, not a new drawing.
       def older_drawings(plan)
-        rows(plan).where(status: %w[done rejected]).where.not(image_url: nil).order(:id)
-                  .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
-                  .index_by { |r| [r.source_url, r.selection_key, r.prompt] }
+        prompts = planned_prompts(plan)
+        rows = rows(plan).where(status: %w[done rejected]).where.not(image_url: nil).order(:id)
+                         .reject { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
+        current_last(rows, prompts).index_by { |r| plan_key(r, prompts) }
       end
 
       def within_daily_limit?
