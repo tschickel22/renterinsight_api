@@ -122,12 +122,17 @@ module Catalog
     # crawl was indistinguishable from a dead one in the admin UI. Archiving
     # takes runs from ~2 minutes to 5+, which made that worse.
     #
-    # update_columns on purpose: no validations, no callbacks, no touching
-    # updated_at on every home — this fires once per home and must stay cheap.
+    # update_columns on purpose: no validations, no callbacks — this fires once
+    # per home and must stay cheap. It DOES set updated_at, because that column
+    # is the heartbeat ScrapeRun.stale reads. Leaving it untouched meant any
+    # crawl longer than PROGRESS_STALE_AFTER (Kabco: 70 homes at a 10s delay is
+    # about 12 minutes) was reaped mid-crawl as "interrupted" and re-queued, so
+    # a second run started alongside the first, every 10 minutes.
     def collect_homes(adapter, run: nil)
-      keys   = Array(adapter.discover)
-      homes  = []
-      errors = []
+      keys      = Array(adapter.discover)
+      homes     = []
+      errors    = []
+      processed = 0
 
       run&.update_columns(homes_discovered: keys.size)
 
@@ -141,6 +146,7 @@ module Catalog
       end
 
       keys.each do |key|
+        processed += 1
         raw  = adapter.fetch(key)
         home = raw && adapter.parse(raw)
         if home.nil?
@@ -149,8 +155,11 @@ module Catalog
           errors << smoke_error(home) unless home.valid_smoke?
           homes << home
         end
+        # Failed counts homes tried and lost, not homes not yet reached: a
+        # healthy run half way through used to read "33 ok, 37 failed".
         run&.update_columns(homes_parsed_ok: homes.size,
-                            homes_failed: keys.size - homes.size)
+                            homes_failed: processed - homes.size,
+                            updated_at: Time.current)
         sleep(adapter.crawl_delay) if adapter.crawl_delay.to_i.positive? && !Rails.env.test?
       rescue StandardError => e
         errors << { 'url' => key.to_s, 'message' => "#{e.class}: #{e.message}" }
