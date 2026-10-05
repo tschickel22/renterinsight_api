@@ -27,6 +27,7 @@ module Truebuild
         def edit(spec, source, prompt, samples: [], aspect: nil)
           req = request(spec, source, prompt, samples: samples, aspect: aspect)
           res = post_with_retries("#{BASE}/models/#{req[:model]}:generateContent", req[:body])
+          Credits.check!(res)
           raise Error, "Gemini #{res.code}: #{res.parsed_response.dig('error', 'message') || res.body.to_s.first(300)}" unless res.code == 200
 
           read(res.parsed_response, req[:model], req[:box])

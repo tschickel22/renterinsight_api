@@ -26,6 +26,7 @@ module Truebuild
         file = upload(jsonl, display_name)
         res = HTTParty.post("#{BASE}/models/#{model}:batchGenerateContent", headers: headers, timeout: 120,
                             body: { batch: { display_name: display_name, input_config: { file_name: file } } }.to_json)
+        Credits.check!(res)
         raise Error, "Gemini batch #{res.code}: #{error(res)}" unless res.code == 200
 
         res.parsed_response['name'] or raise Error, 'Gemini batch: no name returned'
