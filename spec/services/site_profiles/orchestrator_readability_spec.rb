@@ -87,6 +87,23 @@ RSpec.describe SiteProfiles::Orchestrator do
     expect(profile.reload.report['failure_kind']).to eq('still_challenged')
   end
 
+  # A Trove site: the browser could not clear the bot check, but the archive
+  # held a real copy of the homepage, so the scan used to carry on page by
+  # page, two minutes of browser each, and build from stale copies.
+  it 'stops at the homepage when the bot check would not clear, even if the archive answered' do
+    fetcher = fetcher_returning('<html><body><h1>Real homes</h1></body></html>', from_archive: true)
+    allow(fetcher).to receive_messages(render_notes: { 'https://thehomeplus.com' => :still_challenged },
+                                       render_details: {}, close: nil)
+
+    expect { described_class.new(profile, fetcher: fetcher).call }
+      .to raise_error(SiteProfiles::Fetcher::FetchError) { |e|
+        expect(e.message).to include('site_scan:push')
+        expect(e.message).not_to include('placeholder')
+      }
+    expect(fetcher).to have_received(:get).once
+    expect(profile.reload.report['failure_kind']).to eq('still_challenged')
+  end
+
   it 'records the failure on the profile rather than leaving it mid-scan' do
     described_class.new(profile, fetcher: fetcher_returning(PARKED_STUB, from_archive: true)).call
   rescue SiteProfiles::Fetcher::FetchError
