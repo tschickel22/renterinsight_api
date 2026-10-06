@@ -19,6 +19,18 @@ module Truebuild
     class Locked < StandardError; end
 
     TAG = /deal_sheet:(\w+)/
+    # Bumped when totals gain or change a figure: an older sheet reprices when opened.
+    TOTALS_VERSION = 4
+
+    # Priced before the deal's lines last changed (a Products save), or by an
+    # older version of these totals.
+    def self.stale?(build)
+      return false if build.locked?
+      return true if build.priced_at.nil? || build.totals.to_h['version'] != TOTALS_VERSION
+
+      changed = build.deal.deal_products.maximum(:updated_at)
+      changed.present? && changed > build.priced_at + 1.second
+    end
     # Factory Direct's ladder: sale and dealer savings are percents of the
     # home's MSRP, preferred payment a percent of the price after them, other
     # a dollar amount.
@@ -142,6 +154,11 @@ module Truebuild
       changes[:no_charge] = false if ActiveModel::Type::Boolean.new.cast(changes[:tbd])
       changes[:tbd] = false if ActiveModel::Type::Boolean.new.cast(changes[:no_charge])
       changes.merge!(attrs.slice(:label, :group_name, :unit_cost)) if %w[custom template].include?(line.kind)
+      # Freight's cost is worked out from miles and rates; the rep can put in what the hauler actually bills.
+      if line.kind == 'freight' && attrs.key?(:unit_cost)
+        changes[:unit_cost] = attrs[:unit_cost]
+        attrs[:unit_cost].nil? ? line.metadata.delete('set_cost') : line.metadata['set_cost'] = true
+      end
       meta = line.metadata.to_h
       meta['notes'] = attrs[:notes] if attrs.key?(:notes)
       if attrs.key?(:unit_retail)
@@ -280,7 +297,7 @@ module Truebuild
           meta['base'] = { 'net_base_price' => d[:net_base_price], 'required_adders' => d[:required_adders],
                            'program_discount' => d[:program_discount] }.deep_stringify_keys
         end
-        line.unit_cost = source[:cost]
+        line.unit_cost = source[:cost] unless meta['set_cost']
         line.unit_retail = source[:retail] unless meta['set_retail']
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
         meta['freight'] = source[:detail].deep_stringify_keys if line.kind == 'freight' && source[:detail]
@@ -326,7 +343,7 @@ module Truebuild
       end
       unpriced = counted.select { |l| l.retail.nil? }.map(&:label)
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
-      { cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
+      { version: TOTALS_VERSION, cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
         discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
         other_lines_total: other_net.round(2).to_f,
         margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f,

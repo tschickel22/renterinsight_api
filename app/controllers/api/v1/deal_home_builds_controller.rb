@@ -30,7 +30,14 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'read')
 
     build = @deal.home_build
-    render json: build ? build_json(build) : { build: nil, start_from: start_from }
+    return render json: { build: nil, start_from: start_from } unless build
+
+    # A Products save or an older sheet: bring the numbers up to date before showing them.
+    if Truebuild::DealBuild.stale?(build)
+      service = Truebuild::DealBuild.new(build).reprice!
+      return render json: build_json(build.reload, service.warnings)
+    end
+    render json: build_json(build)
   end
 
   def create

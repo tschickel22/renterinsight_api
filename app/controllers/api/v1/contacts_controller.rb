@@ -39,8 +39,10 @@ module Api
                       end
                     end
 
-        # Apply strict location filter - only contacts explicitly assigned to selected location
-        if Current.location_filtered?
+        # Apply strict location filter - only contacts explicitly assigned to selected location.
+        # Not for one account's contacts (its page): they are listed whatever location the
+        # selector is on; RBAC location access above still applies.
+        if Current.location_filtered? && params[:account_id].blank?
           @contacts = @contacts.where(location_id: Current.location_id)
         end
 

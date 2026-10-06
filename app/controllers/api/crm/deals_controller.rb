@@ -675,6 +675,11 @@ module Api
           @company.deals
         end
 
+        # One account's deals (its page) are listed whatever location the
+        # selector is on: a buyer's deals at another lot are still theirs.
+        # RBAC location access above still applies.
+        return filter_deals_by_location(base) { |scope| scope } if params[:account_id].present?
+
         filter_deals_by_location(base) { |scope| scope.for_current_location }
       end
 

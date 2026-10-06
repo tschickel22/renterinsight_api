@@ -248,6 +248,19 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(skirting.reload.tax.to_f).to eq(0.0)
   end
 
+  it "takes the hauler's real freight cost, and brings a stale sheet up to date when it is opened" do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    freight = line('Freight to homesite')
+    patch "#{path}/lines/#{freight['id']}", headers: headers, params: { unit_cost: 7065, unit_retail: 8815 }.to_json
+    post "#{path}/reprice", headers: headers
+    expect(line('Freight to homesite')).to include('cost' => 7065.0, 'retail' => 8815.0, 'set_retail' => true)
+
+    deal.deal_products.create!(product_name: 'Steps', product_sku: 'CUSTOM-s', unit_price: 600, quantity: 1, notes: 'category:accessory')
+    deal.home_build.update_columns(priced_at: 1.minute.ago)
+    get path, headers: headers
+    expect(body.dig('build', 'totals', 'other_lines_total')).to eq(600.0)
+  end
+
   it 'never has a line both TBD and N/C' do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: insulation.id }.to_json
