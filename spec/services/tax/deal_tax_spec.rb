@@ -13,14 +13,14 @@ RSpec.describe Tax::DealTax do
     company.deals.create!({ name: 'Sale', contact_id: buyer.id, location_id: lot.id }.merge(attrs))
   end
 
-  def tax(d, price: 83_688.70, **kw) = described_class.new(deal: d, selling_price: price, **kw).call
+  def tax(d, price: 83_688.70, home_sale: true, **kw) = described_class.new(deal: d, selling_price: price, home_sale: home_sale, **kw).call
 
   it 'taxes Indiana on 65% of the price after trade, at the 7% state rate until the dealer sets one' do
     r = tax(deal(delivery_state: 'Indiana'), trade: 0)
     # Factory Direct's sheet: 83,688.70 x 65% = 54,397.66; 7% = 3,807.84.
     expect(r).to include(state: 'IN', payer: 'dealer_collects', base: 54_397.66, collected: 3807.84, rate: 7.0)
     expect(r[:note]).to include("IN's 7% state rate")
-    expect(r[:disclosure]).to include('IC 6-2.5-5-29')
+    expect(r[:disclosure]).to start_with('Tax on 65% of the selling price after trade-in at 7%. Per IC 6-2.5-5-29')
 
     expect(tax(deal(delivery_state: 'IN'), trade: 10_000)[:base]).to eq(((83_688.70 - 10_000) * 0.65).round(2))
   end
@@ -47,6 +47,12 @@ RSpec.describe Tax::DealTax do
     co = tax(deal(delivery_state: 'CO'), price: 100_000, trade: 20_000)
     expect(co).to include(state: 'CO', base: 100_000.0, collected: 3900.0)
     expect(co[:slots]).to eq(state: 2900.0, county: 1000.0, city: 0.0)
+  end
+
+  it 'taxes anything that is not a home sale the usual way, even in Indiana' do
+    AccountingSettings.for_company(company).update!(tax_rates_by_state: { 'IN' => { 'state' => '7' } })
+    r = tax(deal(delivery_state: 'IN'), price: 5000, trade: 1000, home_sale: false)
+    expect(r).to include(base: 5000.0, collected: 350.0, home_sale: false, taxable_pct: 100.0)
   end
 
   it "uses the dealer's own rules for a state over the defaults" do

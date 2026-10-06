@@ -212,6 +212,53 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
+  it 'reconciles with the deal after a Products save: discount kept, other lines counted, tax on the lines' do
+    company.dealer_catalog_terms.create!(manufacturer: mfr, sale_discount_pct: 10)
+    fee = company.fee_templates.create!(name: 'Skirting', fee_type: 'setup', default_amount: 2000)
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    post "#{path}/lines", headers: headers, params: { kind: 'template', template_type: 'FeeTemplate', template_id: fee.id }.to_json
+    patch path, headers: headers, params: { deal: { delivery_state: 'IN', trade_allowance: 500 } }.to_json
+
+    # What the Products form does on save: delete every line, recreate them (dropping the
+    # home's discount), adding one of its own, then bulk create.
+    kept = deal.reload.deal_products.map { |dp| dp.attributes.slice('product_name', 'unit_price', 'cost', 'quantity', 'notes', 'tax') }
+    deal.deal_products.each { |dp| delete "/api/crm/deals/#{deal.id}/products/#{dp.id}", headers: headers }
+    items = kept.map { |a| a.merge('discount' => 0, 'discount_type' => 'fixed', 'product_sku' => "CUSTOM-#{SecureRandom.hex(3)}") }
+    items << { 'product_name' => 'Steps', 'unit_price' => 600, 'cost' => 300, 'quantity' => 1, 'tax' => 0, 'notes' => 'category:accessory',
+               'discount' => 0, 'discount_type' => 'fixed', 'product_sku' => 'CUSTOM-steps' }
+    post "/api/crm/deals/#{deal.id}/products/bulk_create", headers: headers, params: { products: items }.to_json
+    expect(response).to have_http_status(:created)
+
+    get path, headers: headers
+    t = body.dig('build', 'totals')
+    home = deal.reload.deal_products.find(&:home_line_item?)
+    expect(home.discount.to_f).to eq(t['discount_total'])                     # the sheet put its discount back
+    expect(t['other_lines_total']).to eq(600.0)                                 # Steps is in the sheet's price
+    expect(body.dig('build', 'other_deal_lines').map { |l| l['name'] }).to eq(['Steps'])
+    expect(deal.deal_products.select { |dp| dp.tax.to_d.positive? }.map(&:product_name)).to include(home.product_name, 'Skirting')
+    expect(deal.deal_products.sum(:tax).to_f).to eq(t['tax']['collected'])     # the tax sits on the lines
+    expect(deal.value.to_f).to eq((t['contract_total'] + 500).round(2))         # Deal tab value = contract total + trade-in
+
+    # Marked not taxable in Products: left out of the taxed amount.
+    skirting = deal.deal_products.find { |dp| dp.product_name == 'Skirting' }
+    put "/api/crm/deals/#{deal.id}/products/#{skirting.id}", headers: headers,
+                                                              params: { product: { notes: "#{skirting.notes}, taxable:no", tax: 0 } }.to_json
+    get path, headers: headers
+    expect(body.dig('build', 'totals', 'tax', 'collected')).to be < t['tax']['collected']
+    expect(skirting.reload.tax.to_f).to eq(0.0)
+  end
+
+  it 'never has a line both TBD and N/C' do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: insulation.id }.to_json
+    id = line(insulation.name)['id']
+    patch "#{path}/lines/#{id}", headers: headers, params: { no_charge: true }.to_json
+    patch "#{path}/lines/#{id}", headers: headers, params: { tbd: true }.to_json
+    expect(line(insulation.name)).to include('tbd' => true, 'no_charge' => false)
+    patch "#{path}/lines/#{id}", headers: headers, params: { no_charge: true }.to_json
+    expect(line(insulation.name)).to include('tbd' => false, 'no_charge' => true)
+  end
+
   it 'lists the options offered on the model, marking what is chosen' do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: clay.id }.to_json

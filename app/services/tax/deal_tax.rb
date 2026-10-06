@@ -25,12 +25,10 @@ module Tax
     # confirms these with their accountant, and can change any of them.
     STATE_RULES = {
       'IN' => { 'taxable_pct' => 65, 'trade_reduces' => true, 'used_exempt' => true, 'state_rate' => 7.0,
-                'disclosure' => 'Indiana sales tax on 65% of the selling price after trade-in (IC 6-2.5-5-29). The selling ' \
-                                'price includes delivery, set-up and utility connections sold by the dealer.' },
-      'OH' => { 'payer' => 'dealer_use_tax', 'use_tax_rate' => 7.25,
-                'disclosure' => 'The dealer pays Ohio use tax on its own cost. No sales tax is charged to the buyer.' },
-      'MI' => { 'payer' => 'buyer_at_titling', 'state_rate' => 6.0,
-                'disclosure' => 'The buyer pays Michigan tax when the home is titled. It is not collected here.' }
+                'disclosure' => 'Per IC 6-2.5-5-29 and DOR Bulletin #65. The selling price includes delivery, set-up and ' \
+                                'utility connections sold by the dealer.' },
+      'OH' => { 'payer' => 'dealer_use_tax', 'use_tax_rate' => 7.25, 'disclosure' => nil },
+      'MI' => { 'payer' => 'buyer_at_titling', 'state_rate' => 6.0, 'disclosure' => nil }
     }.freeze
 
     def self.state_code(value)
@@ -48,7 +46,17 @@ module Tax
       state_code(raw)
     end
 
-    def self.rules_for(company, state)
+    # These rules are for selling a manufactured home. A deal for a part, an
+    # installation or anything else (and every invoice) is taxed the usual way.
+    def self.home_sale?(deal)
+      return false unless deal.company&.industry.to_s == 'manufactured_housing'
+
+      deal.try(:home_build).present? || deal.try(:home_line_item).present?
+    end
+
+    def self.rules_for(company, state, home_sale: true)
+      return DEFAULT_RULES unless home_sale
+
       settings = AccountingSettings.for_company(company)
       custom = (settings.tax_rates_by_state || {}).dig(state.to_s, 'rules') || {}
       DEFAULT_RULES.merge(STATE_RULES.fetch(state.to_s, {})).merge(custom.stringify_keys.compact)
@@ -56,8 +64,10 @@ module Tax
 
     # selling_price: after discounts. trade: the trade-in allowance.
     # cost_basis / freight_cost: the dealer's cost, for use-tax states.
-    def initialize(deal:, selling_price:, trade: 0, cost_basis: 0, freight_cost: 0, used: false)
+    # home_sale: nil works it out from the deal (self.home_sale?).
+    def initialize(deal:, selling_price:, trade: 0, cost_basis: 0, freight_cost: 0, used: false, home_sale: nil)
       @deal = deal
+      @home_sale = home_sale.nil? ? self.class.home_sale?(deal) : home_sale
       @price = selling_price.to_d
       @trade = trade.to_d
       @cost_basis = cost_basis.to_d
@@ -69,7 +79,7 @@ module Tax
       state = self.class.taxing_state(@deal)
       return blank(state, 'No delivery state yet: choose where the home goes to work out tax.') unless state
 
-      rules = self.class.rules_for(@deal.company, state)
+      rules = self.class.rules_for(@deal.company, state, home_sale: @home_sale)
       settings = AccountingSettings.for_company(@deal.company)
       rates = settings.combined_tax_rate(state)
       note = nil
@@ -97,8 +107,32 @@ module Tax
         use_tax: use_tax.to_f, after_trade: after_trade.to_f,
         effective_pct: @price.positive? ? (collected / @price * 100).round(2).to_f : 0.0,
         slots: %i[state county city].to_h { |k| [k, rules['payer'] == 'dealer_collects' ? (base * rates[k].to_d / 100).round(2).to_f : 0.0] },
-        disclosure: rules['disclosure'], note: note
+        taxable_pct: rules['taxable_pct'].to_f, trade_reduces: rules['trade_reduces'], home_sale: @home_sale,
+        disclosure: explain(state, rules, rate, exempt), note: note
       }
+    end
+
+    # The tax treatment in a sentence, the way Factory Direct's sheet prints it:
+    # "Tax on 65% of the selling price after trade-in at 7%. Per IC 6-2.5-5-29..."
+    def explain(state, rules, rate, exempt)
+      pct = number(rules['taxable_pct'])
+      sentence =
+        case rules['payer']
+        when 'dealer_use_tax'
+          "The dealer pays #{number(rules['use_tax_rate'])}% #{state} use tax on its cost" \
+            "#{rules['use_tax_includes_freight'] ? ', freight included' : ''}. No sales tax is charged to the buyer."
+        when 'buyer_at_titling'
+          "The buyer pays #{state} tax of #{number(rate)}% when the home is titled. It is not collected here."
+        else
+          exempt ? "A pre-owned home is exempt from #{state} sales tax." :
+            "Tax on #{pct}% of the selling price#{rules['trade_reduces'] ? ' after trade-in' : ''} at #{number(rate)}%."
+        end
+      [sentence, rules['disclosure'].presence].compact.join(' ')
+    end
+
+    def number(value)
+      d = value.to_d
+      d.frac.zero? ? d.to_i.to_s : d.round(3).to_s('F')
     end
 
     private
@@ -106,7 +140,8 @@ module Tax
     def blank(state, note)
       { state: state, rules: DEFAULT_RULES, payer: nil, exempt: false, rates: {}, rate: 0.0, base: 0.0, collected: 0.0,
         at_titling: 0.0, use_tax: 0.0, after_trade: [@price - @trade, 0].max.to_f, effective_pct: 0.0,
-        slots: { state: 0.0, county: 0.0, city: 0.0 }, disclosure: nil, note: note }
+        slots: { state: 0.0, county: 0.0, city: 0.0 }, taxable_pct: 100.0, trade_reduces: false, home_sale: @home_sale,
+        disclosure: nil, note: note }
     end
   end
 end

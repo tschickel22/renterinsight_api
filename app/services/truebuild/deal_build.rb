@@ -138,6 +138,9 @@ module Truebuild
       guard!
       attrs = attrs.to_h.symbolize_keys
       changes = attrs.slice(:quantity, :unit, :tbd, :no_charge, :tax_category)
+      # TBD (no price yet) and N/C (no charge) cannot both be true: setting one clears the other.
+      changes[:no_charge] = false if ActiveModel::Type::Boolean.new.cast(changes[:tbd])
+      changes[:tbd] = false if ActiveModel::Type::Boolean.new.cast(changes[:no_charge])
       changes.merge!(attrs.slice(:label, :group_name, :unit_cost)) if %w[custom template].include?(line.kind)
       meta = line.metadata.to_h
       meta['notes'] = attrs[:notes] if attrs.key?(:notes)
@@ -190,6 +193,7 @@ module Truebuild
           kept << write_extra_line(deal, dp, l)
         end
         tagged.reject { |dp| kept.include?(dp) }.each(&:destroy!)
+        allocate_tax(deal, t)
         d = t['discounts'] || {}
         tax = t['tax'] || {}
         rates = tax['rates'] || {}
@@ -201,6 +205,23 @@ module Truebuild
                             city_tax_rate: collected ? rates['city'] : nil, total_amount: t['contract_total'] || 0,
                             unpaid_balance: t['unpaid_balance'] || 0, updated_at: Time.current)
       end
+    end
+
+    # The tax the sheet collects, spread over the deal's taxable lines in
+    # proportion to their price, so Products shows them taxed and the deal's
+    # value is the selling price plus tax. Rounding lands on the home line.
+    def allocate_tax(deal, totals)
+      collected = totals.dig('tax', 'collected').to_d
+      lines = deal.deal_products.reload.to_a
+      taxable = lines.reject { |dp| dp.notes.to_s.include?('taxable:no') }
+      taxable = taxable.select { |dp| dp.notes.to_s.match?(TAG) || dp.tax.to_d.positive? }
+      base = taxable.sum { |dp| net(dp) }
+      shares = taxable.to_h { |dp| [dp, base.positive? ? (collected * net(dp) / base).round(2) : 0.to_d] }
+      home = taxable.find { |dp| tag_of(dp) == 'home' } || taxable.first
+      shares[home] += collected - shares.values.sum if home
+      (lines - taxable).each { |dp| dp.update!(tax: 0) if dp.tax.to_d.positive? && dp.notes.to_s.match?(TAG) }
+      shares.each { |dp, amount| dp.update!(tax: amount) if dp.tax.to_d != amount }
+      deal.update_columns(value: deal.deal_products.reload.sum(:total))
     end
 
     # Clearing the build: its add-on lines go; the home line stays as a plain line.
@@ -285,12 +306,17 @@ module Truebuild
       terms = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id)
       retail = PricingEngine.round_retail(retail, terms) if retail
       discounts = discounts_for(lines, retail)
-      selling = retail && (retail - discounts.values.sum)
-      tax = tax_for(counted, selling)
+      # Lines someone added in Products (not written by the sheet) are part of
+      # the sale too: their price, cost and tax count here.
+      others = other_deal_lines
+      other_net = others.sum { |dp| net(dp) }
+      cost += others.sum { |dp| dp.line_cost_total.to_d }
+      selling = retail && (retail - discounts.values.sum + other_net)
+      tax = tax_for(counted, selling, others)
       # A use-tax state (Ohio) has the dealer owe tax on its own cost: a cost of the sale.
       cost += tax[:use_tax].to_d
       deal = @build.deal
-      contract_total = selling && (tax[:after_trade].to_d + tax[:collected].to_d)
+      contract_total = selling && ([selling - deal.trade_allowance.to_d, 0].max + tax[:collected].to_d)
       unpaid = contract_total && (contract_total - deal.down_payment.to_d - deal.try(:additional_payment).to_d)
       @warnings << tax[:note] if tax[:note]
       margin = selling && (selling - cost)
@@ -302,6 +328,7 @@ module Truebuild
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
       { cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
         discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
+        other_lines_total: other_net.round(2).to_f,
         margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f,
         trade_allowance: deal.trade_allowance.to_f, trade_payoff: deal.trade_payoff.to_f, tax: tax.except(:rules, :note),
         contract_total: contract_total&.round(2)&.to_f, down_payment: deal.down_payment.to_f,
@@ -310,15 +337,40 @@ module Truebuild
         freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
     end
 
-    # Sales tax by the taxing state's rules (Tax::DealTax): the same numbers GL posting uses.
-    def tax_for(counted, selling)
-      return Tax::DealTax.new(deal: @build.deal, selling_price: 0).call.merge(note: nil) unless selling
+    # Sales tax by the taxing state's rules (Tax::DealTax): the same numbers GL
+    # posting uses. A line the rep marked not taxable in Products is left out
+    # of the taxed amount.
+    def tax_for(counted, selling, others)
+      deal = @build.deal
+      return Tax::DealTax.new(deal: deal, selling_price: 0, home_sale: true).call.merge(note: nil) unless selling
 
+      extras = counted.reject { |l| %w[base option freight].include?(l.kind) }
+      untaxed = extras.select { |l| untaxed_tags.include?(l.id.to_s) }.sum { |l| l.retail.to_d }
+      # The home line: the selling price less the extras and the other lines.
+      untaxed += selling - others.sum { |dp| net(dp) } - extras.sum { |l| l.retail.to_d } if untaxed_tags.include?('home')
+      untaxed += others.reject { |dp| dp.tax.to_d.positive? }.sum { |dp| net(dp) }
       core = counted.select { |l| %w[base option].include?(l.kind) }
       freight = counted.select { |l| l.kind == 'freight' }
-      Tax::DealTax.new(deal: @build.deal, selling_price: selling, trade: @build.deal.trade_allowance,
+      Tax::DealTax.new(deal: deal, selling_price: [selling - untaxed, 0].max, trade: deal.trade_allowance,
                        cost_basis: core.sum { |l| l.cost.to_d }, freight_cost: freight.sum { |l| l.cost.to_d },
-                       used: @build.vehicle&.condition.to_s.casecmp?('used')).call
+                       used: @build.vehicle&.condition.to_s.casecmp?('used'), home_sale: true).call
+    end
+
+    # A deal line's price before tax: unit price x qty less its discount.
+    def net(dp)
+      subtotal = dp.quantity.to_i * dp.unit_price.to_d
+      off = dp.discount_type == 'percentage' ? subtotal * dp.discount.to_d / 100 : dp.discount.to_d
+      (subtotal - off).round(2)
+    end
+
+    # Deal lines the sheet did not write.
+    def other_deal_lines
+      @build.deal.deal_products.reload.reject { |dp| dp.notes.to_s.match?(TAG) || dp.home_line_item? }
+    end
+
+    # Sheet lines the rep marked not taxable in Products ('taxable:no').
+    def untaxed_tags
+      @untaxed_tags ||= @build.deal.deal_products.select { |dp| dp.notes.to_s.include?('taxable:no') }.filter_map { |dp| tag_of(dp) }
     end
 
     # The buyer discounts in dollars, from the build's percents.
@@ -395,7 +447,7 @@ module Truebuild
 
     # Keeps the rep's own words; replaces our tags.
     def tagged_notes(existing, category, tag)
-      own = existing.to_s.gsub(TAG, '').gsub(/category:\s*\w+/i, '').split(',').map(&:strip).reject(&:empty?)
+      own = existing.to_s.gsub(TAG, '').gsub(/category:\s*\w+/i, '').split(',').map(&:strip).reject(&:empty?).uniq
       ["category:#{category}", "deal_sheet:#{tag}", *own].join(', ')
     end
 

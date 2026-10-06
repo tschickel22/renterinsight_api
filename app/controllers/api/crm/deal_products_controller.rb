@@ -41,6 +41,7 @@ module Api
 
           if product.save
             link_vehicle_to_deal(vehicle_id) if vehicle_id
+            resync_deal_sheet
             render json: { product: serialize_deal_product(product) }, status: :created
           else
             render json: { errors: product.errors.full_messages }, status: :unprocessable_entity
@@ -52,6 +53,7 @@ module Api
       # PATCH/PUT /api/crm/deals/:deal_id/products/:id
       def update
         if @deal_product.update(deal_product_params)
+          resync_deal_sheet
           render json: { product: serialize_deal_product(@deal_product) }
         else
           render json: { errors: @deal_product.errors.full_messages }, status: :unprocessable_entity
@@ -105,6 +107,7 @@ module Api
         end
 
         if errors.empty?
+          resync_deal_sheet
           render json: {
             products: created_products,
             total: @deal.deal_products.sum(:total)
@@ -118,6 +121,19 @@ module Api
       end
 
       private
+
+      # The Deal Sheet owns its lines' price, discount and cost (backlog E49).
+      # The Products form saves by deleting every line and recreating it, which
+      # drops the home line's buyer discount; re-applying the sheet afterwards
+      # puts it back and folds in what the rep set here (taxable, commission,
+      # lines the sheet did not write). Never after a delete: the form deletes
+      # first and recreates second.
+      def resync_deal_sheet
+        build = @deal.home_build
+        Truebuild::DealBuild.new(build).reprice! if build && !build.locked?
+      rescue StandardError => e
+        Rails.logger.error("[DealProducts] Deal sheet resync for deal #{@deal.id}: #{e.class} #{e.message}")
+      end
 
       def set_company_scope
         unless current_user
