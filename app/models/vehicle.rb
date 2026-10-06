@@ -60,6 +60,7 @@ class Vehicle < ApplicationRecord
   belongs_to :catalog_plan_variant, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :deal_home_builds, dependent: :nullify
   # Service tickets attached to this home. Includes dealer-only (pre-sale)
   # tickets so the full service history stays with the home even before a sale.
   # Nullify on delete so removing a home doesn't cascade-delete its history.

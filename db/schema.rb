@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_06_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2869,6 +2869,64 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.index ["expires_at"], name: "index_deal_desk_shares_on_expires_at"
     t.index ["public_token"], name: "index_deal_desk_shares_on_public_token", unique: true
     t.index ["shared_by_id"], name: "index_deal_desk_shares_on_shared_by_id"
+  end
+
+  create_table "deal_home_build_lines", force: :cascade do |t|
+    t.bigint "deal_home_build_id", null: false
+    t.string "kind", null: false
+    t.bigint "catalog_option_id"
+    t.bigint "truebuild_addon_id"
+    t.string "group_name"
+    t.string "label", null: false
+    t.string "factory_code"
+    t.decimal "quantity", precision: 10, scale: 2, default: "1.0", null: false
+    t.string "unit", default: "each", null: false
+    t.decimal "unit_cost", precision: 12, scale: 2
+    t.decimal "unit_retail", precision: 12, scale: 2
+    t.decimal "cost", precision: 12, scale: 2
+    t.decimal "retail", precision: 12, scale: 2
+    t.boolean "is_standard", default: false, null: false
+    t.boolean "tbd", default: false, null: false
+    t.boolean "no_charge", default: false, null: false
+    t.string "tax_category", default: "factory_option", null: false
+    t.integer "position", default: 0, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_option_id"], name: "index_deal_home_build_lines_on_catalog_option_id"
+    t.index ["deal_home_build_id", "position"], name: "index_deal_home_build_lines_on_deal_home_build_id_and_position"
+    t.index ["deal_home_build_id"], name: "index_deal_home_build_lines_on_deal_home_build_id"
+    t.index ["truebuild_addon_id"], name: "index_deal_home_build_lines_on_truebuild_addon_id"
+  end
+  create_table "deal_home_builds", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "deal_id", null: false
+    t.bigint "location_id"
+    t.bigint "catalog_plan_variant_id", null: false
+    t.bigint "vehicle_id"
+    t.string "source", default: "order", null: false
+    t.bigint "truebuild_design_id"
+    t.bigint "catalog_price_book_id"
+    t.bigint "cost_book_id"
+    t.bigint "options_book_id"
+    t.string "construction"
+    t.string "status", default: "draft", null: false
+    t.datetime "priced_at"
+    t.jsonb "totals", default: {}, null: false
+    t.text "notes"
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_plan_variant_id"], name: "index_deal_home_builds_on_catalog_plan_variant_id"
+    t.index ["catalog_price_book_id"], name: "index_deal_home_builds_on_catalog_price_book_id"
+    t.index ["company_id"], name: "index_deal_home_builds_on_company_id"
+    t.index ["cost_book_id"], name: "index_deal_home_builds_on_cost_book_id"
+    t.index ["created_by_id"], name: "index_deal_home_builds_on_created_by_id"
+    t.index ["deal_id"], name: "index_deal_home_builds_on_deal_id", unique: true
+    t.index ["location_id"], name: "index_deal_home_builds_on_location_id"
+    t.index ["options_book_id"], name: "index_deal_home_builds_on_options_book_id"
+    t.index ["truebuild_design_id"], name: "index_deal_home_builds_on_truebuild_design_id"
+    t.index ["vehicle_id"], name: "index_deal_home_builds_on_vehicle_id"
   end
 
   create_table "deal_products", force: :cascade do |t|
@@ -8563,6 +8621,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
   add_foreign_key "deal_desk_shares", "companies"
   add_foreign_key "deal_desk_shares", "deals"
   add_foreign_key "deal_desk_shares", "users", column: "shared_by_id"
+  add_foreign_key "deal_home_build_lines", "catalog_options"
+  add_foreign_key "deal_home_build_lines", "deal_home_builds", on_delete: :cascade
+  add_foreign_key "deal_home_build_lines", "truebuild_addons"
+  add_foreign_key "deal_home_builds", "catalog_plan_variants"
+  add_foreign_key "deal_home_builds", "catalog_price_books"
+  add_foreign_key "deal_home_builds", "catalog_price_books", column: "cost_book_id"
+  add_foreign_key "deal_home_builds", "catalog_price_books", column: "options_book_id"
+  add_foreign_key "deal_home_builds", "companies"
+  add_foreign_key "deal_home_builds", "deals"
+  add_foreign_key "deal_home_builds", "locations"
+  add_foreign_key "deal_home_builds", "truebuild_designs"
+  add_foreign_key "deal_home_builds", "users", column: "created_by_id"
+  add_foreign_key "deal_home_builds", "vehicles"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"

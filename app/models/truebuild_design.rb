@@ -7,6 +7,7 @@ class TruebuildDesign < ApplicationRecord
   belongs_to :company
   belongs_to :variant, class_name: 'CatalogPlanVariant', foreign_key: :catalog_plan_variant_id
   belongs_to :vehicle, optional: true
+  has_many :deal_home_builds, dependent: :nullify
   belongs_to :lead, optional: true
   belongs_to :intake_submission, optional: true
   belongs_to :price_book, class_name: 'CatalogPriceBook', foreign_key: :catalog_price_book_id, optional: true

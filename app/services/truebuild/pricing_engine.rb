@@ -199,8 +199,11 @@ module Truebuild
         rounded_to: @terms.round_retail_to }
     end
 
-    def round_retail(amount)
-      step = @terms.round_retail_to.to_i
+    def round_retail(amount) = self.class.round_retail(amount, @terms)
+
+    # A total rounded up to the dealer's step (DealBuild rounds its totals the same way).
+    def self.round_retail(amount, terms)
+      step = terms.round_retail_to.to_i
       return amount unless step.positive?
 
       (amount / step).ceil * step

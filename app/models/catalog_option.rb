@@ -11,6 +11,7 @@ class CatalogOption < ApplicationRecord
   belongs_to :replaced_by, class_name: 'CatalogOption', optional: true
   has_many :prices, class_name: 'CatalogOptionPrice', dependent: :restrict_with_error
   has_many :rules, class_name: 'CatalogOptionRule', dependent: :destroy
+  has_many :deal_home_build_lines, foreign_key: :catalog_option_id, dependent: :nullify
   has_many :inbound_rules, class_name: 'CatalogOptionRule', foreign_key: :target_option_id, dependent: :destroy,
                            inverse_of: :target_option
 
