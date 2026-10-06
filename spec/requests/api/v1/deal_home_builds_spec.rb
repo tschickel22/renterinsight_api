@@ -56,6 +56,8 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(build).to include('source' => 'order', 'status' => 'draft')
     expect(build['lines'].map { |l| [l['kind'], l['tax_category']] }).to eq([%w[base home]])
     expect(line('Apex (2856H32P01)')).to include('cost' => 49_645.0, 'retail' => 62_056.25)
+    expect(line('Apex (2856H32P01)')['base']).to include('net_base_price' => 49_645.0, 'program_discount' => 0.0)
+    expect(build['model']).to include('factory' => 'Decatur', 'series' => 'Prime Of Indiana', 'section' => 'multi')
     expect(build['totals']).to include('cost' => 49_645.0, 'retail' => 62_056.25, 'margin_pct' => 20.0)
 
     post path, headers: headers, params: { variant_id: variant.id }.to_json

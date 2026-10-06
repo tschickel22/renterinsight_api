@@ -84,12 +84,12 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'read')
 
     matcher = Truebuild::HomeMatcher.new
-    variants = matcher.variants
+    variants = CatalogPlanVariant.where(id: matcher.variants.map(&:id)).includes(:manufacturer, catalog_plan: :factory).to_a
     given = @company.dealer_factories.pluck(:factory_id)
     variants = variants.select { |v| given.include?(v.catalog_plan&.factory_id) } if given.any?
     plans = variants.group_by(&:catalog_plan).map do |plan, vs|
-      { id: plan.id, name: plan.name, series: plan.series, manufacturer: vs.first.manufacturer&.name,
-        variants: vs.sort_by(&:model_number).map { |v| matcher.variant_json(v).merge(beds: v.beds, baths: v.baths&.to_f) } }
+      { id: plan.id, name: plan.name, series: plan.series, manufacturer: vs.first.manufacturer&.name, factory: plan.factory&.name,
+        variants: vs.sort_by(&:model_number).map { |v| model_json(v, matcher) } }
     end
     render json: { plans: plans.sort_by { |p| [p[:manufacturer].to_s, p[:series].to_s, p[:name].to_s] } }
   end
@@ -231,8 +231,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     { build: {
       id: build.id, deal_id: build.deal_id, status: build.status, source: build.source, construction: build.construction,
       notes: build.notes, priced_at: build.priced_at,
-      model: Truebuild::HomeMatcher.new.variant_json(variant).merge(beds: variant.beds, baths: variant.baths&.to_f,
-                                                                    square_feet: variant.square_feet),
+      model: model_json(variant, Truebuild::HomeMatcher.new).merge(factory: variant.catalog_plan.factory&.name,
+                                                                   series: variant.catalog_plan.series),
       vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number,
                                   title: [build.vehicle.year, build.vehicle.make, build.vehicle.model].compact.join(' ') },
       design_id: build.truebuild_design_id,
@@ -248,6 +248,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       factory_code: l.factory_code, quantity: l.quantity.to_f, unit: l.unit, unit_cost: l.unit_cost&.to_f, unit_retail: l.unit_retail&.to_f,
       cost: l.cost&.to_f, retail: l.retail&.to_f, standard: l.is_standard, tbd: l.tbd, no_charge: l.no_charge,
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, not_offered: l.metadata['not_offered'] == true,
-      rule: l.metadata['rule'], notes: l.metadata['notes'] }
+      rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'] }
+  end
+
+  def model_json(v, matcher)
+    matcher.variant_json(v).merge(beds: v.beds, baths: v.baths&.to_f, square_feet: v.square_feet, width_ft: v.width_ft,
+                                  length_ft: v.length_ft, section: v.width_ft.to_i <= 18 ? 'single' : 'multi')
   end
 end

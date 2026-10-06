@@ -151,6 +151,12 @@ module Truebuild
       elsif source
         meta.delete('not_offered')
         meta['rule'] = source.dig(:detail, :rule)
+        # The base's make-up for the home tiles: factory base, surcharges, program discount.
+        if line.kind == 'base'
+          d = source[:detail] || {}
+          meta['base'] = { 'net_base_price' => d[:net_base_price], 'required_adders' => d[:required_adders],
+                           'program_discount' => d[:program_discount] }.deep_stringify_keys
+        end
         line.unit_cost = source[:cost]
         line.unit_retail = source[:retail] unless meta['set_retail']
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
