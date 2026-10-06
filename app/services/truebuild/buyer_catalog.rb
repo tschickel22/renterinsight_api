@@ -55,13 +55,14 @@ module Truebuild
       @location = location || vehicle&.location
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
       @book = BookResolver.current_for(variant)
+      @options_book = OptionSource.current_for(variant)
     end
 
     # Pricing every option on a model takes a second or two, so the priced
     # catalog is cached per dealer, model and location until their prices
     # can have moved. Photos are added fresh (the lot home's own come first).
     def call
-      CatalogOptionReviewJob.once(@book)
+      CatalogOptionReviewJob.once(@options_book)
       Rails.cache.fetch(cache_key, expires_in: 30.minutes) { build }.merge(media: media)
     end
 
@@ -110,7 +111,7 @@ module Truebuild
     # Every option group a model's price book offers, with no dealer and no
     # prices: what TrueView draws, once for every dealer who sells the model.
     def self.finish_groups(variant)
-      book = BookResolver.current_for(variant)
+      book = OptionSource.current_for(variant)
       return [] unless book
 
       stamp = [book.id, book.updated_at, CatalogOption.where(manufacturer_id: variant.manufacturer_id).maximum(:updated_at),
@@ -119,7 +120,7 @@ module Truebuild
       Rails.cache.fetch("truebuild:finish_groups:v7:#{variant.id}:#{stamp.join('-')}", expires_in: 12.hours) do
         catalog = allocate
         catalog.instance_variable_set(:@variant, variant)
-        catalog.instance_variable_set(:@book, book)
+        catalog.instance_variable_set(:@options_book, book)
         catalog.finish_groups
       end
     end
@@ -218,12 +219,11 @@ module Truebuild
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v14:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v15:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
     end
 
     def offered_prices
-      @offered_prices ||= @book.option_prices.includes(option: :group).to_a
-                               .select { |op| op.applies_to?(@variant) && op.option.status == 'active' }
+      @offered_prices ||= OptionSource.offered(@options_book, @variant).select { |op| op.option.status == 'active' }
     end
 
     def variant_json
@@ -415,11 +415,14 @@ module Truebuild
     # series, then the one for this home's construction.
     def standard_features
       words = @variant.catalog_plan.series.to_s.downcase.split - %w[champion homes of the]
-      sheets = @book.standard_features.distinct.pluck(:series).select do |s|
+      # The options book's standards when it brought any (a newer sheet for
+      # this series), else the base book's.
+      book = @options_book&.standard_features&.exists? ? @options_book : @book
+      sheets = book.standard_features.distinct.pluck(:series).select do |s|
         s.nil? || words.any? { |w| s.downcase.match?(/\b#{Regexp.escape(w)}\b/) }
       end
       sheet = best_sheet(sheets.compact)
-      @book.standard_features.where(series: [nil, sheet].uniq).where(building_code: [nil, @variant.building_code])
+      book.standard_features.where(series: [nil, sheet].uniq).where(building_code: [nil, @variant.building_code])
            .order(:category, :position)
            .group_by(&:category).map { |cat, fs| { category: cat, items: fs.map(&:name).uniq } }
     end

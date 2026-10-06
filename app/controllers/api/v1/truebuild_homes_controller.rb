@@ -3,8 +3,9 @@
 # Homes on a dealer's lot linked to the TrueBuild model they are. A linked
 # home that is not built yet (to order, ordered, on order) opens the designer
 # from its listing; a linked home without photos of its own shows the
-# manufacturer's. Homes entered by hand ("56' Bay Port") carry no model
-# number, so the dealer links them here, from suggestions.
+# manufacturer's. A home whose model text carries a priced model number
+# links itself on save; one entered by hand ("56' Bay Port") carries none,
+# so the dealer links it here, from suggestions.
 class Api::V1::TruebuildHomesController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -20,11 +21,14 @@ class Api::V1::TruebuildHomesController < ApplicationController
     vehicles = scoped_vehicles.includes(catalog_plan_variant: :catalog_plan).order(:status, :model).limit(500).to_a
     ready = Truebuild::ModelList.trueview_ready(vehicles.filter_map(&:catalog_plan_variant_id).uniq)
     homes = vehicles.map do |v|
+      # Used homes and builders no book prices get no model picker.
+      covered = catalog.coverable?(v)
       { id: v.id, title: [v.year, v.make, v.model].compact.join(' '), status: v.status, stock_number: v.stock_number,
         designable: Truebuild::BuyerCatalog::DESIGNABLE_STATUSES.include?(v.status),
         trueview: ready.include?(v.catalog_plan_variant_id),
+        covered: covered,
         linked: v.catalog_plan_variant && catalog.variant_json(v.catalog_plan_variant),
-        suggestions: v.catalog_plan_variant_id ? [] : catalog.suggest(v) }
+        suggestions: v.catalog_plan_variant_id || !covered ? [] : catalog.suggest(v) }
     end
     render json: { homes: homes }
   end

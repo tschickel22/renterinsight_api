@@ -6,7 +6,8 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}").tap { |c| c.tenant_module_overrides.create!(module_key: 'sales.configurator', is_enabled: true) } }
   let(:other) { Company.create!(name: "Other-#{SecureRandom.hex(4)}") }
   let(:mfr) { Manufacturer.create!(name: "Champion #{SecureRandom.hex(3)}", industry_type: 'manufactured_home') }
-  let(:factory) { mfr.factories.create!(name: 'Topeka', code: "TOP#{SecureRandom.hex(2)}") }
+  # Named as production names it: the plant is how a Dutch Housing home is known to be covered.
+  let(:factory) { mfr.factories.create!(name: 'Topeka, Dutch Housing', code: "TOP#{SecureRandom.hex(2)}") }
   let(:book) { CatalogPriceBook.create!(manufacturer: mfr, factory: factory, name: 'Topeka 2026', status: 'published') }
   let(:bay_port) { CatalogPlan.create!(manufacturer: mfr, factory: factory, series: 'Aspire', name: 'Bay Port') }
   let!(:bay56) { variant('2856H32168', 56) }
@@ -24,12 +25,12 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
     end
   end
 
-  def home(model, company: self.company, status: 'available_to_order')
+  def home(model, company: self.company, status: 'available_to_order', **attrs)
     Vehicle.create!(company: company, year: 2026, make: 'Dutch Housing', model: model, vin: "VIN#{SecureRandom.hex(6).upcase}",
-                    status: status, is_deleted: false)
+                    status: status, is_deleted: false, **attrs)
   end
 
-  it 'suggests the model for a home entered by name and length, or by model number, and links it' do
+  it 'suggests the model for a home entered by name and length, links one carrying its model number, and links on request' do
     by_name = home("56' Bay Port")
     by_number = home('2860 H32168', status: 'on_order')
     home('Sold One', status: 'sold')
@@ -42,12 +43,45 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
     modular = home("56' Bay Port").tap { |v| v.update_columns(home_type: 'Modular') }
     get '/api/v1/truebuild_homes', headers: admin
     expect(JSON.parse(response.body)['homes'].find { |h| h['id'] == modular.id }['suggestions'].map { |s| s['variant_id'] }).to eq([bay56_modular.id])
-    expect(homes[by_number.id]['suggestions'].first).to include('variant_id' => bay60.id, 'reason' => 'Same model number')
+    expect(homes[by_number.id]['linked']).to include('variant_id' => bay60.id)
+    expect(by_number.reload.catalog_plan_variant_id).to eq(bay60.id)
 
     patch "/api/v1/truebuild_homes/#{by_name.id}", headers: admin, params: { variant_id: bay56.id }.to_json
     expect(by_name.reload.catalog_plan_variant_id).to eq(bay56.id)
     patch "/api/v1/truebuild_homes/#{by_name.id}", headers: admin, params: { variant_id: nil }.to_json
     expect(by_name.reload.catalog_plan_variant_id).to be_nil
+  end
+
+  it 'links a site-scanned home whose name carries the number, only when the size agrees' do
+    scanned = home('Aspire Dap2856 H32168', status: 'available')
+    expect(scanned.catalog_plan_variant_id).to eq(bay56.id)
+
+    # Recorded 60' long: suggested, never linked without the dealer.
+    off_size = home('Aspire Dap2856 H32168', status: 'available', length: 60)
+    expect(off_size.catalog_plan_variant_id).to be_nil
+    get '/api/v1/truebuild_homes', headers: admin
+    row = JSON.parse(response.body)['homes'].find { |h| h['id'] == off_size.id }
+    expect(row['suggestions'].map { |s| [s['variant_id'], s['reason']] }).to eq([[bay56.id, 'Same model number']])
+  end
+
+  it 'gives used homes and builders no book covers no model picker' do
+    used = home("56' Bay Port", status: 'available', condition: 'used')
+    other_builder = home("56' Bay Port", status: 'available', make: 'Fleetwood')
+    get '/api/v1/truebuild_homes', headers: admin
+    rows = JSON.parse(response.body)['homes'].index_by { |h| h['id'] }
+    [used, other_builder].each { |v| expect(rows[v.id]).to include('covered' => false, 'suggestions' => []) }
+  end
+
+  it 'sweeps homes saved before they could link themselves' do
+    earlier = home('Bay Port 2856H32168')
+    earlier.update_columns(catalog_plan_variant_id: nil)
+    ambiguous = home('2856 H32168 or 2860 H32168')
+
+    expect(Truebuild::HomeMatcher.new.link_all(company.vehicles, dry_run: true)).to eq([[earlier.id, '2856H32168']])
+    expect(earlier.reload.catalog_plan_variant_id).to be_nil
+    Truebuild::HomeMatcher.new.link_all(company.vehicles)
+    expect(earlier.reload.catalog_plan_variant_id).to eq(bay56.id)
+    expect(ambiguous.reload.catalog_plan_variant_id).to be_nil
   end
 
   it "refuses a model no published book prices, and another company's home" do

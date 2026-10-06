@@ -193,10 +193,10 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return unless authorize_action!('company_settings', 'read')
 
     variant = CatalogPlanVariant.find(params[:variant_id])
-    book = Truebuild::BookResolver.current_for(variant)
+    book = Truebuild::OptionSource.current_for(variant)
     return render json: { groups: [] } unless book
 
-    offered = book.option_prices.includes(option: :group).select { |op| op.applies_to?(variant) }
+    offered = Truebuild::OptionSource.offered(book, variant)
     groups = offered.group_by { |op| op.option.group }.sort_by { |g, _| [g.position.to_i, g.name] }.map do |g, ops|
       { id: g.id, name: g.name,
         options: ops.uniq(&:catalog_option_id).map do |op|

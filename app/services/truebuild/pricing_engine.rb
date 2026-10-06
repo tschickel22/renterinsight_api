@@ -15,9 +15,11 @@ module Truebuild
   class PricingEngine
     # book: where retail comes from (the book the dealer accepted).
     # cost_book: where cost comes from (always the plant's current book).
-    Result = Struct.new(:book, :cost_book, :variant, :lines, :totals, :warnings, keyword_init: true) do
+    # options_book: where option costs come from (OptionSource).
+    Result = Struct.new(:book, :cost_book, :options_book, :variant, :lines, :totals, :warnings, keyword_init: true) do
       def to_h
         { book_id: book&.id, book_name: book&.name, cost_book_id: cost_book&.id, cost_book_name: cost_book&.name,
+          options_book_id: options_book&.id, options_book_name: options_book&.name,
           variant_id: variant.id, model_number: variant.model_number, lines: lines, totals: totals, warnings: warnings }
       end
 
@@ -44,6 +46,10 @@ module Truebuild
       # An explicit book prices both from that book.
       @book = book || BookResolver.book_for(company, variant)
       @cost_book = book || BookResolver.current_for(variant) || @book
+      # Options can come from a newer book than the base (OptionSource), held
+      # back the same way while the dealer reviews it.
+      @options_cost_book = book || OptionSource.current_for(variant) || @cost_book
+      @options_book = book || OptionSource.book_for(company, variant) || @book
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
                       .select { |r| r.location_id.nil? || r.location_id == location&.id }
@@ -53,13 +59,15 @@ module Truebuild
     def call
       raise ArgumentError, 'No published price book covers this model' unless @book
 
-      if @cost_book != @book
-        @warnings << "Your prices are still based on #{@book.name}, but costs follow #{@cost_book.name}. " \
+      if @cost_book != @book || @options_cost_book != @options_book
+        held = @cost_book != @book ? @book : @options_book
+        current = @cost_book != @book ? @cost_book : @options_cost_book
+        @warnings << "Your prices are still based on #{held.name}, but costs follow #{current.name}. " \
                      'Review the new price book to update your prices.'
       end
       lines = [base_line, *option_lines, freight_line, *addon_lines].compact
       totals = totals_for(lines)
-      Result.new(book: @book, cost_book: @cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
+      Result.new(book: @book, cost_book: @cost_book, options_book: @options_cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
 
     private
@@ -100,8 +108,8 @@ module Truebuild
     def option_lines
       return [] if @option_ids.empty?
 
-      prices = offered(@cost_book)
-      retail_prices = @book == @cost_book ? prices : offered(@book)
+      prices = offered(@options_cost_book)
+      retail_prices = @options_book == @options_cost_book ? prices : offered(@options_book)
       @option_ids.filter_map do |id|
         price = most_specific(prices.select { |op| op.catalog_option_id == id })
         unless price
@@ -114,8 +122,7 @@ module Truebuild
     end
 
     def offered(book)
-      book.option_prices.where(catalog_option_id: @option_ids).includes(option: :group).to_a
-          .select { |op| op.applies_to?(@variant, construction: @construction) }
+      OptionSource.offered(book, @variant, construction: @construction, option_ids: @option_ids)
     end
 
     # A price for this exact model beats a size band beats a general price.

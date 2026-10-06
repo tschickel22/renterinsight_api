@@ -245,6 +245,11 @@ class Vehicle < ApplicationRecord
   # and so its factory prices, by the Champion model id (see InventoryLinker).
   before_save :link_catalog_variant,
               if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? && (new_record? || will_save_change_to_champion_model_id?) }
+  # A home with no Champion id (a site scan, typed in) links when its model
+  # text carries a priced model number and its size agrees (HomeMatcher#confident).
+  before_save :link_catalog_variant_by_number,
+              if: -> { champion_model_id.blank? && catalog_plan_variant_id.nil? && condition.to_s.downcase != 'used' &&
+                       model.to_s.match?(/\d{4}/) && (new_record? || will_save_change_to_model?) }
 
   # Structured "landed" cost of the unit — the single source of truth for cost.
   # `total_cost` is authoritative when maintained; otherwise the sum of its components
@@ -404,6 +409,10 @@ class Vehicle < ApplicationRecord
 
   def link_catalog_variant
     self.catalog_plan_variant_id = Catalog::PriceBooks::InventoryLinker.variant_for(self)&.id
+  end
+
+  def link_catalog_variant_by_number
+    self.catalog_plan_variant_id = Truebuild::HomeMatcher.new.confident(self)&.id
   end
 
   def normalize_fields
