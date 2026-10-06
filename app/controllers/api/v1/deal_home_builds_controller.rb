@@ -108,7 +108,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       { id: group&.id, name: group&.name, selection_type: group&.selection_type, required: group&.required,
         options: most_specific(ops).map do |op|
           { id: op.catalog_option_id, name: op.option.name, kind: op.option.kind, standard: op.is_standard,
-            color_set: op.option.metadata.to_h['color_set'].presence,
+            color_set: Truebuild::DealBuild.choice_set(op.option),
             cost: op.dealer_cost&.to_f, suggested_retail: op.suggested_retail&.to_f, factory_code: op.option.factory_code,
             unit: DealHomeBuildLine.unit_for(op.option.name), chosen: chosen.include?(op.catalog_option_id),
             rules: rules.fetch(op.catalog_option_id, []).map { |_, type, target| { type: type, option_id: target } } }
@@ -252,7 +252,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   end
 
   def model_json(v, matcher)
-    matcher.variant_json(v).merge(beds: v.beds, baths: v.baths&.to_f, square_feet: v.square_feet, width_ft: v.width_ft,
+    # Books often leave square feet blank; the box size gives it.
+    sq_ft = v.square_feet.presence || (v.width_ft.to_i * v.length_ft.to_i).nonzero?
+    matcher.variant_json(v).merge(beds: v.beds, baths: v.baths&.to_f, square_feet: sq_ft, width_ft: v.width_ft,
                                   length_ft: v.length_ft, section: v.width_ft.to_i <= 18 ? 'single' : 'multi')
   end
 end

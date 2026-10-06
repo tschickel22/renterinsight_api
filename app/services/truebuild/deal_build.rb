@@ -20,6 +20,14 @@ module Truebuild
       new(build).seed(design)
     end
 
+    # The one-of set an option belongs to: a color set ("Siding"), or a
+    # standard choice written as an option, "Shutters: Black" (the buyer
+    # designer reads these the same way, BuyerCatalog::NAMED_CHOICE).
+    def self.choice_set(option)
+      option.metadata.to_h['color_set'].presence ||
+        (option.kind == 'standard' && option.name.to_s[BuyerCatalog::NAMED_CHOICE, 1]&.strip) || nil
+    end
+
     attr_reader :build, :warnings
 
     def initialize(build)
@@ -192,15 +200,20 @@ module Truebuild
         tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
     end
 
-    # The options this one replaces: the others in its color set ("Siding"),
-    # or in its group when the group is single-choice.
+    # The options this one replaces: the others in its set, or in its group
+    # when the group is single-choice.
     def alternatives(option)
-      others = CatalogOption.where(manufacturer_id: option.manufacturer_id).where.not(id: option.id)
-      set = option.metadata.to_h['color_set'].presence
-      return others.where(catalog_option_group_id: option.catalog_option_group_id) if option.group&.selection_type == 'single'
-      return others.where(catalog_option_group_id: option.catalog_option_group_id).where("metadata->>'color_set' = ?", set) if set
+      others = CatalogOption.where(manufacturer_id: option.manufacturer_id, catalog_option_group_id: option.catalog_option_group_id)
+                            .where.not(id: option.id)
+      return others if option.group&.selection_type == 'single'
 
-      CatalogOption.none
+      if (set = option.metadata.to_h['color_set'].presence)
+        others.where("metadata->>'color_set' = ?", set)
+      elsif (set = self.class.choice_set(option))
+        others.where(kind: 'standard').where('name ILIKE ?', "#{ActiveRecord::Base.sanitize_sql_like(set)}:%")
+      else
+        CatalogOption.none
+      end
     end
 
     def add_line(**attrs)

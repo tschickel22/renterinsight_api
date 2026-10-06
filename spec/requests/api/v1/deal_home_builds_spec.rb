@@ -23,7 +23,13 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
 
   let!(:clay) { option(exterior, 'Clay', nil, standard: true, color_set: 'Siding') }
   let!(:flint) { option(exterior, 'Flint', nil, standard: true, color_set: 'Siding') }
-  let!(:black_shutters) { option(exterior, 'Black', nil, standard: true, color_set: 'Shutters') }
+  # Production's other way of writing a set: a standard option named "Set: value".
+  let!(:black_shutters) do
+    option(exterior, 'Shutters: Black', nil, standard: true).tap { |o| o.update!(kind: 'standard') }
+  end
+  let!(:wine_shutters) do
+    option(exterior, 'Shutters: Wine', nil, standard: true).tap { |o| o.update!(kind: 'standard') }
+  end
   let!(:insulation) { option(extras, 'Upgrade Insulation: R38 Roof & R22 Full Blanket Floor Sectional', 1295) }
   let!(:beam) { option(extras, 'Wood Beam On Ceiling - Per LF', 60) }
 
@@ -70,8 +76,9 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: clay.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: black_shutters.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: flint.id }.to_json
-    expect(body.dig('build', 'lines').map { |l| l['label'] }).to include('Flint', 'Black')
-    expect(body.dig('build', 'lines').map { |l| l['label'] }).not_to include('Clay')
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: wine_shutters.id }.to_json
+    expect(body.dig('build', 'lines').map { |l| l['label'] }).to include('Flint', 'Shutters: Wine')
+    expect(body.dig('build', 'lines').map { |l| l['label'] }).not_to include('Clay', 'Shutters: Black')
     expect(line('Flint')).to include('standard' => true, 'cost' => 0.0, 'retail' => 0.0)
 
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: beam.id, quantity: 12 }.to_json
@@ -121,6 +128,8 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     get "#{path}/options", headers: headers
     siding = body['groups'].find { |g| g['name'] == 'Exterior' }['options'].select { |o| o['color_set'] == 'Siding' }
     expect(siding.map { |o| [o['name'], o['chosen']] }).to eq([['Clay', true], ['Flint', false]])
+    shutters = body['groups'].find { |g| g['name'] == 'Exterior' }['options'].select { |o| o['color_set'] == 'Shutters' }
+    expect(shutters.map { |o| o['name'] }).to eq(['Shutters: Black', 'Shutters: Wine'])
     expect(body['groups'].flat_map { |g| g['options'] }.find { |o| o['id'] == beam.id }).to include('unit' => 'lf', 'cost' => 60.0)
   end
 
