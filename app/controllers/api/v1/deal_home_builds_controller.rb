@@ -6,7 +6,8 @@
 #
 #   GET    /api/v1/deals/:deal_id/home_build                 build, or what it could start from
 #   POST   /api/v1/deals/:deal_id/home_build                 { variant_id, vehicle_id?, design_id? }
-#   PATCH  /api/v1/deals/:deal_id/home_build                 { variant_id?, construction?, notes?, freight_miles?, discounts? }
+#   PATCH  /api/v1/deals/:deal_id/home_build                 { variant_id?, construction?, notes?, freight_miles?, discounts?,
+#                                                              deal: { trade_allowance, trade_payoff, down_payment, delivery_point, delivery_state } }
 #   DELETE /api/v1/deals/:deal_id/home_build
 #   GET    /api/v1/deals/:deal_id/home_build/models          priced models the dealer can build
 #   GET    /api/v1/deals/:deal_id/home_build/options         the model's options by group
@@ -64,6 +65,16 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       raise Truebuild::DealBuild::Locked, 'This build is locked by a signed agreement' if @build.locked?
 
       @build.update!(params.permit(:construction, :notes).to_h)
+      # The sale terms the sheet shows live on the deal: trade-in, down
+      # payment, and where the buyer takes the home (which state taxes it).
+      if params[:deal].present?
+        attrs = params.require(:deal).permit(:trade_allowance, :trade_payoff, :down_payment, :additional_payment,
+                                             :delivery_point, :delivery_state).to_h
+        if attrs.key?('delivery_point') && !%w[deliver lot].include?(attrs['delivery_point'])
+          return render json: { error: 'delivery_point must be deliver or lot' }, status: :unprocessable_entity
+        end
+        @deal.update!(attrs.slice(*@deal.attribute_names))
+      end
       if params.key?(:freight_miles)
         service.set_freight_miles(params[:freight_miles])
       elsif params[:discounts].present?
@@ -249,6 +260,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number,
                                   title: [build.vehicle.year, build.vehicle.make, build.vehicle.model].compact.join(' ') },
       design_id: build.truebuild_design_id,
+      deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_state: @deal.delivery_state,
+                    location_state: @deal.location&.state },
       books: { base: build.price_book&.name, cost: build.cost_book&.name, options: build.options_book&.name },
       totals: build.totals,
       discounts: build.discounts,

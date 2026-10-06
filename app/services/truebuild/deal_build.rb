@@ -191,9 +191,15 @@ module Truebuild
         end
         tagged.reject { |dp| kept.include?(dp) }.each(&:destroy!)
         d = t['discounts'] || {}
+        tax = t['tax'] || {}
+        rates = tax['rates'] || {}
+        collected = tax['payer'] == 'dealer_collects'
         deal.update_columns(dealer_discount: d['savings'] || 0, sales_event_discount: d['sale'] || 0,
                             preferred_payment_discount: d['preferred'] || 0, manager_discount: d['other'] || 0,
-                            updated_at: Time.current)
+                            tax_amount: tax['collected'] || 0, total_tax_amount: tax['collected'] || 0,
+                            state_tax_rate: collected ? rates['state'] : nil, county_tax_rate: collected ? rates['county'] : nil,
+                            city_tax_rate: collected ? rates['city'] : nil, total_amount: t['contract_total'] || 0,
+                            unpaid_balance: t['unpaid_balance'] || 0, updated_at: Time.current)
       end
     end
 
@@ -280,6 +286,13 @@ module Truebuild
       retail = PricingEngine.round_retail(retail, terms) if retail
       discounts = discounts_for(lines, retail)
       selling = retail && (retail - discounts.values.sum)
+      tax = tax_for(counted, selling)
+      # A use-tax state (Ohio) has the dealer owe tax on its own cost: a cost of the sale.
+      cost += tax[:use_tax].to_d
+      deal = @build.deal
+      contract_total = selling && (tax[:after_trade].to_d + tax[:collected].to_d)
+      unpaid = contract_total && (contract_total - deal.down_payment.to_d - deal.try(:additional_payment).to_d)
+      @warnings << tax[:note] if tax[:note]
       margin = selling && (selling - cost)
       margin_pct = selling&.positive? ? (margin / selling * 100).round(1) : nil
       if margin_pct && terms.margin_floor_pct && margin_pct < terms.margin_floor_pct.to_d
@@ -289,8 +302,23 @@ module Truebuild
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
       { cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
         discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
-        margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f, freight_miles: (@build.freight_miles unless @build.source == 'lot'),
+        margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f,
+        trade_allowance: deal.trade_allowance.to_f, trade_payoff: deal.trade_payoff.to_f, tax: tax.except(:rules, :note),
+        contract_total: contract_total&.round(2)&.to_f, down_payment: deal.down_payment.to_f,
+        additional_payment: deal.try(:additional_payment).to_f, unpaid_balance: unpaid&.round(2)&.to_f,
+        delivery_point: deal.try(:delivery_point), freight_miles: (@build.freight_miles unless @build.source == 'lot'),
         freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
+    end
+
+    # Sales tax by the taxing state's rules (Tax::DealTax): the same numbers GL posting uses.
+    def tax_for(counted, selling)
+      return Tax::DealTax.new(deal: @build.deal, selling_price: 0).call.merge(note: nil) unless selling
+
+      core = counted.select { |l| %w[base option].include?(l.kind) }
+      freight = counted.select { |l| l.kind == 'freight' }
+      Tax::DealTax.new(deal: @build.deal, selling_price: selling, trade: @build.deal.trade_allowance,
+                       cost_basis: core.sum { |l| l.cost.to_d }, freight_cost: freight.sum { |l| l.cost.to_d },
+                       used: @build.vehicle&.condition.to_s.casecmp?('used')).call
     end
 
     # The buyer discounts in dollars, from the build's percents.
@@ -333,6 +361,7 @@ module Truebuild
       # A home on the lot keeps what it really cost the dealer.
       lot_cost = @build.source == 'lot' && @build.vehicle&.structured_cost
       cost = lot_cost.to_d + core.select { |l| l.kind == 'option' }.sum { |l| l.cost.to_d } if lot_cost
+      cost += totals.dig('tax', 'use_tax').to_d # dealer-owed use tax is a cost of the home
       variant = @build.variant
       attrs = { product_name: "#{variant.manufacturer&.name} #{variant.catalog_plan.name} #{variant.model_number}".squish,
                 unit_price: price, cost: cost, quantity: 1, discount: totals['discount_total'].to_d, discount_type: 'fixed',

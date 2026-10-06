@@ -192,6 +192,26 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(scenario.line_items.map { |l| l['description'] }).to include('Skirting')
   end
 
+  it 'taxes the sale by the state rules, takes trade-in and down payment, and writes the contract total' do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    get path, headers: headers
+    expect(body.dig('build', 'warnings').join).to include('No delivery state yet')
+
+    patch path, headers: headers, params: { deal: { delivery_state: 'IN', trade_allowance: 4000, down_payment: 1000 } }.to_json
+    t = body.dig('build', 'totals')
+    # Selling price 64,036.25 less 4,000 trade = 60,036.25; Indiana taxes 65% of it at 7%.
+    expect(t['tax']).to include('state' => 'IN', 'base' => 39_023.56, 'collected' => 2731.65)
+    expect(t).to include('contract_total' => 62_767.9, 'unpaid_balance' => 61_767.9, 'trade_allowance' => 4000.0)
+    expect(deal.reload).to have_attributes(tax_amount: 2731.65, total_amount: 62_767.9, unpaid_balance: 61_767.9, state_tax_rate: 7.0)
+
+    patch path, headers: headers, params: { deal: { delivery_state: 'MI' } }.to_json
+    expect(body.dig('build', 'totals', 'tax')).to include('payer' => 'buyer_at_titling', 'collected' => 0.0)
+    expect(deal.reload.tax_amount).to eq(0)
+
+    patch path, headers: headers, params: { deal: { delivery_point: 'nowhere' } }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+
   it 'lists the options offered on the model, marking what is chosen' do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: clay.id }.to_json
