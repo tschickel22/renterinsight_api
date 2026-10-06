@@ -32,12 +32,17 @@ module Truebuild
 
     # addon_ids: the buyer's chosen optional dealer add-ons. quote: include
     # the dealer's quote-only add-ons too (never for a buyer).
-    def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false)
+    # freight_miles: plant to homesite, when known (a deal sheet). assume_freight:
+    # price freight from the stated assumptions when the dealer set none.
+    def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false,
+                   freight_miles: nil, assume_freight: false)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
       @addon_ids = Array(addon_ids).map(&:to_i).uniq
       @quote = quote
+      @freight_miles = freight_miles
+      @assume_freight = assume_freight
       @location = location
       @construction = construction
       # Cost always follows the factory's current book: that is what the
@@ -157,16 +162,16 @@ module Truebuild
     # ---- freight -------------------------------------------------------
 
     def freight_line
-      flat = @terms.freight_flat.to_d
-      per_mile = @terms.freight_per_mile.to_d
-      miles = @terms.freight_miles.to_i
-      return nil if flat.zero? && (per_mile.zero? || miles.zero?)
+      # Freight once the dealer sets a rate; a deal sheet prices it from the
+      # stated assumptions before then, so a quote never leaves it out.
+      return nil unless @assume_freight || @terms.freight_set?
 
-      @warnings << 'Freight per mile is set but miles from the plant are not.' if per_mile.positive? && miles.zero?
-      cost = flat + (per_mile * miles)
-      rule = rule_for(:freight)
-      { kind: 'freight', label: 'Freight', cost: money(cost), retail: money(rule ? rule.apply(cost) : cost),
-        detail: { flat: money(flat), per_mile: money(per_mile), miles: miles } }
+      f = Freight.new(terms: @terms, variant: @variant, miles: @freight_miles).call
+      if f[:detail][:assumed].any?
+        @warnings << "Freight uses assumed #{f[:detail][:assumed].map { |a| a.tr('_', ' ') }.to_sentence} rates. " \
+                     'Set your own under Settings, TrueBuild pricing.'
+      end
+      { kind: 'freight', label: 'Freight to homesite', cost: money(f[:cost]), retail: money(f[:retail]), detail: f[:detail] }
     end
 
     # ---- the dealer's own add-ons ---------------------------------------

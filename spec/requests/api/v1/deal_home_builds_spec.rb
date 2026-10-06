@@ -60,11 +60,15 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(response).to have_http_status(:created)
     build = body['build']
     expect(build).to include('source' => 'order', 'status' => 'draft')
-    expect(build['lines'].map { |l| [l['kind'], l['tax_category']] }).to eq([%w[base home]])
+    # Freight from the stated assumptions until the dealer sets rates: 150 miles x 4.50 x 2 sections
+    # + 2 x 150 permits = 1,650; the buyer pays 20% over.
+    expect(build['lines'].map { |l| [l['kind'], l['tax_category']] }).to eq([%w[base home], %w[freight delivery]])
     expect(line('Apex (2856H32P01)')).to include('cost' => 49_645.0, 'retail' => 62_056.25)
+    expect(line('Freight to homesite')).to include('cost' => 1650.0, 'retail' => 1980.0)
+    expect(line('Freight to homesite')['freight']).to include('miles' => 150, 'sections' => 2)
     expect(line('Apex (2856H32P01)')['base']).to include('net_base_price' => 49_645.0, 'program_discount' => 0.0)
     expect(build['model']).to include('factory' => 'Decatur', 'series' => 'Prime Of Indiana', 'section' => 'multi')
-    expect(build['totals']).to include('cost' => 49_645.0, 'retail' => 62_056.25, 'margin_pct' => 20.0)
+    expect(build['totals']).to include('cost' => 51_295.0, 'gross' => 64_036.25, 'retail' => 64_036.25)
 
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     expect(response).to have_http_status(:unprocessable_entity)
@@ -88,11 +92,11 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     ins = line(insulation.name)
     patch "#{path}/lines/#{ins['id']}", headers: headers, params: { no_charge: true }.to_json
     expect(line(insulation.name)).to include('cost' => 1295.0, 'retail' => 0.0)
-    expect(body.dig('build', 'totals')).to include('cost' => 49_645.0 + 720 + 1295, 'retail' => 62_056.25 + 900)
+    expect(body.dig('build', 'totals')).to include('cost' => 51_295.0 + 720 + 1295, 'retail' => 64_036.25 + 900)
 
     beam_line = line('Wood Beam On Ceiling - Per LF')
     patch "#{path}/lines/#{beam_line['id']}", headers: headers, params: { tbd: true }.to_json
-    expect(body.dig('build', 'totals')).to include('cost' => 49_645.0 + 1295, 'retail' => 62_056.25, 'tbd_count' => 1)
+    expect(body.dig('build', 'totals')).to include('cost' => 51_295.0 + 1295, 'retail' => 64_036.25, 'tbd_count' => 1)
   end
 
   it 'keeps a price the rep set through repricing, and takes custom lines as typed' do
@@ -120,6 +124,72 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     company.dealer_factories.create!(factory: factory)
     get "#{path}/models", headers: headers
     expect(body['plans'].map { |p| [p['name'], p['variants'].map { |v| v['model_number'] }] }).to eq([['Apex', ['2856H32P01']]])
+  end
+
+  it 'takes buyer discounts and miles, and writes the deal: one home line, the extras, the discount columns' do
+    company.dealer_catalog_terms.create!(manufacturer: mfr, sale_discount_pct: 10, dealer_savings_pct: 5)
+    fee = company.fee_templates.create!(name: 'Set-up and blocking', fee_type: 'setup', default_amount: 2500)
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    expect(body.dig('build', 'discounts')).to include('sale_pct' => 10.0, 'savings_pct' => 5.0)
+
+    patch path, headers: headers, params: { freight_miles: 300 }.to_json
+    expect(line('Freight to homesite')).to include('cost' => 3000.0, 'retail' => 3600.0) # 4.50 x 300 x 2 + 300
+    expect(body.dig('build', 'freight_miles_set')).to be(true)
+
+    post "#{path}/lines", headers: headers, params: { kind: 'template', template_type: 'FeeTemplate', template_id: fee.id }.to_json
+    expect(line('Set-up and blocking')).to include('kind' => 'template', 'retail' => 2500.0, 'tax_category' => 'setup')
+    get "#{path}/options", headers: headers
+    expect(body['templates'].map { |t| t['name'] }).to include('Set-up and blocking')
+
+    patch path, headers: headers, params: { discounts: { preferred_pct: 2, other_amount: 500 } }.to_json
+    t = body.dig('build', 'totals')
+    # Gross 62,056.25 + 3,600 + 2,500 = 68,156.25. Savings 5% and sale 10% of the home's 62,056.25;
+    # preferred 2% of what is left; other 500.
+    expect(t['gross']).to eq(68_156.25)
+    expect(t['discounts']).to eq('savings' => 3102.81, 'sale' => 6205.63, 'preferred' => 1176.96, 'other' => 500.0)
+    expect(t['retail']).to eq((68_156.25 - 3102.81 - 6205.63 - 1176.96 - 500).round(2))
+
+    products = deal.reload.deal_products.order(:id)
+    home = products.find(&:home_line_item?)
+    expect(home).to have_attributes(unit_price: 68_156.25 - 2500, cost: 49_645 + 3000, discount: 10_985.4)
+    expect(home.notes).to include('category:home', 'deal_sheet:home')
+    expect(deal.selling_price.to_f).to eq((65_656.25 - 10_985.4).round(2))
+    setup = products.find { |dp| dp.product_name == 'Set-up and blocking' }
+    expect(setup).to have_attributes(unit_price: 2500, source_type: 'template')
+    expect(setup.notes).to include('category:fee', 'deal_sheet:')
+    expect(deal).to have_attributes(dealer_discount: 3102.81, sales_event_discount: 6205.63,
+                                    preferred_payment_discount: 1176.96, manager_discount: 500)
+
+    # The Products form saves by deleting every line and recreating it: the tags carry the lines back to the sheet.
+    kept = products.map { |dp| dp.attributes.slice('product_name', 'unit_price', 'cost', 'quantity', 'discount', 'discount_type', 'notes', 'source_type') }
+    deal.deal_products.destroy_all
+    kept.each { |a| deal.deal_products.create!(a.merge('product_sku' => "CUSTOM-#{SecureRandom.hex(4)}")) }
+    post "#{path}/reprice", headers: headers
+    expect(deal.reload.deal_products.count).to eq(2)
+
+    # A line someone added in Products shows on the sheet, untouched.
+    deal.deal_products.create!(product_name: 'Extended warranty', product_sku: 'CUSTOM-w', unit_price: 900, quantity: 1, notes: 'category:product')
+    get path, headers: headers
+    expect(body.dig('build', 'other_deal_lines').map { |l| l['name'] }).to eq(['Extended warranty'])
+
+    delete path, headers: headers
+    names = deal.reload.deal_products.map(&:product_name)
+    expect(names).to include('Extended warranty', home.product_name)
+    expect(names).not_to include('Set-up and blocking')
+  end
+
+  it 'starts a Deal Desk scenario on a factory order from the price the deal sheet wrote' do
+    company.tenant_module_overrides.create!(module_key: 'sales.deal_desk', is_enabled: true)
+    fee = company.fee_templates.create!(name: 'Skirting', fee_type: 'setup', default_amount: 1800)
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    post "#{path}/lines", headers: headers, params: { kind: 'template', template_type: 'FeeTemplate', template_id: fee.id }.to_json
+
+    post '/api/v1/deal_desk/scenarios', headers: headers, params: { scenario: { deal_id: deal.id, name: 'Cash' } }.to_json
+    expect(response).to have_http_status(:created)
+    scenario = DealDeskScenario.find(body.dig('scenario', 'id'))
+    expect(scenario.unit_price_snapshot.to_f).to eq(deal.reload.selling_price.to_f)
+    expect(scenario.unit_price_snapshot.to_f).to eq(64_036.25)
+    expect(scenario.line_items.map { |l| l['description'] }).to include('Skirting')
   end
 
   it 'lists the options offered on the model, marking what is chosen' do

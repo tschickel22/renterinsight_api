@@ -8,14 +8,30 @@ module Truebuild
   #
   # Totals leave out TBD lines. N/C lines keep their cost (it still reduces
   # gross) and charge nothing.
+  #
+  # The build is the deal sheet, so it writes the deal: one home line (base,
+  # factory options and freight, less the buyer discounts), a deal product for
+  # each add-on, template and custom line, and the deal's discount columns that
+  # agreements merge. Those deal products carry a deal_sheet:<id> tag in their
+  # notes, which survives the Products form's delete-and-recreate save, so a
+  # line is never entered twice in Products, the deal sheet and the Deal Desk.
   class DealBuild
     class Locked < StandardError; end
 
+    TAG = /deal_sheet:(\w+)/
+    # Factory Direct's ladder: sale and dealer savings are percents of the
+    # home's MSRP, preferred payment a percent of the price after them, other
+    # a dollar amount.
+    DISCOUNTS = { 'savings_pct' => :dealer_savings_pct, 'sale_pct' => :sale_discount_pct,
+                  'preferred_pct' => :preferred_payment_pct }.freeze
+
     def self.start(deal:, variant:, user: nil, vehicle: nil, design: nil)
       vehicle ||= deal.vehicle if deal.respond_to?(:vehicle) && deal.vehicle&.catalog_plan_variant_id == variant.id
+      terms = DealerCatalogTerm.effective(deal.company, variant.manufacturer_id)
+      discounts = DISCOUNTS.transform_values { |field| terms[field]&.to_f || 0.0 }.merge('other_amount' => 0.0)
       build = deal.company.deal_home_builds.create!(
         deal: deal, variant: variant, vehicle: vehicle, source: vehicle ? 'lot' : 'order', truebuild_design: design,
-        location_id: deal.location_id || vehicle&.location_id, created_by: user
+        location_id: deal.location_id || vehicle&.location_id, created_by: user, discounts: discounts
       )
       new(build).seed(design)
     end
@@ -42,7 +58,7 @@ module Truebuild
       result&.lines.to_a.each do |l|
         case l[:kind]
         when 'base' then add_line(kind: 'base', label: l[:label], tax_category: 'home')
-        when 'freight' then add_line(kind: 'freight', label: l[:label], tax_category: 'delivery')
+        when 'freight' then add_line(kind: 'freight', label: l[:label], tax_category: 'delivery') unless @build.source == 'lot'
         when 'option' then add_option_line(CatalogOption.find(l[:option_id]))
         # Quote-only add-ons are the rep's to add, not every build's.
         when 'addon'
@@ -74,6 +90,39 @@ module Truebuild
       line
     end
 
+    # A line from the dealer's fee or package templates, the same ones the
+    # Products tab and the Deal Desk offer. Priced as the template sets it.
+    def add_template(type, id)
+      guard!
+      template = case type.to_s
+                 when 'FeeTemplate' then @build.company.fee_templates.find(id)
+                 when 'PackageTemplate' then @build.company.package_templates.find(id)
+                 else raise ArgumentError, 'Unknown template type'
+                 end
+      line = @build.lines.find_by(kind: 'template', source_template: template) ||
+             add_line(kind: 'template', source_template: template, label: template.name,
+                      group_name: template.is_a?(FeeTemplate) ? 'Fees' : 'Packages',
+                      unit_retail: template.is_a?(FeeTemplate) ? template.default_amount : template.default_price,
+                      unit_cost: template.try(:cost) || 0, tax_category: template_tax_category(template))
+      reprice!
+      line
+    end
+
+    # Miles from the plant to the homesite; nil goes back to the estimate.
+    def set_freight_miles(miles)
+      guard!
+      @build.update!(freight_miles: miles.presence&.to_i, freight_miles_set: miles.present?)
+      reprice!
+    end
+
+    # { savings_pct:, sale_pct:, preferred_pct:, other_amount: }
+    def set_discounts(attrs)
+      guard!
+      allowed = attrs.to_h.stringify_keys.slice(*DISCOUNTS.keys, 'other_amount').transform_values { |v| v.to_d.round(4).to_f }
+      @build.update!(discounts: @build.discounts.to_h.merge(allowed))
+      reprice!
+    end
+
     def add_custom(label:, unit_retail:, unit_cost: 0, quantity: 1, unit: 'each', tax_category: 'other', group_name: nil)
       guard!
       line = add_line(kind: 'custom', label: label, group_name: group_name, quantity: quantity, unit: unit, tax_category: tax_category,
@@ -89,12 +138,12 @@ module Truebuild
       guard!
       attrs = attrs.to_h.symbolize_keys
       changes = attrs.slice(:quantity, :unit, :tbd, :no_charge, :tax_category)
-      changes.merge!(attrs.slice(:label, :group_name, :unit_cost)) if line.kind == 'custom'
+      changes.merge!(attrs.slice(:label, :group_name, :unit_cost)) if %w[custom template].include?(line.kind)
       meta = line.metadata.to_h
       meta['notes'] = attrs[:notes] if attrs.key?(:notes)
       if attrs.key?(:unit_retail)
         changes[:unit_retail] = attrs[:unit_retail]
-        line.kind == 'custom' || attrs[:unit_retail].nil? ? meta.delete('set_retail') : meta['set_retail'] = true
+        %w[custom template].include?(line.kind) || attrs[:unit_retail].nil? ? meta.delete('set_retail') : meta['set_retail'] = true
       end
       line.update!(changes.merge(metadata: meta))
       reprice!
@@ -119,7 +168,44 @@ module Truebuild
       lines.each { |line| price_line(line, priced) }
       @build.update!(price_book: result&.book, cost_book: result&.cost_book, options_book: result&.options_book,
                      priced_at: Time.current, totals: totals_for(@build.lines.reload.to_a))
+      sync_deal!
       self
+    end
+
+    # Writes the deal from the build (see the class comment). Skipped once the
+    # deal is won or posted to the GL: its price and cost are frozen then.
+    def sync_deal!
+      deal = @build.deal
+      return if deal.cost_snapshotted?
+
+      lines = @build.lines.reload.select(&:priced?)
+      extras = lines.reject { |l| %w[base option freight].include?(l.kind) }
+      t = @build.totals.to_h
+      ActiveRecord::Base.transaction do
+        tagged = deal.deal_products.reload.select { |dp| dp.notes.to_s.match?(TAG) }
+        home = tagged.find { |dp| tag_of(dp) == 'home' } || deal.home_line_item
+        kept = [write_home_line(deal, home, lines, extras, t)]
+        extras.each do |l|
+          dp = tagged.find { |d| tag_of(d) == l.id.to_s }
+          kept << write_extra_line(deal, dp, l)
+        end
+        tagged.reject { |dp| kept.include?(dp) }.each(&:destroy!)
+        d = t['discounts'] || {}
+        deal.update_columns(dealer_discount: d['savings'] || 0, sales_event_discount: d['sale'] || 0,
+                            preferred_payment_discount: d['preferred'] || 0, manager_discount: d['other'] || 0,
+                            updated_at: Time.current)
+      end
+    end
+
+    # Clearing the build: its add-on lines go; the home line stays as a plain line.
+    def release_deal!
+      @build.deal.deal_products.select { |dp| dp.notes.to_s.match?(TAG) }.each do |dp|
+        if tag_of(dp) == 'home'
+          dp.update!(notes: dp.notes.to_s.gsub(/,?\s*deal_sheet:home/, ''))
+        else
+          dp.destroy!
+        end
+      end
     end
 
     private
@@ -129,8 +215,10 @@ module Truebuild
     end
 
     def engine(option_ids:, addon_ids:)
+      lot = @build.source == 'lot'
       result = PricingEngine.new(company: @build.company, variant: @build.variant, option_ids: option_ids, addon_ids: addon_ids,
-                                 location: @build.location, construction: @build.construction, quote: true).call
+                                 location: @build.location, construction: @build.construction, quote: true,
+                                 freight_miles: (freight_miles unless lot), assume_freight: !lot).call
       # The engine's margin check is for its own sum; the build checks its own totals.
       @warnings = result.warnings.reject { |w| w.start_with?('Margin ') || w.include?(' is not offered on ') }
       result
@@ -154,7 +242,7 @@ module Truebuild
                when 'addon' then priced[:addons][line.truebuild_addon_id]
                end
       meta = line.metadata.to_h
-      if line.kind == 'custom'
+      if %w[custom template].include?(line.kind)
         meta.delete('not_offered')
       elsif source
         meta.delete('not_offered')
@@ -168,6 +256,7 @@ module Truebuild
         line.unit_cost = source[:cost]
         line.unit_retail = source[:retail] unless meta['set_retail']
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
+        meta['freight'] = source[:detail].deep_stringify_keys if line.kind == 'freight' && source[:detail]
       else
         # Priced before, not offered now (a new book dropped it): keep the
         # last price, flag it for the rep.
@@ -189,15 +278,107 @@ module Truebuild
       retail = counted.all? { |l| !l.retail.nil? } ? counted.sum { |l| l.retail.to_d } : nil
       terms = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id)
       retail = PricingEngine.round_retail(retail, terms) if retail
-      margin = retail && (retail - cost)
-      margin_pct = retail&.positive? ? (margin / retail * 100).round(1) : nil
+      discounts = discounts_for(lines, retail)
+      selling = retail && (retail - discounts.values.sum)
+      margin = selling && (selling - cost)
+      margin_pct = selling&.positive? ? (margin / selling * 100).round(1) : nil
       if margin_pct && terms.margin_floor_pct && margin_pct < terms.margin_floor_pct.to_d
         @warnings << "Margin #{margin_pct}% is under your #{terms.margin_floor_pct.to_d.to_s('F')}% floor."
       end
       unpriced = counted.select { |l| l.retail.nil? }.map(&:label)
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
-      { cost: cost.round(2).to_f, retail: retail&.round(2)&.to_f, margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f,
-        tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
+      { cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
+        discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
+        margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f, freight_miles: (@build.freight_miles unless @build.source == 'lot'),
+        freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
+    end
+
+    # The buyer discounts in dollars, from the build's percents.
+    def discounts_for(lines, gross)
+      d = @build.discounts.to_h
+      msrp = lines.find { |l| l.kind == 'base' }&.retail.to_d
+      savings = (msrp * d['savings_pct'].to_d / 100).round(2)
+      sale = (msrp * d['sale_pct'].to_d / 100).round(2)
+      preferred = gross ? ((gross - savings - sale) * d['preferred_pct'].to_d / 100).round(2) : 0.to_d
+      { 'savings' => savings, 'sale' => sale, 'preferred' => preferred, 'other' => d['other_amount'].to_d.round(2) }
+    end
+
+    # The rep's miles, else the estimate from the plant to the homesite (kept
+    # on the build), else the dealer's default in the engine.
+    def freight_miles
+      if @build.freight_miles_set
+        @freight_note = 'Entered on this deal'
+        return @build.freight_miles
+      end
+      est = Freight.estimate_miles(@build.variant, @build.deal)
+      if est
+        @build.update_column(:freight_miles, est.first) if @build.freight_miles != est.first
+        @freight_note = est.last
+        est.first
+      else
+        @build.update_column(:freight_miles, nil) if @build.freight_miles
+        @freight_note = 'No homesite address yet: using your default miles'
+        nil
+      end
+    end
+
+    def tag_of(dp) = dp.notes.to_s[TAG, 1]
+
+    def write_home_line(deal, home, lines, extras, totals)
+      core = lines.reject { |l| extras.include?(l) }
+      # The home's price is the gross less the add-on lines, so the rounding
+      # step stays on the home; the buyer discounts come off it.
+      price = totals['gross'].to_d - extras.sum { |l| l.retail.to_d }
+      cost = core.sum { |l| l.cost.to_d }
+      # A home on the lot keeps what it really cost the dealer.
+      lot_cost = @build.source == 'lot' && @build.vehicle&.structured_cost
+      cost = lot_cost.to_d + core.select { |l| l.kind == 'option' }.sum { |l| l.cost.to_d } if lot_cost
+      variant = @build.variant
+      attrs = { product_name: "#{variant.manufacturer&.name} #{variant.catalog_plan.name} #{variant.model_number}".squish,
+                unit_price: price, cost: cost, quantity: 1, discount: totals['discount_total'].to_d, discount_type: 'fixed',
+                source_type: 'home', notes: tagged_notes(home&.notes, 'home', 'home') }
+      if home
+        home.update!(attrs)
+        home
+      else
+        sku = @build.vehicle ? "VEHICLE-#{@build.vehicle.id}" : "HOMEBUILD-#{@build.id}"
+        deal.deal_products.create!(attrs.merge(product_sku: sku, tax: 0))
+      end
+    end
+
+    def write_extra_line(deal, dp, line)
+      category = case line.kind
+                 when 'template' then line.source_template_type == 'FeeTemplate' ? 'fee' : 'accessory'
+                 when 'addon' then line.truebuild_addon&.fee? ? 'fee' : 'accessory'
+                 else %w[setup delivery utility_connection].include?(line.tax_category) ? 'service' : (line.tax_category == 'fee' ? 'fee' : 'other')
+                 end
+      name = line.quantity == 1 ? line.label : "#{line.label} (#{line.quantity.to_d.to_s('F').sub(/\.0\z/, '')} #{line.unit})"
+      attrs = { product_name: name, unit_price: line.retail.to_d, cost: line.cost.to_d, quantity: 1, discount: 0,
+                discount_type: 'fixed', source_type: line.kind == 'template' ? 'template' : 'home_build',
+                notes: tagged_notes(dp&.notes, category, line.id) }
+      if dp
+        dp.update!(attrs)
+        dp
+      else
+        deal.deal_products.create!(attrs.merge(product_sku: "HOMEBUILD-LINE-#{line.id}", tax: 0))
+      end
+    end
+
+    # Keeps the rep's own words; replaces our tags.
+    def tagged_notes(existing, category, tag)
+      own = existing.to_s.gsub(TAG, '').gsub(/category:\s*\w+/i, '').split(',').map(&:strip).reject(&:empty?)
+      ["category:#{category}", "deal_sheet:#{tag}", *own].join(', ')
+    end
+
+    def template_tax_category(template)
+      return 'other' unless template.is_a?(FeeTemplate)
+
+      text = "#{template.fee_type} #{template.name}".downcase
+      return 'delivery' if text.match?(/deliver|transport|freight|escort/)
+      return 'setup' if text.match?(/set[\s-]?up|block|level|anchor|skirt|install/)
+      return 'utility_connection' if text.match?(/utilit|hook[\s-]?up|connect|septic|well/)
+
+      'fee'
     end
 
     # The options this one replaces: the others in its set, or in its group

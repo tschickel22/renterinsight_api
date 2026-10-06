@@ -6,12 +6,12 @@
 #
 #   GET    /api/v1/deals/:deal_id/home_build                 build, or what it could start from
 #   POST   /api/v1/deals/:deal_id/home_build                 { variant_id, vehicle_id?, design_id? }
-#   PATCH  /api/v1/deals/:deal_id/home_build                 { variant_id?, construction?, notes? }
+#   PATCH  /api/v1/deals/:deal_id/home_build                 { variant_id?, construction?, notes?, freight_miles?, discounts? }
 #   DELETE /api/v1/deals/:deal_id/home_build
 #   GET    /api/v1/deals/:deal_id/home_build/models          priced models the dealer can build
 #   GET    /api/v1/deals/:deal_id/home_build/options         the model's options by group
 #   POST   /api/v1/deals/:deal_id/home_build/reprice
-#   POST   /api/v1/deals/:deal_id/home_build/lines           { kind: option|addon|custom, ... }
+#   POST   /api/v1/deals/:deal_id/home_build/lines           { kind: option|addon|template|custom, ... }
 #   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
 class Api::V1::DealHomeBuildsController < ApplicationController
@@ -64,7 +64,13 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       raise Truebuild::DealBuild::Locked, 'This build is locked by a signed agreement' if @build.locked?
 
       @build.update!(params.permit(:construction, :notes).to_h)
-      service.reprice!
+      if params.key?(:freight_miles)
+        service.set_freight_miles(params[:freight_miles])
+      elsif params[:discounts].present?
+        service.set_discounts(params.require(:discounts).permit(:savings_pct, :sale_pct, :preferred_pct, :other_amount).to_h)
+      else
+        service.reprice!
+      end
     end
     render json: build_json(@build.reload, service.warnings)
   end
@@ -73,6 +79,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
     return render json: { error: 'This build is locked by a signed agreement' }, status: :conflict if @build.locked?
 
+    Truebuild::DealBuild.new(@build).release_deal!
     @build.destroy!
     head :no_content
   end
@@ -116,7 +123,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     end
     render json: { book_id: book&.id, book_name: book&.name, groups: groups,
                    addons: @company.truebuild_addons.active.for_manufacturer(variant.manufacturer_id).order(:position, :id)
-                                   .map { |a| { id: a.id, name: a.name, mode: a.mode, price: a.price.to_f, cost: a.cost.to_f } } }
+                                   .map { |a| { id: a.id, name: a.name, mode: a.mode, price: a.price.to_f, cost: a.cost.to_f } },
+                   # The same fee and package templates Products and the Deal Desk offer.
+                   templates: templates_json }
   end
 
   def reprice
@@ -137,14 +146,18 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       service.add_option(params[:option_id].to_i, quantity: (params[:quantity].presence || 1).to_d)
     when 'addon'
       service.add_addon(params[:addon_id])
+    when 'template'
+      service.add_template(params[:template_type], params[:template_id])
     when 'custom'
       service.add_custom(**params.permit(:label, :unit_retail, :unit_cost, :quantity, :unit, :tax_category, :group_name).to_h.symbolize_keys)
     else
-      return render json: { error: 'kind must be option, addon or custom' }, status: :unprocessable_entity
+      return render json: { error: 'kind must be option, addon, template or custom' }, status: :unprocessable_entity
     end
     render json: build_json(@build.reload, service.warnings), status: :created
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def update_line
@@ -238,6 +251,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       design_id: build.truebuild_design_id,
       books: { base: build.price_book&.name, cost: build.cost_book&.name, options: build.options_book&.name },
       totals: build.totals,
+      discounts: build.discounts,
+      freight_miles_set: build.freight_miles_set,
+      # Lines on the deal the sheet did not write (a warranty added in Products).
+      other_deal_lines: other_deal_lines(build),
       warnings: warnings || build.totals['warnings'] || [],
       lines: build.lines.map { |l| line_json(l) }
     } }
@@ -248,7 +265,21 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       factory_code: l.factory_code, quantity: l.quantity.to_f, unit: l.unit, unit_cost: l.unit_cost&.to_f, unit_retail: l.unit_retail&.to_f,
       cost: l.cost&.to_f, retail: l.retail&.to_f, standard: l.is_standard, tbd: l.tbd, no_charge: l.no_charge,
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, not_offered: l.metadata['not_offered'] == true,
-      rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'] }
+      rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
+      template_type: l.source_template_type, template_id: l.source_template_id }
+  end
+
+  def other_deal_lines(build)
+    build.deal.deal_products.reject { |dp| dp.notes.to_s.match?(Truebuild::DealBuild::TAG) || dp.home_line_item? }
+         .map { |dp| { id: dp.id, name: dp.product_name, total: dp.total.to_f, cost: dp.line_cost_total } }
+  end
+
+  def templates_json
+    fees = @company.fee_templates.where(active: true).order(:position, :name)
+                   .map { |t| { type: 'FeeTemplate', id: t.id, name: t.name, price: t.default_amount.to_f, cost: 0.0, kind: t.fee_type } }
+    packages = @company.package_templates.where(is_active: true).order(:position, :name)
+                       .map { |t| { type: 'PackageTemplate', id: t.id, name: t.name, price: t.default_price.to_f, cost: t.cost.to_f, kind: 'package' } }
+    fees + packages
   end
 
   def model_json(v, matcher)

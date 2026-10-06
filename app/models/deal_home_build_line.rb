@@ -5,7 +5,7 @@
 # are snapshots so a later price book cannot rename a signed line. Cost never
 # reaches a buyer.
 class DealHomeBuildLine < ApplicationRecord
-  KINDS = %w[base option freight addon custom].freeze
+  KINDS = %w[base option freight addon template custom].freeze
   UNITS = %w[each lf sf].freeze
   # What the state tax rules (E45) read. Indiana, for one, taxes delivery,
   # set-up and utility connections sold by the dealer.
@@ -14,6 +14,8 @@ class DealHomeBuildLine < ApplicationRecord
   belongs_to :build, class_name: 'DealHomeBuild', foreign_key: :deal_home_build_id, inverse_of: :lines
   belongs_to :option, class_name: 'CatalogOption', foreign_key: :catalog_option_id, optional: true
   belongs_to :truebuild_addon, optional: true
+  # A fee or package template, the ones Products and the Deal Desk offer.
+  belongs_to :source_template, polymorphic: true, optional: true
 
   validates :kind, inclusion: { in: KINDS }
   validates :unit, inclusion: { in: UNITS }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_06_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_06_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2893,9 +2893,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_06_010000) do
     t.jsonb "metadata", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "source_template_type"
+    t.bigint "source_template_id"
     t.index ["catalog_option_id"], name: "index_deal_home_build_lines_on_catalog_option_id"
     t.index ["deal_home_build_id", "position"], name: "index_deal_home_build_lines_on_deal_home_build_id_and_position"
     t.index ["deal_home_build_id"], name: "index_deal_home_build_lines_on_deal_home_build_id"
+    t.index ["source_template_type", "source_template_id"], name: "index_deal_home_build_lines_on_source_template"
     t.index ["truebuild_addon_id"], name: "index_deal_home_build_lines_on_truebuild_addon_id"
   end
   create_table "deal_home_builds", force: :cascade do |t|
@@ -2917,6 +2920,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_06_010000) do
     t.bigint "created_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "freight_miles"
+    t.boolean "freight_miles_set", default: false, null: false
+    t.jsonb "discounts", default: {}, null: false
     t.index ["catalog_plan_variant_id"], name: "index_deal_home_builds_on_catalog_plan_variant_id"
     t.index ["catalog_price_book_id"], name: "index_deal_home_builds_on_catalog_price_book_id"
     t.index ["company_id"], name: "index_deal_home_builds_on_company_id"
@@ -2997,6 +3003,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_06_010000) do
     t.jsonb "buyer_featured_option_ids", default: [], null: false
     t.jsonb "buyer_hidden_option_ids", default: [], null: false
     t.jsonb "buyer_hidden_groups", default: [], null: false
+    t.decimal "freight_permit_per_section", precision: 10, scale: 2
+    t.decimal "freight_escort_per_mile", precision: 10, scale: 2
+    t.integer "freight_escort_width_ft"
+    t.decimal "freight_minimum", precision: 12, scale: 2
+    t.decimal "freight_markup_pct", precision: 7, scale: 4
+    t.decimal "sale_discount_pct", precision: 7, scale: 4
+    t.decimal "dealer_savings_pct", precision: 7, scale: 4
+    t.decimal "preferred_payment_pct", precision: 7, scale: 4
     t.index "company_id, COALESCE(manufacturer_id, (0)::bigint)", name: "idx_dealer_catalog_terms_unique", unique: true
     t.index ["company_id"], name: "index_dealer_catalog_terms_on_company_id"
     t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"

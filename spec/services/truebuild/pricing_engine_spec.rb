@@ -79,10 +79,32 @@ RSpec.describe Truebuild::PricingEngine do
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.2)
 
     r = price
-    expect(r.lines.last).to include(kind: 'freight', cost: 1400.0, retail: 1400.0)
-    expect(r.totals[:cost]).to eq(67_315.0)
-    expect(r.totals[:retail]).to eq(80_500.0) # 79,098 + 1,400 = 80,498, rounded up to the next 100
+    # Two 14' sections, 200 miles: 4.50 x 200 x 2 = 1,800 haul + 2 x 150 assumed permits + 500 flat = 2,600;
+    # no escort under the assumed 16' width; the buyer pays the assumed 20% over cost.
+    freight = r.lines.last
+    expect(freight).to include(kind: 'freight', cost: 2600.0, retail: 3120.0)
+    expect(freight[:detail]).to include(miles: 200, sections: 2, escorted_sections: 0)
+    expect(freight[:detail][:assumed]).to contain_exactly('permit_per_section', 'escort_per_mile', 'escort_width_ft', 'minimum', 'markup_pct')
+    expect(r.warnings.join).to include('Freight uses assumed')
+    expect(r.totals[:cost]).to eq(68_515.0)
+    expect(r.totals[:retail]).to eq(82_300.0) # 79,098 + 3,120 = 82,218, rounded up to the next 100
     expect(r.warnings.join).to include('under your 25.0% floor')
+  end
+
+  it 'prices freight on a deal sheet from the assumptions until the dealer sets a rate, with escorts for wide sections' do
+    company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.2)
+    expect(price.lines.map { |l| l[:kind] }).not_to include('freight')
+
+    wide = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '3276M32001', width_ft: 32, length_ft: 76)
+    CatalogVariantPrice.create!(price_book: book, variant: wide, net_base_price: 90_000)
+    f = described_class.new(company: company, variant: wide, assume_freight: true, freight_miles: 100).call.lines.last
+    # 4.50 x 100 x 2 = 900 haul, 1.75 x 100 x 2 = 350 escort (16' sections), 300 permits = 1,550; +20% = 1,860.
+    expect(f).to include(kind: 'freight', cost: 1550.0, retail: 1860.0)
+    expect(f[:detail]).to include(sections: 2, escorted_sections: 2)
+
+    company.dealer_catalog_terms.create!(freight_per_mile: 6, freight_minimum: 2500, freight_markup_pct: 0)
+    f = described_class.new(company: company, variant: variant, freight_miles: 50).call.lines.last
+    expect(f).to include(cost: 2500.0, retail: 2500.0) # 6 x 50 x 2 + 300 = 900, under the dealer's 2,500 minimum
   end
 
   it 'has no retail and says so when no rule covers the home' do
