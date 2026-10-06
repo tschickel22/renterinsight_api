@@ -88,8 +88,17 @@ class Api::V1::AccountingSettingsController < ApplicationController
       }
     ).merge(
       allowed_form_states: @company.allowed_form_states || [],
-      effective_tax_accounts: effective_tax_accounts_payload(settings)
+      effective_tax_accounts: effective_tax_accounts_payload(settings),
+      # How each state taxes a home sale before the dealer changes anything
+      # (Tax::DealTax), so the editor can show the defaults and what differs.
+      home_sale_tax_defaults: home_sale_tax_defaults(settings)
     )
+  end
+
+  def home_sale_tax_defaults(settings)
+    states = ((@company.allowed_form_states || []) + (settings.tax_rates_by_state || {}).keys + Tax::DealTax::STATE_RULES.keys)
+             .map { |c| c.to_s.upcase }.select { |c| c.match?(/\A[A-Z]{2}\z/) }.uniq
+    states.index_with { |c| Tax::DealTax::DEFAULT_RULES.merge(Tax::DealTax::STATE_RULES.fetch(c, {})) }
   end
 
   # Per-jurisdiction resolved tax account + whether it's the seeded default.
