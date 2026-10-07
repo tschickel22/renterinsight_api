@@ -70,7 +70,8 @@ module Api
 
       # POST /api/crm/deals/:deal_id/products/bulk_create
       def bulk_create
-        products_data = params.require(:products)
+        # An empty list is the Products form saving after every line was removed.
+        products_data = params.fetch(:products, [])
         created_products = []
         errors = []
         vehicle_ids_in_batch = []
@@ -124,21 +125,21 @@ module Api
 
       private
 
-      # The Deal Sheet owns its lines' price, discount and cost (backlog E49).
-      # The Products form saves by deleting every line and recreating it, which
-      # drops the home line's buyer discount; re-applying the sheet afterwards
-      # puts it back and folds in what the rep set here (taxable, commission,
-      # lines the sheet did not write). Never after a delete: the form deletes
-      # first and recreates second.
       def deal_sheet_json
         live = @deal.home_build
         live && { live_version_id: live.id, live_version_number: live.version_number, live_version_name: live.version_name,
                   version_count: @deal.home_builds.count }
       end
 
+      # Products and the Deal Sheet are one record (backlog E49). The Products
+      # form saves by deleting every line and recreating the list, so after a
+      # save the LIVE sheet takes what changed: a new line becomes a sheet line,
+      # an edited or removed sheet line changes or goes on the sheet, and the
+      # home line gets its buyer discount back. Never after a delete: the form
+      # deletes first and recreates second.
       def resync_deal_sheet
         build = @deal.home_build
-        Truebuild::DealBuild.new(build).reprice! if build && !build.locked?
+        Truebuild::DealBuild.new(build).take_products! if build && !build.locked?
       rescue StandardError => e
         Rails.logger.error("[DealProducts] Deal sheet resync for deal #{@deal.id}: #{e.class} #{e.message}")
       end

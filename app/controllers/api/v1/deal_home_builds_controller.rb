@@ -333,6 +333,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       factory_code: l.factory_code, quantity: l.quantity.to_f, unit: l.unit, unit_cost: l.unit_cost&.to_f, unit_retail: l.unit_retail&.to_f,
       cost: l.cost&.to_f, retail: l.retail&.to_f, standard: l.is_standard, tbd: l.tbd, no_charge: l.no_charge,
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, not_offered: l.metadata['not_offered'] == true,
+      from_products: l.metadata['from_products'] == true,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id }
   end

@@ -233,8 +233,9 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     t = body.dig('build', 'totals')
     home = deal.reload.deal_products.find(&:home_line_item?)
     expect(home.discount.to_f).to eq(t['discount_total'])                     # the sheet put its discount back
-    expect(t['other_lines_total']).to eq(600.0)                                 # Steps is in the sheet's price
-    expect(body.dig('build', 'other_deal_lines').map { |l| l['name'] }).to eq(['Steps'])
+    # Steps, added in Products, is now a sheet line of its own.
+    expect(body.dig('build', 'lines').find { |l| l['label'] == 'Steps' }).to include('kind' => 'custom', 'retail' => 600.0, 'cost' => 300.0)
+    expect(body.dig('build', 'other_deal_lines')).to eq([])
     expect(deal.deal_products.select { |dp| dp.tax.to_d.positive? }.map(&:product_name)).to include(home.product_name, 'Skirting')
     expect(deal.deal_products.sum(:tax).to_f).to eq(t['tax']['collected'])     # the tax sits on the lines
     expect(deal.value.to_f).to eq((t['contract_total'] + 500).round(2))         # Deal tab value = contract total + trade-in

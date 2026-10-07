@@ -16,6 +16,11 @@ module Truebuild
   # notes, which survives the Products form's delete-and-recreate save, so a
   # line is never entered twice in Products, the deal sheet and the Deal Desk.
   #
+  # It works the other way too (take_products!): a line added in Products
+  # becomes a sheet line, and changing or removing a sheet line's deal
+  # product there changes or removes the sheet line. The home line is the
+  # sheet's alone: its price comes from the price book and the options.
+  #
   # A deal can hold several versions of the sheet. Only the LIVE version
   # writes the deal; the others are drafts the rep prices beside it and can
   # make live, which rewrites the deal from that version.
@@ -23,6 +28,8 @@ module Truebuild
     class Locked < StandardError; end
 
     TAG = /deal_sheet:(\w+)/
+    # The lines written to the deal as lines of their own (the rest roll into the home line).
+    EXTRA_KINDS = %w[addon template custom].freeze
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
     TOTALS_VERSION = 4
 
@@ -217,6 +224,28 @@ module Truebuild
       raise ArgumentError, 'The home itself cannot be removed; change the model instead' if line.kind == 'base'
 
       line.destroy!
+      reprice!
+    end
+
+    # Brings what a Products save changed back onto the LIVE sheet, then
+    # reprices (which rewrites the deal). Called after Products creates or
+    # saves lines, never after a delete: the Products form deletes every line
+    # before recreating the list, so a sheet line whose deal product is gone
+    # after a save was removed there.
+    def take_products!
+      return self unless @build.live?
+      return reprice! if @build.deal.cost_snapshotted?
+
+      guard!
+      products = @build.deal.deal_products.reload.to_a
+      by_tag = products.group_by { |dp| tag_of(dp) }
+      DealHomeBuildLine.transaction do
+        @build.lines.reload.select { |l| EXTRA_KINDS.include?(l.kind) && l.priced? }.each do |line|
+          dp = by_tag[line.id.to_s]&.first
+          dp ? take_edits(line, dp) : line.destroy!
+        end
+        products.each { |dp| adopt(dp) if tag_of(dp).nil? && !dp.home_line_item? }
+      end
       reprice!
     end
 
@@ -463,6 +492,48 @@ module Truebuild
     end
 
     def tag_of(dp) = dp.notes.to_s[TAG, 1]
+
+    # What sync_deal! writes as an extra line's name.
+    def written_name(line)
+      line.quantity == 1 ? line.label : "#{line.label} (#{line.quantity.to_d.to_s('F').sub(/\.0\z/, '')} #{line.unit})"
+    end
+
+    # A sheet line's deal product as Products saved it: anything that is not
+    # what the sheet wrote was changed there, and the sheet takes it.
+    def take_edits(line, dp)
+      qty = [dp.quantity.to_i, 1].max
+      price = net(dp)
+      changes = {}
+      meta = line.metadata.to_h
+      changes[:label] = dp.product_name.to_s.strip if dp.product_name.present? && dp.product_name != written_name(line)
+      if qty != 1
+        # Products shows the sheet's line as one at its total; a quantity typed there multiplies it.
+        changes[:quantity] = line.quantity.to_d * qty
+      end
+      new_qty = changes[:quantity] || line.quantity.to_d
+      if price != line.retail.to_d || qty != 1
+        changes[:unit_retail] = new_qty.positive? ? (price / new_qty).round(2) : price
+        changes[:no_charge] = false if price.positive?
+        meta['set_retail'] = true unless %w[custom template].include?(line.kind)
+      end
+      cost = (dp.cost.to_d * qty).round(2)
+      if cost != line.cost.to_d
+        changes[:unit_cost] = new_qty.positive? ? (cost / new_qty).round(2) : cost
+        meta['set_cost'] = true unless %w[custom template].include?(line.kind)
+      end
+      line.update!(changes.merge(metadata: meta)) if changes.any?
+    end
+
+    # A line someone added in Products becomes a sheet line, and its deal
+    # product is tagged as that line's so it is never counted twice.
+    def adopt(dp)
+      qty = [dp.quantity.to_i, 1].max
+      category = dp.notes.to_s[/category:\s*(\w+)/i, 1].to_s.downcase
+      line = add_line(kind: 'custom', label: dp.product_name.presence || 'Item', quantity: qty, unit: 'each',
+                      unit_retail: (net(dp) / qty).round(2), unit_cost: dp.cost.to_d,
+                      tax_category: category == 'fee' ? 'fee' : 'other', metadata: { 'from_products' => true })
+      dp.update!(notes: tagged_notes(dp.notes, category.presence || 'other', line.id))
+    end
 
     def write_home_line(deal, home, lines, extras, totals)
       core = lines.reject { |l| extras.include?(l) }
