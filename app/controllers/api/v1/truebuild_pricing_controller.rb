@@ -54,7 +54,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
     chosen = @company.truebuild_addons.includes(:source).order(:position, :id).to_a
     by_source = chosen.index_by { |a| [a.source_type, a.source_id] }
-    templates = @company.package_templates.active.ordered.map { |t| template_json(t, 'PackageTemplate', t.default_price, by_source) } +
+    templates = @company.package_templates.active.not_homes.ordered.map { |t| template_json(t, 'PackageTemplate', t.default_price, by_source) } +
                 FeeTemplate.where(company_id: @company.id).active.ordered.map { |t| template_json(t, 'FeeTemplate', t.default_amount, by_source) }
     render json: { templates: templates, addons: chosen.map { |a| addon_json(a) } }
   end

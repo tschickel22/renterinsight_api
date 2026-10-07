@@ -15,7 +15,7 @@ module Api
 
       # GET /api/v1/package_templates
       def index
-        templates = @company.package_templates.active.ordered
+        templates = @company.package_templates.active.not_homes.ordered
 
         # Filter by vehicle type if provided (rv/mh) - also return 'all' templates
         if params[:vehicle_type].present?

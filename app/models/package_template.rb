@@ -10,6 +10,24 @@ class PackageTemplate < ApplicationRecord
   scope :active, -> { where(is_active: true) }
   scope :ordered, -> { order(:position, :name) }
 
+  # A home is inventory, never a template. Quotes, invoices and Edit Deal
+  # used to save every typed line as a template, the home line included
+  # ("2023 Cavco Crest", "2026 Dutch Housing Verona"). Recognized by a
+  # model-year name at a home's price, or a VIN or home/land tag in its notes.
+  HOME_LIKE_SQL = <<~SQL.squish.freeze
+    (package_templates.name ~ '^(19|20)[0-9]{2} ' AND COALESCE(package_templates.default_price, 0) >= 10000)
+    OR COALESCE(package_templates.description, '') ILIKE '%VIN:%'
+    OR COALESCE(package_templates.description, '') ~* 'category:\s*(home|land)'
+  SQL
+  scope :not_homes, -> { where.not(HOME_LIKE_SQL) }
+
+  validate :not_a_home, on: :create
+
+  def home_like?
+    (name.to_s.match?(/\A(19|20)\d{2} /) && default_price.to_d >= 10_000) ||
+      description.to_s.match?(/VIN:|category:\s*(home|land)/i)
+  end
+
   def to_inventory_package_attrs
     {
       package_template_id: id,
@@ -23,5 +41,11 @@ class PackageTemplate < ApplicationRecord
       tax_rate: tax_rate,
       position: position
     }
+  end
+
+  private
+
+  def not_a_home
+    errors.add(:base, 'A home is inventory, not a template') if home_like?
   end
 end
