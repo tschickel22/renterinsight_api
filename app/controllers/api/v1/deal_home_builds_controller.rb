@@ -4,11 +4,15 @@
 # Lines carry cost: cost on a deal is visible to deal readers by design. A
 # buyer never reaches this controller.
 #
+# Every call works on the LIVE version unless it passes version_id.
+#
 #   GET    /api/v1/deals/:deal_id/home_build                 build, or what it could start from
 #   POST   /api/v1/deals/:deal_id/home_build                 { variant_id, vehicle_id?, design_id? }
-#   PATCH  /api/v1/deals/:deal_id/home_build                 { variant_id?, construction?, notes?, freight_miles?, discounts?,
+#   PATCH  /api/v1/deals/:deal_id/home_build                 { label?, variant_id?, construction?, notes?, freight_miles?, discounts?,
 #                                                              deal: { trade_allowance, trade_payoff, down_payment, delivery_point, delivery_state } }
 #   DELETE /api/v1/deals/:deal_id/home_build
+#   POST   /api/v1/deals/:deal_id/home_build/versions        { copy_from_id? | variant_id, label?, live? } a new version
+#   POST   /api/v1/deals/:deal_id/home_build/make_live       { version_id } that version writes the deal
 #   GET    /api/v1/deals/:deal_id/home_build/models          priced models the dealer can build
 #   GET    /api/v1/deals/:deal_id/home_build/options         the model's options by group
 #   POST   /api/v1/deals/:deal_id/home_build/reprice
@@ -20,7 +24,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   require_module! Truebuild::BuyerCatalog::MODULE
   before_action :set_company_scope
   before_action :set_deal
-  before_action :set_build, except: %i[show create models]
+  before_action :set_build, except: %i[show create models create_version]
+
+  # What PATCH changes besides a version's name.
+  EDIT_KEYS = %w[variant_id construction notes deal freight_miles discounts].freeze
 
   rescue_from Truebuild::DealBuild::Locked do |e|
     render json: { error: e.message }, status: :conflict
@@ -29,7 +36,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def show
     return unless authorize_action!('deals', 'read')
 
-    build = @deal.home_build
+    build = params[:version_id].present? ? @deal.home_builds.find_by(id: params[:version_id]) : @deal.home_build
+    return render json: { error: 'That version is not on this deal' }, status: :not_found if params[:version_id].present? && !build
     return render json: { build: nil, start_from: start_from } unless build
 
     # A Products save or an older sheet: bring the numbers up to date before showing them.
@@ -42,7 +50,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   def create
     return unless authorize_action!('deals', 'update')
-    return render json: { error: 'This deal already has a home build' }, status: :unprocessable_entity if @deal.home_build
+    return render json: { error: 'This deal already has a home build' }, status: :unprocessable_entity if @deal.home_builds.exists?
 
     variant = priced_variant(params[:variant_id]) or return
     vehicle = params[:vehicle_id].present? ? @company.vehicles.find_by(id: params[:vehicle_id]) : nil
@@ -55,10 +63,40 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: build_json(service.build, service.warnings), status: :created
   end
 
+  # A second version: a copy of one already on the deal, or a different home
+  # from scratch. A draft unless live: true.
+  def create_version
+    return unless authorize_action!('deals', 'update')
+
+    if params[:copy_from_id].present?
+      source = @deal.home_builds.find_by(id: params[:copy_from_id])
+      return render json: { error: 'That version is not on this deal' }, status: :not_found unless source
+
+      service = Truebuild::DealBuild.new(source).copy(label: params[:label], user: current_user)
+      service.make_live! if ActiveModel::Type::Boolean.new.cast(params[:live])
+    else
+      variant = priced_variant(params[:variant_id]) or return
+      service = Truebuild::DealBuild.start(deal: @deal, variant: variant, user: current_user, label: params[:label],
+                                           live: ActiveModel::Type::Boolean.new.cast(params[:live]))
+    end
+    render json: build_json(service.build.reload, service.warnings), status: :created
+  end
+
+  def make_live
+    return unless authorize_action!('deals', 'update')
+
+    service = Truebuild::DealBuild.new(@build).make_live!
+    render json: build_json(@build.reload, service.warnings)
+  end
+
   def update
     return unless authorize_action!('deals', 'update')
 
     service = Truebuild::DealBuild.new(@build)
+    # A version's name is the rep's, and can change even once it is signed.
+    @build.update!(label: params[:label].presence) if params.key?(:label)
+    return render json: build_json(@build.reload) if params.key?(:label) && (params.keys & EDIT_KEYS).empty?
+
     if params[:variant_id].present? && params[:variant_id].to_i != @build.catalog_plan_variant_id
       # A different home: its options are not this one's, so the build starts over.
       variant = priced_variant(params[:variant_id]) or return
@@ -96,8 +134,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def destroy
     return unless authorize_action!('deals', 'update')
     return render json: { error: 'This build is locked by a signed agreement' }, status: :conflict if @build.locked?
+    if @build.live? && @deal.home_builds.where.not(id: @build.id).exists?
+      return render json: { error: 'This is the LIVE version. Make another version live before deleting it.' }, status: :unprocessable_entity
+    end
 
-    Truebuild::DealBuild.new(@build).release_deal!
+    Truebuild::DealBuild.new(@build).release_deal! if @build.live?
     @build.destroy!
     head :no_content
   end
@@ -218,8 +259,13 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   end
 
   def set_build
-    @build = @deal.home_build
-    render json: { error: 'This deal has no home build' }, status: :not_found unless @build
+    if params[:version_id].present?
+      @build = @deal.home_builds.find_by(id: params[:version_id])
+      render json: { error: 'That version is not on this deal' }, status: :not_found unless @build
+    else
+      @build = @deal.home_build
+      render json: { error: 'This deal has no home build' }, status: :not_found unless @build
+    end
   end
 
   def priced_variant(id)
@@ -262,6 +308,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     { build: {
       id: build.id, deal_id: build.deal_id, status: build.status, source: build.source, construction: build.construction,
       notes: build.notes, priced_at: build.priced_at,
+      version_number: build.version_number, label: build.label, live: build.live, version_name: build.version_name,
+      versions: versions_json(build.deal),
       model: model_json(variant, Truebuild::HomeMatcher.new).merge(factory: variant.catalog_plan.factory&.name,
                                                                    series: variant.catalog_plan.series),
       vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number,
@@ -287,6 +335,16 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, not_offered: l.metadata['not_offered'] == true,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id }
+  end
+
+  # The dropdown: every version with the figures a rep compares them by.
+  def versions_json(deal)
+    deal.home_builds.includes(variant: :catalog_plan).map do |v|
+      t = v.totals.to_h
+      { id: v.id, version_number: v.version_number, label: v.label, name: v.version_name, live: v.live, status: v.status,
+        model: "#{v.variant.catalog_plan.name} (#{v.variant.model_number})",
+        selling_price: t['retail'], contract_total: t['contract_total'], margin_pct: t['margin_pct'], updated_at: v.updated_at }
+    end
   end
 
   def other_deal_lines(build)

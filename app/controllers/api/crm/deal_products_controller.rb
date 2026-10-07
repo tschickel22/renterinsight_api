@@ -21,7 +21,9 @@ module Api
           products: products.map { |p| serialize_deal_product(p) },
           total: products.sum { |p| p.total.to_f }.round(2),
           total_cost: products.sum { |p| p.line_cost_total }.round(2),
-          total_profit: products.sum { |p| p.line_profit }.round(2)
+          total_profit: products.sum { |p| p.line_profit }.round(2),
+          # The deal sheet version these lines were written from (the LIVE badge).
+          deal_sheet: deal_sheet_json
         }
       end
 
@@ -128,6 +130,12 @@ module Api
       # puts it back and folds in what the rep set here (taxable, commission,
       # lines the sheet did not write). Never after a delete: the form deletes
       # first and recreates second.
+      def deal_sheet_json
+        live = @deal.home_build
+        live && { live_version_id: live.id, live_version_number: live.version_number, live_version_name: live.version_name,
+                  version_count: @deal.home_builds.count }
+      end
+
       def resync_deal_sheet
         build = @deal.home_build
         Truebuild::DealBuild.new(build).reprice! if build && !build.locked?

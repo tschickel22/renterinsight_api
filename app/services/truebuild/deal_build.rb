@@ -15,6 +15,10 @@ module Truebuild
   # agreements merge. Those deal products carry a deal_sheet:<id> tag in their
   # notes, which survives the Products form's delete-and-recreate save, so a
   # line is never entered twice in Products, the deal sheet and the Deal Desk.
+  #
+  # A deal can hold several versions of the sheet. Only the LIVE version
+  # writes the deal; the others are drafts the rep prices beside it and can
+  # make live, which rewrites the deal from that version.
   class DealBuild
     class Locked < StandardError; end
 
@@ -37,15 +41,25 @@ module Truebuild
     DISCOUNTS = { 'savings_pct' => :dealer_savings_pct, 'sale_pct' => :sale_discount_pct,
                   'preferred_pct' => :preferred_payment_pct }.freeze
 
-    def self.start(deal:, variant:, user: nil, vehicle: nil, design: nil)
+    # The deal's first build is LIVE; a later one is a draft version unless
+    # live: true.
+    def self.start(deal:, variant:, user: nil, vehicle: nil, design: nil, live: nil, label: nil)
       vehicle ||= deal.vehicle if deal.respond_to?(:vehicle) && deal.vehicle&.catalog_plan_variant_id == variant.id
       terms = DealerCatalogTerm.effective(deal.company, variant.manufacturer_id)
       discounts = DISCOUNTS.transform_values { |field| terms[field]&.to_f || 0.0 }.merge('other_amount' => 0.0)
+      first = !deal.home_builds.exists?
       build = deal.company.deal_home_builds.create!(
         deal: deal, variant: variant, vehicle: vehicle, source: vehicle ? 'lot' : 'order', truebuild_design: design,
-        location_id: deal.location_id || vehicle&.location_id, created_by: user, discounts: discounts
+        location_id: deal.location_id || vehicle&.location_id, created_by: user, discounts: discounts,
+        version_number: next_version(deal), label: label.presence, live: first
       )
-      new(build).seed(design)
+      service = new(build).seed(design)
+      service.make_live! if live && !first
+      service
+    end
+
+    def self.next_version(deal)
+      deal.home_builds.maximum(:version_number).to_i + 1
     end
 
     # The one-of set an option belongs to: a color set ("Siding"), or a
@@ -57,6 +71,34 @@ module Truebuild
     end
 
     attr_reader :build, :warnings
+
+    # A new draft version with this one's home, lines, freight and discounts.
+    def copy(label: nil, user: nil)
+      copy = nil
+      DealHomeBuild.transaction do
+        copy = @build.dup
+        copy.assign_attributes(version_number: self.class.next_version(@build.deal), label: label.presence, live: false,
+                               status: 'draft', created_by: user || @build.created_by, priced_at: nil)
+        copy.save!
+        @build.lines.each { |l| copy.lines.create!(l.attributes.except('id', 'deal_home_build_id', 'created_at', 'updated_at')) }
+      end
+      self.class.new(copy).reprice!
+    end
+
+    # Makes this version the one the deal is written from. The version it
+    # replaces stays as a draft. Refused while the LIVE version is signed.
+    def make_live!
+      return reprice! if @build.live?
+
+      current = @build.deal.home_build
+      raise Locked, "#{current.version_name} is locked by a signed agreement; change it with a change order" if current&.locked?
+
+      DealHomeBuild.transaction do
+        current&.update!(live: false)
+        @build.update!(live: true)
+      end
+      reprice!
+    end
 
     def initialize(build)
       @build = build
@@ -196,6 +238,7 @@ module Truebuild
     # deal is won or posted to the GL: its price and cost are frozen then.
     def sync_deal!
       deal = @build.deal
+      return unless @build.live?
       return if deal.cost_snapshotted?
 
       lines = @build.lines.reload.select(&:priced?)

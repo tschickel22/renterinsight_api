@@ -881,6 +881,14 @@ module Api
         [home_price, addons]
       end
 
+      def deal_sheet_json(deal)
+        live = deal.home_build
+        return nil unless live
+
+        { liveVersionId: live.id, liveVersionNumber: live.version_number, liveVersionName: live.version_name,
+          versionCount: deal.home_builds.count }
+      end
+
       def deal_json(deal, detailed: false)
         # Check if user has permission to view cost details
         can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
@@ -1045,7 +1053,9 @@ module Api
           
           base.merge!(
             products: products_array,
-            stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) }
+            stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) },
+            # The deal sheet version the deal's numbers come from, for the LIVE badge.
+            dealSheet: deal_sheet_json(deal)
           )
         end
         

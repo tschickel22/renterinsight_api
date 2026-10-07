@@ -62,7 +62,9 @@ class Deal < ApplicationRecord
   
   has_many :deal_products, dependent: :destroy
   # The factory model and options on this deal (backlog E49).
-  has_one :home_build, class_name: 'DealHomeBuild', dependent: :destroy
+  # Every version of the deal sheet; the LIVE one is the deal's home build.
+  has_many :home_builds, -> { order(:version_number) }, class_name: 'DealHomeBuild', dependent: :destroy
+  has_one :home_build, -> { where(live: true) }, class_name: 'DealHomeBuild'
   has_many :deal_desk_scenarios, dependent: :destroy
   has_many :invoices, dependent: :nullify
   has_many :deal_stage_histories, dependent: :destroy

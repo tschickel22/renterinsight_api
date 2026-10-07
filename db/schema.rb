@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_06_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_07_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2901,6 +2901,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_06_210000) do
     t.index ["source_template_type", "source_template_id"], name: "index_deal_home_build_lines_on_source_template"
     t.index ["truebuild_addon_id"], name: "index_deal_home_build_lines_on_truebuild_addon_id"
   end
+
   create_table "deal_home_builds", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "deal_id", null: false
@@ -2923,12 +2924,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_06_210000) do
     t.integer "freight_miles"
     t.boolean "freight_miles_set", default: false, null: false
     t.jsonb "discounts", default: {}, null: false
+    t.integer "version_number", default: 1, null: false
+    t.string "label"
+    t.boolean "live", default: false, null: false
     t.index ["catalog_plan_variant_id"], name: "index_deal_home_builds_on_catalog_plan_variant_id"
     t.index ["catalog_price_book_id"], name: "index_deal_home_builds_on_catalog_price_book_id"
     t.index ["company_id"], name: "index_deal_home_builds_on_company_id"
     t.index ["cost_book_id"], name: "index_deal_home_builds_on_cost_book_id"
     t.index ["created_by_id"], name: "index_deal_home_builds_on_created_by_id"
-    t.index ["deal_id"], name: "index_deal_home_builds_on_deal_id", unique: true
+    t.index ["deal_id", "version_number"], name: "index_deal_home_builds_on_deal_id_and_version_number", unique: true
+    t.index ["deal_id"], name: "index_deal_home_builds_one_live_per_deal", unique: true, where: "live"
     t.index ["location_id"], name: "index_deal_home_builds_on_location_id"
     t.index ["options_book_id"], name: "index_deal_home_builds_on_options_book_id"
     t.index ["truebuild_design_id"], name: "index_deal_home_builds_on_truebuild_design_id"

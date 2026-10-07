@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# The home on a deal and what was chosen for it (backlog E49). One per deal.
-# Priced through Truebuild::PricingEngine by Truebuild::DealBuild; Schedule A,
+# The home on a deal and what was chosen for it (backlog E49). A deal can
+# hold several versions (a second home, another option set); the LIVE one
+# writes the deal and the others are drafts to compare. Priced through Truebuild::PricingEngine by Truebuild::DealBuild; Schedule A,
 # Colors & Finishes, the deal sheet and the factory PO read it. Locked once
 # the agreement is signed: from then on it changes by change order (E52).
 class DealHomeBuild < ApplicationRecord
@@ -22,12 +23,18 @@ class DealHomeBuild < ApplicationRecord
 
   validates :source, inclusion: { in: SOURCES }
   validates :status, inclusion: { in: STATUSES }
-  validates :deal_id, uniqueness: true
+  validates :version_number, uniqueness: { scope: :deal_id }
+  validates :deal_id, uniqueness: { conditions: -> { where(live: true) } }, if: :live?
   validate :same_company
 
   before_save { self.totals = totals.to_h.deep_stringify_keys }
 
   def locked? = status == 'locked'
+
+  # "Version 2" or "Version 2: Double carport".
+  def version_name
+    ["Version #{version_number}", label.presence].compact.join(': ')
+  end
 
   private
 

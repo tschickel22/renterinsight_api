@@ -316,6 +316,8 @@ Rails.application.routes.draw do
       get    'deals/:deal_id/home_build/models', to: 'deal_home_builds#models'
       get    'deals/:deal_id/home_build/options', to: 'deal_home_builds#options'
       post   'deals/:deal_id/home_build/reprice', to: 'deal_home_builds#reprice'
+      post   'deals/:deal_id/home_build/versions', to: 'deal_home_builds#create_version'
+      post   'deals/:deal_id/home_build/make_live', to: 'deal_home_builds#make_live'
       post   'deals/:deal_id/home_build/lines', to: 'deal_home_builds#create_line'
       patch  'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#update_line'
       delete 'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#destroy_line'
