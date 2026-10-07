@@ -34,6 +34,7 @@ class Quote < ApplicationRecord
   # Validations
   validates :quote_number, presence: true, uniqueness: true
   validates :status, presence: true, inclusion: { in: STATUSES }
+  validates :pricing_display, inclusion: { in: %w[detailed bundled] }, allow_nil: true
   validates :subtotal, :tax, :total, numericality: { greater_than_or_equal_to: 0 }
   validate :items_must_be_array
   validate :valid_until_must_be_future, if: -> { valid_until.present? && new_record? }
@@ -324,12 +325,23 @@ class Quote < ApplicationRecord
   INTERNAL_ITEM_KEY = /cost|margin|profit|markup|gross|internal/i
 
   # What the public quote page (/q/:token) may show.
+  # Totals only ('bundled'): each line without its price, credits summed as savings.
+  PRICE_ITEM_KEY = /\A(unit_?price|total|line_?total|discount|discount_?type|tax|rate)\z/i
+
   def public_as_json
     json = as_json
     %w[items lineItems].each do |k|
       next unless json[k].is_a?(Array)
 
       json[k] = json[k].map { |item| item.is_a?(Hash) ? item.reject { |key, _| key.to_s.match?(INTERNAL_ITEM_KEY) } : item }
+      next unless pricing_display == 'bundled'
+
+      totals = json[k].map { |item| item.is_a?(Hash) ? (item['total'] || item['lineTotal']).to_f : 0 }
+      json['savings'] = totals.select(&:negative?).sum.abs.round(2)
+      json['itemsPrice'] = totals.select(&:positive?).sum.round(2)
+      json[k] = json[k].each_with_index.reject { |_, i| totals[i].negative? }.map do |item, _|
+        item.is_a?(Hash) ? item.reject { |key, _| key.to_s.match?(PRICE_ITEM_KEY) } : item
+      end
     end
     json
   end
