@@ -322,6 +322,9 @@ Rails.application.routes.draw do
       patch  'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#update_line'
       delete 'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#destroy_line'
       post   'deals/:deal_id/home_build/lines/:id/report_price', to: 'deal_home_builds#report_price'
+      get    'deals/:deal_id/home_build/suppliers', to: 'deal_home_builds#suppliers'
+      post   'deals/:deal_id/home_build/purchase_order', to: 'deal_home_builds#create_purchase_order'
+      post   'deals/:deal_id/home_build/purchase_order/:po_id/refresh', to: 'deal_home_builds#refresh_purchase_order'
       get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
       post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'
       post   'truebuild_pricing/updates/:id/decline', to: 'truebuild_pricing#decline_update'
@@ -1551,6 +1554,8 @@ Rails.application.routes.draw do
           post :cancel
           get :receiving_history, path: 'receiving-history'
           post :post_to_accounting
+          # A factory PO (backlog E51): the home arrived.
+          post :receive_home, path: 'receive-home'
         end
         collection do
           get :stats

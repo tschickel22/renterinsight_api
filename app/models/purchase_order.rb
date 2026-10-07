@@ -13,6 +13,10 @@ class PurchaseOrder < ApplicationRecord
   belongs_to :vendor, optional: true
   belongs_to :created_by, class_name: 'User', optional: true
   belongs_to :approved_by, class_name: 'User', optional: true
+  # A factory PO (backlog E51): a home for a deal, built from its Deal Sheet.
+  belongs_to :deal, optional: true
+  belongs_to :deal_home_build, optional: true
+  belongs_to :received_vehicle, class_name: 'Vehicle', optional: true
   
   has_many :lines, class_name: 'PurchaseOrderLine', foreign_key: 'purchase_order_id', dependent: :destroy, inverse_of: :purchase_order
   has_many :purchase_order_lines, dependent: :destroy
@@ -27,6 +31,9 @@ class PurchaseOrder < ApplicationRecord
   validates :supplier_id, presence: true
   validates :po_number, presence: true, uniqueness: { scope: [:company_id, :is_deleted], conditions: -> { where(is_deleted: [false, nil]) } }
   validates :status, presence: true, inclusion: { in: %w[draft sent partially_received received cancelled] }
+  KINDS = %w[parts factory_home].freeze
+  validates :kind, inclusion: { in: KINDS }
+  validate :deal_is_this_companys
   validates :order_date, presence: true
   validates :subtotal, :tax_amount, :shipping_cost, :total_amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   
@@ -56,6 +63,8 @@ class PurchaseOrder < ApplicationRecord
   scope :recent, -> { order(order_date: :desc, created_at: :desc) }
   
   # Status helpers
+  def factory_home? = kind == 'factory_home'
+
   def draft?
     status == 'draft'
   end
@@ -147,8 +156,14 @@ class PurchaseOrder < ApplicationRecord
     self.total_amount = subtotal + tax_amount + shipping_cost
   end
 
+  # A factory PO posts nothing on receipt: the home's cost reaches the books
+  # with the factory invoice, entered as a bill.
   def status_changed_to_received?
-    saved_change_to_status? && status.in?(%w[received partially_received])
+    !factory_home? && saved_change_to_status? && status.in?(%w[received partially_received])
+  end
+
+  def deal_is_this_companys
+    errors.add(:deal, 'belongs to another company') if deal && deal.company_id != company_id
   end
 
   def post_to_accounting

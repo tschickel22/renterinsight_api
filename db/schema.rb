@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5815,7 +5815,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
 
   create_table "purchase_order_lines", force: :cascade do |t|
     t.bigint "purchase_order_id", null: false
-    t.bigint "part_id", null: false
+    t.bigint "part_id"
     t.integer "line_number", null: false
     t.decimal "quantity_ordered", precision: 10, scale: 3, null: false
     t.decimal "quantity_received", precision: 10, scale: 3, default: "0.0", null: false
@@ -5829,6 +5829,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.decimal "discount_percent", precision: 5, scale: 2, default: "0.0"
+    t.bigint "catalog_option_id"
+    t.index ["catalog_option_id"], name: "index_purchase_order_lines_on_catalog_option_id"
     t.index ["part_id"], name: "index_purchase_order_lines_on_part_id"
     t.index ["purchase_order_id", "line_number"], name: "idx_on_purchase_order_id_line_number_052fcfc9be", unique: true
     t.index ["purchase_order_id", "part_id"], name: "index_purchase_order_lines_on_purchase_order_id_and_part_id"
@@ -5874,6 +5876,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
     t.bigint "vendor_id"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.bigint "deal_id"
+    t.string "kind", default: "parts", null: false
+    t.bigint "deal_home_build_id"
+    t.bigint "received_vehicle_id"
+    t.jsonb "sheet_snapshot", default: {}, null: false
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -5881,12 +5888,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
     t.index ["company_id", "supplier_id"], name: "index_purchase_orders_on_company_id_and_supplier_id"
     t.index ["company_id"], name: "index_purchase_orders_on_company_id"
     t.index ["created_by_id"], name: "index_purchase_orders_on_created_by_id"
+    t.index ["deal_home_build_id"], name: "index_purchase_orders_on_deal_home_build_id"
+    t.index ["deal_id"], name: "index_purchase_orders_on_deal_id"
     t.index ["expected_delivery_date"], name: "index_purchase_orders_on_expected_delivery_date"
     t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
     t.index ["location_id"], name: "index_purchase_orders_on_location_id"
     t.index ["order_date"], name: "index_purchase_orders_on_order_date"
     t.index ["quickbooks_id"], name: "index_purchase_orders_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["received_date"], name: "index_purchase_orders_on_received_date"
+    t.index ["received_vehicle_id"], name: "index_purchase_orders_on_received_vehicle_id"
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
     t.index ["vendor_id"], name: "index_purchase_orders_on_vendor_id"
@@ -8940,13 +8950,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
   add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
+  add_foreign_key "purchase_order_lines", "catalog_options", on_delete: :nullify
   add_foreign_key "purchase_order_lines", "parts"
   add_foreign_key "purchase_order_lines", "purchase_orders"
   add_foreign_key "purchase_orders", "companies"
+  add_foreign_key "purchase_orders", "deal_home_builds", on_delete: :nullify
+  add_foreign_key "purchase_orders", "deals"
   add_foreign_key "purchase_orders", "locations"
-  add_foreign_key "purchase_orders", "suppliers"
   add_foreign_key "purchase_orders", "users", column: "approved_by_id"
   add_foreign_key "purchase_orders", "users", column: "created_by_id"
+  add_foreign_key "purchase_orders", "vehicles", column: "received_vehicle_id"
   add_foreign_key "quickbooks_connections", "companies"
   add_foreign_key "quickbooks_entity_mappings", "companies"
   add_foreign_key "quickbooks_field_mappings", "companies"

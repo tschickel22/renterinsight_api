@@ -20,6 +20,9 @@
 #   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
 #   POST   /api/v1/deals/:deal_id/home_build/lines/:id/report_price   { field: price|cost, suggested_value, note }
+#   GET    /api/v1/deals/:deal_id/home_build/suppliers                suppliers for the factory PO, the likely one first
+#   POST   /api/v1/deals/:deal_id/home_build/purchase_order           { supplier_id | supplier_name, expected_delivery_date?, notes? }
+#   POST   /api/v1/deals/:deal_id/home_build/purchase_order/:po_id/refresh   rewrite a draft PO from the sheet
 class Api::V1::DealHomeBuildsController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -32,6 +35,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   rescue_from Truebuild::DealBuild::Locked do |e|
     render json: { error: e.message }, status: :conflict
+  end
+  rescue_from Truebuild::FactoryOrder::Refused do |e|
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def show
@@ -246,6 +252,46 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # Suppliers to send the factory PO to; the one named for the home's
+  # manufacturer (and plant) first.
+  def suppliers
+    return unless authorize_action!('inventory', 'read')
+
+    list = @company.suppliers.where(is_deleted: [false, nil]).order(Arel.sql('LOWER(name)')).limit(500).to_a
+    mfr = @build.variant.manufacturer&.name.to_s
+    plant = @build.variant.catalog_plan.factory&.name.to_s
+    score = ->(s) { n = s.name.to_s.downcase; (mfr.present? && n.include?(mfr.downcase.split.first.to_s) ? 2 : 0) + (plant.present? && n.include?(plant.downcase) ? 1 : 0) }
+    suggested = list.max_by(&score)
+    suggested = nil if suggested && score.call(suggested).zero?
+    render json: { suppliers: list.map { |s| { id: s.id, name: s.name } }, suggested_id: suggested&.id,
+                   new_name: [mfr.presence, plant.presence].compact.join(' ') }
+  end
+
+  def create_purchase_order
+    return unless authorize_action!('inventory', 'create')
+
+    supplier = if params[:supplier_id].present?
+                 @company.suppliers.find_by(id: params[:supplier_id])
+               elsif params[:supplier_name].present?
+                 @company.suppliers.create!(name: params[:supplier_name].to_s.strip)
+               end
+    return render json: { error: 'Choose the factory to send it to' }, status: :unprocessable_entity unless supplier
+
+    po = Truebuild::FactoryOrder.new(@build).create!(supplier: supplier, user: current_user,
+                                                     expected_delivery_date: params[:expected_delivery_date], notes: params[:notes])
+    render json: { purchase_order: purchase_order_json(po), build: build_json(@build.reload)[:build] }, status: :created
+  end
+
+  def refresh_purchase_order
+    return unless authorize_action!('inventory', 'update')
+
+    po = @deal.purchase_orders.find_by(id: params[:po_id])
+    return render json: { error: 'Purchase order not found' }, status: :not_found unless po
+
+    Truebuild::FactoryOrder.new(@build).refresh!(po)
+    render json: { purchase_order: purchase_order_json(po.reload), build: build_json(@build.reload)[:build] }
+  end
+
   # The price book has this line wrong: the rep sets the right figure on the
   # deal and tells the platform team, who correct the book for every dealer.
   def report_price
@@ -372,6 +418,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       # Lines on the deal the sheet did not write (a warranty added in Products).
       other_deal_lines: other_deal_lines(build),
       warnings: warnings || build.totals['warnings'] || [],
+      purchase_orders: build.deal.purchase_orders.where(kind: 'factory_home', is_deleted: [false, nil]).order(:created_at)
+                            .map { |po| purchase_order_json(po) },
       lines: build.lines.map { |l| line_json(l) }
     } }
   end
@@ -384,6 +432,12 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       from_products: l.metadata['from_products'] == true,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id }
+  end
+
+  def purchase_order_json(po)
+    { id: po.id, po_number: po.po_number, status: po.status, total: po.total_amount.to_f, supplier: po.supplier&.name,
+      version_number: po.sheet_snapshot.to_h['version'], changed_since: Truebuild::FactoryOrder.changed?(po),
+      received_vehicle_id: po.received_vehicle_id }
   end
 
   # The dropdown: every version with the figures a rep compares them by.

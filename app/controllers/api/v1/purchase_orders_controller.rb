@@ -2,7 +2,8 @@
 
 class Api::V1::PurchaseOrdersController < ApplicationController
   before_action :set_company_scope
-  before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history, :post_to_accounting]
+  before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history, :post_to_accounting,
+                                            :receive_home]
 
   def index
     return unless authorize_action!('inventory', 'read')
@@ -50,6 +51,8 @@ class Api::V1::PurchaseOrdersController < ApplicationController
 
     # Supplier filter
     purchase_orders = purchase_orders.where(supplier_id: params[:supplier_id]) if params[:supplier_id].present?
+    # A deal's factory POs
+    purchase_orders = purchase_orders.where(deal_id: params[:deal_id]) if params[:deal_id].present?
 
     # Pagination
     page = (params[:page] || 1).to_i
@@ -89,7 +92,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
   def show
     return unless authorize_action!('inventory', 'read')
 
-    render json: @purchase_order.as_json(
+    json = @purchase_order.as_json(
       methods: [:supplier_name, :location_name, :created_by_name],
       include: {
         supplier: { only: [:id, :name, :code, :account_number, :email, :phone] },
@@ -111,6 +114,17 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         }
       }
     )
+    # A factory PO: the deal it is for, and whether the Deal Sheet changed since.
+    if @purchase_order.deal
+      d = @purchase_order.deal
+      json['deal'] = { 'id' => d.id, 'deal_number' => d.deal_number, 'name' => d.name }
+    end
+    if @purchase_order.factory_home?
+      json['sheet_changed_since'] = Truebuild::FactoryOrder.changed?(@purchase_order)
+      v = @purchase_order.received_vehicle
+      json['received_vehicle'] = v && { 'id' => v.id, 'serial_number' => v.serial_number, 'stock_number' => v.stock_number }
+    end
+    render json: json
   end
 
   def create
@@ -241,6 +255,23 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         created_by: { only: [:id, :first_name, :last_name] }
       }
     )
+  end
+
+  # POST /api/v1/purchase_orders/:id/receive-home  { serial_number, vehicle_id?, stock_number? }
+  # A factory PO's home arrived: records it in inventory (or links one already
+  # there) and to the deal. Posts nothing; the cost comes with the factory invoice.
+  def receive_home
+    return unless authorize_action!('inventory', 'update')
+
+    vehicle = params[:vehicle_id].present? ? @company.vehicles.find_by(id: params[:vehicle_id]) : nil
+    return render json: { error: 'Home not found' }, status: :not_found if params[:vehicle_id].present? && !vehicle
+
+    Truebuild::FactoryOrder.receive!(@purchase_order, serial_number: params[:serial_number], vehicle: vehicle,
+                                                      stock_number: params[:stock_number], user: current_user)
+    @purchase_order.reload
+    render json: { status: @purchase_order.status, received_vehicle_id: @purchase_order.received_vehicle_id }
+  rescue Truebuild::FactoryOrder::Refused, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   # POST /api/v1/purchase_orders/:id/post_to_accounting
