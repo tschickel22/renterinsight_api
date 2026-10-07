@@ -44,6 +44,8 @@ module Api
         # apply_template resolves negative IDs back to CompanyAllowanceDefault.
         if params[:include_standard].present?
           payload += @company.company_allowance_defaults.active.ordered.map { |d| standard_item_json(d) }
+          # One alphabetical list, standard items among the templates.
+          payload.sort_by! { |row| row[:name].to_s.downcase }
         end
 
         render json: payload

@@ -295,9 +295,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   end
 
   def templates_json
-    fees = @company.fee_templates.where(active: true).order(:position, :name)
+    fees = @company.fee_templates.where(active: true).ordered
                    .map { |t| { type: 'FeeTemplate', id: t.id, name: t.name, price: t.default_amount.to_f, cost: 0.0, kind: t.fee_type } }
-    packages = @company.package_templates.where(is_active: true).not_homes.order(:position, :name)
+    packages = @company.package_templates.where(is_active: true).not_homes.ordered
                        .map { |t| { type: 'PackageTemplate', id: t.id, name: t.name, price: t.default_price.to_f, cost: t.cost.to_f, kind: 'package' } }
     fees + packages
   end

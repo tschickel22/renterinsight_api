@@ -22,6 +22,11 @@ RSpec.describe PackageTemplate do
     expect(company.package_templates.not_homes.pluck(:name)).to match_array(keep.map(&:name))
   end
 
+  it 'lists templates alphabetically' do
+    %w[Skirting awning Fencing].each { |n| template(n, 100).save! }
+    expect(company.package_templates.ordered.pluck(:name)).to eq(%w[awning Fencing Skirting])
+  end
+
   it 'refuses to save a home as a template' do
     t = template('2026 Dutch Housing Verona', 159_231)
     expect(t.save).to be(false)

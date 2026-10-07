@@ -8,7 +8,8 @@ class PackageTemplate < ApplicationRecord
   validates :default_price, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
 
   scope :active, -> { where(is_active: true) }
-  scope :ordered, -> { order(:position, :name) }
+  # Alphabetical wherever templates are listed (pickers, settings, the Deal Sheet). Nothing reorders them by hand.
+  scope :ordered, -> { order(Arel.sql('LOWER(name)'), :id) }
 
   # A home is inventory, never a template. Quotes, invoices and Edit Deal
   # used to save every typed line as a template, the home line included
