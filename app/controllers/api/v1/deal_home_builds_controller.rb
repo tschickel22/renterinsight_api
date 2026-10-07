@@ -291,7 +291,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   def other_deal_lines(build)
     build.deal.deal_products.reject { |dp| dp.notes.to_s.match?(Truebuild::DealBuild::TAG) || dp.home_line_item? }
-         .map { |dp| { id: dp.id, name: dp.product_name, total: dp.total.to_f, cost: dp.line_cost_total } }
+         .map { |dp| { id: dp.id, name: dp.product_name, total: (dp.total.to_d - dp.tax.to_d).to_f, tax: dp.tax.to_f, cost: dp.line_cost_total } }
   end
 
   def templates_json
