@@ -193,8 +193,9 @@ module Truebuild
     end
 
     # attrs: quantity, unit, tbd, no_charge, tax_category, notes; unit_retail
-    # sets this line's price (kept through repricing until cleared with nil);
-    # label, group_name and unit_cost only on custom lines.
+    # and unit_cost set this line's price and cost (kept through repricing
+    # until cleared with nil); label and group_name only on custom and
+    # template lines.
     def update_line(line, attrs)
       guard!
       attrs = attrs.to_h.symbolize_keys
@@ -203,8 +204,9 @@ module Truebuild
       changes[:no_charge] = false if ActiveModel::Type::Boolean.new.cast(changes[:tbd])
       changes[:tbd] = false if ActiveModel::Type::Boolean.new.cast(changes[:no_charge])
       changes.merge!(attrs.slice(:label, :group_name, :unit_cost)) if %w[custom template].include?(line.kind)
-      # Freight's cost is worked out from miles and rates; the rep can put in what the hauler actually bills.
-      if line.kind == 'freight' && attrs.key?(:unit_cost)
+      # A book line's cost is the book's; the rep can set what it really costs (the hauler's bill for
+      # freight, a factory quote for an option), kept through repricing until cleared with nil.
+      if !%w[custom template].include?(line.kind) && attrs.key?(:unit_cost)
         changes[:unit_cost] = attrs[:unit_cost]
         attrs[:unit_cost].nil? ? line.metadata.delete('set_cost') : line.metadata['set_cost'] = true
       end
@@ -542,7 +544,8 @@ module Truebuild
       price = totals['gross'].to_d - extras.sum { |l| l.retail.to_d }
       cost = core.sum { |l| l.cost.to_d }
       # A home on the lot keeps what it really cost the dealer.
-      lot_cost = @build.source == 'lot' && @build.vehicle&.structured_cost
+      base = core.find { |l| l.kind == 'base' }
+      lot_cost = @build.source == 'lot' && !base&.metadata.to_h['set_cost'] && @build.vehicle&.structured_cost
       cost = lot_cost.to_d + core.select { |l| l.kind == 'option' }.sum { |l| l.cost.to_d } if lot_cost
       cost += totals.dig('tax', 'use_tax').to_d # dealer-owed use tax is a cost of the home
       variant = @build.variant

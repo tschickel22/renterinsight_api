@@ -262,6 +262,23 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(body.dig('build', 'totals', 'other_lines_total')).to eq(600.0)
   end
 
+  it "keeps a rep's cost and price on any line through repricing, until cleared" do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: insulation.id }.to_json
+    id = line(insulation.name)['id']
+    patch "#{path}/lines/#{id}", headers: headers, params: { unit_cost: 1100, unit_retail: 1500 }.to_json
+    post "#{path}/reprice", headers: headers
+    expect(line(insulation.name)).to include('cost' => 1100.0, 'retail' => 1500.0, 'set_cost' => true, 'set_retail' => true)
+
+    home = line('Apex (2856H32P01)')
+    patch "#{path}/lines/#{home['id']}", headers: headers, params: { unit_cost: 48_000 }.to_json
+    expect(line('Apex (2856H32P01)')).to include('cost' => 48_000.0, 'set_cost' => true)
+    expect(deal.reload.deal_products.find(&:home_line_item?).cost.to_f).to eq(48_000 + 1100 + 1650) # freight rides on the home line
+
+    patch "#{path}/lines/#{id}", headers: headers, params: { unit_cost: nil, unit_retail: nil }.to_json
+    expect(line(insulation.name)).to include('cost' => 1295.0, 'set_cost' => false, 'set_retail' => false)
+  end
+
   it 'never has a line both TBD and N/C' do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: insulation.id }.to_json
