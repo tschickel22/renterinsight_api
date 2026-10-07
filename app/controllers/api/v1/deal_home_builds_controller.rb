@@ -19,6 +19,7 @@
 #   POST   /api/v1/deals/:deal_id/home_build/lines           { kind: option|addon|template|custom, ... }
 #   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
+#   POST   /api/v1/deals/:deal_id/home_build/lines/:id/report_price   { field: price|cost, suggested_value, note }
 class Api::V1::DealHomeBuildsController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -245,7 +246,54 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # The price book has this line wrong: the rep sets the right figure on the
+  # deal and tells the platform team, who correct the book for every dealer.
+  def report_price
+    return unless authorize_action!('deals', 'update')
+
+    line = @build.lines.find(params[:id])
+    field = params[:field].to_s
+    return render json: { error: 'field must be price or cost' }, status: :unprocessable_entity unless CatalogPriceRequest::FIELDS.include?(field)
+
+    target = book_row_for(line)
+    unless target
+      return render json: { error: 'This line is not from a price book, so there is nothing to correct there' }, status: :unprocessable_entity
+    end
+    if target.is_a?(CatalogVariantPrice) && field == 'price'
+      return render json: { error: "A home's retail comes from your markup; report its base price (cost) instead" }, status: :unprocessable_entity
+    end
+
+    current = target.is_a?(CatalogVariantPrice) ? target.net_base_price : (field == 'price' ? target.suggested_retail : target.dealer_cost)
+    req = @company.catalog_price_requests.create!(
+      price_book: target.price_book, target_type: target.class.name, target_id: target.id, field: field,
+      current_value: current, suggested_value: params[:suggested_value].presence, note: params[:note].presence,
+      label: line.kind == 'base' ? "#{@build.variant.catalog_plan.name} #{@build.variant.model_number} base price" :
+                                   "#{line.label} on #{@build.variant.model_number}",
+      deal: @deal, requested_by: current_user
+    )
+    render json: { request: { id: req.id, status: req.status, label: req.label } }, status: :created
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
   private
+
+  # The price book row that priced a line: the home's base, or the option's
+  # most specific row in the book its options come from.
+  def book_row_for(line)
+    variant = @build.variant
+    case line.kind
+    when 'base'
+      book = @build.cost_book || @build.price_book
+      book&.variant_prices&.find_by(catalog_plan_variant_id: variant.id)
+    when 'option'
+      book = @build.options_book || Truebuild::OptionSource.current_for(variant)
+      return nil unless book && line.catalog_option_id
+
+      rows = Truebuild::OptionSource.offered(book, variant, construction: @build.construction, option_ids: [line.catalog_option_id])
+      most_specific(rows.to_a).first
+    end
+  end
 
   def set_deal
     deals = @company.deals

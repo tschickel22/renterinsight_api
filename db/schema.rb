@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_07_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_08_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1714,6 +1714,49 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_07_010000) do
     t.index ["manufacturer_id"], name: "index_catalog_price_books_on_manufacturer_id"
     t.index ["published_by_id"], name: "index_catalog_price_books_on_published_by_id"
     t.index ["supersedes_id"], name: "index_catalog_price_books_on_supersedes_id"
+  end
+
+  create_table "catalog_price_corrections", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.string "target_type", null: false
+    t.bigint "target_id", null: false
+    t.string "field", null: false
+    t.string "old_value"
+    t.string "new_value"
+    t.text "reason"
+    t.bigint "corrected_by_id"
+    t.bigint "catalog_price_request_id"
+    t.datetime "created_at", null: false
+    t.index ["catalog_price_book_id"], name: "index_catalog_price_corrections_on_catalog_price_book_id"
+    t.index ["catalog_price_request_id"], name: "index_catalog_price_corrections_on_catalog_price_request_id"
+    t.index ["corrected_by_id"], name: "index_catalog_price_corrections_on_corrected_by_id"
+    t.index ["target_type", "target_id"], name: "index_catalog_price_corrections_on_target_type_and_target_id"
+  end
+
+  create_table "catalog_price_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "catalog_price_book_id", null: false
+    t.string "target_type", null: false
+    t.bigint "target_id", null: false
+    t.string "field", null: false
+    t.decimal "current_value", precision: 12, scale: 2
+    t.decimal "suggested_value", precision: 12, scale: 2
+    t.text "note"
+    t.string "label", null: false
+    t.bigint "deal_id"
+    t.bigint "requested_by_id"
+    t.string "status", default: "open", null: false
+    t.bigint "resolved_by_id"
+    t.datetime "resolved_at"
+    t.text "resolution_note"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_id"], name: "index_catalog_price_requests_on_catalog_price_book_id"
+    t.index ["company_id"], name: "index_catalog_price_requests_on_company_id"
+    t.index ["deal_id"], name: "index_catalog_price_requests_on_deal_id"
+    t.index ["requested_by_id"], name: "index_catalog_price_requests_on_requested_by_id"
+    t.index ["resolved_by_id"], name: "index_catalog_price_requests_on_resolved_by_id"
+    t.index ["status", "catalog_price_book_id"], name: "idx_on_status_catalog_price_book_id_c35cd5bd9a"
   end
 
   create_table "catalog_sources", force: :cascade do |t|
@@ -8543,6 +8586,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_07_010000) do
   add_foreign_key "catalog_price_books", "manufacturers"
   add_foreign_key "catalog_price_books", "users", column: "created_by_id"
   add_foreign_key "catalog_price_books", "users", column: "published_by_id"
+  add_foreign_key "catalog_price_corrections", "catalog_price_books"
+  add_foreign_key "catalog_price_corrections", "users", column: "corrected_by_id"
+  add_foreign_key "catalog_price_requests", "catalog_price_books"
+  add_foreign_key "catalog_price_requests", "companies"
+  add_foreign_key "catalog_price_requests", "deals"
+  add_foreign_key "catalog_price_requests", "users", column: "requested_by_id"
+  add_foreign_key "catalog_price_requests", "users", column: "resolved_by_id"
   add_foreign_key "catalog_standard_features", "catalog_price_books"
   add_foreign_key "catalog_swatch_sheets", "factories", on_delete: :nullify
   add_foreign_key "catalog_swatch_sheets", "manufacturers"

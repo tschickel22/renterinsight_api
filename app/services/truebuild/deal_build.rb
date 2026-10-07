@@ -38,6 +38,9 @@ module Truebuild
     def self.stale?(build)
       return false if build.locked?
       return true if build.priced_at.nil? || build.totals.to_h['version'] != TOTALS_VERSION
+      # A platform admin corrected one of its books since (Truebuild::PriceCorrector).
+      books = [build.price_book, build.cost_book, build.options_book].compact.uniq
+      return true if books.any? { |b| (at = b.metadata.to_h['corrected_at']).present? && Time.zone.parse(at) > build.priced_at }
 
       changed = build.deal.deal_products.maximum(:updated_at)
       changed.present? && changed > build.priced_at + 1.second

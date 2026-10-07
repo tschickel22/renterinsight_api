@@ -20,6 +20,8 @@ class CatalogPriceBook < ApplicationRecord
   has_many :import_items, class_name: 'CatalogImportItem', dependent: :delete_all
   has_many :variant_prices, class_name: 'CatalogVariantPrice', dependent: :delete_all
   has_many :option_prices, class_name: 'CatalogOptionPrice', dependent: :delete_all
+  has_many :corrections, class_name: 'CatalogPriceCorrection', dependent: :delete_all
+  has_many :price_requests, class_name: 'CatalogPriceRequest', dependent: :delete_all
   has_many :standard_features, class_name: 'CatalogStandardFeature', dependent: :delete_all
   has_many :dealer_adoptions, class_name: 'DealerPriceBookAdoption', dependent: :restrict_with_error
 

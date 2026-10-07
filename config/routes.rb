@@ -321,6 +321,7 @@ Rails.application.routes.draw do
       post   'deals/:deal_id/home_build/lines', to: 'deal_home_builds#create_line'
       patch  'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#update_line'
       delete 'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#destroy_line'
+      post   'deals/:deal_id/home_build/lines/:id/report_price', to: 'deal_home_builds#report_price'
       get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
       post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'
       post   'truebuild_pricing/updates/:id/decline', to: 'truebuild_pricing#decline_update'
@@ -3110,8 +3111,15 @@ Rails.application.routes.draw do
           get  'option_decisions', to: 'catalog_option_decisions#index'
           post 'option_review', to: 'catalog_option_decisions#review'
           get  'options', to: 'catalog_option_decisions#options'
+          # Correcting prices after publishing (CatalogPriceCorrectionsController).
+          get   'prices', to: 'catalog_price_corrections#prices'
+          patch 'prices/:kind/:price_id', to: 'catalog_price_corrections#update_price'
+          get   'corrections', to: 'catalog_price_corrections#corrections'
         end
       end
+      get  'catalog_price_requests', to: 'catalog_price_corrections#requests'
+      post 'catalog_price_requests/:id/apply', to: 'catalog_price_corrections#apply'
+      post 'catalog_price_requests/:id/dismiss', to: 'catalog_price_corrections#dismiss'
       get   'option_decisions/patterns', to: 'catalog_option_decisions#patterns'
       patch 'option_decisions/:id', to: 'catalog_option_decisions#update'
       post  'option_decisions', to: 'catalog_option_decisions#create'
