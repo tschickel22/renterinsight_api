@@ -416,6 +416,11 @@ class Vehicle < ApplicationRecord
     self.catalog_plan_variant_id = Truebuild::HomeMatcher.new.confident(self)&.id
   end
 
+  def factory_model_name?
+    number = catalog_plan_variant&.model_number.to_s
+    number.present? && model.to_s.include?(number)
+  end
+
   def normalize_fields
     # Champion catalog rows come pre-formatted from the manufacturer's master
     # data — titleizing them breaks part numbers (DAP1676H32222 → "Dap 1676 H 32222")
@@ -423,7 +428,9 @@ class Vehicle < ApplicationRecord
     # an infinite update loop on every sync.
     # catalog_inventory is the same story: Cavco's model numbers ("Matrix
     # 30724X") titleize into "Matrix 30724 X", which is not a real part number.
-    unless %w[champion_ims catalog_import catalog_import_clone catalog_inventory].include?(source)
+    # Nor a home whose model carries its catalog model number (one received on a
+    # factory PO, "Apex 2856H32P01"), which titleizing re-spaces to "2856 H32 P01".
+    unless %w[champion_ims catalog_import catalog_import_clone catalog_inventory].include?(source) || factory_model_name?
       self.make = make&.titleize
       self.model = model&.titleize
     end

@@ -76,7 +76,7 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(response).to have_http_status(:ok)
     home = company.vehicles.find(body['received_vehicle_id'])
     expect(home).to have_attributes(serial_number: 'DEC123456AB', listing_type: 'manufactured_home', status: 'reserved',
-                                    catalog_plan_variant_id: variant.id, bedrooms: 3)
+                                    catalog_plan_variant_id: variant.id, bedrooms: 3, model: 'Apex 2856H32P01')
     expect(po.reload.status).to eq('received')
     expect(deal.reload.vehicle_id).to eq(home.id)
     expect(company.journal_entries.where(source_entity_type: 'PurchaseOrder', source_entity_id: po.id)).to be_empty
