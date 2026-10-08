@@ -565,6 +565,7 @@ module Campaigns
 
         TAG CONDITIONS (audience.filter_tree):
         - To gate a campaign on a tag, use a leaf with `field: "tags"`.
+        - Location: Lead and Contact audiences can filter on "city", "state" and "zip" (Accounts on "billing_city", "billing_state", "billing_postal_code"). States are two-letter USPS codes: "leads in Colorado or Utah" => { "field": "state", "operator": "in", "value": ["CO", "UT"] }. A zip area uses "starts_with" on zip ("802").
         - Valid tag operators: "tags_include" (has this tag), "tags_any_of" (has ANY of these tags), "tags_exclude" (does NOT have this tag).
         - `value` is a TAG NAME STRING (e.g. "weekly-favorites"), or an ARRAY of tag names for tags_any_of. Do NOT use "equals" or "in" for tags — those operators are for regular columns and will silently fail.
         - Example: { "type": "and", "children": [ { "field": "tags", "operator": "tags_include", "value": "weekly-favorites" } ] }

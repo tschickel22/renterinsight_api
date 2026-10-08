@@ -167,6 +167,12 @@ module Audiences
         - "tagged hot or warm" => { field: "tags", operator: "tags_any_of", value: ["hot", "warm"] }
         - "without tag cold" => { field: "tags", operator: "tags_exclude", value: "cold" }
 
+        LOCATION QUERIES:
+        - States are stored as two-letter USPS codes. "in Colorado" => { field: "state", operator: "equals", value: "CO" }. Several states => operator "in" with a list of codes.
+        - A city => { field: "city", operator: "equals", value: "Denver" }. A zip => "equals"; an area by zip prefix ("zips starting 802") => "starts_with".
+        - Accounts use billing_city / billing_state / billing_postal_code (or the shipping_ ones when the prompt says shipping).
+        - Distance ("within 50 miles of") is not supported; use the nearest equivalent (state, city or zip prefix) and say nothing else.
+
         BOOLEAN LOGIC:
         - "and" / "with" / "who" => combine with type: "and"
         - "or" => use type: "or" group

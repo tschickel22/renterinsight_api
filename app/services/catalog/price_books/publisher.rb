@@ -243,14 +243,14 @@ module Catalog
           row = book.option_prices.find_by(id: r['price_id']) or next
           next unless row.option&.kind == 'color' && r['key'].present? && r['color_set'].present?
 
+          # An option already at the key ("Siding: White", written as a standard
+          # choice) becomes the set's color, as color_option makes it.
           option = CatalogOption.find_or_initialize_by(manufacturer_id: book.manufacturer_id, key: r['key'])
-          if option.new_record?
-            option.group = CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, factory_id: book.factory_id, key: r['group_key']) ||
+          option.group ||= CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, factory_id: book.factory_id, key: r['group_key']) ||
                            row.option.group
-            option.assign_attributes(name: r['name'].to_s.truncate(250), kind: 'color', status: 'active',
-                                     metadata: { 'color_set' => r['color_set'] })
-            option.save!
-          end
+          option.assign_attributes(name: r['name'].to_s.truncate(250), kind: 'color', status: 'active',
+                                   metadata: option.metadata.to_h.merge('color_set' => r['color_set']))
+          option.save! if option.changed?
           next if row.catalog_option_id == option.id
 
           row.update_columns(catalog_option_id: option.id, updated_at: Time.current)

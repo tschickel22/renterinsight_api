@@ -17,6 +17,18 @@ module Audiences
 
     VIRTUAL_FIELDS = %w[source_name owner_name].freeze
 
+    ADDRESS_COLUMNS = {
+      'Lead'    => %w[city state zip],
+      'Contact' => %w[street city state zip],
+      'Account' => %w[billing_street billing_city billing_state billing_postal_code
+                      shipping_street shipping_city shipping_state shipping_postal_code]
+    }.freeze
+
+    # Typed by people and imported from spreadsheets, so "co", "CO" and "CO "
+    # all mean Colorado. Exact comparisons on these ignore case and
+    # surrounding spaces.
+    CASE_INSENSITIVE_FIELDS = ADDRESS_COLUMNS.values.flatten.uniq.freeze
+
     def initialize(company:, source_type:, filter_tree:,
                    exclude_filter_tree: nil,
                    manual_include_ids: nil,
@@ -184,6 +196,10 @@ module Audiences
       table = scope.model.table_name
       qualified = "#{table}.#{column}"
 
+      if CASE_INSENSITIVE_FIELDS.include?(column) && %w[equals not_equals in not_in].include?(operator)
+        return apply_case_insensitive_leaf(scope, qualified, operator, value)
+      end
+
       case operator
       when 'equals'
         scope.where(column => value)
@@ -216,6 +232,19 @@ module Audiences
       when 'days_since_greater_than'
         days = value.to_i
         scope.where("#{qualified} < ?", days.days.ago)
+      end
+    end
+
+    # NOT matches a blank column too, as not_equals on any other field does.
+    def apply_case_insensitive_leaf(scope, qualified, operator, value)
+      values = Array(value).map { |v| v.to_s.strip.downcase }.reject(&:empty?)
+      return scope if values.empty?
+
+      normalized = "LOWER(TRIM(#{qualified}))"
+      if operator.start_with?('not')
+        scope.where("#{qualified} IS NULL OR #{normalized} NOT IN (?)", values)
+      else
+        scope.where("#{normalized} IN (?)", values)
       end
     end
 
@@ -344,11 +373,11 @@ module Audiences
       when 'Lead'
         # is_converted: a recurring audience ("every lead who wants the weekly
         # homes email") must be able to let a lead go once it becomes a deal.
-        %w[first_name last_name email phone status source_id health_score opt_in_sms last_activity_at created_at updated_at company_name title location_id owner_id is_converted]
+        %w[first_name last_name email phone status source_id health_score opt_in_sms last_activity_at created_at updated_at company_name title location_id owner_id is_converted] + ADDRESS_COLUMNS['Lead']
       when 'Contact'
-        %w[first_name last_name email phone opt_in_sms account_id created_at updated_at company_name title location_id owner_id]
+        %w[first_name last_name email phone opt_in_sms account_id created_at updated_at company_name title location_id owner_id] + ADDRESS_COLUMNS['Contact']
       when 'Account'
-        %w[name account_type website created_at updated_at]
+        %w[name account_type website created_at updated_at] + ADDRESS_COLUMNS['Account']
       else
         []
       end

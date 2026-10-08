@@ -58,7 +58,10 @@ RSpec.describe 'Api service ticket attachment audiences', type: :request do
       )
     end
 
-    it 'copies only manufacturer-tagged files onto the generated claim' do
+    # Claims used to get a one-time copy of the tagged files. Since 57797982
+    # they read the ticket's manufacturer-tagged files live, so a tag changed
+    # after the claim exists still reaches the manufacturer.
+    it 'shows the manufacturer only the files tagged for them, live from the ticket' do
       mfr_file = attach_file(ticket, 'manufacturer.png')
       attach_file(ticket, 'internal.png') # left untagged → internal only
 
@@ -71,8 +74,12 @@ RSpec.describe 'Api service ticket attachment audiences', type: :request do
 
       expect(response).to have_http_status(:created)
       claim = WarrantyClaim.find(JSON.parse(response.body).dig('claim', 'id'))
-      expect(claim.attachments.count).to eq(1)
-      expect(claim.attachments.first.filename.to_s).to eq('manufacturer.png')
+      expect(claim.attachments.count).to eq(0) # nothing copied
+      expect(claim.manufacturer_attachments.map { |a| a.filename.to_s }).to eq(['manufacturer.png'])
+
+      patch "/api/v1/service-tickets/#{ticket.id}/attachments/#{mfr_file.id}/audience",
+            params: { visible_to_manufacturer: false }, headers: headers
+      expect(claim.reload.manufacturer_attachments).to be_empty
     end
   end
 
