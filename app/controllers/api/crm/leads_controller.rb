@@ -504,7 +504,7 @@ module Api
       # per-row path (which keeps callbacks).
       #
       # Accepts EITHER lead_ids: [int] OR filter: { status_category, search, owner_id,
-      # health_band }, PLUS any of: status, owner_id.
+      # health_band, tag_ids, status, source_id }, PLUS any of: status, owner_id.
       def bulk_update
         return unless authorize_action!('leads', 'update')
 
@@ -1149,6 +1149,17 @@ module Api
         if filters[:owner_id].present?
           # 'unassigned' sentinel matches leads with no owner; numeric ids filter to that owner.
           scope = filters[:owner_id].to_s == 'unassigned' ? scope.where(owner_id: nil) : scope.where(owner_id: filters[:owner_id])
+        end
+
+        # Status and source were filtered in the browser on the loaded page
+        # only, so the total, the later pages and "select all matching" all
+        # ignored them. 'all' is the dropdown's no-filter value.
+        if filters[:status].present? && filters[:status].to_s != 'all'
+          scope = scope.where(status: filters[:status].to_s)
+        end
+
+        if filters[:source_id].present? && filters[:source_id].to_s != 'all'
+          scope = scope.where(source_id: filters[:source_id])
         end
 
         if (range = HEALTH_BAND_RANGES[filters[:health_band].to_s])
