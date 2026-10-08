@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_08_050000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_08_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1372,6 +1372,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_050000) do
     t.text "sms_body"
     t.string "media_url"
     t.jsonb "attachments", default: []
+    t.datetime "send_at"
+    t.string "send_at_timezone"
     t.index ["campaign_id", "position"], name: "index_campaign_steps_on_campaign_id_and_position"
   end
 

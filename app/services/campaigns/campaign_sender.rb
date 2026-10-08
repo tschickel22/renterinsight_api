@@ -47,6 +47,9 @@ module Campaigns
       #
       # A test send is excluded: an admin pressing Send Test twice means it.
       return mark_skipped('already_sent_for_step') if !test_send? && already_sent?(step)
+      # Reached after its day was over (joined late, or held past midnight by
+      # the send window): skip rather than send a day-of message a day late.
+      return mark_skipped('send_date_passed') if !test_send? && step.send_day_passed?
 
       if contact_value.blank?
         # In a mixed campaign someone with an email but no phone still gets the

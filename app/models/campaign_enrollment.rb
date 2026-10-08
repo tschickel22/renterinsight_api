@@ -51,13 +51,13 @@ class CampaignEnrollment < ApplicationRecord
     if next_step.nil?
       update!(status: 'completed', last_sent_at: Time.current)
     else
-      wait_seconds = (next_step.wait_days || 0) * 86400 + (next_step.wait_hours || 0) * 3600
       # Paced like the initial enrollment, otherwise a cohort enrolled together
       # re-converges on the next step: 490 recipients that were spread over an
       # hour would all come due at exactly wait_days later and burst again.
+      # A dated step comes due at its date rather than after a wait.
       slot = Messaging::SendPacer.new(
         connection_key: sending_connection_key,
-        earliest: Time.current + wait_seconds.seconds
+        earliest: next_step.due_at(Time.current)
       ).next_slot
       update!(
         status: 'active', # in-progress drip (was 'pending'); stays in the active scope

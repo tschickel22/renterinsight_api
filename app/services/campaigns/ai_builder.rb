@@ -174,11 +174,14 @@ module Campaigns
         Array(plan['steps']).each_with_index do |step, idx|
           step_channel = step_channel_for(plan, step)
           sms = step_channel == 'sms'
+          send_at = plan_send_at(step, generation)
           campaign.campaign_steps.create!(
             position: idx,
             channel: step_channel,
-            wait_days: step['wait_days'] || 0,
-            wait_hours: step['wait_hours'] || 0,
+            wait_days: send_at ? 0 : (step['wait_days'] || 0),
+            wait_hours: send_at ? 0 : (step['wait_hours'] || 0),
+            send_at: send_at,
+            send_at_timezone: (send_at && plan_time_zone(generation)&.tzinfo&.name),
             subject: (step['subject'] unless sms),
             preheader: (step['preheader'] unless sms),
             body_blocks: sms ? [] : (step['body_blocks'] || []),
@@ -250,6 +253,24 @@ module Campaigns
       step['sms_body'].present? && step['body_blocks'].blank? ? 'sms' : 'email'
     end
 
+    # The dealer's time zone, sent by the builder (the browser's zone), so a
+    # date the AI writes means the dealer's calendar day.
+    def plan_time_zone(generation)
+      ActiveSupport::TimeZone[generation.context_snapshot.to_h['timezone'].to_s]
+    end
+
+    # A step the AI pinned to a date carries send_at as local wall time
+    # ("2026-10-18T09:00"), read in the dealer's zone. Unparseable is ignored,
+    # leaving the step on its wait.
+    def plan_send_at(step, generation)
+      raw = step['send_at'].to_s.strip
+      return nil if raw.blank?
+
+      (plan_time_zone(generation) || ActiveSupport::TimeZone['Eastern Time (US & Canada)']).parse(raw)
+    rescue ArgumentError
+      nil
+    end
+
     def build_context(channel, overrides)
       # Try both casings for the setting key (historically inconsistent)
       profile = Setting.get('Company', @company.id, 'company_profile') ||
@@ -281,7 +302,15 @@ module Campaigns
         'contact_count' => safe_count(@company.try(:contacts)),
         'available_templates' => CampaignTemplate.seeded.where(channel: channel == 'mixed' ? %w[email sms] : channel).pluck(:slug)
       }
-      base.merge((overrides || {}).stringify_keys)
+      merged = base.merge((overrides || {}).stringify_keys)
+      # Today in the dealer's zone, so "Saturday" or "the 18th" in a prompt
+      # resolves to the right date.
+      # The builder always sends one; Eastern is the same fallback the send
+      # window uses, and is stored back so accept reads dates in that zone.
+      tz = ActiveSupport::TimeZone[merged['timezone'].to_s] || ActiveSupport::TimeZone['Eastern Time (US & Canada)']
+      merged['timezone'] = tz.tzinfo.name
+      merged['today'] = Time.current.in_time_zone(tz).strftime('%A, %Y-%m-%d')
+      merged
     end
 
     def business_display_name
@@ -405,6 +434,7 @@ module Campaigns
               {
                 "wait_days": 0, "wait_hours": 0,
                 "channel": "email" | "sms",  // REQUIRED when the plan channel is "mixed"; omit otherwise
+                "send_at": "2026-10-18T09:00",  // OPTIONAL. Local date and time in context.timezone. ONLY when the prompt ties this message to a specific calendar day (an event, an open house, a deadline). When set, wait_days/wait_hours are ignored.
                 "subject": "Email subject (omit for SMS)",
                 "preheader": "Email preview text (omit for SMS)",
                 "body_blocks": [
@@ -472,6 +502,12 @@ module Campaigns
         CADENCE:
         - Day 1, then space subsequent steps (3, 7, 14, 30, 60 days are sensible).
         - Never less than 24 hours between steps.
+
+        DATED STEPS:
+        - When the prompt names a specific date or event day ("the open house is Saturday the 18th", "remind them the day before"), give the steps tied to that day a "send_at" (local time, e.g. "2026-10-18T09:00"), worked out from context.today. A day-of message goes the morning of that day; a reminder the day before goes mid-morning.
+        - Keep send_at times between 9:00 and 18:00 so they fall inside normal sending hours (texts can never go before 8:00 or after 21:00).
+        - Steps without a tie to a date use wait_days/wait_hours as usual. Dated steps must be in date order with each other.
+        - If the prompt names a date without a year, use the next occurrence on or after context.today.
 
         CHANNEL:
         - Use context.channel as the plan channel. Do not switch it, even if the prompt asks for a channel that context.channel does not include; the dealer picks channels in the builder.

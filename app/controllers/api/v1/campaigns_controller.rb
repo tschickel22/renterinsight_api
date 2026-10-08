@@ -101,6 +101,8 @@ class Api::V1::CampaignsController < ApplicationController
             body_blocks: sp['body_blocks'],
             sms_body: sp['sms_body'],
             media_url: sp['media_url'],
+            send_at: sp['send_at'].presence,
+            send_at_timezone: sp['send_at_timezone'].presence,
             is_active: true
           )
         end
@@ -238,6 +240,7 @@ class Api::V1::CampaignsController < ApplicationController
       reasons << 'Campaign must be in draft status' unless @campaign.status == 'draft'
       reasons << 'Campaign needs at least one active step' if @campaign.campaign_steps.where(is_active: true).empty?
       reasons << 'Campaign needs an audience' if @campaign.campaign_audience.nil?
+      reasons.concat(@campaign.step_date_problems)
 
       step_channels = @campaign.campaign_steps.active.pluck(:channel).compact.uniq
       needs_email = step_channels.include?('email') || (step_channels.empty? && @campaign.email_channel?)
@@ -1141,6 +1144,8 @@ class Api::V1::CampaignsController < ApplicationController
       channel: s.channel,
       wait_days: s.wait_days,
       wait_hours: s.wait_hours,
+      send_at: s.send_at&.iso8601,
+      send_at_timezone: s.send_at_timezone,
       subject: s.subject,
       preheader: s.preheader,
       body_blocks: s.body_blocks,

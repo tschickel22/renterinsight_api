@@ -12,8 +12,7 @@ module Campaigns
       return 0 unless @audience
 
       first_step = @campaign.campaign_steps.active.ordered.first
-      first_wait_seconds = ((first_step&.wait_days || 0) * 86400) + ((first_step&.wait_hours || 0) * 3600)
-      earliest_send_at = Time.current + first_wait_seconds.seconds
+      earliest_send_at = first_step ? first_step.due_at(Time.current) : Time.current
 
       # Every enrollment used to get an IDENTICAL next_send_at, so enrolling 490
       # recipients made 490 sends due in the same instant and the scheduler
