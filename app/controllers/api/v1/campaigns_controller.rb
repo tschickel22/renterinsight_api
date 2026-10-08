@@ -1126,6 +1126,9 @@ class Api::V1::CampaignsController < ApplicationController
       utm_medium: c.utm_medium,
       utm_campaign: c.utm_campaign,
       steps: c.campaign_steps.ordered.map { |s| step_json(s) },
+      # Shown read only under Settings > Sender. Texts always go from the
+      # company (or location) number, never a per-campaign choice.
+      sms_from_number: (c.resolve_sms_sender_for_step&.phone_number if c.sends_sms?),
       audience: c.campaign_audience ? audience_json(c.campaign_audience) : nil,
       enrollments_count: c.campaign_enrollments.active.count
     )

@@ -56,4 +56,20 @@ RSpec.describe 'Campaign SMS availability and mixed-campaign consent', type: :re
     expect(response).to have_http_status(:ok)
     expect(c.campaign_audience.reload.sms_compliance_override?).to be true
   end
+
+  it 'shows the number a mixed campaign texts from, and none for an email-only one' do
+    TwilioAccount.create!(company_id: company.id, phone_number: '+15558889999', phone_number_sid: 'PN1', status: 'active')
+    c = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'Mixed',
+                         campaign_type: 'drip', channel: 'email',
+                         from_identity_type: 'User', from_identity_id: user.id, throttle_per_day: 100)
+    c.campaign_steps.create!(position: 0, channel: 'email', subject: 'Hi', body_blocks: [{ 'type' => 'text', 'html' => 'x' }])
+    sms = c.campaign_steps.create!(position: 1, channel: 'sms', sms_body: 'Hi')
+
+    get "/api/v1/campaigns/#{c.id}", headers: headers
+    expect(JSON.parse(response.body)['sms_from_number']).to eq('+15558889999')
+
+    sms.destroy!
+    get "/api/v1/campaigns/#{c.id}", headers: headers
+    expect(JSON.parse(response.body)['sms_from_number']).to be_nil
+  end
 end
