@@ -112,6 +112,15 @@ class PurchaseOrder < ApplicationRecord
   def supplier_name
     supplier&.name
   end
+
+  # The buyer on the deal this PO is for, for the PO list.
+  def deal_customer_name
+    deal&.customer_display_name
+  end
+
+  def deal_number
+    deal&.deal_number
+  end
   
   def location_name
     location&.name

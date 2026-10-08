@@ -72,6 +72,16 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     po = deal.purchase_orders.last
     expect(po.supplier.name).to eq("#{mfr.name} Decatur")
 
+    # Not sent yet: the factory never got it, so it cannot have arrived.
+    post "/api/v1/purchase-orders/#{po.id}/receive-home", headers: headers, params: { serial_number: 'DEC123456AB' }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(JSON.parse(response.body)['error']).to include('has not been sent')
+
+    post "/api/v1/purchase-orders/#{po.id}/send", headers: headers
+    get '/api/v1/purchase-orders', headers: headers, params: { search: 'Smith' }
+    listed = JSON.parse(response.body)['items']
+    expect(listed.map { |p| [p['id'], p['deal_customer_name']] }).to eq([[po.id, deal.customer_display_name]])
+
     post "/api/v1/purchase-orders/#{po.id}/receive-home", headers: headers, params: { serial_number: 'DEC123456AB' }.to_json
     expect(response).to have_http_status(:ok)
     home = company.vehicles.find(body['received_vehicle_id'])

@@ -84,6 +84,8 @@ module Truebuild
     def self.receive!(po, serial_number:, user:, vehicle: nil, stock_number: nil)
       raise Refused, 'Only a factory PO is received this way' unless po.factory_home?
       raise Refused, "#{po.po_number} is #{po.status}" if %w[received cancelled].include?(po.status)
+      # A PO the factory never got cannot have arrived.
+      raise Refused, "#{po.po_number} has not been sent: email it or mark it sent first" if po.draft?
       raise Refused, 'Enter the serial number on the home' if serial_number.blank? && vehicle.nil?
 
       build = po.deal_home_build || po.deal&.home_build

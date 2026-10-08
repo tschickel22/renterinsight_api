@@ -37,9 +37,9 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     # Search
     if params[:search].present?
       search_term = "%#{params[:search]}%"
-      purchase_orders = purchase_orders.joins(:supplier).where(
-        'purchase_orders.po_number ILIKE ? OR suppliers.name ILIKE ?',
-        search_term, search_term
+      purchase_orders = purchase_orders.joins(:supplier).left_joins(deal: :contact).where(
+        'purchase_orders.po_number ILIKE :q OR vendors.name ILIKE :q OR deals.name ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q',
+        q: search_term
       )
     end
 
@@ -60,14 +60,14 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     total_count = purchase_orders.count
     
     purchase_orders = purchase_orders
-      .includes(:supplier, :location, :created_by, lines: :part)
+      .includes(:supplier, :location, :created_by, { deal: %i[contact account] }, lines: :part)
       .order(order_date: :desc, created_at: :desc)
       .offset((page - 1) * per_page)
       .limit(per_page)
 
     render json: {
       items: purchase_orders.as_json(
-        methods: [:supplier_name, :location_name, :created_by_name],
+        methods: [:supplier_name, :location_name, :created_by_name, :deal_customer_name, :deal_number],
         include: {
           supplier: { only: [:id, :name, :code] },
           location: { only: [:id, :name] },
@@ -93,7 +93,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     return unless authorize_action!('inventory', 'read')
 
     json = @purchase_order.as_json(
-      methods: [:supplier_name, :location_name, :created_by_name],
+      methods: [:supplier_name, :location_name, :created_by_name, :deal_customer_name],
       include: {
         supplier: { only: [:id, :name, :code, :account_number, :email, :phone] },
         location: { 
