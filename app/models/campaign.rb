@@ -97,6 +97,17 @@ class Campaign < ApplicationRecord
     step_channels.length > 1
   end
 
+  # Channels the active steps send on. A mixed campaign keeps channel 'email'
+  # and carries its texts as SMS steps, so the campaign channel alone does not
+  # say whether it texts anyone.
+  def active_step_channels
+    chans = campaign_steps.active.pluck(:channel).compact.uniq
+    chans.presence || [channel]
+  end
+
+  def sends_sms?   = active_step_channels.include?('sms')
+  def sends_email? = active_step_channels.include?('email')
+
   def can_start?
     return false unless status == 'draft'
     return false if campaign_steps.active.empty?

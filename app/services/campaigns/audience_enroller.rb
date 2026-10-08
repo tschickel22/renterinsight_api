@@ -31,14 +31,21 @@ module Campaigns
       # a rerun (dynamic mode / recurrence cycle) doesn't double-count.
       seen_contact_values = Set.new(existing_snapshot_values)
 
+      # A mixed campaign needs both addresses on the enrollment: an SMS step
+      # reads sms_phone_snapshot and an email step email_address_snapshot.
+      # Snapshotting only the campaign channel's address left every SMS step
+      # of an email campaign with nothing to send to.
+      wants_email = @campaign.sends_email?
+      wants_sms   = @campaign.sends_sms?
+
       enrolled = 0
       each_source_type do |source_type, scope|
         scope.find_each do |record|
-          contact_value = if @campaign.email_channel?
-                            record.try(:email)&.downcase
-                          else
-                            normalize_phone(record.try(:phone))
-                          end
+          email = (record.try(:email).to_s.downcase.presence if wants_email)
+          phone = (normalize_phone(record.try(:phone)) if wants_sms)
+          # The campaign channel's address is the dedupe key; a mixed campaign
+          # falls back to the other one for someone who only has that.
+          contact_value = @campaign.email_channel? ? (email || phone) : (phone || email)
           next if contact_value.blank?
           next if CampaignSuppression.suppressed?(@campaign.company_id, contact_value)
           next unless seen_contact_values.add?(contact_value)
@@ -48,11 +55,8 @@ module Campaigns
             recipient_type: source_type, recipient_id: record.id,
             status: 'pending', current_step_index: 0
           }
-          if @campaign.email_channel?
-            attrs[:email_address_snapshot] = contact_value
-          else
-            attrs[:sms_phone_snapshot] = contact_value
-          end
+          attrs[:email_address_snapshot] = email if email
+          attrs[:sms_phone_snapshot] = phone if phone
 
           existing = CampaignEnrollment.find_by(
             campaign_id: @campaign.id,
@@ -122,9 +126,10 @@ module Campaigns
     # Test sends are excluded: a test goes to the admin who pressed the button,
     # and counting that address shut out any real recipient who shares it.
     def existing_snapshot_values
-      col = @campaign.email_channel? ? :email_address_snapshot : :sms_phone_snapshot
-      values = @campaign.campaign_enrollments.real.where.not(col => nil).pluck(col)
-      @campaign.email_channel? ? values.map { |v| v.to_s.downcase } : values
+      real = @campaign.campaign_enrollments.real
+      emails = real.where.not(email_address_snapshot: nil).pluck(:email_address_snapshot).map { |v| v.to_s.downcase }
+      phones = real.where.not(sms_phone_snapshot: nil).pluck(:sms_phone_snapshot)
+      emails + phones
     end
 
     private

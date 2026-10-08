@@ -622,6 +622,14 @@ class Api::V1::CampaignsController < ApplicationController
     prompt = params[:prompt].to_s.strip
     return render(json: { error: 'prompt is required' }, status: :unprocessable_entity) if prompt.blank?
     channel = params[:channel].presence || 'email'
+    unless %w[email sms mixed].include?(channel)
+      return render(json: { error: "Unknown channel: #{channel}" }, status: :unprocessable_entity)
+    end
+    # Texts need a number to send from. Checked here so the AI never drafts an
+    # SMS campaign the dealer could not start.
+    if channel != 'email' && sms_sender_for_new_campaign.nil?
+      return render(json: { error: 'No active SMS number for this company. Provision one in Settings > Communications > SMS.' }, status: :unprocessable_entity)
+    end
 
     # Extract document context (base64-encoded files uploaded for AI to reference)
     attachment_context = if params[:attachment_context].present?
@@ -731,8 +739,9 @@ class Api::V1::CampaignsController < ApplicationController
     return render(json: { error: 'Generation not found' }, status: :not_found) unless generation
 
     plan = generation.generated_plan || {}
-    step_plan = Array(plan['steps']).first
-    return render(json: { error: 'Plan has no steps to preview' }, status: :unprocessable_entity) if step_plan.blank?
+    # A mixed plan previews its first email step; its texts have no email render.
+    step_plan = Array(plan['steps']).find { |s| s['channel'] != 'sms' }
+    return render(json: { error: 'Plan has no email steps to preview' }, status: :unprocessable_entity) if step_plan.blank?
 
     # Un-persisted models so the preview doesn't leak into the campaigns
     # list, stats, or credit accounting. EmailRenderer treats
@@ -740,7 +749,7 @@ class Api::V1::CampaignsController < ApplicationController
     campaign = Campaign.new(
       company_id: @company.id,
       name: plan['name'] || 'AI Preview',
-      channel: plan['channel'] || 'email',
+      channel: plan['channel'] == 'sms' ? 'sms' : 'email',
       campaign_type: plan['campaign_type'] || 'drip',
       from_identity_type: 'Company',
       from_identity_id: nil,
@@ -780,6 +789,16 @@ class Api::V1::CampaignsController < ApplicationController
   rescue => e
     Rails.logger.error "[CampaignsController#ai_preview_render] #{e.class}: #{e.message}"
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/campaigns/sms_status
+  # Whether this company can send campaign texts, so the AI builder only
+  # offers SMS when there is a number to send from.
+  def sms_status
+    return unless authorize_action!('campaigns', 'read')
+
+    sender = sms_sender_for_new_campaign
+    render json: { available: sender.present?, from_number: sender&.phone_number }
   end
 
   def merge_fields
@@ -879,6 +898,12 @@ class Api::V1::CampaignsController < ApplicationController
   end
 
   private
+
+  # The number a campaign created now would text from, resolved the same way
+  # the sender resolves it at send time.
+  def sms_sender_for_new_campaign
+    Campaign.new(company_id: @company.id, channel: 'sms', location_id: current_location&.id).resolve_sms_sender_for_step
+  end
 
   # Walks the parent_generation chain forward to the most recent descendant
   # so subsequent refines build on top of prior ones rather than starting
