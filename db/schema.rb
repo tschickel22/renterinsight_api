@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_08_060000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_08_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1553,7 +1553,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_060000) do
     t.string "series"
     t.string "key", null: false
     t.string "name", null: false
-    t.string "selection_type", default: "single", null: false
+    t.string "selection_type", default: "multiple", null: false
     t.boolean "required", default: false, null: false
     t.integer "position", default: 0, null: false
     t.string "render_surface"

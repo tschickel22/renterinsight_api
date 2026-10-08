@@ -100,6 +100,43 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(body.dig('build', 'totals')).to include('cost' => 51_295.0 + 1295, 'retail' => 64_036.25, 'tbd_count' => 1)
   end
 
+  it 'keeps a color in another set of a single-choice section: carpet does not clear linoleum' do
+    flooring = CatalogOptionGroup.create!(manufacturer: mfr, key: 'flooring', name: 'Flooring', selection_type: 'single')
+    dune = option(flooring, 'Dune', nil, standard: true, color_set: 'Carpet')
+    tobacco = option(flooring, 'Tobacco', nil, standard: true, color_set: 'Linoleum')
+    sand = option(flooring, 'Sand', nil, standard: true, color_set: 'Carpet')
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+
+    [dune, tobacco, sand].each { |o| post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: o.id }.to_json }
+    labels = body.dig('build', 'lines').map { |l| l['label'] }
+    expect(labels).to include('Carpet: Sand', 'Linoleum: Tobacco')
+    expect(labels).not_to include('Carpet: Dune')
+  end
+
+  it 'moves a sheet line off a shared color the split replaced, or drops it for a newer pick in its set' do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    build = deal.home_builds.first
+    build.update_columns(options_book_id: book.id)
+    flooring = CatalogOptionGroup.create!(manufacturer: mfr, key: 'flooring', name: 'Flooring', selection_type: 'multiple')
+    # The shared options a book had before the split; the book no longer prices them.
+    old_dune = CatalogOption.create!(group: flooring, manufacturer: mfr, key: 'flooring--old-dune', name: 'Dune', kind: 'color',
+                                     metadata: { 'color_set' => 'Carpet' })
+    old_white = CatalogOption.create!(group: exterior, manufacturer: mfr, key: 'exterior--old-white', name: 'White', kind: 'color',
+                                      metadata: { 'color_set' => 'Corner posts' })
+    dune = option(flooring, 'Dune', nil, standard: true, color_set: 'Carpet')
+    option(exterior, 'White', nil, standard: true, color_set: 'Siding')
+    build.lines.create!(kind: 'option', option: old_dune, label: 'Carpet: Dune', position: 10)
+    build.lines.create!(kind: 'option', option: old_white, label: 'Siding: White', position: 11)
+    build.lines.create!(kind: 'option', option: flint, label: 'Siding: Flint', position: 12)
+
+    expect(Catalog::PriceBooks::Publisher.repoint_color_lines!(book)).to eq(2)
+    lines = build.lines.reload
+    expect(lines.find_by(label: 'Carpet: Dune').catalog_option_id).to eq(dune.id)
+    expect(lines.where(catalog_option_id: [old_dune.id, old_white.id])).to be_empty
+    expect(lines.find_by(label: 'Siding: Flint')).to be_present
+    expect(build.reload.totals['warnings'].to_a.grep(/not offered/)).to be_empty
+  end
+
   it 'keeps a price the rep set through repricing, and takes custom lines as typed' do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: insulation.id }.to_json

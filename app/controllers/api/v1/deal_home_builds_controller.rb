@@ -185,7 +185,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     ids = rows.map(&:catalog_option_id).uniq
     rules = CatalogOptionRule.approved.where(catalog_option_id: ids).pluck(:catalog_option_id, :rule_type, :target_option_id)
                              .group_by(&:first)
-    groups = rows.group_by { |op| op.option.group }.sort_by { |g, _| [g&.position.to_i, g&.name.to_s] }.map do |group, ops|
+    # By section, not group record: a color shared by two factories sits in
+    # one factory's group, and Flooring showed up twice on the other's homes.
+    sections = rows.group_by { |op| op.option.group&.key || op.option.group&.name }
+    groups = sections.values.map { |ops| [ops.map { |op| op.option.group }.compact.min_by(&:id), ops] }
+                     .sort_by { |g, _| [g&.position.to_i, g&.name.to_s] }.map do |group, ops|
       { id: group&.id, name: group&.name, selection_type: group&.selection_type, required: group&.required,
         options: most_specific(ops).map do |op|
           { id: op.catalog_option_id, name: op.option.name, kind: op.option.kind, standard: op.is_standard,

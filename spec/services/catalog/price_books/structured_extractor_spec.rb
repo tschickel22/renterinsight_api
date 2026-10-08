@@ -83,9 +83,9 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
                                 payload: { 'kind' => 'color', 'group' => set, 'name' => 'White' })
       CatalogOptionPrice.create!(price_book: book, option: shared, is_standard: true, source_ref: ref)
     end
-    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(2)
+    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(moved: 2, lines: 0)
     sets = book.option_prices.reload.map { |r| r.option.metadata['color_set'] }
     expect(sets).to contain_exactly('Siding', 'Shutters')
-    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(0) # once is enough
+    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(moved: 0, lines: 0) # once is enough
   end
 end
