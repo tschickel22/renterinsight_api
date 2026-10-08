@@ -31,7 +31,10 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
                 { tab: 'Prime - Decatur factory', section: 'Construction',
                   description: 'Upgrade Insulation: R33 Roof & R22 Outside I-Beams Singlewide', dealer_cost: 330 }],
       colors: [{ tab: 'Prime - Decatur factory', group: 'Siding', name: 'Clay' },
-               { tab: 'Prime - Decatur factory', group: 'Siding', name: 'Flint' }] }.to_json
+               { tab: 'Prime - Decatur factory', group: 'Siding', name: 'Flint' },
+               { tab: 'Prime - Decatur factory', group: 'Siding', name: 'White' },
+               { tab: 'Prime - Decatur factory', group: 'Shutters', name: 'White' },
+               { tab: 'Prime - Decatur factory', group: 'Corner Posts', name: 'White' }] }.to_json
   end
 
   it 'is recognized, reads every row, and publishes them under the catalog names' do
@@ -42,7 +45,7 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
     doc = book.documents.create!(filename: 'decatur.json', checksum_sha256: SecureRandom.hex(32), kind: 'price_list',
                                  storage_key: 'k', storage_bucket: 'b', byte_size: file.bytesize, content_type: 'application/json')
     described_class.new(doc, file, Catalog::PriceBooks::Recorder.new(book, document: doc)).call
-    expect(book.import_items.group(:item_type).count).to eq('variant_price' => 2, 'option_price' => 2, 'option' => 2)
+    expect(book.import_items.group(:item_type).count).to eq('variant_price' => 2, 'option_price' => 2, 'option' => 5)
     expect(doc.reload.metadata).to include('structured' => true, 'partial' => true)
 
     Catalog::PriceBooks::Reconciler.new(book).call
@@ -63,5 +66,26 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
     clay = rows.find { |r| r.option.name == 'Clay' }
     expect(clay.option.metadata['color_set']).to be_present
     expect(clay.is_standard).to be(true)
+    # "White" in three sets is three options, each in its own set.
+    whites = rows.select { |r| r.option.name == 'White' }
+    expect(whites.map { |r| r.option.metadata['color_set'] }).to contain_exactly('Siding', 'Shutters', 'Corner posts')
+    expect(whites.map(&:catalog_option_id).uniq.size).to eq(3)
+  end
+
+  it 'splits colors a book published before keying by set had sharing one option' do
+    shared = CatalogOption.create!(manufacturer: mfr, key: 'exterior--white', name: 'White', kind: 'color',
+                                   group: CatalogOptionGroup.create!(manufacturer: mfr, key: 'exterior', name: 'Exterior'),
+                                   metadata: { 'color_set' => 'Shutters' })
+    book.update_columns(status: 'published', published_at: Time.current)
+    %w[Siding Shutters].each_with_index do |set, i|
+      ref = { 'document_id' => 1, 'structured' => 'color', 'index' => i }
+      book.import_items.create!(item_type: 'option', review_status: 'approved', source_ref: ref,
+                                payload: { 'kind' => 'color', 'group' => set, 'name' => 'White' })
+      CatalogOptionPrice.create!(price_book: book, option: shared, is_standard: true, source_ref: ref)
+    end
+    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(2)
+    sets = book.option_prices.reload.map { |r| r.option.metadata['color_set'] }
+    expect(sets).to contain_exactly('Siding', 'Shutters')
+    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(0) # once is enough
   end
 end

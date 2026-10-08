@@ -3109,6 +3109,8 @@ Rails.application.routes.draw do
           get  :link_sources
           post :link_catalog
           post :publish
+          # Colors that shared one option across sets get one each (Publisher.split_colors!).
+          post :split_colors
           get  'documents/:document_id/download', action: :download_document, as: :download_document
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
           get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs

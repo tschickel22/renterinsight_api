@@ -363,6 +363,14 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
   # POST /api/admin/catalog_price_books/:id/publish
   # Checks what can be checked quickly, then publishes in the background.
   # The book's publishing state says queued, running, done or failed.
+  # POST /api/admin/catalog_price_books/:id/split_colors
+  # A book published before colors were keyed by set: its colors that shared
+  # one option across sets ("White" in Siding and Shutters) get one each.
+  def split_colors
+    moved = Catalog::PriceBooks::Publisher.split_colors!(@book)
+    render json: { moved: moved }
+  end
+
   def publish
     return render json: { error: "This price book is #{@book.status}" }, status: :unprocessable_entity unless @book.editable?
 
