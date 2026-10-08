@@ -21,12 +21,40 @@ module Truebuild
       @deal = build.deal
     end
 
+    # The PO's item lines: the home and its factory options. A color or finish
+    # pick at no charge goes in the colors list instead (colors), where its set
+    # names it ("Shutters: Black", not a bare "Black").
     def self.lines(build)
-      build.lines.select { |l| %w[base option].include?(l.kind) && l.priced? }.map do |l|
+      color_ids = color_option_ids(build)
+      build.lines.select { |l| %w[base option].include?(l.kind) && l.priced? }
+           .reject { |l| l.kind == 'option' && color_ids.include?(l.catalog_option_id) && l.unit_cost.to_d.zero? }.map do |l|
         { 'kind' => l.kind, 'option_id' => l.catalog_option_id, 'description' => l.kind == 'base' ? home_name(build) : l.label,
           'code' => l.kind == 'base' ? build.variant.model_number : l.factory_code,
           'quantity' => l.quantity.to_d.to_s, 'unit_cost' => l.unit_cost.to_d.round(2).to_s }
       end
+    end
+
+    # Every color and finish set offered on this model, with what was picked:
+    # the factory needs each one, and an unpicked set is flagged to confirm.
+    def self.colors(build)
+      sets = offered_sets(build)
+      chosen = build.lines.select { |l| l.kind == 'option' && !l.tbd }.index_by(&:catalog_option_id)
+      sets.map do |set, options|
+        pick = options.find { |o| chosen[o.id] }
+        name = pick && (pick.name.to_s.start_with?("#{set}:") ? pick.name.to_s.sub("#{set}:", '').strip : pick.name)
+        { 'set' => set, 'choice' => name, 'code' => pick&.factory_code }
+      end.sort_by { |c| c['set'].to_s.downcase }
+    end
+
+    def self.offered_sets(build)
+      variant = build.variant
+      book = OptionSource.current_for(variant)
+      rows = OptionSource.offered(book, variant, construction: build.construction).select { |op| op.option.status == 'active' }
+      rows.map(&:option).uniq.group_by { |o| DealBuild.choice_set(o) }.except(nil)
+    end
+
+    def self.color_option_ids(build)
+      offered_sets(build).values.flatten.map(&:id).to_set
     end
 
     def self.home_name(build)
@@ -39,7 +67,9 @@ module Truebuild
       build = po.deal_home_build || po.deal&.home_build
       return false unless build
 
-      po.sheet_snapshot.to_h['lines'] != lines(build) || po.deal_home_build_id != po.deal&.home_build&.id
+      snap = po.sheet_snapshot.to_h
+      snap['lines'] != lines(build) || (snap.key?('colors') && snap['colors'] != colors(build)) ||
+        po.deal_home_build_id != po.deal&.home_build&.id
     end
 
     # The supplier record that stands for a manufacturer on POs and bills: the
@@ -132,8 +162,8 @@ module Truebuild
                        catalog_option_id: l['option_id'], quantity_ordered: l['quantity'].to_d, unit_cost: l['unit_cost'].to_d)
       end
       tbd = @build.lines.count(&:tbd)
-      po.sheet_snapshot = { 'lines' => lines, 'version' => @build.version_number, 'written_at' => Time.current.iso8601,
-                            'tbd_left_off' => tbd }
+      po.sheet_snapshot = { 'lines' => lines, 'colors' => self.class.colors(@build), 'version' => @build.version_number,
+                            'written_at' => Time.current.iso8601, 'tbd_left_off' => tbd }
     end
 
     def default_notes

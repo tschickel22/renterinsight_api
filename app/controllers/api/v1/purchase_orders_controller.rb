@@ -123,6 +123,8 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     json['manufacturer'] = m && { 'id' => m.id, 'name' => m.name }
     json['order_contact'] = @purchase_order.order_contact.stringify_keys
     if @purchase_order.factory_home?
+      json['colors'] = @purchase_order.colors
+      json['hide_prices_for_factory'] = @purchase_order.hide_prices_for_factory?
       json['sheet_changed_since'] = Truebuild::FactoryOrder.changed?(@purchase_order)
       v = @purchase_order.received_vehicle
       json['received_vehicle'] = v && { 'id' => v.id, 'serial_number' => v.serial_number, 'stock_number' => v.stock_number }

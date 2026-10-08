@@ -7,6 +7,8 @@ class PurchaseOrderPdfGenerator
     @po = po
     @company = po.company
     @location = po.location
+    # The dealer's choice (Settings, TrueBuild pricing): the factory prices its own order.
+    @hide_prices = po.hide_prices_for_factory?
   end
 
   def generate
@@ -16,8 +18,14 @@ class PurchaseOrderPdfGenerator
     parties(pdf)
     pdf.move_down 16
     lines(pdf)
-    pdf.move_down 12
-    totals(pdf)
+    if @po.colors.any?
+      pdf.move_down 14
+      colors(pdf)
+    end
+    unless @hide_prices
+      pdf.move_down 12
+      totals(pdf)
+    end
     if @po.notes.present?
       pdf.move_down 16
       pdf.text 'Notes', style: :bold, size: 10
@@ -58,14 +66,30 @@ class PurchaseOrderPdfGenerator
   end
 
   def lines(pdf)
-    rows = [['Item', 'Code', 'Qty', 'Unit cost', 'Total']]
+    rows = [@hide_prices ? %w[Item Code Qty] : ['Item', 'Code', 'Qty', 'Unit cost', 'Total']]
     @po.lines.order(:line_number).each do |l|
-      rows << [l.part_name.to_s, l.part_number.to_s, l.quantity_ordered.to_d.to_s('F').sub(/\.0\z/, ''), money(l.unit_cost), money(l.line_total)]
+      row = [l.part_name.to_s, l.part_number.to_s, l.quantity_ordered.to_d.to_s('F').sub(/\.0\z/, '')]
+      row += [money(l.unit_cost), money(l.line_total)] unless @hide_prices
+      rows << row
     end
+    last = rows.first.size - 1
     pdf.table(rows, header: true, width: pdf.bounds.width, cell_style: { size: 9, padding: [5, 5], border_color: 'DDDDDD' }) do |t|
       t.row(0).font_style = :bold
       t.row(0).background_color = 'F3F4F6'
-      t.columns(2..4).align = :right
+      t.columns(2..last).align = :right
+    end
+  end
+
+  # Every color and finish set on the model, with the pick; an unpicked one
+  # is flagged so the factory confirms it rather than guessing.
+  def colors(pdf)
+    pdf.text 'Colors and finishes', style: :bold, size: 11
+    pdf.move_down 4
+    rows = [%w[Set Choice Code]]
+    @po.colors.each { |c| rows << [c['set'].to_s, c['choice'].presence || 'Not chosen yet: please confirm', c['code'].to_s] }
+    pdf.table(rows, header: true, width: pdf.bounds.width, cell_style: { size: 9, padding: [4, 5], border_color: 'DDDDDD' }) do |t|
+      t.row(0).font_style = :bold
+      t.row(0).background_color = 'F3F4F6'
     end
   end
 

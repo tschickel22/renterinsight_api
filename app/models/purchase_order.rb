@@ -113,6 +113,17 @@ class PurchaseOrder < ApplicationRecord
     supplier&.name
   end
 
+  # The dealer's TrueBuild setting: leave prices off the factory PO it prints
+  # and emails (the factory bills from its own price list).
+  def hide_prices_for_factory?
+    factory_home? && DealerCatalogTerm.effective(company, nil).factory_po_hide_prices == true
+  end
+
+  # The color and finish picks written onto a factory PO.
+  def colors
+    sheet_snapshot.to_h['colors'] || []
+  end
+
   # The buyer on the deal this PO is for, for the PO list.
   def deal_customer_name
     deal&.customer_display_name

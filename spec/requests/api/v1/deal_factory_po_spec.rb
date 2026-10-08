@@ -158,6 +158,35 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  it 'lists every color set on the factory PO with its pick, and can leave prices off' do
+    exterior = CatalogOptionGroup.create!(manufacturer: mfr, key: 'exterior', name: 'Exterior', selection_type: 'multiple')
+    clay, _flint = %w[Clay Flint].map do |name|
+      CatalogOption.create!(group: exterior, manufacturer: mfr, key: "exterior--#{name.downcase}", name: name, kind: 'color',
+                            metadata: { 'color_set' => 'Siding' }, factory_code: "SID-#{name.upcase}").tap do |o|
+        CatalogOptionPrice.create!(price_book: book, option: o, is_standard: true)
+      end
+    end
+    CatalogOption.create!(group: exterior, manufacturer: mfr, key: 'exterior--shutters-black', name: 'Shutters: Black', kind: 'standard').tap do |o|
+      CatalogOptionPrice.create!(price_book: book, option: o, is_standard: true)
+    end
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: clay.id }.to_json
+    supplier = company.suppliers.create!(name: 'Factory')
+    post "#{path}/purchase_order", headers: headers, params: { supplier_id: supplier.id }.to_json
+    po = deal.purchase_orders.last
+    expect(po.colors).to eq([{ 'set' => 'Shutters', 'choice' => nil, 'code' => nil },
+                             { 'set' => 'Siding', 'choice' => 'Clay', 'code' => 'SID-CLAY' }])
+    expect(po.lines.map(&:description)).not_to include('Clay') # in the colors list, not an item at $0
+
+    text = PDF::Reader.new(StringIO.new(PurchaseOrderPdfGenerator.new(po).generate)).pages.map(&:text).join("\n")
+    expect(text).to include('Colors and finishes', 'Siding', 'Clay', 'SID-CLAY', 'Not chosen yet')
+    expect(text).to include('$49,645.00')
+
+    company.dealer_catalog_terms.find_by(manufacturer_id: nil).update!(factory_po_hide_prices: true)
+    text = PDF::Reader.new(StringIO.new(PurchaseOrderPdfGenerator.new(po.reload).generate)).pages.map(&:text).join("\n")
+    expect(text).not_to include('$')
+    expect(text).to include('Upgrade Insulation', 'Clay')
+  end
+
   it 'lists Deal Sheets for the PO form, marking the ordered ones' do
     get '/api/v1/deal_sheets', headers: headers, params: { search: 'pat' }
     rows = JSON.parse(response.body)['deal_sheets']
