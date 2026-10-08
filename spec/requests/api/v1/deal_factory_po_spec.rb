@@ -120,6 +120,11 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(response).to have_http_status(:ok)
     expect(ActionMailer::Base.deliveries.last[:from].to_s).to eq("#{company.name} <noreply@example.com>")
 
+    # An address typed when sending is kept as the manufacturer's PO email.
+    post "/api/v1/purchase-orders/#{po.id}/email", headers: headers, params: { to: 'new-orders@factory.example', save_contact: true }.to_json
+    expect(JSON.parse(response.body)['saved_contact']).to eq('manufacturer')
+    expect(po.reload.order_contact[:email]).to eq('new-orders@factory.example')
+
     # Without a separate orders email, POs go to the rep.
     company.company_manufacturers.find_by(manufacturer: mfr).update!(po_email: nil, po_contact_name: nil)
     expect(po.reload.order_contact[:email]).to eq('rep@factory.example')
@@ -141,6 +146,13 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     foreign = other.deals.create!(name: 'Not yours', contact_id: stranger.id)
     post '/api/v1/purchase-orders', headers: headers, params: { purchase_order: { deal_id: foreign.id, manufacturer_id: mfr.id, order_date: Date.current } }.to_json
     expect(response).to have_http_status(:not_found)
+  end
+
+  it 'lists Deal Sheets for the PO form, marking the ordered ones' do
+    get '/api/v1/deal_sheets', headers: headers, params: { search: 'pat' }
+    rows = JSON.parse(response.body)['deal_sheets']
+    expect(rows.map { |r| [r['deal_id'], r['source'], r['ordered']] }).to eq([[deal.id, 'order', false]])
+    expect(rows.first['model']).to eq('Apex (2856H32P01)')
   end
 
   it 'will not order a draft version or a home already on the lot' do

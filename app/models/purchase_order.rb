@@ -67,13 +67,22 @@ class PurchaseOrder < ApplicationRecord
   # Status helpers
   def factory_home? = kind == 'factory_home'
 
+  # The manufacturer this PO is with: set on it, or the one its supplier was
+  # made for (code MFR-<id>), or the home's on its Deal Sheet.
+  def contact_manufacturer
+    return manufacturer if manufacturer
+
+    id = supplier&.code.to_s[/\AMFR-(\d+)\z/, 1]
+    (id && Manufacturer.find_by(id: id)) || deal_home_build&.variant&.manufacturer
+  end
+
   # Who receives this PO by email: the manufacturer's orders contact (or its
   # rep when it has none), else the supplier's email.
   def order_contact
-    if manufacturer
-      cm = company.company_manufacturers.find_by(manufacturer_id: manufacturer_id)
-      email = cm&.effective_po_email || manufacturer.po_email.presence || manufacturer.contact_email
-      name = cm&.effective_po_contact_name || manufacturer.po_contact_name || manufacturer.contact_name
+    if (m = contact_manufacturer)
+      cm = company.company_manufacturers.find_by(manufacturer_id: m.id)
+      email = cm&.effective_po_email || m.po_email.presence || m.contact_email
+      name = cm&.effective_po_contact_name || m.po_contact_name || m.contact_name
       return { email: email, name: name } if email.present?
     end
     { email: supplier&.email.presence, name: supplier&.try(:contact_name) }

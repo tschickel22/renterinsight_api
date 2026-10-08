@@ -119,7 +119,8 @@ class Api::V1::PurchaseOrdersController < ApplicationController
       d = @purchase_order.deal
       json['deal'] = { 'id' => d.id, 'deal_number' => d.deal_number, 'name' => d.name }
     end
-    json['manufacturer'] = @purchase_order.manufacturer && { 'id' => @purchase_order.manufacturer.id, 'name' => @purchase_order.manufacturer.name }
+    m = @purchase_order.contact_manufacturer
+    json['manufacturer'] = m && { 'id' => m.id, 'name' => m.name }
     json['order_contact'] = @purchase_order.order_contact.stringify_keys
     if @purchase_order.factory_home?
       json['sheet_changed_since'] = Truebuild::FactoryOrder.changed?(@purchase_order)
@@ -315,10 +316,11 @@ class Api::V1::PurchaseOrdersController < ApplicationController
       Rails.logger.error("[PO email] #{@purchase_order.po_number}: #{e.class} #{e.message}")
       return render json: { error: "The email could not be sent: #{e.message}" }, status: :bad_gateway
     end
+    saved = save_order_contact(to.to_s.split(/[,;]\s*/).first) if ActiveModel::Type::Boolean.new.cast(params[:save_contact])
     attrs = { emailed_at: Time.current, emailed_to: to }
     attrs.merge!(status: 'sent', sent_at: Time.current) if @purchase_order.draft?
     @purchase_order.update_columns(attrs.merge(updated_at: Time.current))
-    render json: { status: @purchase_order.status, emailed_at: @purchase_order.emailed_at, emailed_to: to }
+    render json: { status: @purchase_order.status, emailed_at: @purchase_order.emailed_at, emailed_to: to, saved_contact: saved }
   end
 
   # POST /api/v1/purchase_orders/:id/post_to_accounting
@@ -341,6 +343,28 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     @purchase_order = @company.purchase_orders.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Purchase order not found' }, status: :not_found
+  end
+
+  # The address typed when emailing, kept for next time: the manufacturer's
+  # PO email (adding it to Manufacturer/Warranty if it is not there yet),
+  # else the supplier's email when it has none.
+  def save_order_contact(email)
+    return nil if email.blank?
+
+    if (m = @purchase_order.contact_manufacturer)
+      cm = @company.company_manufacturers.find_or_initialize_by(manufacturer_id: m.id)
+      cm.active = true if cm.new_record?
+      # The rep's address typed in again is not a separate orders contact.
+      cm.po_email = email unless email.casecmp?(cm.effective_contact_email.to_s)
+      cm.save! if cm.changed?
+      'manufacturer'
+    elsif @purchase_order.supplier && @purchase_order.supplier.email.blank?
+      @purchase_order.supplier.update!(email: email)
+      'supplier'
+    end
+  rescue ActiveRecord::RecordInvalid => e
+    Rails.logger.warn("[PO email] could not save #{email} as the order contact: #{e.message}")
+    nil
   end
 
   # A PO for a deal, or placed with a manufacturer: both must be this

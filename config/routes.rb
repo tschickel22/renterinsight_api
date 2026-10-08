@@ -309,6 +309,7 @@ Rails.application.routes.draw do
       patch  'truebuild_homes/:id', to: 'truebuild_homes#update'
       post   'truebuild_designs/:id/quote', to: 'truebuild_designs#create_quote'
       # A deal's home build (E49): the model and the options chosen for it.
+      get    'deal_sheets', to: 'deal_sheets#index'
       get    'deals/:deal_id/home_build', to: 'deal_home_builds#show'
       post   'deals/:deal_id/home_build', to: 'deal_home_builds#create'
       patch  'deals/:deal_id/home_build', to: 'deal_home_builds#update'
