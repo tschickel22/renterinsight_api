@@ -108,6 +108,18 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(mail.attachments.map(&:filename)).to eq(["#{po.po_number}.pdf"])
     expect(po.reload).to have_attributes(status: 'sent', emailed_to: 'orders@factory.example')
 
+    # The company's sender not verified with the provider: sent from the platform's, under the dealer's name.
+    calls = 0
+    allow_any_instance_of(Mail::Message).to receive(:deliver).and_wrap_original do |m, *args|
+      calls += 1
+      raise 'Email address is not verified. The following identities failed the check' if calls == 1
+
+      m.call(*args)
+    end
+    post "/api/v1/purchase-orders/#{po.id}/email", headers: headers, params: { to: 'orders@factory.example' }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(ActionMailer::Base.deliveries.last[:from].to_s).to eq("#{company.name} <noreply@example.com>")
+
     # Without a separate orders email, POs go to the rep.
     company.company_manufacturers.find_by(manufacturer: mfr).update!(po_email: nil, po_contact_name: nil)
     expect(po.reload.order_contact[:email]).to eq('rep@factory.example')

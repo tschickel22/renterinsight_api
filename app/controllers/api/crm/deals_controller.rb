@@ -1055,7 +1055,14 @@ module Api
             products: products_array,
             stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) },
             # The deal sheet version the deal's numbers come from, for the LIVE badge.
-            dealSheet: deal_sheet_json(deal)
+            dealSheet: deal_sheet_json(deal),
+            # Purchase orders for this deal: the home order shows at the top of the deal.
+            purchaseOrders: deal.purchase_orders.where(is_deleted: [false, nil]).order(:created_at).map { |po|
+              { id: po.id, poNumber: po.po_number, kind: po.kind, status: po.status, total: po.total_amount.to_f,
+                supplier: po.manufacturer&.name || po.supplier&.name, emailedAt: po.emailed_at&.iso8601,
+                sentAt: po.sent_at&.iso8601, expectedDeliveryDate: po.expected_delivery_date&.iso8601,
+                receivedDate: po.received_date&.iso8601 }
+            }
           )
         end
         

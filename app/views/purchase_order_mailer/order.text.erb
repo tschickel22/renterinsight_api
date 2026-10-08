@@ -6,6 +6,6 @@
 <% if @po.expected_delivery_date %>Needed by <%= @po.expected_delivery_date.strftime('%B %-d, %Y') %>.
 <% end %>
 Reply to this email with any questions.
-<% if @sender_user %>
-<%= @sender_user.try(:name) %>
+<% if @sender %>
+<%= @sender.try(:name) %>
 <% end %><%= @company.name %>

@@ -295,8 +295,26 @@ class Api::V1::PurchaseOrdersController < ApplicationController
       return render json: { error: 'This purchase order was cancelled' }, status: :unprocessable_entity
     end
 
-    PurchaseOrderMailer.order(@purchase_order, to: to.to_s.split(/[,;]\s*/), cc: params[:cc].presence, message: params[:message],
-                                               sender: current_user).deliver_now
+    deliver_po = ->(from) do
+      PurchaseOrderMailer.order(@purchase_order, to: to.to_s.split(/[,;]\s*/), cc: params[:cc].presence, message: params[:message],
+                                                 sender: current_user, from: from).deliver_now
+    end
+    begin
+      begin
+        deliver_po.call(nil)
+      rescue StandardError => e
+        # The company's or location's sender is not verified with the provider:
+        # send from the platform's, under the dealer's name.
+        fallback = PurchaseOrderMailer.platform_from(@company)
+        raise unless e.message.to_s.match?(/not verified/i) && fallback
+
+        Rails.logger.warn("[PO email] #{@purchase_order.po_number}: sender not verified, using the platform sender")
+        deliver_po.call(fallback)
+      end
+    rescue StandardError => e
+      Rails.logger.error("[PO email] #{@purchase_order.po_number}: #{e.class} #{e.message}")
+      return render json: { error: "The email could not be sent: #{e.message}" }, status: :bad_gateway
+    end
     attrs = { emailed_at: Time.current, emailed_to: to }
     attrs.merge!(status: 'sent', sent_at: Time.current) if @purchase_order.draft?
     @purchase_order.update_columns(attrs.merge(updated_at: Time.current))
