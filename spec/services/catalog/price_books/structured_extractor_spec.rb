@@ -102,4 +102,17 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
     expect(rows.map { |r| r.reload.option.metadata['color_set'] }).to eq(%w[Siding Shutters])
     expect(Catalog::PriceBooks::Publisher.split_colors_from!(book, list)).to eq(moved: 0, lines: 0)
   end
+
+  it 'turns a standard choice already at the key into the set color' do
+    group = CatalogOptionGroup.create!(manufacturer: mfr, key: 'exterior', name: 'Exterior')
+    shared = CatalogOption.create!(manufacturer: mfr, key: 'exterior--white', name: 'White', kind: 'color', group: group,
+                                   metadata: { 'color_set' => 'Corner posts' })
+    choice = CatalogOption.create!(manufacturer: mfr, key: 'exterior--siding-white', name: 'Siding: White', kind: 'standard', group: group)
+    book.update_columns(status: 'published', published_at: Time.current)
+    row = CatalogOptionPrice.create!(price_book: book, option: shared, is_standard: true)
+    list = [{ price_id: row.id, key: 'exterior--siding-white', name: 'White', color_set: 'Siding', group_key: 'exterior' }]
+    expect(Catalog::PriceBooks::Publisher.split_colors_from!(book, list)).to eq(moved: 1, lines: 0)
+    expect(choice.reload).to have_attributes(name: 'White', kind: 'color')
+    expect(choice.metadata['color_set']).to eq('Siding')
+  end
 end
