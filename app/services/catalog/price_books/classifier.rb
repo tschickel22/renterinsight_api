@@ -16,6 +16,8 @@ module Catalog
         ext = File.extname(name).downcase
         return 'order_form' if %w[.xlsx .xlsm .xls .csv].include?(ext)
         return 'image' if IMAGE_EXT.include?(ext)
+        # Our own structured catalog file (StructuredExtractor).
+        return 'price_list' if StructuredExtractor.structured?(name, bytes)
         return 'unknown' unless ext == '.pdf'
 
         page_text = pdf_text(bytes).first(2).join(' ')
