@@ -72,6 +72,8 @@ module Api
         # a hardcoded enum (which misses imported/legacy statuses and shows zero-count
         # options that no lead actually has).
         by_status = leads.where.not(status: nil).group(:status).count
+        # States present in the data, for the State filter dropdown.
+        by_state = leads.where.not(state: [nil, '']).group(Arel.sql('UPPER(TRIM(leads.state))')).count
         status_counts = {
           total: all_leads_count,
           active: active_count,
@@ -84,6 +86,7 @@ module Api
           showing_scheduled: by_status['showing_scheduled'] || 0,
           application_submitted: by_status['application_submitted'] || 0,
           by_status: by_status,
+          by_state: by_state,
         }
         
         # Calculate percentage changes
@@ -1160,6 +1163,18 @@ module Api
 
         if filters[:source_id].present? && filters[:source_id].to_s != 'all'
           scope = scope.where(source_id: filters[:source_id])
+        end
+
+        # Address. State is a two-letter code from the dropdown (or a comma
+        # list); city is a contains match; zip is a prefix so "802" reaches an
+        # area. All ignore case and surrounding spaces.
+        states = filters[:state].to_s.split(',').map { |s| s.strip.downcase }.reject { |s| s.empty? || s == 'all' }
+        scope = scope.where('LOWER(TRIM(leads.state)) IN (?)', states) if states.any?
+        if filters[:city].present?
+          scope = scope.where('leads.city ILIKE ?', "%#{ActiveRecord::Base.sanitize_sql_like(filters[:city].to_s.strip)}%")
+        end
+        if filters[:zip].present?
+          scope = scope.where('leads.zip ILIKE ?', "#{ActiveRecord::Base.sanitize_sql_like(filters[:zip].to_s.strip)}%")
         end
 
         if (range = HEALTH_BAND_RANGES[filters[:health_band].to_s])
