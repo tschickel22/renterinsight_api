@@ -385,7 +385,11 @@ module Truebuild
         line.unit_cost = source[:cost] unless meta['set_cost']
         line.unit_retail = source[:retail] unless meta['set_retail']
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
-        line.label = self.class.option_label(line.option) if line.kind == 'option' && line.option
+        if line.kind == 'option' && line.option
+          line.label = self.class.option_label(line.option)
+          # A code corrected in the price book reaches open sheets (and their factory PO).
+          line.factory_code = line.option.factory_code if line.option.factory_code.present?
+        end
         meta['freight'] = source[:detail].deep_stringify_keys if line.kind == 'freight' && source[:detail]
       else
         # Priced before, not offered now (a new book dropped it): keep the

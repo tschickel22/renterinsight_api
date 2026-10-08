@@ -60,6 +60,14 @@ RSpec.describe 'Price book corrections', type: :request do
     expect(body['build']['lines'].find { |l| l['label'] == 'Upgrade Insulation' }).to include('cost' => 1395.0)
   end
 
+  it "sets an option's factory code for the PO, logged like a price" do
+    patch "/api/admin/catalog_price_books/#{book.id}/prices/option/#{option_price.id}", headers: admin,
+          params: { changes: { factory_code: ' op800999 ' }, reason: 'From the order form' }.to_json
+    expect(JSON.parse(response.body)['row']).to include('factory_code' => 'OP800999')
+    expect(insulation.reload.factory_code).to eq('OP800999')
+    expect(book.corrections.last).to have_attributes(field: 'factory_code', old_value: 'INS38', new_value: 'OP800999')
+  end
+
   it 'refuses a missing base price, an unknown field, and anyone but a platform admin' do
     patch "/api/admin/catalog_price_books/#{book.id}/prices/base/#{base_price.id}", headers: admin, params: { changes: { net_base_price: '' } }.to_json
     expect(response).to have_http_status(:unprocessable_entity)

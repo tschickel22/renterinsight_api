@@ -10,7 +10,10 @@ module Truebuild
   class PriceCorrector
     FIELDS = {
       'CatalogVariantPrice' => { 'net_base_price' => :money, 'total_base_price' => :money },
-      'CatalogOptionPrice' => { 'dealer_cost' => :money, 'suggested_retail' => :money, 'is_standard' => :boolean }
+      'CatalogOptionPrice' => { 'dealer_cost' => :money, 'suggested_retail' => :money, 'is_standard' => :boolean,
+                                # The option's factory code, for the factory PO: it belongs to the option
+                                # (every book and model that offers it), not to this price row.
+                                'factory_code' => :code }
     }.freeze
 
     class Invalid < StandardError; end
@@ -38,10 +41,12 @@ module Truebuild
           raise Invalid, 'A home needs a base price' if field == 'net_base_price' && (value.nil? || value <= 0)
           raise Invalid, "#{field.humanize} cannot be negative" if value.is_a?(BigDecimal) && value.negative?
 
-          old = target.public_send(field)
+          holder = field == 'factory_code' ? target.option : target
+          old = holder.public_send(field)
           next if old == value || (old.is_a?(BigDecimal) && value.is_a?(BigDecimal) && old.round(2) == value.round(2))
 
-          target.public_send("#{field}=", value)
+          holder.public_send("#{field}=", value)
+          holder.save! if holder != target
           log << { field: field, old_value: old&.to_s, new_value: value&.to_s }
         end
         next if log.empty?
@@ -61,6 +66,7 @@ module Truebuild
 
     def cast(type, raw)
       return ActiveModel::Type::Boolean.new.cast(raw) if type == :boolean
+      return raw.to_s.strip.upcase.presence if type == :code
       return nil if raw.blank?
 
       BigDecimal(raw.to_s.delete(',$'))
