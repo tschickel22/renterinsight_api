@@ -66,8 +66,11 @@ module Api
       def preview
         return unless authorize_action!('data_import_export', 'read')
 
-        path   = ImportExport::S3Helper.download_to_tempfile(@job.source_file_url)
-        parsed = ImportExport::CsvParser.new(path).parse
+        # A workbook with several tabs reads the one picked in the wizard. The
+        # pick is saved on the job so the import reads the same tab.
+        sheet  = params[:sheet].presence || (@job.options || {})['sheet']
+        parsed = ImportExport::S3Helper.with_local_file(@job.source_file_url) { |path| ImportExport::CsvParser.new(path, sheet: sheet).parse }
+        @job.update!(options: (@job.options || {}).merge('sheet' => parsed[:sheet])) if parsed[:sheet] && parsed[:sheet] != (@job.options || {})['sheet']
         fields = ImportExport::ModuleRegistry.fields_for(@job.module_type, company_id: @company.id, for_import: true)
 
         if @job.module_type.to_s == 'budget_lines'
@@ -83,6 +86,8 @@ module Api
 
         render json: {
           headers: parsed[:headers],
+          sheets: parsed[:sheets],
+          sheet: parsed[:sheet],
           sample_rows: parsed[:rows].first(10),
           total_rows: parsed[:total_rows],
           fields: fields,

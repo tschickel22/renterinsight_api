@@ -43,8 +43,7 @@ module ImportExport
         raise "Budget '#{budget.name}' is not editable (status: #{budget.status}, consolidation: #{budget.consolidation_type})"
       end
 
-      file_path = download_source
-      parsed    = CsvParser.new(file_path).parse
+      parsed = S3Helper.with_local_file(@job.source_file_url.to_s) { |path| CsvParser.new(path, sheet: (@job.options || {})['sheet']).parse }
 
       @job.update!(total_rows: parsed[:total_rows])
 
@@ -196,12 +195,6 @@ module ImportExport
       return nil if value.nil?
       stripped = value.to_s.strip
       stripped.empty? ? nil : stripped
-    end
-
-    def download_source
-      key = @job.source_file_url.to_s
-      return key if File.exist?(key)
-      ImportExport::S3Helper.download_to_tempfile(key)
     end
 
     def build_row_hash(row, headers, mapping)
