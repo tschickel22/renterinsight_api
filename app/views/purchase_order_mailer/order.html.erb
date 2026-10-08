@@ -1,0 +1,6 @@
+<p><strong><%= @po.factory_home? ? 'Home order' : 'Purchase order' %> <%= @po.po_number %></strong> from <%= @company.name %></p>
+<% if @message.present? %><p><%= simple_format(@message) %></p><% end %>
+<p>The order is attached (<%= @po.po_number %>.pdf): <%= @po.lines.count %> line(s), total <%= number_to_currency(@po.total_amount) %>.
+<% if @po.expected_delivery_date %><br>Needed by <%= @po.expected_delivery_date.strftime('%B %-d, %Y') %>.<% end %></p>
+<p>Reply to this email with any questions.</p>
+<p><% if @sender_user %><%= @sender_user.try(:name) %><br><% end %><%= @company.name %></p>

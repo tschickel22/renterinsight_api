@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_08_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2452,6 +2452,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
     t.string "contact_phone"
     t.string "claim_email"
     t.string "claim_contact_name"
+    t.string "po_email"
+    t.string "po_contact_name"
     t.index ["active"], name: "index_company_manufacturers_on_active"
     t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
     t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
@@ -4756,6 +4758,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
     t.string "claim_email"
     t.string "claim_contact_name"
     t.bigint "company_id"
+    t.string "po_email"
+    t.string "po_contact_name"
     t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
     t.index ["active"], name: "index_manufacturers_on_active"
     t.index ["company_id", "code"], name: "index_manufacturers_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
@@ -5881,6 +5885,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
     t.bigint "deal_home_build_id"
     t.bigint "received_vehicle_id"
     t.jsonb "sheet_snapshot", default: {}, null: false
+    t.bigint "manufacturer_id"
+    t.datetime "emailed_at"
+    t.string "emailed_to"
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -5893,6 +5900,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
     t.index ["expected_delivery_date"], name: "index_purchase_orders_on_expected_delivery_date"
     t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
     t.index ["location_id"], name: "index_purchase_orders_on_location_id"
+    t.index ["manufacturer_id"], name: "index_purchase_orders_on_manufacturer_id"
     t.index ["order_date"], name: "index_purchase_orders_on_order_date"
     t.index ["quickbooks_id"], name: "index_purchase_orders_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["received_date"], name: "index_purchase_orders_on_received_date"
@@ -8957,6 +8965,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_08_020000) do
   add_foreign_key "purchase_orders", "deal_home_builds", on_delete: :nullify
   add_foreign_key "purchase_orders", "deals"
   add_foreign_key "purchase_orders", "locations"
+  add_foreign_key "purchase_orders", "manufacturers"
   add_foreign_key "purchase_orders", "users", column: "approved_by_id"
   add_foreign_key "purchase_orders", "users", column: "created_by_id"
   add_foreign_key "purchase_orders", "vehicles", column: "received_vehicle_id"

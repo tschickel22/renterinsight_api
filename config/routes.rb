@@ -1556,6 +1556,7 @@ Rails.application.routes.draw do
           post :post_to_accounting
           # A factory PO (backlog E51): the home arrived.
           post :receive_home, path: 'receive-home'
+          post :email
         end
         collection do
           get :stats

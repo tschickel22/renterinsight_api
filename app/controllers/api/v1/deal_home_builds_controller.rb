@@ -263,21 +263,35 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     score = ->(s) { n = s.name.to_s.downcase; (mfr.present? && n.include?(mfr.downcase.split.first.to_s) ? 2 : 0) + (plant.present? && n.include?(plant.downcase) ? 1 : 0) }
     suggested = list.max_by(&score)
     suggested = nil if suggested && score.call(suggested).zero?
+    # Manufacturers the dealer works with (Settings, Manufacturer/Warranty), the
+    # home's own first: ordering from one emails its PO contact.
+    home_mfr = @build.variant.manufacturer
+    mfrs = Manufacturer.where(id: @company.company_manufacturers.active.select(:manufacturer_id)).or(Manufacturer.where(id: home_mfr&.id)).to_a
+    cms = @company.company_manufacturers.where(manufacturer_id: mfrs.map(&:id)).index_by(&:manufacturer_id)
+    manufacturers = mfrs.sort_by { |m| [m.id == home_mfr&.id ? 0 : 1, m.name.to_s.downcase] }.map do |m|
+      { id: m.id, name: m.name, po_email: cms[m.id]&.effective_po_email || m.po_email.presence || m.contact_email }
+    end
     render json: { suppliers: list.map { |s| { id: s.id, name: s.name } }, suggested_id: suggested&.id,
+                   manufacturers: manufacturers, suggested_manufacturer_id: home_mfr&.id,
                    new_name: [mfr.presence, plant.presence].compact.join(' ') }
   end
 
   def create_purchase_order
     return unless authorize_action!('inventory', 'create')
 
-    supplier = if params[:supplier_id].present?
+    manufacturer = params[:manufacturer_id].present? ? Manufacturer.visible_to_company(@company.id).find_by(id: params[:manufacturer_id]) : nil
+    return render json: { error: 'Manufacturer not found' }, status: :not_found if params[:manufacturer_id].present? && !manufacturer
+
+    supplier = if manufacturer
+                 Truebuild::FactoryOrder.supplier_for(@company, manufacturer)
+               elsif params[:supplier_id].present?
                  @company.suppliers.find_by(id: params[:supplier_id])
                elsif params[:supplier_name].present?
                  @company.suppliers.create!(name: params[:supplier_name].to_s.strip)
                end
     return render json: { error: 'Choose the factory to send it to' }, status: :unprocessable_entity unless supplier
 
-    po = Truebuild::FactoryOrder.new(@build).create!(supplier: supplier, user: current_user,
+    po = Truebuild::FactoryOrder.new(@build).create!(supplier: supplier, user: current_user, manufacturer: manufacturer,
                                                      expected_delivery_date: params[:expected_delivery_date], notes: params[:notes])
     render json: { purchase_order: purchase_order_json(po), build: build_json(@build.reload)[:build] }, status: :created
   end

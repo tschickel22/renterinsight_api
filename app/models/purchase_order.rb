@@ -17,6 +17,8 @@ class PurchaseOrder < ApplicationRecord
   belongs_to :deal, optional: true
   belongs_to :deal_home_build, optional: true
   belongs_to :received_vehicle, class_name: 'Vehicle', optional: true
+  # Placed with a manufacturer (its supplier record stands in for the books).
+  belongs_to :manufacturer, optional: true
   
   has_many :lines, class_name: 'PurchaseOrderLine', foreign_key: 'purchase_order_id', dependent: :destroy, inverse_of: :purchase_order
   has_many :purchase_order_lines, dependent: :destroy
@@ -64,6 +66,18 @@ class PurchaseOrder < ApplicationRecord
   
   # Status helpers
   def factory_home? = kind == 'factory_home'
+
+  # Who receives this PO by email: the manufacturer's orders contact (or its
+  # rep when it has none), else the supplier's email.
+  def order_contact
+    if manufacturer
+      cm = company.company_manufacturers.find_by(manufacturer_id: manufacturer_id)
+      email = cm&.effective_po_email || manufacturer.po_email.presence || manufacturer.contact_email
+      name = cm&.effective_po_contact_name || manufacturer.po_contact_name || manufacturer.contact_name
+      return { email: email, name: name } if email.present?
+    end
+    { email: supplier&.email.presence, name: supplier&.try(:contact_name) }
+  end
 
   def draft?
     status == 'draft'

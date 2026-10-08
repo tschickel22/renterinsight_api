@@ -85,6 +85,52 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
+  it "orders from the home's manufacturer and emails the PO to its orders contact, not the rep" do
+    company.company_manufacturers.create!(manufacturer: mfr, contact_email: 'rep@factory.example', po_email: 'orders@factory.example',
+                                          po_contact_name: 'Order Desk')
+    get "#{path}/suppliers", headers: headers
+    expect(body['suggested_manufacturer_id']).to eq(mfr.id)
+    expect(body['manufacturers'].first).to include('name' => mfr.name, 'po_email' => 'orders@factory.example')
+
+    post "#{path}/purchase_order", headers: headers, params: { manufacturer_id: mfr.id }.to_json
+    po = deal.purchase_orders.last
+    expect(po.manufacturer).to eq(mfr)
+    expect(po.supplier).to have_attributes(name: mfr.name, code: "MFR-#{mfr.id}")
+    expect(po.order_contact).to eq(email: 'orders@factory.example', name: 'Order Desk')
+
+    Setting.set('Platform', 0, 'communications', { 'email' => { 'from_address' => 'noreply@example.com' } })
+    expect do
+      post "/api/v1/purchase-orders/#{po.id}/email", headers: headers, params: { message: 'Please confirm the build date.' }.to_json
+    end.to change { ActionMailer::Base.deliveries.size }.by(1)
+    mail = ActionMailer::Base.deliveries.last
+    expect(mail.to).to eq(['orders@factory.example'])
+    expect(mail.subject).to eq("Home order #{po.po_number} from #{company.name}")
+    expect(mail.attachments.map(&:filename)).to eq(["#{po.po_number}.pdf"])
+    expect(po.reload).to have_attributes(status: 'sent', emailed_to: 'orders@factory.example')
+
+    # Without a separate orders email, POs go to the rep.
+    company.company_manufacturers.find_by(manufacturer: mfr).update!(po_email: nil, po_contact_name: nil)
+    expect(po.reload.order_contact[:email]).to eq('rep@factory.example')
+  end
+
+  it 'links a PO made in the PO form to a deal and a manufacturer' do
+    company.company_manufacturers.create!(manufacturer: mfr, contact_email: 'rep@factory.example')
+    part = company.parts.create!(name: 'Skirting kit', sku: "SK-#{SecureRandom.hex(2)}") rescue nil
+    lines = part ? [{ part_id: part.id, line_number: 1, quantity_ordered: 1, unit_cost: 100 }] : []
+    post '/api/v1/purchase-orders', headers: headers,
+         params: { purchase_order: { deal_id: deal.id, manufacturer_id: mfr.id, order_date: Date.current, lines_attributes: lines } }.to_json
+    expect(response).to have_http_status(:created)
+    po = company.purchase_orders.find(JSON.parse(response.body)['id'])
+    expect(po).to have_attributes(deal_id: deal.id, manufacturer_id: mfr.id, kind: 'parts')
+    expect(po.supplier.code).to eq("MFR-#{mfr.id}")
+
+    other = Company.create!(name: "Other #{SecureRandom.hex(2)}")
+    stranger = other.contacts.create!(first_name: 'Sam', last_name: 'Lee', email: "s#{SecureRandom.hex(2)}@example.com")
+    foreign = other.deals.create!(name: 'Not yours', contact_id: stranger.id)
+    post '/api/v1/purchase-orders', headers: headers, params: { purchase_order: { deal_id: foreign.id, manufacturer_id: mfr.id, order_date: Date.current } }.to_json
+    expect(response).to have_http_status(:not_found)
+  end
+
   it 'will not order a draft version or a home already on the lot' do
     post "#{path}/versions", headers: headers, params: { copy_from_id: deal.home_build.id }.to_json
     draft = body['build']['id']

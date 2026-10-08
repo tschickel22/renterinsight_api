@@ -42,10 +42,23 @@ module Truebuild
       po.sheet_snapshot.to_h['lines'] != lines(build) || po.deal_home_build_id != po.deal&.home_build&.id
     end
 
-    def create!(supplier:, user:, expected_delivery_date: nil, notes: nil)
+    # The supplier record that stands for a manufacturer on POs and bills: the
+    # one made for it before, one already named for it, or a new one.
+    def self.supplier_for(company, manufacturer)
+      code = "MFR-#{manufacturer.id}"
+      existing = company.suppliers.where(is_deleted: [false, nil]).find_by(code: code) ||
+                 company.suppliers.where(is_deleted: [false, nil]).where('LOWER(name) = ?', manufacturer.name.to_s.downcase).first
+      return existing if existing
+
+      cm = company.company_manufacturers.find_by(manufacturer_id: manufacturer.id)
+      company.suppliers.create!(name: manufacturer.name, code: code,
+                                email: cm&.effective_po_email || manufacturer.po_email.presence || manufacturer.contact_email)
+    end
+
+    def create!(supplier:, user:, expected_delivery_date: nil, notes: nil, manufacturer: nil)
       refuse_unless_orderable!
       po = @deal.company.purchase_orders.build(
-        kind: 'factory_home', deal: @deal, deal_home_build: @build, supplier: supplier, vendor_id: supplier.id,
+        kind: 'factory_home', deal: @deal, deal_home_build: @build, supplier: supplier, vendor_id: supplier.id, manufacturer: manufacturer,
         location_id: @deal.location_id || @build.location_id, created_by: user, status: 'draft', order_date: Date.current,
         expected_delivery_date: expected_delivery_date.presence, notes: notes.presence || default_notes, **ship_to
       )
