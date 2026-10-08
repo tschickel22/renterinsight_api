@@ -2,7 +2,8 @@
 
 class Api::V1::PurchaseOrdersController < ApplicationController
   before_action :set_company_scope
-  before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history, :post_to_accounting]
+  before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history, :post_to_accounting,
+                                            :receive_home, :email]
 
   def index
     return unless authorize_action!('inventory', 'read')
@@ -36,9 +37,9 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     # Search
     if params[:search].present?
       search_term = "%#{params[:search]}%"
-      purchase_orders = purchase_orders.joins(:supplier).where(
-        'purchase_orders.po_number ILIKE ? OR suppliers.name ILIKE ?',
-        search_term, search_term
+      purchase_orders = purchase_orders.joins(:supplier).left_joins(deal: :contact).where(
+        'purchase_orders.po_number ILIKE :q OR vendors.name ILIKE :q OR deals.name ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q',
+        q: search_term
       )
     end
 
@@ -50,6 +51,8 @@ class Api::V1::PurchaseOrdersController < ApplicationController
 
     # Supplier filter
     purchase_orders = purchase_orders.where(supplier_id: params[:supplier_id]) if params[:supplier_id].present?
+    # A deal's factory POs
+    purchase_orders = purchase_orders.where(deal_id: params[:deal_id]) if params[:deal_id].present?
 
     # Pagination
     page = (params[:page] || 1).to_i
@@ -57,14 +60,14 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     total_count = purchase_orders.count
     
     purchase_orders = purchase_orders
-      .includes(:supplier, :location, :created_by, lines: :part)
+      .includes(:supplier, :location, :created_by, { deal: %i[contact account] }, lines: :part)
       .order(order_date: :desc, created_at: :desc)
       .offset((page - 1) * per_page)
       .limit(per_page)
 
     render json: {
       items: purchase_orders.as_json(
-        methods: [:supplier_name, :location_name, :created_by_name],
+        methods: [:supplier_name, :location_name, :created_by_name, :deal_customer_name, :deal_number],
         include: {
           supplier: { only: [:id, :name, :code] },
           location: { only: [:id, :name] },
@@ -89,8 +92,8 @@ class Api::V1::PurchaseOrdersController < ApplicationController
   def show
     return unless authorize_action!('inventory', 'read')
 
-    render json: @purchase_order.as_json(
-      methods: [:supplier_name, :location_name, :created_by_name],
+    json = @purchase_order.as_json(
+      methods: [:supplier_name, :location_name, :created_by_name, :deal_customer_name],
       include: {
         supplier: { only: [:id, :name, :code, :account_number, :email, :phone] },
         location: { 
@@ -111,13 +114,30 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         }
       }
     )
+    # A factory PO: the deal it is for, and whether the Deal Sheet changed since.
+    if @purchase_order.deal
+      d = @purchase_order.deal
+      json['deal'] = { 'id' => d.id, 'deal_number' => d.deal_number, 'name' => d.name }
+    end
+    m = @purchase_order.contact_manufacturer
+    json['manufacturer'] = m && { 'id' => m.id, 'name' => m.name }
+    json['order_contact'] = @purchase_order.order_contact.stringify_keys
+    if @purchase_order.factory_home?
+      json['colors'] = @purchase_order.colors
+      json['hide_prices_for_factory'] = @purchase_order.hide_prices_for_factory?
+      json['sheet_changed_since'] = Truebuild::FactoryOrder.changed?(@purchase_order)
+      v = @purchase_order.received_vehicle
+      json['received_vehicle'] = v && { 'id' => v.id, 'serial_number' => v.serial_number, 'stock_number' => v.stock_number }
+    end
+    render json: json
   end
 
   def create
     return unless authorize_action!('inventory', 'create')
 
     purchase_order = @company.purchase_orders.build(purchase_order_params)
-    
+    return unless link_deal_and_manufacturer(purchase_order)
+
     # Auto-assign location_id
     purchase_order.location_id ||= Current.location_id if Current.location_id.present?
     
@@ -146,7 +166,10 @@ class Api::V1::PurchaseOrdersController < ApplicationController
   def update
     return unless authorize_action!('inventory', 'update')
 
-    if @purchase_order.update(purchase_order_params)
+    @purchase_order.assign_attributes(purchase_order_params)
+    return unless link_deal_and_manufacturer(@purchase_order)
+
+    if @purchase_order.save
       render json: @purchase_order.as_json(
         include: {
           supplier: { only: [:id, :name] },
@@ -243,6 +266,65 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     )
   end
 
+  # POST /api/v1/purchase_orders/:id/receive-home  { serial_number, vehicle_id?, stock_number? }
+  # A factory PO's home arrived: records it in inventory (or links one already
+  # there) and to the deal. Posts nothing; the cost comes with the factory invoice.
+  def receive_home
+    return unless authorize_action!('inventory', 'update')
+
+    vehicle = params[:vehicle_id].present? ? @company.vehicles.find_by(id: params[:vehicle_id]) : nil
+    return render json: { error: 'Home not found' }, status: :not_found if params[:vehicle_id].present? && !vehicle
+
+    Truebuild::FactoryOrder.receive!(@purchase_order, serial_number: params[:serial_number], vehicle: vehicle,
+                                                      stock_number: params[:stock_number], user: current_user)
+    @purchase_order.reload
+    render json: { status: @purchase_order.status, received_vehicle_id: @purchase_order.received_vehicle_id }
+  rescue Truebuild::FactoryOrder::Refused, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/purchase-orders/:id/email  { to?, cc?, message? }
+  # Emails the PO as a PDF to the manufacturer's orders contact (or the rep
+  # when it has none), else the supplier; a draft is marked sent.
+  def email
+    return unless authorize_action!('inventory', 'update')
+
+    to = params[:to].presence || @purchase_order.order_contact[:email]
+    return render json: { error: 'No email to send it to: add one for the manufacturer or supplier, or type one' }, status: :unprocessable_entity if to.blank?
+    unless to.to_s.split(/[,;]\s*/).all? { |e| e.match?(URI::MailTo::EMAIL_REGEXP) }
+      return render json: { error: "#{to} is not an email address" }, status: :unprocessable_entity
+    end
+    if @purchase_order.status == 'cancelled'
+      return render json: { error: 'This purchase order was cancelled' }, status: :unprocessable_entity
+    end
+
+    deliver_po = ->(from) do
+      PurchaseOrderMailer.order(@purchase_order, to: to.to_s.split(/[,;]\s*/), cc: params[:cc].presence, message: params[:message],
+                                                 sender: current_user, from: from).deliver_now
+    end
+    begin
+      begin
+        deliver_po.call(nil)
+      rescue StandardError => e
+        # The company's or location's sender is not verified with the provider:
+        # send from the platform's, under the dealer's name.
+        fallback = PurchaseOrderMailer.platform_from(@company)
+        raise unless e.message.to_s.match?(/not verified/i) && fallback
+
+        Rails.logger.warn("[PO email] #{@purchase_order.po_number}: sender not verified, using the platform sender")
+        deliver_po.call(fallback)
+      end
+    rescue StandardError => e
+      Rails.logger.error("[PO email] #{@purchase_order.po_number}: #{e.class} #{e.message}")
+      return render json: { error: "The email could not be sent: #{e.message}" }, status: :bad_gateway
+    end
+    saved = save_order_contact(to.to_s.split(/[,;]\s*/).first) if ActiveModel::Type::Boolean.new.cast(params[:save_contact])
+    attrs = { emailed_at: Time.current, emailed_to: to }
+    attrs.merge!(status: 'sent', sent_at: Time.current) if @purchase_order.draft?
+    @purchase_order.update_columns(attrs.merge(updated_at: Time.current))
+    render json: { status: @purchase_order.status, emailed_at: @purchase_order.emailed_at, emailed_to: to, saved_contact: saved }
+  end
+
   # POST /api/v1/purchase_orders/:id/post_to_accounting
   def post_to_accounting
     return unless authorize_action!('purchase_orders', 'update')
@@ -263,6 +345,52 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     @purchase_order = @company.purchase_orders.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Purchase order not found' }, status: :not_found
+  end
+
+  # The address typed when emailing, kept for next time: the manufacturer's
+  # PO email (adding it to Manufacturer/Warranty if it is not there yet),
+  # else the supplier's email when it has none.
+  def save_order_contact(email)
+    return nil if email.blank?
+
+    if (m = @purchase_order.contact_manufacturer)
+      cm = @company.company_manufacturers.find_or_initialize_by(manufacturer_id: m.id)
+      cm.active = true if cm.new_record?
+      # The rep's address typed in again is not a separate orders contact.
+      cm.po_email = email unless email.casecmp?(cm.effective_contact_email.to_s)
+      cm.save! if cm.changed?
+      'manufacturer'
+    elsif @purchase_order.supplier && @purchase_order.supplier.email.blank?
+      @purchase_order.supplier.update!(email: email)
+      'supplier'
+    end
+  rescue ActiveRecord::RecordInvalid => e
+    Rails.logger.warn("[PO email] could not save #{email} as the order contact: #{e.message}")
+    nil
+  end
+
+  # A PO for a deal, or placed with a manufacturer: both must be this
+  # company's. A manufacturer stands in for the supplier (its supplier record
+  # is made for it, so the factory invoice can be entered as a bill).
+  def link_deal_and_manufacturer(po)
+    raw = params[:purchase_order] || {}
+    if raw.key?(:deal_id)
+      deal = raw[:deal_id].present? ? @company.deals.find_by(id: raw[:deal_id]) : nil
+      return render(json: { error: 'Deal not found' }, status: :not_found) && false if raw[:deal_id].present? && !deal
+
+      po.deal = deal
+    end
+    if raw[:manufacturer_id].present?
+      manufacturer = Manufacturer.visible_to_company(@company.id).find_by(id: raw[:manufacturer_id])
+      return render(json: { error: 'Manufacturer not found' }, status: :not_found) && false unless manufacturer
+
+      po.manufacturer = manufacturer
+      po.supplier = Truebuild::FactoryOrder.supplier_for(@company, manufacturer)
+      po.vendor_id = po.supplier_id
+    elsif raw.key?(:manufacturer_id)
+      po.manufacturer = nil
+    end
+    true
   end
 
   def purchase_order_params

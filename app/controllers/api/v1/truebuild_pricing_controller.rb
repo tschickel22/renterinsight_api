@@ -15,8 +15,8 @@ class Api::V1::TruebuildPricingController < ApplicationController
   after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update
                                           create_addon update_addon destroy_addon]
 
-  TERM_FIELDS = %i[price_update_policy price_display program_discount_pct freight_per_mile freight_flat freight_miles
-                   margin_floor_pct round_retail_to buyer_view].freeze
+  TERM_FIELDS = %i[price_update_policy price_display program_discount_pct margin_floor_pct round_retail_to buyer_view
+                   sale_discount_pct dealer_savings_pct preferred_payment_pct factory_po_hide_prices].freeze + DealerCatalogTerm::FREIGHT
   # The buyer view's lists (BuyerView); company-wide like price_display.
   BUYER_LISTS = %i[buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups].freeze
 
@@ -39,6 +39,8 @@ class Api::V1::TruebuildPricingController < ApplicationController
       manufacturers: manufacturers,
       rules: @company.dealer_markup_rules.order(:scope_type, :id).map { |r| rule_json(r) },
       locations: @company.locations.order(:name).map { |l| { id: l.id, name: l.name } },
+      # What the deal sheet uses for freight until the dealer sets their own.
+      freight_assumptions: DealerCatalogTerm::FREIGHT_ASSUMPTIONS,
       updates: @company.dealer_price_book_adoptions.where.not(previous_book_id: nil).where.not(status: 'superseded')
                        .includes(price_book: %i[manufacturer factory]).order(created_at: :desc).limit(20)
                        .map { |a| update_json(a) }
@@ -52,7 +54,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
     chosen = @company.truebuild_addons.includes(:source).order(:position, :id).to_a
     by_source = chosen.index_by { |a| [a.source_type, a.source_id] }
-    templates = @company.package_templates.active.ordered.map { |t| template_json(t, 'PackageTemplate', t.default_price, by_source) } +
+    templates = @company.package_templates.active.not_homes.ordered.map { |t| template_json(t, 'PackageTemplate', t.default_price, by_source) } +
                 FeeTemplate.where(company_id: @company.id).active.ordered.map { |t| template_json(t, 'FeeTemplate', t.default_amount, by_source) }
     render json: { templates: templates, addons: chosen.map { |a| addon_json(a) } }
   end
@@ -193,10 +195,10 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return unless authorize_action!('company_settings', 'read')
 
     variant = CatalogPlanVariant.find(params[:variant_id])
-    book = Truebuild::BookResolver.current_for(variant)
+    book = Truebuild::OptionSource.current_for(variant)
     return render json: { groups: [] } unless book
 
-    offered = book.option_prices.includes(option: :group).select { |op| op.applies_to?(variant) }
+    offered = Truebuild::OptionSource.offered(book, variant)
     groups = offered.group_by { |op| op.option.group }.sort_by { |g, _| [g.position.to_i, g.name] }.map do |g, ops|
       { id: g.id, name: g.name,
         options: ops.uniq(&:catalog_option_id).map do |op|

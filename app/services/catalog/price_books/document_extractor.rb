@@ -22,7 +22,9 @@ module Catalog
         recorder = Recorder.new(@book, client: @client, document: @doc)
         bytes = PrivateFiles.read(PrivateFiles.ref(@doc.storage_key, @doc.storage_bucket))
 
-        if @doc.kind == 'order_form'
+        if StructuredExtractor.structured?(@doc.filename, bytes)
+          StructuredExtractor.new(@doc, bytes, recorder).call
+        elsif @doc.kind == 'order_form'
           WorkbookExtractor.new(@doc, bytes, recorder).call
         elsif File.extname(@doc.filename).downcase == '.pdf'
           PdfExtractor.new(@doc, bytes, recorder).call

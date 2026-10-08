@@ -41,7 +41,9 @@ module Catalog
           item.update!(payload: p, matched: option, change_type: change, previous_values: previous)
         end
 
-        add_removed(seen) if @current
+        # A structured file that covers part of the plant (one series) does
+        # not propose the homes it leaves out for removal.
+        add_removed(seen) if @current && !@book.documents.any? { |d| d.metadata.to_h['partial'] }
         @book.update!(metadata: @book.metadata.merge('summary' => summary, 'compared_with' => @current&.id))
       end
 

@@ -172,7 +172,16 @@ module Accounting
       selling_price = BigDecimal((@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || 0).to_s)
       return { success: true, skipped: 'no_selling_price', entries: [], total_tax: BigDecimal('0') } if selling_price <= 0
 
-      rates = settings.combined_tax_rate(state_code)
+      # The taxing state's rules (Tax::DealTax, backlog E45): Indiana taxes 65% of
+      # the price after trade, Michigan collects at titling, Ohio has the dealer
+      # owe use tax instead. Other states: the whole price, as before.
+      tax = Tax::DealTax.new(deal: @deal, selling_price: selling_price, trade: @deal.try(:trade_allowance) || 0,
+                             cost_basis: @deal.landed_cost || 0, used: @deal.try(:vehicle)&.condition.to_s.casecmp?('used')).call
+      if tax[:payer] && tax[:payer] != 'dealer_collects'
+        return { success: true, skipped: "not_collected_in_#{tax[:state]}", entries: [], total_tax: BigDecimal('0') }
+      end
+      state_code = tax[:state] || state_code
+      rates = tax[:rates].present? ? tax[:rates].transform_values { |v| BigDecimal(v.to_s) } : settings.combined_tax_rate(state_code)
       accounts = settings.tax_accounts
       posting_service = ManualPostingService.new(@company)
 
@@ -187,7 +196,7 @@ module Accounting
         next if rate.nil? || rate <= 0
         next if account.nil?
 
-        amount = (selling_price * rate / 100).round(2)
+        amount = BigDecimal(tax[:slots][slot].to_s)
         next if amount <= 0
 
         je = posting_service.post_simple!(

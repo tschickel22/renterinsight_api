@@ -15,7 +15,7 @@ module Api
 
       # GET /api/v1/package_templates
       def index
-        templates = @company.package_templates.active.ordered
+        templates = @company.package_templates.active.not_homes.ordered
 
         # Filter by vehicle type if provided (rv/mh) - also return 'all' templates
         if params[:vehicle_type].present?
@@ -44,6 +44,8 @@ module Api
         # apply_template resolves negative IDs back to CompanyAllowanceDefault.
         if params[:include_standard].present?
           payload += @company.company_allowance_defaults.active.ordered.map { |d| standard_item_json(d) }
+          # One alphabetical list, standard items among the templates.
+          payload.sort_by! { |row| row[:name].to_s.downcase }
         end
 
         render json: payload

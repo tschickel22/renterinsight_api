@@ -61,6 +61,12 @@ class Deal < ApplicationRecord
   belongs_to :secondary_salesperson, class_name: 'User', foreign_key: 'secondary_salesperson_id', optional: true
   
   has_many :deal_products, dependent: :destroy
+  # The factory model and options on this deal (backlog E49).
+  # Every version of the deal sheet; the LIVE one is the deal's home build.
+  has_many :home_builds, -> { order(:version_number) }, class_name: 'DealHomeBuild', dependent: :destroy
+  has_one :home_build, -> { where(live: true) }, class_name: 'DealHomeBuild'
+  # Factory POs written from the Deal Sheet (backlog E51).
+  has_many :purchase_orders, dependent: :nullify
   has_many :deal_desk_scenarios, dependent: :destroy
   has_many :invoices, dependent: :nullify
   has_many :deal_stage_histories, dependent: :destroy

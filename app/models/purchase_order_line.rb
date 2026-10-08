@@ -3,20 +3,23 @@
 class PurchaseOrderLine < ApplicationRecord
   # Associations
   belongs_to :purchase_order, inverse_of: :lines
-  belongs_to :part
+  # A factory PO's lines are the model and its options, not parts.
+  belongs_to :part, optional: true
+  belongs_to :catalog_option, optional: true
   has_many :inventory_transactions, dependent: :nullify
   
-  # Delegate part attributes for easier access
-  # Creates methods: part_name, part_number (maps to part.sku)
-  delegate :name, to: :part, prefix: 'part', allow_nil: true
   delegate :sku, to: :part, prefix: false, allow_nil: true
-  
-  # Alias sku as part_number for frontend compatibility
-  alias_method :part_number, :sku
+
+  # The part's name and SKU (part_number, for the frontend). A factory PO
+  # line has no part: its description and factory code stand in.
+  def part_name = part&.name || description
+
+  def part_number = part&.sku || manufacturer_part_no
   
   # Validations
   validates :purchase_order, presence: true
-  validates :part, presence: true
+  validates :part, presence: true, unless: -> { purchase_order&.factory_home? }
+  validates :description, presence: true, if: -> { purchase_order&.factory_home? }
   validates :line_number, presence: true, numericality: { only_integer: true, greater_than: 0 }
   validates :quantity_ordered, presence: true, numericality: { greater_than: 0 }
   validates :unit_cost, presence: true, numericality: { greater_than_or_equal_to: 0 }

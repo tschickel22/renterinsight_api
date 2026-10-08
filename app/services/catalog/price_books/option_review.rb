@@ -116,8 +116,9 @@ module Catalog
 
       def prompt(batch)
         lines = batch.map do |o|
+          family = Truebuild::OptionFamilies.key(o.name)
           flags = [o.kind, ('standard' if @standard.include?(o.id)), ("set=#{o.metadata['color_set']}" if o.metadata['color_set'].present?),
-                   ("family=#{f}" if (f = Truebuild::OptionFamilies.key(o.name)))].compact.join(', ')
+                   ("family=#{family}" if family)].compact.join(', ')
           "#{o.id} | #{o.group&.name} | #{o.name} | #{flags}"
         end
         <<~TEXT

@@ -53,6 +53,13 @@ class Api::Company::ManufacturersController < ApplicationController
         claimContactNameOverride: company_manufacturer&.claim_contact_name,
         factoryClaimEmail: manufacturer.claim_email,
         factoryClaimContactName: manufacturer.claim_contact_name,
+        # Purchase orders: a separate orders contact, or the rep contact when none
+        poEmail: company_manufacturer&.effective_po_email || manufacturer.po_email.presence || manufacturer.contact_email,
+        poContactName: company_manufacturer&.effective_po_contact_name || manufacturer.po_contact_name || manufacturer.contact_name,
+        poSeparate: (company_manufacturer&.separate_po_email || manufacturer.po_email).present?,
+        poEmailOverride: company_manufacturer&.po_email,
+        poContactNameOverride: company_manufacturer&.po_contact_name,
+        factoryPoEmail: manufacturer.po_email,
         website: manufacturer.website,
         active: manufacturer.active,
         owned: manufacturer.company_id == @company.id,
@@ -90,6 +97,8 @@ class Api::Company::ManufacturersController < ApplicationController
       contact_phone: params[:contact_phone],
       claim_email: params[:claim_email],
       claim_contact_name: params[:claim_contact_name],
+      po_email: params[:po_email],
+      po_contact_name: params[:po_contact_name],
       active: true
     )
     
@@ -251,6 +260,8 @@ class Api::Company::ManufacturersController < ApplicationController
       contact_email: h['contact_email'].presence,
       contact_phone: h['contact_phone'].presence,
       claim_email: h['claim_email'].presence,
+      po_email: h['po_email'].presence,
+      po_contact_name: h['po_contact_name'].presence,
       claim_contact_name: h['claim_contact_name'].presence,
       active: true
     }
@@ -288,7 +299,7 @@ class Api::Company::ManufacturersController < ApplicationController
     params.require(:manufacturer).permit(
       :name, :industry_type, :code, :website, :active,
       :contact_name, :contact_email, :contact_phone,
-      :claim_email, :claim_contact_name
+      :claim_email, :claim_contact_name, :po_email, :po_contact_name
     )
   end
 
@@ -307,6 +318,8 @@ class Api::Company::ManufacturersController < ApplicationController
       contactPhone: manufacturer.contact_phone,
       claimEmail: manufacturer.claim_email,
       claimContactName: manufacturer.claim_contact_name,
+      poEmail: manufacturer.po_email,
+      poContactName: manufacturer.po_contact_name,
       createdAt: manufacturer.created_at,
       updatedAt: manufacturer.updated_at
     }
@@ -320,7 +333,7 @@ class Api::Company::ManufacturersController < ApplicationController
   
   def update_params
     params.permit(:dealer_code, :notes, :active, :contact_name, :contact_email, :contact_phone,
-                  :claim_email, :claim_contact_name)
+                  :claim_email, :claim_contact_name, :po_email, :po_contact_name)
   end
   
   def determine_company_industry_types
@@ -360,6 +373,12 @@ class Api::Company::ManufacturersController < ApplicationController
       claimContactNameOverride: company_manufacturer.claim_contact_name,
       factoryClaimEmail: manufacturer.claim_email,
       factoryClaimContactName: manufacturer.claim_contact_name,
+      poEmail: company_manufacturer.effective_po_email,
+      poContactName: company_manufacturer.effective_po_contact_name,
+      poSeparate: company_manufacturer.separate_po_email.present?,
+      poEmailOverride: company_manufacturer.po_email,
+      poContactNameOverride: company_manufacturer.po_contact_name,
+      factoryPoEmail: manufacturer.po_email,
       createdAt: company_manufacturer.created_at,
       updatedAt: company_manufacturer.updated_at
     }

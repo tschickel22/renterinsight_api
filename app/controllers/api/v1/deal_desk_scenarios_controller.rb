@@ -358,7 +358,16 @@ module Api
       # --- Computation / snapshots -------------------------------------------
       def snapshot_unit!(scenario)
         unit = scenario.vehicle || @company.vehicles.find_by(id: scenario.vehicle_id)
-        return unless unit
+        unless unit
+          # A factory order has no unit yet: the home line the deal sheet wrote
+          # prices it, so the desk starts from the same number (E49).
+          deal = scenario.deal
+          if deal&.selling_price.to_f.positive?
+            scenario.unit_price_snapshot = deal.selling_price
+            scenario.unit_cost_snapshot = deal.home_line_item_cost
+          end
+          return
+        end
 
         # Price source depends on whether this scenario's unit is still the DEAL's home or a
         # swapped-in comparable:

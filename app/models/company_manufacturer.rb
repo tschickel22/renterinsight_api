@@ -55,6 +55,20 @@ class CompanyManufacturer < ApplicationRecord
     contact_email.presence || manufacturer&.contact_email
   end
 
+  # Where purchase orders go: a separate orders contact when one is set (the
+  # dealer's, else the factory's), otherwise the rep contact.
+  def separate_po_email
+    po_email.presence || manufacturer&.po_email.presence
+  end
+
+  def effective_po_email
+    separate_po_email || effective_contact_email
+  end
+
+  def effective_po_contact_name
+    separate_po_email ? (po_contact_name.presence || manufacturer&.po_contact_name) : effective_contact_name
+  end
+
   def effective_contact_phone
     contact_phone.presence || manufacturer&.contact_phone
   end

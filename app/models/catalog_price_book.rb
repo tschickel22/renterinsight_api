@@ -11,11 +11,17 @@ class CatalogPriceBook < ApplicationRecord
   belongs_to :published_by, class_name: 'User', optional: true
   belongs_to :created_by, class_name: 'User', optional: true
   belongs_to :supersedes, class_name: 'CatalogPriceBook', optional: true
+  # Deal builds remember the books they were priced from; deleting a draft must not fail on them.
+  has_many :deal_home_builds, foreign_key: :catalog_price_book_id, dependent: :nullify
+  has_many :cost_deal_home_builds, class_name: 'DealHomeBuild', foreign_key: :cost_book_id, dependent: :nullify
+  has_many :options_deal_home_builds, class_name: 'DealHomeBuild', foreign_key: :options_book_id, dependent: :nullify
 
   has_many :documents, class_name: 'CatalogPriceBookDocument', dependent: :destroy
   has_many :import_items, class_name: 'CatalogImportItem', dependent: :delete_all
   has_many :variant_prices, class_name: 'CatalogVariantPrice', dependent: :delete_all
   has_many :option_prices, class_name: 'CatalogOptionPrice', dependent: :delete_all
+  has_many :corrections, class_name: 'CatalogPriceCorrection', dependent: :delete_all
+  has_many :price_requests, class_name: 'CatalogPriceRequest', dependent: :delete_all
   has_many :standard_features, class_name: 'CatalogStandardFeature', dependent: :delete_all
   has_many :dealer_adoptions, class_name: 'DealerPriceBookAdoption', dependent: :restrict_with_error
 

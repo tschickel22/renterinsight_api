@@ -44,6 +44,18 @@ RSpec.describe Catalog::PriceBooks::OptionReview do
     expect(described_class.new(book).call).to include(options_sent: 0)
   end
 
+  # Production raised NameError here for every book with such an option.
+  it 'tells Claude the family an option already falls in' do
+    package = option(kitchen, 'Stainless Appliance Package')
+    sent = nil
+    allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |content:, **|
+      sent = content.first[:text]
+      { input: {}, input_tokens: 1, output_tokens: 1 }
+    end
+    described_class.new(book).call
+    expect(sent).to include("#{package.id} | Kitchen & Appliances | Stainless Appliance Package | upgrade, family=appliance package")
+  end
+
   it "teaches Claude the factory's reviewed decisions" do
     other = option(kitchen, 'Ice Maker Kit')
     CatalogOptionDecision.create!(manufacturer: mfr, option_key: other.key, kind: 'family', value: 'refrigerator', source: 'claude',

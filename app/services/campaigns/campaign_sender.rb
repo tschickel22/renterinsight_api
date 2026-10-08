@@ -47,10 +47,18 @@ module Campaigns
       #
       # A test send is excluded: an admin pressing Send Test twice means it.
       return mark_skipped('already_sent_for_step') if !test_send? && already_sent?(step)
+      # Reached after its day was over (joined late, or held past midnight by
+      # the send window): skip rather than send a day-of message a day late.
+      return mark_skipped('send_date_passed') if !test_send? && step.send_day_passed?
 
-      return mark_failed('contact_value_missing') if contact_value.blank?
+      if contact_value.blank?
+        # In a mixed campaign someone with an email but no phone still gets the
+        # emails; only the step they cannot receive is skipped.
+        return @campaign.mixed_channel? ? mark_skipped("no_#{step.effective_channel}_address") : mark_failed('contact_value_missing')
+      end
       return mark_unsubscribed if suppressed?
       return mark_skipped('no_marketing_consent') unless marketing_consent_ok?(step)
+      return mark_skipped('no_sms_opt_in') if step.sms_channel? && !sms_opt_in_ok?
 
       # The send window protects the recipients of an automated campaign from being mailed at
       # 3am. A test send goes to the admin who just pressed the button, so there is nothing
@@ -60,7 +68,7 @@ module Campaigns
       # as a broken email connection.
       unless test_send?
         window = Messaging::SendWindowCalculator.new(
-          send_window: @campaign.send_window, channel: @campaign.channel,
+          send_window: @campaign.send_window, channel: step.effective_channel,
           recipient: recipient, company: @company
         ).evaluate
         return reschedule_to(window, reason: 'outside_send_window') if window.is_a?(Time)
@@ -413,6 +421,20 @@ module Campaigns
         recipient: recipient,
         channel: step.effective_channel == 'sms' ? 'sms' : 'email'
       )
+    end
+
+    # Texts go only to recipients who opted in to SMS, unless someone
+    # acknowledged written consent for this audience. An SMS campaign already
+    # filters its audience this way; a mixed campaign cannot, because the same
+    # people still get its emails, so its SMS steps are checked here instead.
+    # Mirrors CampaignAudience#scope_for_sms_compliance.
+    def sms_opt_in_ok?
+      return true if test_send?
+      return true if @campaign.campaign_audience&.sms_compliance_override?
+      return false if recipient.class.name == 'Account'
+
+      col = %w[opt_in_sms sms_opt_in].find { |c| recipient.class.column_names.include?(c) }
+      col ? recipient.public_send(col) == true : true
     end
 
     def marketing_consent_required?

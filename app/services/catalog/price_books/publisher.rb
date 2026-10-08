@@ -178,14 +178,52 @@ module Catalog
 
       def publish_color(item, counts)
         p = item.payload
-        group = group_for(p['group'].presence || 'Colors')
-        option = CatalogOption.find_or_initialize_by(manufacturer_id: @mfr, key: Keys.option(p['group'], p['name']))
-        option.assign_attributes(group: group, name: p['name'].to_s.truncate(250), kind: 'color', status: 'active',
-                                 metadata: option.metadata.merge('color_set' => ColorSets.normalize(p['group'])))
-        option.save!
+        option = self.class.color_option(@mfr, p, group_for(p['group'].presence || 'Colors'))
         CatalogOptionPrice.create!(price_book: @book, option: option, is_standard: true, source_ref: item.source_ref,
                                    series: Applicability.series_for(p['tab'].to_s, series_list))
+        item.update_columns(matched_type: 'CatalogOption', matched_id: option.id)
         counts['colors'] += 1
+      end
+
+      # One option per color set and color. Keyed by group and name alone,
+      # "White" in Siding, Shutters and Corner Posts (all Exterior) was one
+      # option, and the last set published took it from the others.
+      def self.color_option(manufacturer_id, payload, group)
+        set = ColorSets.normalize(payload['group'])
+        option = CatalogOption.find_or_initialize_by(manufacturer_id: manufacturer_id, key: color_key(payload))
+        option.assign_attributes(group: group, name: payload['name'].to_s.truncate(250), kind: 'color', status: 'active',
+                                 metadata: option.metadata.merge('color_set' => set))
+        option.save!
+        option
+      end
+
+      def self.color_key(payload)
+        Keys.option(payload['group'], "#{ColorSets.normalize(payload['group'])} #{payload['name']}")
+      end
+
+      # A book published before colors were keyed by set: each of its color
+      # rows moves to its own set's option (from the import item that made
+      # it). Returns how many rows moved.
+      def self.split_colors!(book)
+        moved = 0
+        groups = {}
+        book.import_items.where(item_type: 'option', review_status: ACCEPTED).find_each do |item|
+          p = item.payload
+          next unless p['kind'] == 'color'
+
+          row = book.option_prices.find_by("source_ref = ?::jsonb", item.source_ref.to_json)
+          next unless row
+
+          key, = Sections.group_for(p['group'].presence || 'Colors')
+          group = groups[key] ||= CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, key: key) || row.option.group
+          option = color_option(book.manufacturer_id, p, group)
+          next if row.catalog_option_id == option.id
+
+          row.update_columns(catalog_option_id: option.id, updated_at: Time.current)
+          item.update_columns(matched_type: 'CatalogOption', matched_id: option.id)
+          moved += 1
+        end
+        moved
       end
 
       def publish_standard(item, counts)

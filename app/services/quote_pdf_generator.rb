@@ -222,9 +222,16 @@ class QuotePdfGenerator
   end
 
   # ── LINE ITEMS ──
+  # Totals only (pricing_display 'bundled'): the buyer sees what is included,
+  # not what each line costs; credits are summed as Savings in the totals.
+  def totals_only? = @quote.pricing_display == 'bundled'
+
+  def line_total(item) = (item['total'] || item['line_total'] || item['lineTotal'] || 0).to_f
+
   def add_line_items(pdf, accent)
     items = @quote.items || []
     return pdf.text('No line items', size: 10, color: '999999', style: :italic) if items.empty?
+    return add_included_items(pdf, accent, items) if totals_only?
 
     # Check if ANY item has a non-zero discount
     has_discounts = items.any? do |item|
@@ -246,9 +253,9 @@ class QuotePdfGenerator
       discount = (item['discount'] || 0).to_f
       total = item['total'] || item['line_total'] || item['lineTotal'] || 0
 
-      # Add taxable indicator
+      # Add taxable indicator (a credit lowers the taxed amount; it is not a taxed charge)
       taxable = item['taxable'] == true || item['taxable'] == 'true'
-      desc += ' +Tax' if taxable
+      desc += ' +Tax' if taxable && total.to_f >= 0
 
       row = [desc, qty.to_s, format_currency(price)]
       row << format_currency(discount) if has_discounts
@@ -273,6 +280,21 @@ class QuotePdfGenerator
       t.row(0).background_color = accent
       t.row(0).border_color = accent
       t.columns(right_cols).align = :right
+    end
+  end
+
+  def add_included_items(pdf, accent, items)
+    table_data = [['Included', 'Qty']]
+    items.reject { |item| line_total(item).negative? }.each do |item|
+      table_data << [item['description'] || item['name'] || '', (item['quantity'] || item['qty'] || 1).to_s]
+    end
+    pdf.table(table_data, header: true, width: pdf.bounds.width,
+              cell_style: { padding: [8, 6], size: 10, border_width: 0.5, border_color: 'DDDDDD' }) do |t|
+      t.row(0).font_style = :bold
+      t.row(0).text_color = 'FFFFFF'
+      t.row(0).background_color = accent
+      t.row(0).border_color = accent
+      t.columns(1).align = :right
     end
   end
 
@@ -308,6 +330,13 @@ class QuotePdfGenerator
       totals_data << ['Shipping/Delivery', format_currency(shipping_cost)]
     end
 
+    if totals_only?
+      credits = (@quote.items || []).sum { |item| [line_total(item), 0].min }
+      if credits.negative?
+        totals_data << ['Price', format_currency((@quote.items || []).sum { |item| [line_total(item), 0].max })]
+        totals_data << ['Savings', format_currency(credits)]
+      end
+    end
     totals_data << ['Subtotal', format_currency(@quote.subtotal || 0)]
     totals_data << ['Tax', format_currency(@quote.tax || 0)]
     totals_data << ['Total', format_currency(@quote.total || 0)]
@@ -390,10 +419,11 @@ class QuotePdfGenerator
     { street: nil, city: nil, state: nil, zip: nil }
   end
 
+  # -1918.44 prints as -$1,918.44 (the sign used to be dropped, so credits read as charges).
   def format_currency(amount)
     number = amount.to_f
-    whole, decimal = sprintf('%.2f', number).split('.')
+    whole, decimal = sprintf('%.2f', number.abs).split('.')
     whole_with_commas = whole.reverse.scan(/\d{1,3}/).join(',').reverse
-    "$#{whole_with_commas}.#{decimal}"
+    "#{'-' if number.round(2).negative?}$#{whole_with_commas}.#{decimal}"
   end
 end

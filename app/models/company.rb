@@ -160,6 +160,8 @@ class Company < ApplicationRecord
   has_many :dealer_markup_rules, dependent: :destroy
   has_many :dealer_price_book_adoptions, dependent: :destroy
   has_many :truebuild_designs, dependent: :destroy
+  has_many :deal_home_builds, dependent: :destroy
+  has_many :catalog_price_requests, dependent: :destroy
   has_many :truebuild_addons, dependent: :destroy
 
   # Website Builder Associations

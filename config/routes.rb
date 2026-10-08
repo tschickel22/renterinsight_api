@@ -308,6 +308,24 @@ Rails.application.routes.draw do
       get    'truebuild_homes', to: 'truebuild_homes#index'
       patch  'truebuild_homes/:id', to: 'truebuild_homes#update'
       post   'truebuild_designs/:id/quote', to: 'truebuild_designs#create_quote'
+      # A deal's home build (E49): the model and the options chosen for it.
+      get    'deal_sheets', to: 'deal_sheets#index'
+      get    'deals/:deal_id/home_build', to: 'deal_home_builds#show'
+      post   'deals/:deal_id/home_build', to: 'deal_home_builds#create'
+      patch  'deals/:deal_id/home_build', to: 'deal_home_builds#update'
+      delete 'deals/:deal_id/home_build', to: 'deal_home_builds#destroy'
+      get    'deals/:deal_id/home_build/models', to: 'deal_home_builds#models'
+      get    'deals/:deal_id/home_build/options', to: 'deal_home_builds#options'
+      post   'deals/:deal_id/home_build/reprice', to: 'deal_home_builds#reprice'
+      post   'deals/:deal_id/home_build/versions', to: 'deal_home_builds#create_version'
+      post   'deals/:deal_id/home_build/make_live', to: 'deal_home_builds#make_live'
+      post   'deals/:deal_id/home_build/lines', to: 'deal_home_builds#create_line'
+      patch  'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#update_line'
+      delete 'deals/:deal_id/home_build/lines/:id', to: 'deal_home_builds#destroy_line'
+      post   'deals/:deal_id/home_build/lines/:id/report_price', to: 'deal_home_builds#report_price'
+      get    'deals/:deal_id/home_build/suppliers', to: 'deal_home_builds#suppliers'
+      post   'deals/:deal_id/home_build/purchase_order', to: 'deal_home_builds#create_purchase_order'
+      post   'deals/:deal_id/home_build/purchase_order/:po_id/refresh', to: 'deal_home_builds#refresh_purchase_order'
       get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
       post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'
       post   'truebuild_pricing/updates/:id/decline', to: 'truebuild_pricing#decline_update'
@@ -1537,6 +1555,9 @@ Rails.application.routes.draw do
           post :cancel
           get :receiving_history, path: 'receiving-history'
           post :post_to_accounting
+          # A factory PO (backlog E51): the home arrived.
+          post :receive_home, path: 'receive-home'
+          post :email
         end
         collection do
           get :stats
@@ -2117,6 +2138,7 @@ Rails.application.routes.draw do
           post 'ai_generate/:generation_id/accept', action: :ai_accept, as: :ai_accept
           post 'ai_generate/:generation_id/refine', action: :ai_refine, as: :ai_refine
           get  'ai_generate/:generation_id/preview_render', action: :ai_preview_render, as: :ai_preview_render
+          get :sms_status
           get :templates, to: 'campaign_templates#index'
           get :merge_fields
           get :audience_field_schema
@@ -3087,6 +3109,8 @@ Rails.application.routes.draw do
           get  :link_sources
           post :link_catalog
           post :publish
+          # Colors that shared one option across sets get one each (Publisher.split_colors!).
+          post :split_colors
           get  'documents/:document_id/download', action: :download_document, as: :download_document
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
           get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs
@@ -3097,8 +3121,15 @@ Rails.application.routes.draw do
           get  'option_decisions', to: 'catalog_option_decisions#index'
           post 'option_review', to: 'catalog_option_decisions#review'
           get  'options', to: 'catalog_option_decisions#options'
+          # Correcting prices after publishing (CatalogPriceCorrectionsController).
+          get   'prices', to: 'catalog_price_corrections#prices'
+          patch 'prices/:kind/:price_id', to: 'catalog_price_corrections#update_price'
+          get   'corrections', to: 'catalog_price_corrections#corrections'
         end
       end
+      get  'catalog_price_requests', to: 'catalog_price_corrections#requests'
+      post 'catalog_price_requests/:id/apply', to: 'catalog_price_corrections#apply'
+      post 'catalog_price_requests/:id/dismiss', to: 'catalog_price_corrections#dismiss'
       get   'option_decisions/patterns', to: 'catalog_option_decisions#patterns'
       patch 'option_decisions/:id', to: 'catalog_option_decisions#update'
       post  'option_decisions', to: 'catalog_option_decisions#create'

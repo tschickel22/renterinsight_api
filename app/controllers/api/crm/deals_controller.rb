@@ -675,6 +675,11 @@ module Api
           @company.deals
         end
 
+        # One account's deals (its page) are listed whatever location the
+        # selector is on: a buyer's deals at another lot are still theirs.
+        # RBAC location access above still applies.
+        return filter_deals_by_location(base) { |scope| scope } if params[:account_id].present?
+
         filter_deals_by_location(base) { |scope| scope.for_current_location }
       end
 
@@ -876,6 +881,14 @@ module Api
         [home_price, addons]
       end
 
+      def deal_sheet_json(deal)
+        live = deal.home_build
+        return nil unless live
+
+        { liveVersionId: live.id, liveVersionNumber: live.version_number, liveVersionName: live.version_name,
+          versionCount: deal.home_builds.count }
+      end
+
       def deal_json(deal, detailed: false)
         # Check if user has permission to view cost details
         can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
@@ -1040,7 +1053,16 @@ module Api
           
           base.merge!(
             products: products_array,
-            stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) }
+            stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) },
+            # The deal sheet version the deal's numbers come from, for the LIVE badge.
+            dealSheet: deal_sheet_json(deal),
+            # Purchase orders for this deal: the home order shows at the top of the deal.
+            purchaseOrders: deal.purchase_orders.where(is_deleted: [false, nil]).order(:created_at).map { |po|
+              { id: po.id, poNumber: po.po_number, kind: po.kind, status: po.status, total: po.total_amount.to_f,
+                supplier: po.manufacturer&.name || po.supplier&.name, emailedAt: po.emailed_at&.iso8601,
+                sentAt: po.sent_at&.iso8601, expectedDeliveryDate: po.expected_delivery_date&.iso8601,
+                receivedDate: po.received_date&.iso8601 }
+            }
           )
         end
         

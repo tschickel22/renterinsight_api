@@ -16,5 +16,6 @@ class FeeTemplate < ApplicationRecord
   scope :active, -> { where(active: true) }
   scope :seeded, -> { where(is_seeded: true) }
   scope :for_collateral, ->(type) { where(applies_to: [type, 'all']) }
-  scope :ordered, -> { order(:position, :name) }
+  # Alphabetical wherever templates are listed (pickers, settings, the Deal Sheet). Nothing reorders them by hand.
+  scope :ordered, -> { order(Arel.sql('LOWER(name)'), :id) }
 end

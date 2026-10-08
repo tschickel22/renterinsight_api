@@ -168,6 +168,31 @@ RSpec.describe Campaigns::AiBuilder do
       expect(generation.reload.status).to eq('accepted')
       expect(generation.campaign_id).to eq(campaign.id)
     end
+
+    it 'builds a mixed plan as an email campaign with its own SMS steps' do
+      mixed = plan.merge(
+        'channel' => 'mixed',
+        'steps' => [
+          { 'channel' => 'email', 'wait_days' => 0, 'subject' => 'Hi', 'body_blocks' => [{ 'type' => 'text', 'html' => 'x' }] },
+          { 'channel' => 'sms', 'wait_days' => 2, 'sms_body' => 'Still looking?', 'subject' => 'stray',
+            'body_blocks' => [{ 'type' => 'text', 'html' => 'stray' }] },
+          { 'wait_days' => 5, 'sms_body' => 'Last nudge' }
+        ]
+      )
+      generation = CampaignAiGeneration.create!(company: company, user: user, prompt: 'p',
+                                                 generated_plan: mixed, status: 'generated')
+      campaign = described_class.new(company: company, user: user).accept(
+        generation: generation,
+        sender_params: { from_identity_type: 'User', from_identity_id: user.id }
+      )
+      steps = campaign.campaign_steps.order(:position)
+      expect(campaign.channel).to eq('email')
+      expect(campaign.from_identity_type).to eq('User')
+      expect(steps.map(&:channel)).to eq(%w[email sms sms])
+      expect(steps.second.subject).to be_nil
+      expect(steps.second.body_blocks).to eq([])
+      expect(campaign.sends_sms?).to be true
+    end
   end
 
   describe '#refine' do

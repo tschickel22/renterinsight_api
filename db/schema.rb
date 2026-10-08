@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_08_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1372,6 +1372,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.text "sms_body"
     t.string "media_url"
     t.jsonb "attachments", default: []
+    t.datetime "send_at"
+    t.string "send_at_timezone"
     t.index ["campaign_id", "position"], name: "index_campaign_steps_on_campaign_id_and_position"
   end
 
@@ -1714,6 +1716,49 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.index ["manufacturer_id"], name: "index_catalog_price_books_on_manufacturer_id"
     t.index ["published_by_id"], name: "index_catalog_price_books_on_published_by_id"
     t.index ["supersedes_id"], name: "index_catalog_price_books_on_supersedes_id"
+  end
+
+  create_table "catalog_price_corrections", force: :cascade do |t|
+    t.bigint "catalog_price_book_id", null: false
+    t.string "target_type", null: false
+    t.bigint "target_id", null: false
+    t.string "field", null: false
+    t.string "old_value"
+    t.string "new_value"
+    t.text "reason"
+    t.bigint "corrected_by_id"
+    t.bigint "catalog_price_request_id"
+    t.datetime "created_at", null: false
+    t.index ["catalog_price_book_id"], name: "index_catalog_price_corrections_on_catalog_price_book_id"
+    t.index ["catalog_price_request_id"], name: "index_catalog_price_corrections_on_catalog_price_request_id"
+    t.index ["corrected_by_id"], name: "index_catalog_price_corrections_on_corrected_by_id"
+    t.index ["target_type", "target_id"], name: "index_catalog_price_corrections_on_target_type_and_target_id"
+  end
+
+  create_table "catalog_price_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "catalog_price_book_id", null: false
+    t.string "target_type", null: false
+    t.bigint "target_id", null: false
+    t.string "field", null: false
+    t.decimal "current_value", precision: 12, scale: 2
+    t.decimal "suggested_value", precision: 12, scale: 2
+    t.text "note"
+    t.string "label", null: false
+    t.bigint "deal_id"
+    t.bigint "requested_by_id"
+    t.string "status", default: "open", null: false
+    t.bigint "resolved_by_id"
+    t.datetime "resolved_at"
+    t.text "resolution_note"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_price_book_id"], name: "index_catalog_price_requests_on_catalog_price_book_id"
+    t.index ["company_id"], name: "index_catalog_price_requests_on_company_id"
+    t.index ["deal_id"], name: "index_catalog_price_requests_on_deal_id"
+    t.index ["requested_by_id"], name: "index_catalog_price_requests_on_requested_by_id"
+    t.index ["resolved_by_id"], name: "index_catalog_price_requests_on_resolved_by_id"
+    t.index ["status", "catalog_price_book_id"], name: "idx_on_status_catalog_price_book_id_c35cd5bd9a"
   end
 
   create_table "catalog_sources", force: :cascade do |t|
@@ -2409,6 +2454,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.string "contact_phone"
     t.string "claim_email"
     t.string "claim_contact_name"
+    t.string "po_email"
+    t.string "po_contact_name"
     t.index ["active"], name: "index_company_manufacturers_on_active"
     t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
     t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
@@ -2871,6 +2918,76 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.index ["shared_by_id"], name: "index_deal_desk_shares_on_shared_by_id"
   end
 
+  create_table "deal_home_build_lines", force: :cascade do |t|
+    t.bigint "deal_home_build_id", null: false
+    t.string "kind", null: false
+    t.bigint "catalog_option_id"
+    t.bigint "truebuild_addon_id"
+    t.string "group_name"
+    t.string "label", null: false
+    t.string "factory_code"
+    t.decimal "quantity", precision: 10, scale: 2, default: "1.0", null: false
+    t.string "unit", default: "each", null: false
+    t.decimal "unit_cost", precision: 12, scale: 2
+    t.decimal "unit_retail", precision: 12, scale: 2
+    t.decimal "cost", precision: 12, scale: 2
+    t.decimal "retail", precision: 12, scale: 2
+    t.boolean "is_standard", default: false, null: false
+    t.boolean "tbd", default: false, null: false
+    t.boolean "no_charge", default: false, null: false
+    t.string "tax_category", default: "factory_option", null: false
+    t.integer "position", default: 0, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "source_template_type"
+    t.bigint "source_template_id"
+    t.index ["catalog_option_id"], name: "index_deal_home_build_lines_on_catalog_option_id"
+    t.index ["deal_home_build_id", "position"], name: "index_deal_home_build_lines_on_deal_home_build_id_and_position"
+    t.index ["deal_home_build_id"], name: "index_deal_home_build_lines_on_deal_home_build_id"
+    t.index ["source_template_type", "source_template_id"], name: "index_deal_home_build_lines_on_source_template"
+    t.index ["truebuild_addon_id"], name: "index_deal_home_build_lines_on_truebuild_addon_id"
+  end
+
+  create_table "deal_home_builds", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "deal_id", null: false
+    t.bigint "location_id"
+    t.bigint "catalog_plan_variant_id", null: false
+    t.bigint "vehicle_id"
+    t.string "source", default: "order", null: false
+    t.bigint "truebuild_design_id"
+    t.bigint "catalog_price_book_id"
+    t.bigint "cost_book_id"
+    t.bigint "options_book_id"
+    t.string "construction"
+    t.string "status", default: "draft", null: false
+    t.datetime "priced_at"
+    t.jsonb "totals", default: {}, null: false
+    t.text "notes"
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "freight_miles"
+    t.boolean "freight_miles_set", default: false, null: false
+    t.jsonb "discounts", default: {}, null: false
+    t.integer "version_number", default: 1, null: false
+    t.string "label"
+    t.boolean "live", default: false, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.index ["catalog_plan_variant_id"], name: "index_deal_home_builds_on_catalog_plan_variant_id"
+    t.index ["catalog_price_book_id"], name: "index_deal_home_builds_on_catalog_price_book_id"
+    t.index ["company_id"], name: "index_deal_home_builds_on_company_id"
+    t.index ["cost_book_id"], name: "index_deal_home_builds_on_cost_book_id"
+    t.index ["created_by_id"], name: "index_deal_home_builds_on_created_by_id"
+    t.index ["deal_id", "version_number"], name: "index_deal_home_builds_on_deal_id_and_version_number", unique: true
+    t.index ["deal_id"], name: "index_deal_home_builds_one_live_per_deal", unique: true, where: "live"
+    t.index ["location_id"], name: "index_deal_home_builds_on_location_id"
+    t.index ["options_book_id"], name: "index_deal_home_builds_on_options_book_id"
+    t.index ["truebuild_design_id"], name: "index_deal_home_builds_on_truebuild_design_id"
+    t.index ["vehicle_id"], name: "index_deal_home_builds_on_vehicle_id"
+  end
+
   create_table "deal_products", force: :cascade do |t|
     t.integer "deal_id", null: false
     t.integer "product_id"
@@ -2939,6 +3056,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.jsonb "buyer_featured_option_ids", default: [], null: false
     t.jsonb "buyer_hidden_option_ids", default: [], null: false
     t.jsonb "buyer_hidden_groups", default: [], null: false
+    t.decimal "freight_permit_per_section", precision: 10, scale: 2
+    t.decimal "freight_escort_per_mile", precision: 10, scale: 2
+    t.integer "freight_escort_width_ft"
+    t.decimal "freight_minimum", precision: 12, scale: 2
+    t.decimal "freight_markup_pct", precision: 7, scale: 4
+    t.decimal "sale_discount_pct", precision: 7, scale: 4
+    t.decimal "dealer_savings_pct", precision: 7, scale: 4
+    t.decimal "preferred_payment_pct", precision: 7, scale: 4
+    t.boolean "factory_po_hide_prices", default: false, null: false
     t.index "company_id, COALESCE(manufacturer_id, (0)::bigint)", name: "idx_dealer_catalog_terms_unique", unique: true
     t.index ["company_id"], name: "index_dealer_catalog_terms_on_company_id"
     t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"
@@ -3098,6 +3224,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.bigint "lender_id"
     t.jsonb "deal_desk_baseline"
     t.bigint "co_applicant_contact_id"
+    t.string "delivery_point", default: "deliver", null: false
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -4635,6 +4762,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.string "claim_email"
     t.string "claim_contact_name"
     t.bigint "company_id"
+    t.string "po_email"
+    t.string "po_contact_name"
     t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
     t.index ["active"], name: "index_manufacturers_on_active"
     t.index ["company_id", "code"], name: "index_manufacturers_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
@@ -5694,7 +5823,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
 
   create_table "purchase_order_lines", force: :cascade do |t|
     t.bigint "purchase_order_id", null: false
-    t.bigint "part_id", null: false
+    t.bigint "part_id"
     t.integer "line_number", null: false
     t.decimal "quantity_ordered", precision: 10, scale: 3, null: false
     t.decimal "quantity_received", precision: 10, scale: 3, default: "0.0", null: false
@@ -5708,6 +5837,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.decimal "discount_percent", precision: 5, scale: 2, default: "0.0"
+    t.bigint "catalog_option_id"
+    t.index ["catalog_option_id"], name: "index_purchase_order_lines_on_catalog_option_id"
     t.index ["part_id"], name: "index_purchase_order_lines_on_part_id"
     t.index ["purchase_order_id", "line_number"], name: "idx_on_purchase_order_id_line_number_052fcfc9be", unique: true
     t.index ["purchase_order_id", "part_id"], name: "index_purchase_order_lines_on_purchase_order_id_and_part_id"
@@ -5753,6 +5884,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.bigint "vendor_id"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.bigint "deal_id"
+    t.string "kind", default: "parts", null: false
+    t.bigint "deal_home_build_id"
+    t.bigint "received_vehicle_id"
+    t.jsonb "sheet_snapshot", default: {}, null: false
+    t.bigint "manufacturer_id"
+    t.datetime "emailed_at"
+    t.string "emailed_to"
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -5760,12 +5899,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
     t.index ["company_id", "supplier_id"], name: "index_purchase_orders_on_company_id_and_supplier_id"
     t.index ["company_id"], name: "index_purchase_orders_on_company_id"
     t.index ["created_by_id"], name: "index_purchase_orders_on_created_by_id"
+    t.index ["deal_home_build_id"], name: "index_purchase_orders_on_deal_home_build_id"
+    t.index ["deal_id"], name: "index_purchase_orders_on_deal_id"
     t.index ["expected_delivery_date"], name: "index_purchase_orders_on_expected_delivery_date"
     t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
     t.index ["location_id"], name: "index_purchase_orders_on_location_id"
+    t.index ["manufacturer_id"], name: "index_purchase_orders_on_manufacturer_id"
     t.index ["order_date"], name: "index_purchase_orders_on_order_date"
     t.index ["quickbooks_id"], name: "index_purchase_orders_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["received_date"], name: "index_purchase_orders_on_received_date"
+    t.index ["received_vehicle_id"], name: "index_purchase_orders_on_received_vehicle_id"
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
     t.index ["vendor_id"], name: "index_purchase_orders_on_vendor_id"
@@ -8465,6 +8608,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
   add_foreign_key "catalog_price_books", "manufacturers"
   add_foreign_key "catalog_price_books", "users", column: "created_by_id"
   add_foreign_key "catalog_price_books", "users", column: "published_by_id"
+  add_foreign_key "catalog_price_corrections", "catalog_price_books"
+  add_foreign_key "catalog_price_corrections", "users", column: "corrected_by_id"
+  add_foreign_key "catalog_price_requests", "catalog_price_books"
+  add_foreign_key "catalog_price_requests", "companies"
+  add_foreign_key "catalog_price_requests", "deals"
+  add_foreign_key "catalog_price_requests", "users", column: "requested_by_id"
+  add_foreign_key "catalog_price_requests", "users", column: "resolved_by_id"
   add_foreign_key "catalog_standard_features", "catalog_price_books"
   add_foreign_key "catalog_swatch_sheets", "factories", on_delete: :nullify
   add_foreign_key "catalog_swatch_sheets", "manufacturers"
@@ -8563,6 +8713,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
   add_foreign_key "deal_desk_shares", "companies"
   add_foreign_key "deal_desk_shares", "deals"
   add_foreign_key "deal_desk_shares", "users", column: "shared_by_id"
+  add_foreign_key "deal_home_build_lines", "catalog_options"
+  add_foreign_key "deal_home_build_lines", "deal_home_builds", on_delete: :cascade
+  add_foreign_key "deal_home_build_lines", "truebuild_addons"
+  add_foreign_key "deal_home_builds", "catalog_plan_variants"
+  add_foreign_key "deal_home_builds", "catalog_price_books"
+  add_foreign_key "deal_home_builds", "catalog_price_books", column: "cost_book_id"
+  add_foreign_key "deal_home_builds", "catalog_price_books", column: "options_book_id"
+  add_foreign_key "deal_home_builds", "companies"
+  add_foreign_key "deal_home_builds", "deals"
+  add_foreign_key "deal_home_builds", "locations"
+  add_foreign_key "deal_home_builds", "truebuild_designs"
+  add_foreign_key "deal_home_builds", "users", column: "created_by_id"
+  add_foreign_key "deal_home_builds", "vehicles"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
@@ -8799,13 +8962,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_04_210000) do
   add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
+  add_foreign_key "purchase_order_lines", "catalog_options", on_delete: :nullify
   add_foreign_key "purchase_order_lines", "parts"
   add_foreign_key "purchase_order_lines", "purchase_orders"
   add_foreign_key "purchase_orders", "companies"
+  add_foreign_key "purchase_orders", "deal_home_builds", on_delete: :nullify
+  add_foreign_key "purchase_orders", "deals"
   add_foreign_key "purchase_orders", "locations"
-  add_foreign_key "purchase_orders", "suppliers"
+  add_foreign_key "purchase_orders", "manufacturers"
   add_foreign_key "purchase_orders", "users", column: "approved_by_id"
   add_foreign_key "purchase_orders", "users", column: "created_by_id"
+  add_foreign_key "purchase_orders", "vehicles", column: "received_vehicle_id"
   add_foreign_key "quickbooks_connections", "companies"
   add_foreign_key "quickbooks_entity_mappings", "companies"
   add_foreign_key "quickbooks_field_mappings", "companies"

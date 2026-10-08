@@ -15,9 +15,11 @@ module Truebuild
   class PricingEngine
     # book: where retail comes from (the book the dealer accepted).
     # cost_book: where cost comes from (always the plant's current book).
-    Result = Struct.new(:book, :cost_book, :variant, :lines, :totals, :warnings, keyword_init: true) do
+    # options_book: where option costs come from (OptionSource).
+    Result = Struct.new(:book, :cost_book, :options_book, :variant, :lines, :totals, :warnings, keyword_init: true) do
       def to_h
         { book_id: book&.id, book_name: book&.name, cost_book_id: cost_book&.id, cost_book_name: cost_book&.name,
+          options_book_id: options_book&.id, options_book_name: options_book&.name,
           variant_id: variant.id, model_number: variant.model_number, lines: lines, totals: totals, warnings: warnings }
       end
 
@@ -30,12 +32,17 @@ module Truebuild
 
     # addon_ids: the buyer's chosen optional dealer add-ons. quote: include
     # the dealer's quote-only add-ons too (never for a buyer).
-    def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false)
+    # freight_miles: plant to homesite, when known (a deal sheet). assume_freight:
+    # price freight from the stated assumptions when the dealer set none.
+    def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false,
+                   freight_miles: nil, assume_freight: false)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
       @addon_ids = Array(addon_ids).map(&:to_i).uniq
       @quote = quote
+      @freight_miles = freight_miles
+      @assume_freight = assume_freight
       @location = location
       @construction = construction
       # Cost always follows the factory's current book: that is what the
@@ -44,6 +51,10 @@ module Truebuild
       # An explicit book prices both from that book.
       @book = book || BookResolver.book_for(company, variant)
       @cost_book = book || BookResolver.current_for(variant) || @book
+      # Options can come from a newer book than the base (OptionSource), held
+      # back the same way while the dealer reviews it.
+      @options_cost_book = book || OptionSource.current_for(variant) || @cost_book
+      @options_book = book || OptionSource.book_for(company, variant) || @book
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
                       .select { |r| r.location_id.nil? || r.location_id == location&.id }
@@ -53,13 +64,15 @@ module Truebuild
     def call
       raise ArgumentError, 'No published price book covers this model' unless @book
 
-      if @cost_book != @book
-        @warnings << "Your prices are still based on #{@book.name}, but costs follow #{@cost_book.name}. " \
+      if @cost_book != @book || @options_cost_book != @options_book
+        held = @cost_book != @book ? @book : @options_book
+        current = @cost_book != @book ? @cost_book : @options_cost_book
+        @warnings << "Your prices are still based on #{held.name}, but costs follow #{current.name}. " \
                      'Review the new price book to update your prices.'
       end
       lines = [base_line, *option_lines, freight_line, *addon_lines].compact
       totals = totals_for(lines)
-      Result.new(book: @book, cost_book: @cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
+      Result.new(book: @book, cost_book: @cost_book, options_book: @options_cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
 
     private
@@ -100,8 +113,8 @@ module Truebuild
     def option_lines
       return [] if @option_ids.empty?
 
-      prices = offered(@cost_book)
-      retail_prices = @book == @cost_book ? prices : offered(@book)
+      prices = offered(@options_cost_book)
+      retail_prices = @options_book == @options_cost_book ? prices : offered(@options_book)
       @option_ids.filter_map do |id|
         price = most_specific(prices.select { |op| op.catalog_option_id == id })
         unless price
@@ -114,8 +127,7 @@ module Truebuild
     end
 
     def offered(book)
-      book.option_prices.where(catalog_option_id: @option_ids).includes(option: :group).to_a
-          .select { |op| op.applies_to?(@variant, construction: @construction) }
+      OptionSource.offered(book, @variant, construction: @construction, option_ids: @option_ids)
     end
 
     # A price for this exact model beats a size band beats a general price.
@@ -150,16 +162,16 @@ module Truebuild
     # ---- freight -------------------------------------------------------
 
     def freight_line
-      flat = @terms.freight_flat.to_d
-      per_mile = @terms.freight_per_mile.to_d
-      miles = @terms.freight_miles.to_i
-      return nil if flat.zero? && (per_mile.zero? || miles.zero?)
+      # Freight once the dealer sets a rate; a deal sheet prices it from the
+      # stated assumptions before then, so a quote never leaves it out.
+      return nil unless @assume_freight || @terms.freight_set?
 
-      @warnings << 'Freight per mile is set but miles from the plant are not.' if per_mile.positive? && miles.zero?
-      cost = flat + (per_mile * miles)
-      rule = rule_for(:freight)
-      { kind: 'freight', label: 'Freight', cost: money(cost), retail: money(rule ? rule.apply(cost) : cost),
-        detail: { flat: money(flat), per_mile: money(per_mile), miles: miles } }
+      f = Freight.new(terms: @terms, variant: @variant, miles: @freight_miles).call
+      if f[:detail][:assumed].any?
+        @warnings << "Freight uses assumed #{f[:detail][:assumed].map { |a| a.tr('_', ' ') }.to_sentence} rates. " \
+                     'Set your own under Settings, TrueBuild pricing.'
+      end
+      { kind: 'freight', label: 'Freight to homesite', cost: money(f[:cost]), retail: money(f[:retail]), detail: f[:detail] }
     end
 
     # ---- the dealer's own add-ons ---------------------------------------
@@ -192,8 +204,11 @@ module Truebuild
         rounded_to: @terms.round_retail_to }
     end
 
-    def round_retail(amount)
-      step = @terms.round_retail_to.to_i
+    def round_retail(amount) = self.class.round_retail(amount, @terms)
+
+    # A total rounded up to the dealer's step (DealBuild rounds its totals the same way).
+    def self.round_retail(amount, terms)
+      step = terms.round_retail_to.to_i
       return amount unless step.positive?
 
       (amount / step).ceil * step

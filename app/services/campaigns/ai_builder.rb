@@ -154,7 +154,9 @@ module Campaigns
           status: 'draft',
           campaign_type: campaign_type,
           audience_mode: audience_mode,
-          channel: plan['channel'].presence || 'email',
+          # A mixed plan is an email campaign carrying SMS steps; Campaign
+          # itself only knows email and sms.
+          channel: plan['channel'] == 'sms' ? 'sms' : 'email',
           from_identity_type: sender_params[:from_identity_type],
           from_identity_id: sender_params[:from_identity_id],
           from_display_name: sender_params[:from_display_name],
@@ -170,16 +172,21 @@ module Campaigns
         )
 
         Array(plan['steps']).each_with_index do |step, idx|
+          step_channel = step_channel_for(plan, step)
+          sms = step_channel == 'sms'
+          send_at = plan_send_at(step, generation)
           campaign.campaign_steps.create!(
             position: idx,
-            channel: plan['channel'] || 'email',
-            wait_days: step['wait_days'] || 0,
-            wait_hours: step['wait_hours'] || 0,
-            subject: step['subject'],
-            preheader: step['preheader'],
-            body_blocks: step['body_blocks'] || [],
-            sms_body: step['sms_body'],
-            inventory_block_config: step['inventory_block_config']
+            channel: step_channel,
+            wait_days: send_at ? 0 : (step['wait_days'] || 0),
+            wait_hours: send_at ? 0 : (step['wait_hours'] || 0),
+            send_at: send_at,
+            send_at_timezone: (send_at && plan_time_zone(generation)&.tzinfo&.name),
+            subject: (step['subject'] unless sms),
+            preheader: (step['preheader'] unless sms),
+            body_blocks: sms ? [] : (step['body_blocks'] || []),
+            sms_body: (step['sms_body'] if sms),
+            inventory_block_config: (step['inventory_block_config'] unless sms)
           )
         end
 
@@ -236,6 +243,34 @@ module Campaigns
       end
     end
 
+    # A mixed plan names each step's channel; a single-channel plan applies its
+    # channel to every step. A mixed step the AI left unlabelled is read from
+    # its content: an SMS body and no email body means a text.
+    def step_channel_for(plan, step)
+      return plan['channel'] == 'sms' ? 'sms' : 'email' unless plan['channel'] == 'mixed'
+      return step['channel'] if %w[email sms].include?(step['channel'])
+
+      step['sms_body'].present? && step['body_blocks'].blank? ? 'sms' : 'email'
+    end
+
+    # The dealer's time zone, sent by the builder (the browser's zone), so a
+    # date the AI writes means the dealer's calendar day.
+    def plan_time_zone(generation)
+      ActiveSupport::TimeZone[generation.context_snapshot.to_h['timezone'].to_s]
+    end
+
+    # A step the AI pinned to a date carries send_at as local wall time
+    # ("2026-10-18T09:00"), read in the dealer's zone. Unparseable is ignored,
+    # leaving the step on its wait.
+    def plan_send_at(step, generation)
+      raw = step['send_at'].to_s.strip
+      return nil if raw.blank?
+
+      (plan_time_zone(generation) || ActiveSupport::TimeZone['Eastern Time (US & Canada)']).parse(raw)
+    rescue ArgumentError
+      nil
+    end
+
     def build_context(channel, overrides)
       # Try both casings for the setting key (historically inconsistent)
       profile = Setting.get('Company', @company.id, 'company_profile') ||
@@ -265,9 +300,17 @@ module Campaigns
         'inventory_summary' => inventory_summary,
         'lead_count' => safe_count(@company.try(:leads)),
         'contact_count' => safe_count(@company.try(:contacts)),
-        'available_templates' => CampaignTemplate.seeded.where(channel: channel).pluck(:slug)
+        'available_templates' => CampaignTemplate.seeded.where(channel: channel == 'mixed' ? %w[email sms] : channel).pluck(:slug)
       }
-      base.merge((overrides || {}).stringify_keys)
+      merged = base.merge((overrides || {}).stringify_keys)
+      # Today in the dealer's zone, so "Saturday" or "the 18th" in a prompt
+      # resolves to the right date.
+      # The builder always sends one; Eastern is the same fallback the send
+      # window uses, and is stored back so accept reads dates in that zone.
+      tz = ActiveSupport::TimeZone[merged['timezone'].to_s] || ActiveSupport::TimeZone['Eastern Time (US & Canada)']
+      merged['timezone'] = tz.tzinfo.name
+      merged['today'] = Time.current.in_time_zone(tz).strftime('%A, %Y-%m-%d')
+      merged
     end
 
     def business_display_name
@@ -377,7 +420,7 @@ module Campaigns
             "name": "Short campaign name",
             "description": "One-sentence summary",
             "campaign_type": "blast" | "drip" | "triggered" | "recurring_digest",
-            "channel": "email" | "sms",
+            "channel": "email" | "sms" | "mixed",  // ALWAYS context.channel. "mixed" = email AND text steps in one campaign.
             "audience_mode": "static" | "dynamic",  // ALWAYS "dynamic" for recurring_digest — new subscribers/tagged contacts must land in the next cycle's send. Use "static" only for one-shot blasts where the recipient list should freeze at launch.
             "recurrence_cron": "0 9 * * MON",  // REQUIRED for recurring_digest. Fugit 5-field cron: "min hour dom mon dow". Use "0 9 * * MON" for weekly Monday 9am (safe default), "0 9 * * FRI" for Friday, "0 9 1 * *" for monthly-on-the-1st. Omit or set null for non-recurring types.
             "audience": {
@@ -390,6 +433,8 @@ module Campaigns
             "steps": [
               {
                 "wait_days": 0, "wait_hours": 0,
+                "channel": "email" | "sms",  // REQUIRED when the plan channel is "mixed"; omit otherwise
+                "send_at": "2026-10-18T09:00",  // OPTIONAL. Local date and time in context.timezone. ONLY when the prompt ties this message to a specific calendar day (an event, an open house, a deadline). When set, wait_days/wait_hours are ignored.
                 "subject": "Email subject (omit for SMS)",
                 "preheader": "Email preview text (omit for SMS)",
                 "body_blocks": [
@@ -457,6 +502,17 @@ module Campaigns
         CADENCE:
         - Day 1, then space subsequent steps (3, 7, 14, 30, 60 days are sensible).
         - Never less than 24 hours between steps.
+
+        DATED STEPS:
+        - When the prompt names a specific date or event day ("the open house is Saturday the 18th", "remind them the day before"), give the steps tied to that day a "send_at" (local time, e.g. "2026-10-18T09:00"), worked out from context.today. A day-of message goes the morning of that day; a reminder the day before goes mid-morning.
+        - Keep send_at times between 9:00 and 18:00 so they fall inside normal sending hours (texts can never go before 8:00 or after 21:00).
+        - Steps without a tie to a date use wait_days/wait_hours as usual. Dated steps must be in date order with each other.
+        - If the prompt names a date without a year, use the next occurrence on or after context.today.
+
+        CHANNEL:
+        - Use context.channel as the plan channel. Do not switch it, even if the prompt asks for a channel that context.channel does not include; the dealer picks channels in the builder.
+        - "email": every step is an email. "sms": every step is a text.
+        - "mixed": combine emails and texts in one sequence, and set "channel" on EVERY step. Email steps carry subject, preheader and body_blocks. SMS steps carry only sms_body (no subject, no body_blocks, no inventory_block_config). Use texts for short, timely nudges (a quick check-in, a reminder, a reply prompt) and emails for richer content (photos, inventory, detail). Open with an email unless the prompt says otherwise, and do not send a text and an email on the same day.
 
         COMPLIANCE:
         - Email steps must be okay with CAN-SPAM (footer auto-added by system).

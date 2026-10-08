@@ -60,6 +60,7 @@ class Vehicle < ApplicationRecord
   belongs_to :catalog_plan_variant, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :deal_home_builds, dependent: :nullify
   # Service tickets attached to this home. Includes dealer-only (pre-sale)
   # tickets so the full service history stays with the home even before a sale.
   # Nullify on delete so removing a home doesn't cascade-delete its history.
@@ -245,6 +246,11 @@ class Vehicle < ApplicationRecord
   # and so its factory prices, by the Champion model id (see InventoryLinker).
   before_save :link_catalog_variant,
               if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? && (new_record? || will_save_change_to_champion_model_id?) }
+  # A home with no Champion id (a site scan, typed in) links when its model
+  # text carries a priced model number and its size agrees (HomeMatcher#confident).
+  before_save :link_catalog_variant_by_number,
+              if: -> { champion_model_id.blank? && catalog_plan_variant_id.nil? && condition.to_s.downcase != 'used' &&
+                       model.to_s.match?(/\d{4}/) && (new_record? || will_save_change_to_model?) }
 
   # Structured "landed" cost of the unit — the single source of truth for cost.
   # `total_cost` is authoritative when maintained; otherwise the sum of its components
@@ -406,6 +412,15 @@ class Vehicle < ApplicationRecord
     self.catalog_plan_variant_id = Catalog::PriceBooks::InventoryLinker.variant_for(self)&.id
   end
 
+  def link_catalog_variant_by_number
+    self.catalog_plan_variant_id = Truebuild::HomeMatcher.new.confident(self)&.id
+  end
+
+  def factory_model_name?
+    number = catalog_plan_variant&.model_number.to_s
+    number.present? && model.to_s.include?(number)
+  end
+
   def normalize_fields
     # Champion catalog rows come pre-formatted from the manufacturer's master
     # data — titleizing them breaks part numbers (DAP1676H32222 → "Dap 1676 H 32222")
@@ -413,7 +428,9 @@ class Vehicle < ApplicationRecord
     # an infinite update loop on every sync.
     # catalog_inventory is the same story: Cavco's model numbers ("Matrix
     # 30724X") titleize into "Matrix 30724 X", which is not a real part number.
-    unless %w[champion_ims catalog_import catalog_import_clone catalog_inventory].include?(source)
+    # Nor a home whose model carries its catalog model number (one received on a
+    # factory PO, "Apex 2856H32P01"), which titleizing re-spaces to "2856 H32 P01".
+    unless %w[champion_ims catalog_import catalog_import_clone catalog_inventory].include?(source) || factory_model_name?
       self.make = make&.titleize
       self.model = model&.titleize
     end

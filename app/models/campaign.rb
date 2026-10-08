@@ -97,10 +97,41 @@ class Campaign < ApplicationRecord
     step_channels.length > 1
   end
 
+  # Channels the active steps send on. A mixed campaign keeps channel 'email'
+  # and carries its texts as SMS steps, so the campaign channel alone does not
+  # say whether it texts anyone.
+  def active_step_channels
+    chans = campaign_steps.active.pluck(:channel).compact.uniq
+    chans.presence || [channel]
+  end
+
+  def sends_sms?   = active_step_channels.include?('sms')
+
+  # Dated steps that cannot send as written: a date already past, or one
+  # earlier than a dated step before it (steps run in order, so it would be
+  # reached late and skipped).
+  def step_date_problems(now = Time.current)
+    problems = []
+    previous = nil
+    # Numbered by order, as the Steps tab shows them; position can start at 0.
+    campaign_steps.active.ordered.each.with_index(1) do |s, number|
+      next unless s.dated?
+
+      problems << "Step #{number} is set to send #{s.send_at_label}, which has passed." if s.send_at < now
+      if previous && s.send_at < previous[:step].send_at
+        problems << "Step #{number} is dated before step #{previous[:number]}, so it would be reached after its date."
+      end
+      previous = { step: s, number: number }
+    end
+    problems
+  end
+  def sends_email? = active_step_channels.include?('email')
+
   def can_start?
     return false unless status == 'draft'
     return false if campaign_steps.active.empty?
     return false if campaign_audience.nil?
+    return false if step_date_problems.any?
 
     step_channels = campaign_steps.active.pluck(:channel).compact.uniq
     if step_channels.include?('email') || (step_channels.empty? && email_channel?)

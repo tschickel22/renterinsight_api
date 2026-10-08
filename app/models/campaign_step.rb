@@ -35,6 +35,32 @@ class CampaignStep < ApplicationRecord
       body_blocks.any? { |b| b.is_a?(Hash) && (b['type'] == 'raw_html' || b[:type] == 'raw_html') }
   end
 
+  # A dated step sends on its date and time instead of after a wait. Waits
+  # count from when the previous step actually went out, and sends are paced
+  # and held to the send window, so "Day 7" drifts by hours per recipient;
+  # a message tied to a calendar day (the day of an event) needs a real date.
+  def dated? = send_at.present?
+
+  # When this step comes due for someone whose previous step went out at
+  # `from`. A dated step ignores its wait.
+  def due_at(from = Time.current)
+    dated? ? send_at : from + (wait_days || 0).days + (wait_hours || 0).hours
+  end
+
+  # Once the step's calendar day is over (in the zone it was picked in) it is
+  # skipped, so nobody gets "see you today" the day after.
+  def send_day_passed?(now = Time.current)
+    dated? && now > send_at.in_time_zone(send_at_zone).end_of_day
+  end
+
+  def send_at_zone
+    ActiveSupport::TimeZone[send_at_timezone.to_s] || ActiveSupport::TimeZone['Eastern Time (US & Canada)']
+  end
+
+  def send_at_label
+    send_at&.in_time_zone(send_at_zone)&.strftime('%a, %b %-d, %Y at %-l:%M %p %Z')
+  end
+
   def effective_channel
     return channel if channel.present?
     campaign&.channel

@@ -110,7 +110,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       sample: sample,
       filter_evaluation: 'applied',
       channel: @campaign.channel,
-      sms_opt_in_filter_active: @campaign.sms_channel? && !audience&.sms_compliance_override?,
+      sms_opt_in_filter_active: @campaign.sends_sms? && !audience&.sms_compliance_override?,
       sms_compliance_override: audience&.sms_compliance_override? || false
     }
   rescue Audiences::FilterCompiler::CompilationError => e
@@ -121,8 +121,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     return unless authorize_action!('campaigns', 'update')
     audience = @campaign.campaign_audience
     return render(json: { error: 'No audience set' }, status: :unprocessable_entity) unless audience
-    unless @campaign.sms_channel?
-      return render(json: { error: 'Compliance acknowledgment only applies to SMS campaigns' }, status: :unprocessable_entity)
+    unless @campaign.sends_sms?
+      return render(json: { error: 'Compliance acknowledgment only applies to campaigns with SMS steps' }, status: :unprocessable_entity)
     end
 
     acknowledgment = (params[:acknowledgment] || '').to_s.strip

@@ -8,6 +8,8 @@ class TruebuildAddon < ApplicationRecord
   belongs_to :company
   belongs_to :source, polymorphic: true
   belongs_to :manufacturer, optional: true
+  # A deal build keeps the line (its label and price are snapshots) when the add-on goes.
+  has_many :deal_home_build_lines, dependent: :nullify
 
   validates :mode, inclusion: { in: MODES }
   validates :source_type, inclusion: { in: SOURCES }

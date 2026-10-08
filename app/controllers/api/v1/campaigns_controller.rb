@@ -101,6 +101,8 @@ class Api::V1::CampaignsController < ApplicationController
             body_blocks: sp['body_blocks'],
             sms_body: sp['sms_body'],
             media_url: sp['media_url'],
+            send_at: sp['send_at'].presence,
+            send_at_timezone: sp['send_at_timezone'].presence,
             is_active: true
           )
         end
@@ -238,6 +240,7 @@ class Api::V1::CampaignsController < ApplicationController
       reasons << 'Campaign must be in draft status' unless @campaign.status == 'draft'
       reasons << 'Campaign needs at least one active step' if @campaign.campaign_steps.where(is_active: true).empty?
       reasons << 'Campaign needs an audience' if @campaign.campaign_audience.nil?
+      reasons.concat(@campaign.step_date_problems)
 
       step_channels = @campaign.campaign_steps.active.pluck(:channel).compact.uniq
       needs_email = step_channels.include?('email') || (step_channels.empty? && @campaign.email_channel?)
@@ -622,6 +625,14 @@ class Api::V1::CampaignsController < ApplicationController
     prompt = params[:prompt].to_s.strip
     return render(json: { error: 'prompt is required' }, status: :unprocessable_entity) if prompt.blank?
     channel = params[:channel].presence || 'email'
+    unless %w[email sms mixed].include?(channel)
+      return render(json: { error: "Unknown channel: #{channel}" }, status: :unprocessable_entity)
+    end
+    # Texts need a number to send from. Checked here so the AI never drafts an
+    # SMS campaign the dealer could not start.
+    if channel != 'email' && sms_sender_for_new_campaign.nil?
+      return render(json: { error: 'No active SMS number for this company. Provision one in Settings > Communications > SMS.' }, status: :unprocessable_entity)
+    end
 
     # Extract document context (base64-encoded files uploaded for AI to reference)
     attachment_context = if params[:attachment_context].present?
@@ -731,8 +742,9 @@ class Api::V1::CampaignsController < ApplicationController
     return render(json: { error: 'Generation not found' }, status: :not_found) unless generation
 
     plan = generation.generated_plan || {}
-    step_plan = Array(plan['steps']).first
-    return render(json: { error: 'Plan has no steps to preview' }, status: :unprocessable_entity) if step_plan.blank?
+    # A mixed plan previews its first email step; its texts have no email render.
+    step_plan = Array(plan['steps']).find { |s| s['channel'] != 'sms' }
+    return render(json: { error: 'Plan has no email steps to preview' }, status: :unprocessable_entity) if step_plan.blank?
 
     # Un-persisted models so the preview doesn't leak into the campaigns
     # list, stats, or credit accounting. EmailRenderer treats
@@ -740,7 +752,7 @@ class Api::V1::CampaignsController < ApplicationController
     campaign = Campaign.new(
       company_id: @company.id,
       name: plan['name'] || 'AI Preview',
-      channel: plan['channel'] || 'email',
+      channel: plan['channel'] == 'sms' ? 'sms' : 'email',
       campaign_type: plan['campaign_type'] || 'drip',
       from_identity_type: 'Company',
       from_identity_id: nil,
@@ -780,6 +792,16 @@ class Api::V1::CampaignsController < ApplicationController
   rescue => e
     Rails.logger.error "[CampaignsController#ai_preview_render] #{e.class}: #{e.message}"
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/campaigns/sms_status
+  # Whether this company can send campaign texts, so the AI builder only
+  # offers SMS when there is a number to send from.
+  def sms_status
+    return unless authorize_action!('campaigns', 'read')
+
+    sender = sms_sender_for_new_campaign
+    render json: { available: sender.present?, from_number: sender&.phone_number }
   end
 
   def merge_fields
@@ -879,6 +901,12 @@ class Api::V1::CampaignsController < ApplicationController
   end
 
   private
+
+  # The number a campaign created now would text from, resolved the same way
+  # the sender resolves it at send time.
+  def sms_sender_for_new_campaign
+    Campaign.new(company_id: @company.id, channel: 'sms', location_id: current_location&.id).resolve_sms_sender_for_step
+  end
 
   # Walks the parent_generation chain forward to the most recent descendant
   # so subsequent refines build on top of prior ones rather than starting
@@ -1101,6 +1129,9 @@ class Api::V1::CampaignsController < ApplicationController
       utm_medium: c.utm_medium,
       utm_campaign: c.utm_campaign,
       steps: c.campaign_steps.ordered.map { |s| step_json(s) },
+      # Shown read only under Settings > Sender. Texts always go from the
+      # company (or location) number, never a per-campaign choice.
+      sms_from_number: (c.resolve_sms_sender_for_step&.phone_number if c.sends_sms?),
       audience: c.campaign_audience ? audience_json(c.campaign_audience) : nil,
       enrollments_count: c.campaign_enrollments.active.count
     )
@@ -1113,6 +1144,8 @@ class Api::V1::CampaignsController < ApplicationController
       channel: s.channel,
       wait_days: s.wait_days,
       wait_hours: s.wait_hours,
+      send_at: s.send_at&.iso8601,
+      send_at_timezone: s.send_at_timezone,
       subject: s.subject,
       preheader: s.preheader,
       body_blocks: s.body_blocks,

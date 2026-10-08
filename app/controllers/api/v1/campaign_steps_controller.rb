@@ -159,6 +159,7 @@ class Api::V1::CampaignStepsController < ApplicationController
     permitted = params.require(:campaign_step).permit(
       :position, :channel, :wait_days, :wait_hours,
       :subject, :preheader, :sms_body, :media_url, :is_active,
+      :send_at, :send_at_timezone,
       inventory_block_config: {},
       attachments: [:s3_key, :filename, :size, :content_type, :delivery_mode]
     )
@@ -182,6 +183,8 @@ class Api::V1::CampaignStepsController < ApplicationController
       channel: s.channel,
       wait_days: s.wait_days,
       wait_hours: s.wait_hours,
+      send_at: s.send_at&.iso8601,
+      send_at_timezone: s.send_at_timezone,
       subject: s.subject,
       preheader: s.preheader,
       body_blocks: s.body_blocks,
