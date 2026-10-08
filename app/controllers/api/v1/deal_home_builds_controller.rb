@@ -195,6 +195,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
           { id: op.catalog_option_id, name: op.option.name, kind: op.option.kind, standard: op.is_standard,
             color_set: Truebuild::DealBuild.choice_set(op.option),
             cost: op.dealer_cost&.to_f, suggested_retail: op.suggested_retail&.to_f, factory_code: op.option.factory_code,
+            includes: Array(op.option.package_items).map(&:to_s),
             unit: DealHomeBuildLine.unit_for(op.option.name), chosen: chosen.include?(op.catalog_option_id),
             rules: rules.fetch(op.catalog_option_id, []).map { |_, type, target| { type: type, option_id: target } } }
         end.sort_by { |o| o[:name].to_s } }
@@ -447,7 +448,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       warnings: warnings || build.totals['warnings'] || [],
       purchase_orders: build.deal.purchase_orders.where(kind: 'factory_home', is_deleted: [false, nil]).order(:created_at)
                             .map { |po| purchase_order_json(po) },
-      lines: build.lines.map { |l| line_json(l) }
+      lines: build.lines.includes(:option).map { |l| line_json(l) }
     } }
   end
 
@@ -458,7 +459,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, set_cost: l.metadata['set_cost'] == true, not_offered: l.metadata['not_offered'] == true,
       from_products: l.metadata['from_products'] == true,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
-      template_type: l.source_template_type, template_id: l.source_template_id }
+      template_type: l.source_template_type, template_id: l.source_template_id,
+      # What a package holds ("PACKAGE 2" alone says nothing to a buyer).
+      includes: l.kind == 'option' ? Array(l.option&.package_items).map(&:to_s) : [] }
   end
 
   def purchase_order_json(po)

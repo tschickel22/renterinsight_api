@@ -339,6 +339,18 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(body['groups'].flat_map { |g| g['options'] }.find { |o| o['id'] == beam.id }).to include('unit' => 'lf', 'cost' => 60.0)
   end
 
+  it "names what a package holds, in the options list and on the sheet line" do
+    package = option(extras, 'PACKAGE 4', 1295).tap { |o| o.update!(kind: 'package', package_items: ['Microwave OTR', 'Gas Range']) }
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    get "#{path}/options", headers: headers
+    listed = body['groups'].flat_map { |g| g['options'] }.find { |o| o['id'] == package.id }
+    expect(listed['includes']).to eq(['Microwave OTR', 'Gas Range'])
+
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: package.id }.to_json
+    expect(line('PACKAGE 4')['includes']).to eq(['Microwave OTR', 'Gas Range'])
+    expect(line('Apex (2856H32P01)')['includes']).to eq([])
+  end
+
   it 'refuses an unpriced model, a locked build, and another company' do
     unpriced = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '1636H11P01', width_ft: 16, length_ft: 36)
     post path, headers: headers, params: { variant_id: unpriced.id }.to_json
