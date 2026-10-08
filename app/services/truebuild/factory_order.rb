@@ -39,10 +39,14 @@ module Truebuild
     def self.colors(build)
       sets = offered_sets(build)
       chosen = build.lines.select { |l| l.kind == 'option' && !l.tbd }.index_by(&:catalog_option_id)
+      skips = build.color_skips
       sets.map do |set, options|
         pick = options.find { |o| chosen[o.id] }
         name = pick && (pick.name.to_s.start_with?("#{set}:") ? pick.name.to_s.sub("#{set}:", '').strip : pick.name)
-        { 'set' => set, 'choice' => name, 'code' => pick&.factory_code }
+        row = { 'set' => set, 'choice' => name, 'code' => pick&.factory_code }
+        # Marked "Not on this home": said so on the PO instead of "Not chosen yet".
+        row['skipped'] = true if pick.nil? && skips.include?(set)
+        row
       end.sort_by { |c| c['set'].to_s.downcase }
     end
 

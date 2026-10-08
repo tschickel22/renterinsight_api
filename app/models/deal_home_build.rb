@@ -27,7 +27,14 @@ class DealHomeBuild < ApplicationRecord
   validates :deal_id, uniqueness: { conditions: -> { where(live: true) } }, if: :live?
   validate :same_company
 
-  before_save { self.totals = totals.to_h.deep_stringify_keys }
+  before_save do
+    self.totals = totals.to_h.deep_stringify_keys
+    self.metadata = metadata.to_h.deep_stringify_keys
+  end
+
+  # Color and finish sets marked "Not on this home" (colors for an option the
+  # home does not have).
+  def color_skips = Array(metadata.to_h['color_skips'])
 
   def locked? = status == 'locked'
 

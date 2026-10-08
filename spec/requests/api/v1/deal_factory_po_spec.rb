@@ -177,8 +177,14 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
                              { 'set' => 'Siding', 'choice' => 'Clay', 'code' => 'SID-CLAY' }])
     expect(po.lines.map(&:description)).not_to include('Clay') # in the colors list, not an item at $0
 
+    # Shutters marked "Not on this home": the PO says so; a draft takes it with Update.
+    patch path, headers: headers, params: { color_skips: ['Shutters'] }.to_json
+    expect(body.dig('build', 'color_skips')).to eq(['Shutters'])
+    post "#{path}/purchase_order/#{po.id}/refresh", headers: headers
+    expect(po.reload.colors.first).to include('set' => 'Shutters', 'skipped' => true)
+
     text = PDF::Reader.new(StringIO.new(PurchaseOrderPdfGenerator.new(po).generate)).pages.map(&:text).join("\n")
-    expect(text).to include('Colors and finishes', 'Siding', 'Clay', 'SID-CLAY', 'Not chosen yet')
+    expect(text).to include('Colors and finishes', 'Siding', 'Clay', 'SID-CLAY', 'Not on this home')
     expect(text).to include('$49,645.00')
 
     company.dealer_catalog_terms.find_by(manufacturer_id: nil).update!(factory_po_hide_prices: true)

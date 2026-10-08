@@ -102,7 +102,15 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     service = Truebuild::DealBuild.new(@build)
     # A version's name is the rep's, and can change even once it is signed.
     @build.update!(label: params[:label].presence) if params.key?(:label)
-    return render json: build_json(@build.reload) if params.key?(:label) && (params.keys & EDIT_KEYS).empty?
+    # Color sets marked "Not on this home" (Colors & finishes checklist).
+    if params.key?(:color_skips)
+      raise Truebuild::DealBuild::Locked, 'This build is locked by a signed agreement' if @build.locked?
+
+      @build.update!(metadata: @build.metadata.to_h.merge('color_skips' => Array(params[:color_skips]).map(&:to_s).reject(&:blank?).uniq))
+    end
+    if (params.key?(:label) || params.key?(:color_skips)) && (params.keys & EDIT_KEYS).empty?
+      return render json: build_json(@build.reload)
+    end
 
     if params[:variant_id].present? && params[:variant_id].to_i != @build.catalog_plan_variant_id
       # A different home: its options are not this one's, so the build starts over.
@@ -429,6 +437,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       totals: build.totals,
       discounts: build.discounts,
       freight_miles_set: build.freight_miles_set,
+      color_skips: build.color_skips,
       # Lines on the deal the sheet did not write (a warranty added in Products).
       other_deal_lines: other_deal_lines(build),
       warnings: warnings || build.totals['warnings'] || [],

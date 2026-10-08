@@ -86,7 +86,10 @@ class PurchaseOrderPdfGenerator
     pdf.text 'Colors and finishes', style: :bold, size: 11
     pdf.move_down 4
     rows = [%w[Set Choice Code]]
-    @po.colors.each { |c| rows << [c['set'].to_s, c['choice'].presence || 'Not chosen yet: please confirm', c['code'].to_s] }
+    @po.colors.each do |c|
+      choice = c['choice'].presence || (c['skipped'] ? 'Not on this home' : 'Not chosen yet: please confirm')
+      rows << [c['set'].to_s, choice, c['code'].to_s]
+    end
     pdf.table(rows, header: true, width: pdf.bounds.width, cell_style: { size: 9, padding: [4, 5], border_color: 'DDDDDD' }) do |t|
       t.row(0).font_style = :bold
       t.row(0).background_color = 'F3F4F6'
