@@ -18,9 +18,16 @@ module ImportExport
 
     def match_and_attach!
       return { matched: 0, unmatched: [] } unless @job.image_zip_url.present?
-      zip_path = File.exist?(@job.image_zip_url.to_s) ? @job.image_zip_url : ImportExport::S3Helper.download_to_tempfile(@job.image_zip_url)
-      return { matched: 0, unmatched: [] } unless zip_path && File.exist?(zip_path)
+      ImportExport::S3Helper.with_local_file(@job.image_zip_url) do |zip_path|
+        return { matched: 0, unmatched: [] } unless zip_path && File.exist?(zip_path)
 
+        match_zip(zip_path)
+      end
+    end
+
+    private
+
+    def match_zip(zip_path)
       cfg = ModuleRegistry.config_for(@job.module_type)
       return { matched: 0, unmatched: [] } unless cfg
 
@@ -52,8 +59,6 @@ module ImportExport
 
       { matched: matched, unmatched: unmatched }
     end
-
-    private
 
     def identifiers_for(record)
       ids = []
