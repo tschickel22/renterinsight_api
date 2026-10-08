@@ -81,9 +81,10 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: black_shutters.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: flint.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: wine_shutters.id }.to_json
-    expect(body.dig('build', 'lines').map { |l| l['label'] }).to include('Flint', 'Shutters: Wine')
-    expect(body.dig('build', 'lines').map { |l| l['label'] }).not_to include('Clay', 'Shutters: Black')
-    expect(line('Flint')).to include('standard' => true, 'cost' => 0.0, 'retail' => 0.0)
+    # A color pick names its set: "Siding: Flint", not a bare "Flint".
+    expect(body.dig('build', 'lines').map { |l| l['label'] }).to include('Siding: Flint', 'Shutters: Wine')
+    expect(body.dig('build', 'lines').map { |l| l['label'] }).not_to include('Siding: Clay', 'Shutters: Black')
+    expect(line('Siding: Flint')).to include('standard' => true, 'cost' => 0.0, 'retail' => 0.0)
 
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: beam.id, quantity: 12 }.to_json
     expect(line('Wood Beam On Ceiling - Per LF')).to include('unit' => 'lf', 'quantity' => 12.0, 'cost' => 720.0, 'retail' => 900.0)

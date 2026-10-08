@@ -31,7 +31,7 @@ module Truebuild
     # The lines written to the deal as lines of their own (the rest roll into the home line).
     EXTRA_KINDS = %w[addon template custom].freeze
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
-    TOTALS_VERSION = 4
+    TOTALS_VERSION = 5
 
     # Priced before the deal's lines last changed (a Products save), or by an
     # older version of these totals.
@@ -78,6 +78,14 @@ module Truebuild
     def self.choice_set(option)
       option.metadata.to_h['color_set'].presence ||
         (option.kind == 'standard' && option.name.to_s[BuyerCatalog::NAMED_CHOICE, 1]&.strip) || nil
+    end
+
+    # A line's name: a color or finish pick carries its set ("Shutters:
+    # Blue"), since "Blue" alone says nothing on a sheet, quote or PO.
+    def self.option_label(option)
+      set = choice_set(option)
+      name = option.name.to_s
+      set && !name.downcase.start_with?(set.downcase) ? "#{set}: #{name}" : name
     end
 
     attr_reader :build, :warnings
@@ -377,6 +385,7 @@ module Truebuild
         line.unit_cost = source[:cost] unless meta['set_cost']
         line.unit_retail = source[:retail] unless meta['set_retail']
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
+        line.label = self.class.option_label(line.option) if line.kind == 'option' && line.option
         meta['freight'] = source[:detail].deep_stringify_keys if line.kind == 'freight' && source[:detail]
       else
         # Priced before, not offered now (a new book dropped it): keep the
@@ -620,7 +629,7 @@ module Truebuild
     end
 
     def add_option_line(option)
-      add_line(kind: 'option', option: option, label: option.name, group_name: option.group&.name, factory_code: option.factory_code,
+      add_line(kind: 'option', option: option, label: self.class.option_label(option), group_name: option.group&.name, factory_code: option.factory_code,
                unit: DealHomeBuildLine.unit_for(option.name), tax_category: 'factory_option')
     end
 
