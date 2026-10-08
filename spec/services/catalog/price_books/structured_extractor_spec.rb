@@ -115,4 +115,14 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
     expect(choice.reload).to have_attributes(name: 'White', kind: 'color')
     expect(choice.metadata['color_set']).to eq('Siding')
   end
+
+  it 'converts a standard choice an earlier run already moved the rows onto' do
+    group = CatalogOptionGroup.create!(manufacturer: mfr, key: 'exterior', name: 'Exterior')
+    choice = CatalogOption.create!(manufacturer: mfr, key: 'exterior--siding-olive', name: 'Siding: Olive', kind: 'standard', group: group)
+    book.update_columns(status: 'published', published_at: Time.current)
+    row = CatalogOptionPrice.create!(price_book: book, option: choice, is_standard: true)
+    list = [{ price_id: row.id, key: 'exterior--siding-olive', name: 'Olive', color_set: 'Siding', group_key: 'exterior' }]
+    expect(Catalog::PriceBooks::Publisher.split_colors_from!(book, list)).to eq(moved: 0, lines: 0)
+    expect(choice.reload).to have_attributes(name: 'Olive', kind: 'color')
+  end
 end

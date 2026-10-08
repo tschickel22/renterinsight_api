@@ -241,7 +241,9 @@ module Catalog
         rows.each do |r|
           r = r.to_h.stringify_keys
           row = book.option_prices.find_by(id: r['price_id']) or next
-          next unless row.option&.kind == 'color' && r['key'].present? && r['color_set'].present?
+          next unless r['key'].present? && r['color_set'].present?
+          # A color row, or one an earlier run already moved onto the option at the key.
+          next unless row.option&.kind == 'color' || row.option&.key == r['key']
 
           # An option already at the key ("Siding: White", written as a standard
           # choice) becomes the set's color, as color_option makes it.
