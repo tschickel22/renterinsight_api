@@ -367,7 +367,9 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
   # A book published before colors were keyed by set: its colors that shared
   # one option across sets ("White" in Siding and Shutters) get one each.
   def split_colors
-    render json: Catalog::PriceBooks::Publisher.split_colors!(@book)
+    # A book with no import items takes the rows' options as a list.
+    rows = params[:rows].presence&.map { |r| r.permit(:price_id, :key, :name, :color_set, :group_key).to_h }
+    render json: rows ? Catalog::PriceBooks::Publisher.split_colors_from!(@book, rows) : Catalog::PriceBooks::Publisher.split_colors!(@book)
   end
 
   def publish

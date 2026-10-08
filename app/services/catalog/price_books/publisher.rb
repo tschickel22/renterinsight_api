@@ -232,6 +232,33 @@ module Catalog
         { moved: moved, lines: repoint_color_lines!(book) }
       end
 
+      # The same split for a book that came over without its import items
+      # (production's first Topeka book): each row names the option it
+      # belongs on, as the split made it where the items exist.
+      # rows: [{ price_id:, key:, name:, color_set:, group_key: }]
+      def self.split_colors_from!(book, rows)
+        moved = 0
+        rows.each do |r|
+          r = r.to_h.stringify_keys
+          row = book.option_prices.find_by(id: r['price_id']) or next
+          next unless row.option&.kind == 'color' && r['key'].present? && r['color_set'].present?
+
+          option = CatalogOption.find_or_initialize_by(manufacturer_id: book.manufacturer_id, key: r['key'])
+          if option.new_record?
+            option.group = CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, factory_id: book.factory_id, key: r['group_key']) ||
+                           row.option.group
+            option.assign_attributes(name: r['name'].to_s.truncate(250), kind: 'color', status: 'active',
+                                     metadata: { 'color_set' => r['color_set'] })
+            option.save!
+          end
+          next if row.catalog_option_id == option.id
+
+          row.update_columns(catalog_option_id: option.id, updated_at: Time.current)
+          moved += 1
+        end
+        { moved: moved, lines: repoint_color_lines!(book) }
+      end
+
       # A sheet line still on a color option this book no longer prices (the
       # shared one a split replaced) moves to the book's option with the same
       # name in the line's set ("Carpet: Dune"). When the sheet already holds
