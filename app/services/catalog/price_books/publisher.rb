@@ -191,7 +191,11 @@ module Catalog
       def self.color_option(manufacturer_id, payload, group)
         set = ColorSets.normalize(payload['group'])
         option = CatalogOption.find_or_initialize_by(manufacturer_id: manufacturer_id, key: color_key(payload))
-        option.assign_attributes(group: group, name: payload['name'].to_s.truncate(250), kind: 'color', status: 'active',
+        # One option serves every factory that offers the color, so it keeps
+        # the group it was made in; moving it put Topeka's colors under
+        # Decatur's sections.
+        option.group = group if option.new_record? || option.group.nil?
+        option.assign_attributes(name: payload['name'].to_s.truncate(250), kind: 'color', status: 'active',
                                  metadata: option.metadata.merge('color_set' => set))
         option.save!
         option
@@ -203,7 +207,8 @@ module Catalog
 
       # A book published before colors were keyed by set: each of its color
       # rows moves to its own set's option (from the import item that made
-      # it). Returns how many rows moved.
+      # it), and sheet lines still on the shared option follow. Returns how
+      # many rows moved and how many lines were re-pointed.
       def self.split_colors!(book)
         moved = 0
         groups = {}
@@ -215,7 +220,8 @@ module Catalog
           next unless row
 
           key, = Sections.group_for(p['group'].presence || 'Colors')
-          group = groups[key] ||= CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, key: key) || row.option.group
+          group = groups[key] ||= CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, factory_id: book.factory_id, key: key) ||
+                                  row.option.group
           option = color_option(book.manufacturer_id, p, group)
           next if row.catalog_option_id == option.id
 
@@ -223,7 +229,73 @@ module Catalog
           item.update_columns(matched_type: 'CatalogOption', matched_id: option.id)
           moved += 1
         end
-        moved
+        { moved: moved, lines: repoint_color_lines!(book) }
+      end
+
+      # The same split for a book that came over without its import items
+      # (production's first Topeka book): each row names the option it
+      # belongs on, as the split made it where the items exist.
+      # rows: [{ price_id:, key:, name:, color_set:, group_key: }]
+      def self.split_colors_from!(book, rows)
+        moved = 0
+        rows.each do |r|
+          r = r.to_h.stringify_keys
+          row = book.option_prices.find_by(id: r['price_id']) or next
+          next unless row.option&.kind == 'color' && r['key'].present? && r['color_set'].present?
+
+          option = CatalogOption.find_or_initialize_by(manufacturer_id: book.manufacturer_id, key: r['key'])
+          if option.new_record?
+            option.group = CatalogOptionGroup.find_by(manufacturer_id: book.manufacturer_id, factory_id: book.factory_id, key: r['group_key']) ||
+                           row.option.group
+            option.assign_attributes(name: r['name'].to_s.truncate(250), kind: 'color', status: 'active',
+                                     metadata: { 'color_set' => r['color_set'] })
+            option.save!
+          end
+          next if row.catalog_option_id == option.id
+
+          row.update_columns(catalog_option_id: option.id, updated_at: Time.current)
+          moved += 1
+        end
+        { moved: moved, lines: repoint_color_lines!(book) }
+      end
+
+      # A sheet line still on a color option this book no longer prices (the
+      # shared one a split replaced) moves to the book's option with the same
+      # name in the line's set ("Carpet: Dune"). When the sheet already holds
+      # a newer pick in that set, the stale line goes instead. Signed sheets
+      # are left alone.
+      def self.repoint_color_lines!(book)
+        rows = book.option_prices.includes(:option).select { |r| r.option&.kind == 'color' }
+        priced = rows.map(&:catalog_option_id).to_set
+        by_name = rows.map(&:option).uniq.group_by { |o| o.name.to_s.downcase }
+        builds = DealHomeBuild.where(options_book_id: book.id).or(DealHomeBuild.where(catalog_price_book_id: book.id))
+        lines = DealHomeBuildLine.where(kind: 'option', build: builds).includes(:option, :build)
+                                 .select { |l| l.option&.kind == 'color' && !priced.include?(l.catalog_option_id) }
+        touched = Set.new
+        fixed = 0
+        lines.each do |line|
+          next if line.build.locked?
+
+          set = line.label.to_s.include?(':') ? line.label.to_s.split(':', 2).first.strip : line.option.metadata.to_h['color_set']
+          pick = by_name.fetch(line.option.name.to_s.downcase, []).find { |o| o.metadata.to_h['color_set'].to_s.casecmp?(set.to_s) }
+          next unless pick
+
+          taken = line.build.lines.where(kind: 'option').where.not(id: line.id).includes(:option)
+                      .any? { |l| l.option&.metadata.to_h['color_set'].to_s.casecmp?(set.to_s) && priced.include?(l.catalog_option_id) }
+          if taken
+            line.destroy!
+          else
+            line.update_columns(catalog_option_id: pick.id, label: Truebuild::DealBuild.option_label(pick), updated_at: Time.current)
+          end
+          touched << line.build
+          fixed += 1
+        end
+        touched.each do |build|
+          Truebuild::DealBuild.new(build.reload).reprice!
+        rescue StandardError => e
+          Rails.logger.error("split_colors reprice build #{build.id}: #{e.message}")
+        end
+        fixed
       end
 
       def publish_standard(item, counts)
@@ -239,7 +311,9 @@ module Catalog
         @groups[key] ||= CatalogOptionGroup.find_or_initialize_by(manufacturer_id: @mfr, factory_id: @book.factory_id,
                                                                   series: nil, key: key).tap do |g|
           g.name = name
-          g.selection_type ||= 'multiple'
+          # A new group is multiple choice: the column defaults to single,
+          # which made every pick in Flooring clear the others.
+          g.selection_type = 'multiple' if g.new_record?
           g.position = Sections::GROUPS.index { |k, _, _| k == key } || Sections::GROUPS.size
           g.save!
         end

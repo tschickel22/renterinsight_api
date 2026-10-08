@@ -83,9 +83,23 @@ RSpec.describe Catalog::PriceBooks::StructuredExtractor do
                                 payload: { 'kind' => 'color', 'group' => set, 'name' => 'White' })
       CatalogOptionPrice.create!(price_book: book, option: shared, is_standard: true, source_ref: ref)
     end
-    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(2)
+    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(moved: 2, lines: 0)
     sets = book.option_prices.reload.map { |r| r.option.metadata['color_set'] }
     expect(sets).to contain_exactly('Siding', 'Shutters')
-    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(0) # once is enough
+    expect(Catalog::PriceBooks::Publisher.split_colors!(book)).to eq(moved: 0, lines: 0) # once is enough
+  end
+
+  it 'splits colors from a list when the book has no import items' do
+    group = CatalogOptionGroup.create!(manufacturer: mfr, key: 'exterior', name: 'Exterior')
+    shared = CatalogOption.create!(manufacturer: mfr, key: 'exterior--white', name: 'White', kind: 'color', group: group,
+                                   metadata: { 'color_set' => 'Corner posts' })
+    book.update_columns(status: 'published', published_at: Time.current)
+    rows = Array.new(2) { CatalogOptionPrice.create!(price_book: book, option: shared, is_standard: true) }
+    list = rows.zip(%w[Siding Shutters]).map do |row, set|
+      { price_id: row.id, key: "exterior--#{set.downcase}-white", name: 'White', color_set: set, group_key: 'exterior' }
+    end
+    expect(Catalog::PriceBooks::Publisher.split_colors_from!(book, list)).to eq(moved: 2, lines: 0)
+    expect(rows.map { |r| r.reload.option.metadata['color_set'] }).to eq(%w[Siding Shutters])
+    expect(Catalog::PriceBooks::Publisher.split_colors_from!(book, list)).to eq(moved: 0, lines: 0)
   end
 end

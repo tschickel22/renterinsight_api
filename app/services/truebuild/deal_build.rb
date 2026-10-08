@@ -613,15 +613,19 @@ module Truebuild
     end
 
     # The options this one replaces: the others in its set, or in its group
-    # when the group is single-choice.
+    # when the group is single-choice. A color is one of its set only: Carpet
+    # and Linoleum share Flooring, and picking a carpet keeps the linoleum.
     def alternatives(option)
+      if (set = option.metadata.to_h['color_set'].presence)
+        return CatalogOption.where(manufacturer_id: option.manufacturer_id, kind: 'color')
+                            .where("metadata->>'color_set' = ?", set).where.not(id: option.id)
+      end
+
       others = CatalogOption.where(manufacturer_id: option.manufacturer_id, catalog_option_group_id: option.catalog_option_group_id)
                             .where.not(id: option.id)
-      return others if option.group&.selection_type == 'single'
+      return others.where("metadata->>'color_set' IS NULL") if option.group&.selection_type == 'single'
 
-      if (set = option.metadata.to_h['color_set'].presence)
-        others.where("metadata->>'color_set' = ?", set)
-      elsif (set = self.class.choice_set(option))
+      if (set = self.class.choice_set(option))
         others.where(kind: 'standard').where('name ILIKE ?', "#{ActiveRecord::Base.sanitize_sql_like(set)}:%")
       else
         CatalogOption.none
