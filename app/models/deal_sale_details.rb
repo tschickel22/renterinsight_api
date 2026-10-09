@@ -82,8 +82,7 @@ class DealSaleDetails
   def finance? = @deal.payment_type.to_s.downcase.match?(/financ|loan/)
   def cash? = @deal.payment_type.to_s.downcase.include?('cash')
 
-  private
-
+  # What the deal already holds: shown on the sheet, and read by the agreement's sheets.
   def filled
     buyer = ->(c) { c && { name: [c.first_name, c.last_name].compact.join(' ').squish, email: c.email, phone: c.phone,
                            address: [c.street, [c.city, c.state, c.zip].compact.join(' ').squish].reject(&:blank?).join(', ') } }
@@ -94,6 +93,8 @@ class DealSaleDetails
       down_payment_due_date: @deal.down_payment_due_date&.iso8601, expected_delivery: @deal.delivery_date&.iso8601,
       serial_number: received&.serial_number.presence || @deal.vehicle&.serial_number.presence }
   end
+
+  private
 
   # Typed, or the home's county when it has one on record.
   def county = @deal.sale_details.to_h['county'].presence || @deal.vehicle&.try(:county_name).presence

@@ -339,6 +339,7 @@ Rails.application.routes.draw do
       get    'deals/:deal_id/home_build/suppliers', to: 'deal_home_builds#suppliers'
       post   'deals/:deal_id/home_build/purchase_order', to: 'deal_home_builds#create_purchase_order'
       post   'deals/:deal_id/home_build/purchase_order/:po_id/refresh', to: 'deal_home_builds#refresh_purchase_order'
+      get    'deals/:deal_id/home_build/sheets', to: 'deal_home_builds#sheets'
       get    'truebuild_pricing/updates/:id', to: 'truebuild_pricing#show_update'
       post   'truebuild_pricing/updates/:id/accept', to: 'truebuild_pricing#accept_update'
       post   'truebuild_pricing/updates/:id/decline', to: 'truebuild_pricing#decline_update'

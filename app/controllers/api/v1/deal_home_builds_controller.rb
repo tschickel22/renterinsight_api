@@ -23,6 +23,7 @@
 #   GET    /api/v1/deals/:deal_id/home_build/suppliers                suppliers for the factory PO, the likely one first
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order           { supplier_id | supplier_name, expected_delivery_date?, notes? }
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order/:po_id/refresh   rewrite a draft PO from the sheet
+#   GET    /api/v1/deals/:deal_id/home_build/sheets?sheet=schedule_a|colors     the agreement's standard sheets (PDF; both when no sheet)
 class Api::V1::DealHomeBuildsController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -321,6 +322,21 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   # The price book has this line wrong: the rep sets the right figure on the
   # deal and tells the platform team, who correct the book for every dealer.
+  # Schedule A and the Color and Finish Selections as the buyer will sign
+  # them (AgreementSheetsPdfGenerator). Retail only.
+  def sheets
+    return unless authorize_action!('deals', 'read')
+
+    sheets = params[:sheet].present? ? [params[:sheet].to_s] : AgreementSheetsPdfGenerator::SHEETS.keys
+    unless (sheets - AgreementSheetsPdfGenerator::SHEETS.keys).empty?
+      return render json: { error: 'Unknown sheet' }, status: :bad_request
+    end
+
+    pdf = AgreementSheetsPdfGenerator.new(@build, sheets: sheets).generate
+    name = sheets.one? ? sheets.first.tr('_', '-') : 'agreement-sheets'
+    send_data pdf, filename: "#{@deal.deal_number}-#{name}.pdf", type: 'application/pdf', disposition: 'inline'
+  end
+
   def report_price
     return unless authorize_action!('deals', 'update')
 
