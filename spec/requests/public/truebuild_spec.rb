@@ -369,6 +369,22 @@ RSpec.describe 'Public TrueBuild', type: :request do
       get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
       expect(response).to have_http_status(:ok)
     end
+
+    it 'offers the designer on no website once the dealer turns it off, add-on or not' do
+      company.tenant_module_overrides.create!(module_key: 'sales.truebuild_embed', is_enabled: true)
+      company.dealer_catalog_terms.find_or_initialize_by(manufacturer_id: nil).update!(website_designer: false)
+      [embed, embed.merge(website_id: site.id)].each do |params|
+        get "/public/inventory/#{vehicle.id}", params: params
+        expect(JSON.parse(response.body)['truebuild']).to eq('available' => false)
+      end
+      get '/public/inventory/filters', params: embed.merge(website_id: site.id)
+      expect(JSON.parse(response.body)['designable_count']).to eq(0)
+      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
+      expect(response).to have_http_status(:forbidden)
+      expect(JSON.parse(response.body)).not_to have_key('design_url')
+      get '/public/truebuild/models', params: { token: token, website_id: site.id }
+      expect(response).to have_http_status(:forbidden)
+    end
   end
 
   it "shows the manufacturer's photos and floor plan for a linked home with none of its own" do

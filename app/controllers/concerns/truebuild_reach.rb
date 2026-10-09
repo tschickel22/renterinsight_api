@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
-# Where TrueBuild may be offered. On a dealer's DealerTide site always; on the
+# Where TrueBuild may be offered. Nowhere when the dealer turned the website
+# designer off. Otherwise on a dealer's DealerTide site always; on the
 # dealer's own website (the inventory embed, or a page built on the public
 # API) only with the add-on, which Tom grants dealer by dealer: buyers are
 # meant to design on the DealerTide site.
@@ -24,12 +25,24 @@ module TruebuildReach
   end
 
   def truebuild_reachable?
+    return false unless website_designer?
+
     dealertide_site_request? || @company.has_module?(EMBED_MODULE)
   end
 
+  # The dealer's own switch (TrueBuild pricing settings): off, no website
+  # offers the designer, while the Deal Sheet and quotes still use TrueBuild.
+  def website_designer?
+    return @website_designer if defined?(@website_designer)
+
+    @website_designer = DealerCatalogTerm.effective(@company, nil).website_designer != false
+  end
+
   # The home on the dealer's live DealerTide site, for "Design this home on
-  # our website", or nil when the dealer has no live site.
+  # our website", or nil when the dealer has no live site or no designer.
   def truebuild_site_url(vehicle = nil)
+    return nil unless website_designer?
+
     site = @company.websites.where(status: :published).order(:id).find { |w| w.public_url.present? }
     return nil unless site
 
