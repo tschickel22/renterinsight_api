@@ -14,6 +14,10 @@ class PurchaseOrderLine < ApplicationRecord
   # line has no part: its description and factory code stand in.
   def part_name = part&.name || description
 
+  # What a package on a factory PO holds, from the price book option, so the
+  # factory sees the contents and not just "PACKAGE 2".
+  def package_items = Array(catalog_option&.package_items).map(&:to_s)
+
   def part_number = part&.sku || manufacturer_part_no
   
   # Validations

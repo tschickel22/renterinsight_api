@@ -67,8 +67,8 @@ class PurchaseOrderPdfGenerator
 
   def lines(pdf)
     rows = [@hide_prices ? %w[Item Code Qty] : ['Item', 'Code', 'Qty', 'Unit cost', 'Total']]
-    @po.lines.order(:line_number).each do |l|
-      row = [l.part_name.to_s, l.part_number.to_s, l.quantity_ordered.to_d.to_s('F').sub(/\.0\z/, '')]
+    @po.lines.includes(:catalog_option).order(:line_number).each do |l|
+      row = [item_cell(l), l.part_number.to_s, l.quantity_ordered.to_d.to_s('F').sub(/\.0\z/, '')]
       row += [money(l.unit_cost), money(l.line_total)] unless @hide_prices
       rows << row
     end
@@ -78,6 +78,16 @@ class PurchaseOrderPdfGenerator
       t.row(0).background_color = 'F3F4F6'
       t.columns(2..last).align = :right
     end
+  end
+
+  # The item, with a package's contents in smaller grey type under it.
+  def item_cell(line)
+    items = line.package_items
+    return line.part_name.to_s if items.empty?
+
+    esc = ->(t) { t.to_s.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;') }
+    { content: "#{esc.(line.part_name)}\n<font size='8'><color rgb='666666'>Includes: #{esc.(items.join(', '))}</color></font>",
+      inline_format: true }
   end
 
   # Every color and finish set on the model, with the pick; an unpicked one
