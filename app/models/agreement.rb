@@ -262,6 +262,38 @@ class Agreement < ApplicationRecord
   end
 
   # Copy field definitions from the linked template (if not already set)
+  # The Deal Sheet version an agreement was made from (the LIVE one then), as
+  # a fingerprint of its lines and contract total, so the agreement can say
+  # when the LIVE sheet has moved on since. Repricing that changes nothing
+  # does not count.
+  def self.deal_sheet_stamp(build)
+    return nil unless build
+
+    lines = build.lines.map { |l| [l.kind, l.label, l.quantity.to_s, l.retail.to_s, l.tbd, l.no_charge] }
+    { 'build_id' => build.id, 'version_number' => build.version_number, 'version_name' => build.version_name,
+      'contract_total' => build.totals.to_h['contract_total'], 'digest' => Digest::SHA256.hexdigest([lines, build.totals.to_h['contract_total']].to_json)[0, 16] }
+  end
+
+  def stamp_deal_sheet!
+    return unless deal
+
+    stamp = self.class.deal_sheet_stamp(deal.home_build)
+    self.metadata = metadata.to_h.merge('deal_sheet' => stamp) if stamp
+  end
+
+  # => { version_name, live, changed, live_version_name } or nil
+  def deal_sheet_status
+    stamp = metadata.to_h['deal_sheet']
+    return nil unless stamp
+
+    live = deal&.home_build
+    current = self.class.deal_sheet_stamp(live)
+    { version_name: stamp['version_name'], version_number: stamp['version_number'],
+      live: live.present? && live.id == stamp['build_id'],
+      changed: current.present? && (current['build_id'] != stamp['build_id'] || current['digest'] != stamp['digest']),
+      live_version_name: live&.version_name }
+  end
+
   def initialize_field_definitions_from_template!
     return unless agreement_template_id.present?
     return if custom_field_definitions.present?

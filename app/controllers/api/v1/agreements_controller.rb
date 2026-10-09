@@ -147,6 +147,8 @@ module Api
         # Snapshot deal line items if deal is linked
         if agreement.deal_id.present?
           agreement.optional_equipment_snapshot = build_equipment_snapshot(agreement.deal_id)
+          # Which Deal Sheet version it was made from (the LIVE one).
+          agreement.stamp_deal_sheet!
         end
 
         if agreement.save
@@ -1313,6 +1315,8 @@ module Api
             .map(&:name),
           custom_field_values: agreement.custom_field_values,
           optional_equipment_snapshot: agreement.optional_equipment_snapshot,
+          # The Deal Sheet version it was made from, and whether the LIVE one has moved on.
+          deal_sheet: agreement.deal_sheet_status,
           created_at: agreement.created_at,
           updated_at: agreement.updated_at
         }
