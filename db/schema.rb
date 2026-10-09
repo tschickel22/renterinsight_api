@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7928,6 +7928,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.date "estimated_delivery_date"
     t.bigint "catalog_plan_variant_id"
     t.string "building_code"
+    t.date "special_discount_ends_on"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["catalog_plan_variant_id"], name: "index_vehicles_on_catalog_plan_variant_id"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
@@ -7958,6 +7959,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["sold_via_deal_id"], name: "index_vehicles_on_sold_via_deal_id"
     t.index ["source"], name: "index_vehicles_on_source"
+    t.index ["special_discount_ends_on"], name: "index_vehicles_on_special_discount_ends_on", where: "special_discount_enabled"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["total_cost"], name: "index_vehicles_on_total_cost"
     t.index ["use_location_address"], name: "index_vehicles_on_use_location_address"

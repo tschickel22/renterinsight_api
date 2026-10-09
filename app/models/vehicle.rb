@@ -310,6 +310,28 @@ class Vehicle < ApplicationRecord
     sale_price || rent_price
   end
 
+  # A sale that ran through its end date, in the dealer's own time zone: it
+  # shows all of that day, and is off the next.
+  def sale_expired?(today = nil)
+    return false unless special_discount_enabled && special_discount_ends_on
+
+    special_discount_ends_on < (today || Time.current.in_time_zone(company&.time_zone || 'America/New_York').to_date)
+  end
+
+  # Every sale past its end date turns off, as if a rep turned it off: the
+  # discount clears and the home shows its base price. Hourly (recurring.yml).
+  def self.expire_sales!
+    ended = 0
+    where(special_discount_enabled: true).where('special_discount_ends_on < ?', Date.current + 1).includes(:company).find_each do |v|
+      next unless v.sale_expired?
+
+      v.special_discount_enabled = false
+      v.save(validate: false)
+      ended += 1
+    end
+    ended
+  end
+
   # Computed total: sale_price + all packages that are included_in_total
   def total_home_price
     package_total = inventory_packages.included_in_total.sum(:price).to_f
