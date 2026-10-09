@@ -106,6 +106,7 @@ class Agreement < ApplicationRecord
 
     update!(status: STATUS_COMPLETED, completed_at: Time.current)
     AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_COMPLETED)
+    deal_sheet_completed
 
     # Seal the signed PDF: async in production/staging, sync in dev/test
     if Rails.env.production? || Rails.env.staging?
@@ -127,6 +128,19 @@ class Agreement < ApplicationRecord
     )
     AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_VOIDED, performed_by: user, metadata: { reason: reason })
     true
+  end
+
+  # Signed: the Deal Sheet version it was made from locks, or a change order
+  # becomes the LIVE version (Agreements::DealSheetLock). A failure here must
+  # not fail the buyer's signature, so it is logged and reported instead.
+  def deal_sheet_completed
+    return unless deal_id
+
+    Agreements::DealSheetLock.completed(self)
+  rescue StandardError => e
+    Rails.logger.error("[Agreement #{id}] Deal Sheet lock failed: #{e.class}: #{e.message}")
+    Sentry.capture_exception(e) if defined?(Sentry)
+    nil
   end
 
   def expire!

@@ -219,6 +219,10 @@ module Api
           return render json: { error: 'Agreement cannot be sent. Ensure it is in draft status with at least one signer.' }, status: :unprocessable_entity
         end
 
+        if @agreement.deal_id && (problem = Agreements::DealSheetLock.send_problem(@agreement))
+          return render json: { error: problem, code: 'deal_sheet_changed' }, status: :unprocessable_entity
+        end
+
         if @agreement.send_to_signers!(current_user)
           SendAgreementJob.perform_later(@agreement.id) if defined?(SendAgreementJob)
           begin
