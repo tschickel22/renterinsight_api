@@ -45,9 +45,9 @@ class Public::TruebuildController < ApplicationController
 
   def model
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
-    return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
+    return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant).for_buyer
+    render json: Truebuild::BuyerCatalog.new(@company, variant, show_prices: @preview == true).for_buyer
   end
 
   # GET /public/truebuild/models/:variant_id/trueview
@@ -55,7 +55,7 @@ class Public::TruebuildController < ApplicationController
   # drawing (a factory run's) is above zero.
   def trueview
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
-    return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
+    return not_designable unless designable_model?(variant)
 
     # Asked every 20 seconds while a factory run draws, from every open
     # designer: answered from a 15 second cache. A visit draws nothing; only
@@ -68,14 +68,16 @@ class Public::TruebuildController < ApplicationController
 
   def price
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
-    return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
+    return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location).price(params[:option_ids], params[:addon_ids])
+    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location, show_prices: @preview == true)
+                                       .price(params[:option_ids], params[:addon_ids])
   end
 
   def create_design
+    return render json: { error: 'This is a preview: designs are not saved' }, status: :forbidden if @preview
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
-    return not_designable unless Truebuild::BuyerCatalog.available?(@company, variant)
+    return not_designable unless designable_model?(variant)
     return render json: { error: 'Please try again' }, status: :unprocessable_entity if params[:website].present? # honeypot
     return render json: { error: 'Too many saves. Please try again later.' }, status: :too_many_requests if throttled?
 
@@ -129,7 +131,7 @@ class Public::TruebuildController < ApplicationController
 
   # On the dealer's own website, only with the add-on (TruebuildReach).
   def require_truebuild_reach
-    return if truebuild_reachable?
+    return if @preview || truebuild_reachable?
 
     render json: { error: 'Design this home on our website', design_url: truebuild_site_url }.compact, status: :forbidden
   end
@@ -148,6 +150,28 @@ class Public::TruebuildController < ApplicationController
     count.to_i > 10
   end
 
+  # A platform admin's Preview as a buyer (Truebuild::PreviewPass): the
+  # dealer it prices through, that factory's models only.
+  def authenticate_preview
+    pass = Truebuild::PreviewPass.resolve(params[:preview])
+    return false unless pass
+
+    @company = Company.find_by(id: pass['company_id'])
+    return false unless @company
+
+    @preview = true
+    @preview_factory_id = pass['factory_id']
+    true
+  end
+
+  # In a preview, any model of the factory a published book prices, released
+  # or not; otherwise what the dealer offers buyers.
+  def designable_model?(variant)
+    return Truebuild::BuyerCatalog.available?(@company, variant) unless @preview
+
+    variant.present? && variant.catalog_plan&.factory_id == @preview_factory_id && Truebuild::BookResolver.current_for(variant).present?
+  end
+
   def not_designable
     render json: { error: 'This home cannot be designed online' }, status: :not_found
   end
@@ -162,6 +186,8 @@ class Public::TruebuildController < ApplicationController
   end
 
   def authenticate_inventory_token
+    return if authenticate_preview
+
     token = params[:token] || request.headers['X-Inventory-Token']
     @company = token.present? && Company.find_by(public_inventory_token: token)
     return render json: { error: 'Invalid inventory token' }, status: :unauthorized unless @company

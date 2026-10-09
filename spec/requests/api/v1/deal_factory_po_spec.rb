@@ -193,6 +193,22 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(text).to include('Upgrade Insulation', 'Clay')
   end
 
+  it "lists a package's contents on the PO, in its JSON and its PDF" do
+    package = CatalogOption.create!(group: group, manufacturer: mfr, key: 'construction--package-4', name: 'PACKAGE 4', kind: 'package',
+                                    package_items: ['Microwave OTR', 'Gas Range']).tap do |o|
+      CatalogOptionPrice.create!(price_book: book, option: o, dealer_cost: 1295)
+    end
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: package.id }.to_json
+    post "#{path}/purchase_order", headers: headers, params: { supplier_id: company.suppliers.create!(name: 'Factory').id }.to_json
+    po = deal.purchase_orders.last
+
+    get "/api/v1/purchase-orders/#{po.id}", headers: headers
+    expect(body['lines'].find { |l| l['part_name'] == 'PACKAGE 4' }['package_items']).to eq(['Microwave OTR', 'Gas Range'])
+    expect(body['lines'].find { |l| l['part_name'] == 'Upgrade Insulation' }['package_items']).to eq([])
+    text = PDF::Reader.new(StringIO.new(PurchaseOrderPdfGenerator.new(po).generate)).pages.map(&:text).join("\n")
+    expect(text).to include('PACKAGE 4', 'Includes: Microwave OTR, Gas Range')
+  end
+
   it 'lists Deal Sheets for the PO form, marking the ordered ones' do
     get '/api/v1/deal_sheets', headers: headers, params: { search: 'pat' }
     rows = JSON.parse(response.body)['deal_sheets']

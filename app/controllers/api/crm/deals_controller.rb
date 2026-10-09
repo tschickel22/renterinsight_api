@@ -93,11 +93,15 @@ module Api
           {}
         end
 
+        # A quote links to a deal through its Deal Sheet, so the quote form lists those.
+        with_sheet = DealHomeBuild.where(deal_id: deals.map(&:id), live: true).pluck(:deal_id).to_set
+
         render json: {
           deals: deals.map { |d|
             n = last_notes_by_deal[d.id]
             deal_json(d).merge(
-              lastNote: n ? { content: n.content, createdAt: n.created_at, createdByName: n.created_by_name } : nil
+              lastNote: n ? { content: n.content, createdAt: n.created_at, createdByName: n.created_by_name } : nil,
+              hasDealSheet: with_sheet.include?(d.id)
             )
           },
           meta: {

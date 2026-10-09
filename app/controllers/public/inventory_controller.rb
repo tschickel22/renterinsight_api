@@ -442,7 +442,10 @@ class Public::InventoryController < ApplicationController
   # without the add-on, where to design it instead (its DealerTide page).
   def truebuild_for(vehicle)
     designable = Truebuild::BuyerCatalog.designable_home?(@company, vehicle)
-    return { available: true } if designable && truebuild_reachable?
+    if designable && truebuild_reachable?
+      # On the dealer's own website, the hosted designer to link to as well.
+      return dealertide_site_request? ? { available: true } : { available: true, design_url: Truebuild::DesignLink.url(@company, vehicle) }
+    end
 
     { available: false, design_url: (truebuild_site_url(vehicle) if designable) }.compact
   end
@@ -780,6 +783,9 @@ class Public::InventoryController < ApplicationController
       # finishes), and see them on its photos when trueview is true.
       designable: @designable_ids.to_a.include?(vehicle.id),
       trueview: @designable_ids.to_a.include?(vehicle.id) && @trueview_variant_ids.to_a.include?(vehicle.catalog_plan_variant_id),
+      # The dealer's own website (not a DealerTide site, which opens the
+      # designer in the page): the hosted designer to link the button to.
+      design_url: (Truebuild::DesignLink.url(@company, vehicle) if @designable_ids.to_a.include?(vehicle.id) && !dealertide_site_request?),
 
       # Computed fields
       display_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,

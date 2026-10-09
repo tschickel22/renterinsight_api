@@ -5,7 +5,7 @@
 # dealers. Platform data, platform admins only, so no company scope.
 class Api::Admin::TruebuildFactoriesController < ApplicationController
   before_action :require_platform_admin!
-  before_action :set_factory, only: %i[release unrelease]
+  before_action :set_factory, only: %i[release unrelease preview]
 
   # GET /api/admin/truebuild_factories?refresh=1
   def index
@@ -38,6 +38,26 @@ class Api::Admin::TruebuildFactoriesController < ApplicationController
     render json: Truebuild::FactoryReadiness.row(@factory.id)
   end
 
+  # POST /api/admin/truebuild_factories/:id/preview { company_id }
+  # Preview as a buyer, before the factory is released: its models a
+  # published book prices, the dealers to price through, and a pass the
+  # buyer designer takes in place of a dealer's token (Truebuild::PreviewPass).
+  # Without company_id, the first dealer given the factory, or any dealer
+  # with pricing.
+  def preview
+    dealers = preview_dealers
+    company = dealers.find { |c| c.id == params[:company_id].to_i } || dealers.first
+    return render json: { error: 'No dealer has TrueBuild pricing to preview with' }, status: :unprocessable_entity unless company
+
+    render json: {
+      pass: Truebuild::PreviewPass.issue(company: company, factory: @factory, user: current_user),
+      company: { id: company.id, name: company.name, logo: company.branding_settings.to_h['logo'],
+                 primary_color: company.branding_settings.to_h['primaryColor'].presence || '#3b82f6' },
+      dealers: dealers.map { |c| { id: c.id, name: c.name, given: given_ids.include?(c.id) } },
+      models: preview_models
+    }
+  end
+
   # PUT /api/admin/truebuild_factories/ready_share { share } (0.5 to 1)
   def update_ready_share
     share = params[:share].to_f
@@ -49,6 +69,29 @@ class Api::Admin::TruebuildFactoriesController < ApplicationController
   end
 
   private
+
+  def given_ids
+    @given_ids ||= DealerFactory.where(factory_id: @factory.id).pluck(:company_id).to_set
+  end
+
+  # Dealers given this factory first, then the rest with TrueBuild pricing.
+  def preview_dealers
+    priced = DealerMarkupRule.active.select(:company_id)
+    Company.where(id: given_ids.to_a).or(Company.where(id: priced)).order(:name).to_a
+           .sort_by { |c| [given_ids.include?(c.id) ? 0 : 1, c.name.to_s.downcase] }
+  end
+
+  def preview_models
+    variants = CatalogPlanVariant.joins(:catalog_plan).where(catalog_plans: { factory_id: @factory.id }, status: 'active')
+                                 .includes(:catalog_plan).order('catalog_plans.series, catalog_plans.name, catalog_plan_variants.model_number').to_a
+    ready = Truebuild::ModelList.trueview_ready(variants.map(&:id))
+    variants.select { |v| Truebuild::BookResolver.current_for(v) }.map do |v|
+      photo = Array(v.media.to_h['photos']).first
+      { id: v.id, model_number: v.model_number, name: v.catalog_plan.name, series: v.catalog_plan.series,
+        width_ft: v.width_ft, length_ft: v.length_ft, beds: v.beds, baths: v.baths&.to_f, trueview: ready.include?(v.id),
+        photo: photo.is_a?(Hash) ? photo['url'] : photo }
+    end
+  end
 
   def set_factory
     @factory = Factory.find_by(id: params[:id])

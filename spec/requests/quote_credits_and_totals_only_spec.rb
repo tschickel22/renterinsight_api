@@ -37,6 +37,13 @@ RSpec.describe 'Quote credits and totals only', type: :request do
     expect(body).to include('savings' => 1918.44, 'itemsPrice' => 40_000.0)
   end
 
+  it 'prints a $0 choice as No charge, without +Tax' do
+    items << { 'description' => 'Siding: Clay', 'quantity' => 1, 'unit_price' => 0, 'total' => 0, 'taxable' => true }
+    text = pdf_text(quote)
+    expect(text).to match(/Siding: Clay\s+1\s+No charge/)
+    expect(text).not_to include('Siding: Clay +Tax')
+  end
+
   it 'refuses an unknown display' do
     expect(quote.update(pricing_display: 'secret')).to be(false)
   end

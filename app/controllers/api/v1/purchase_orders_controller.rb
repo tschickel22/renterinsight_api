@@ -107,7 +107,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         created_by: { only: [:id, :first_name, :last_name, :email] },
         approved_by: { only: [:id, :first_name, :last_name, :email] },
         lines: {
-          methods: [:part_name, :part_number, :percent_received, :status],
+          methods: [:part_name, :part_number, :percent_received, :status, :package_items],
           include: {
             part: { only: [:id, :part_number, :name, :description] }
           }

@@ -167,10 +167,21 @@ module Scrapers
         slug_fragments.uniq!
       end
 
-      # Phase 1: Walk <img> tags with their alt text. Alt text is the most
-      # reliable signal for floor-plan / elevation classification.
       classified  = {} # url => :gallery | :elevation | :floor_plan
       alt_for_url = {} # url => first alt text we saw
+
+      # Phase 0: the page's own Floor plans panel. Its images carry no alt
+      # text and a bare name ("Main_0002_3272H32186-"), so the panel is the
+      # only sure sign; on this model's page, so no slug check.
+      doc.css('#panel-floor-plans img').each do |img|
+        src = first_attr(img, %w[src data-src data-original data-lazy-src])
+        next unless src.to_s.match?(SCENE7_IMG_REGEX)
+
+        classified[src.match(SCENE7_IMG_REGEX).to_s] = :floor_plan
+      end
+
+      # Phase 1: Walk <img> tags with their alt text. Alt text is the most
+      # reliable signal for floor-plan / elevation classification.
 
       doc.css('img').each do |img|
         src = first_attr(img, %w[src data-src data-original data-lazy-src])
@@ -211,12 +222,15 @@ module Scrapers
 
     # Champion's URL conventions (observed):
     #   - "-standard" in the asset path marks floor-plan layouts
+    #   - an asset named "Main_<digits>..." is a floor-plan render
     #   - "floor" or "floorplan" in path/alt marks floor plans
     #   - "elevation" or "exterior-rendering" in path/alt marks elevation art
     #   - everything else is a gallery photo
     def classify_scene7(url, alt)
       haystack = "#{url} #{alt}".downcase
       return :floor_plan if haystack.include?('floorplan') || haystack.include?('floor plan') || haystack.include?('floor-plan')
+      # Champion's floor plan renders: "Main_0002_3272H32186-", "Main_0000s_0009_Aspire-112AP-1652H21083-Sta".
+      return :floor_plan if url.to_s.split('/').last.to_s.match?(/\AMain_\d/i)
       return :floor_plan if url.downcase.include?('-standard')
       return :floor_plan if alt.to_s.downcase.include?('floor')
       return :elevation  if haystack.include?('elevation') || haystack.include?('exterior-rendering') || haystack.include?('exterior rendering')

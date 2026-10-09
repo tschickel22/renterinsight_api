@@ -30,7 +30,7 @@ class DealerCatalogTerm < ApplicationRecord
   # discounts a deal sheet starts from.
   COMPANY_WIDE = %i[price_update_policy price_display margin_floor_pct round_retail_to
                     buyer_view buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups
-                    factory_po_hide_prices].freeze
+                    factory_po_hide_prices website_designer].freeze
   PER_MANUFACTURER = %i[program_discount_pct sale_discount_pct dealer_savings_pct preferred_payment_pct].freeze
   # The dealer's hauler, so set once for the company; a manufacturer row can
   # still override (a plant that ships its own homes).

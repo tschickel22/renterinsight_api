@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 Rails.application.routes.draw do
+  # The hosted designer for one home (Truebuild::DesignLink), linked from a dealer's own
+  # website, on the shared design host. (Under /design on the API's own address: below.)
+  constraints(lambda { |req| (host = Truebuild::DesignLink.host) && Websites::RequestHost.for(req) == host }) do
+    get '/:dealer/:vehicle_id', to: 'public/design_pages#show', constraints: { vehicle_id: /\d+/ }, as: :hosted_design
+  end
+
   # ==================== TENANT WEBSITES (CUSTOM HOSTNAMES) ====================
   #
   # FIRST on purpose. Cloudflare for SaaS forwards the visitor's original Host, so a dealer
@@ -17,6 +23,9 @@ Rails.application.routes.draw do
     get '/', to: 'public/sites#show', as: :tenant_website_root
     get '*path', to: 'public/sites#show', format: false, as: :tenant_website_page
   end
+
+  # The hosted designer on the API's own address, until the design host is routed.
+  get '/design/:dealer/:vehicle_id', to: 'public/design_pages#show', constraints: { vehicle_id: /\d+/ }, as: :design_page
 
   # Health check
   get 'up', to: 'rails/health#show', as: :rails_health_check
@@ -3089,6 +3098,7 @@ Rails.application.routes.draw do
       post   'trueview_transfer', to: 'trueview_transfer#import'
       get    'truebuild_factories', to: 'truebuild_factories#index'
       put    'truebuild_factories/ready_share', to: 'truebuild_factories#update_ready_share'
+      post   'truebuild_factories/:id/preview', to: 'truebuild_factories#preview'
       post   'truebuild_factories/:id/release', to: 'truebuild_factories#release'
       delete 'truebuild_factories/:id/release', to: 'truebuild_factories#unrelease'
 

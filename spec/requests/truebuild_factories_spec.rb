@@ -135,6 +135,47 @@ RSpec.describe 'TrueBuild factories', type: :request do
     expect(names.call).to eq([])
   end
 
+  it 'previews an unreleased factory as a buyer, through a dealer, saving nothing' do
+    belvidere = model(topeka, 'Belvidere', '2856H32392')
+    keystone = model(lancaster, 'Keystone', '2856H11111')
+    post "/api/admin/truebuild_factories/#{topeka.id}/preview", headers: headers
+    expect(response).to have_http_status(:ok)
+    body = JSON.parse(response.body)
+    expect(body['company']).to include('id' => company.id, 'name' => 'Summit Homes')
+    expect(body['models'].map { |m| m['model_number'] }).to eq(['2856H32392'])
+    pass = body['pass']
+
+    # Not released, not given to the dealer: the preview still opens it, with
+    # prices though the dealer hides them from buyers.
+    company.dealer_catalog_terms.find_or_initialize_by(manufacturer_id: nil).update!(price_display: 'hidden')
+    get "/public/truebuild/models/#{belvidere.id}", params: { preview: pass }
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body)['display']).to include('show_prices' => true)
+    expect(JSON.parse(response.body)['base_price']).to be_present
+    post '/public/truebuild/price', params: { preview: pass, variant_id: belvidere.id, option_ids: [] }.to_json,
+                                    headers: { 'Content-Type' => 'application/json' }
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body)['total']).to be_present
+
+    # A buyer of a released factory still sees the dealer's choice: no prices.
+    topeka.update!(truebuild_released_at: Time.current)
+    DealerFactory.create!(company: company, factory: topeka)
+    get "/public/truebuild/models/#{belvidere.id}", params: { token: company.public_inventory_token, website_id: site.id }
+    expect(JSON.parse(response.body)['display']).to include('show_prices' => false)
+    topeka.update!(truebuild_released_at: nil)
+    post '/public/truebuild/designs', params: { preview: pass, variant_id: belvidere.id, option_ids: [], contact: { email: 'a@b.co' } }.to_json,
+                                      headers: { 'Content-Type' => 'application/json' }
+    expect(response).to have_http_status(:forbidden)
+    expect(company.truebuild_designs.count).to eq(0)
+
+    get "/public/truebuild/models/#{keystone.id}", params: { preview: pass } # another factory
+    expect(response).to have_http_status(:not_found)
+    get "/public/truebuild/models/#{belvidere.id}", params: { preview: "#{pass}x" }
+    expect(response).to have_http_status(:unauthorized)
+    get "/public/truebuild/models/#{belvidere.id}", params: { token: company.public_inventory_token, website_id: site.id }
+    expect(response).to have_http_status(:not_found) # buyers still cannot
+  end
+
   it 'keeps dealers out' do
     rep = User.create!(email: "r-#{SecureRandom.hex(4)}@example.com", first_name: 'R', last_name: 'P', password: 'Pass1234!',
                        company_id: company.id, role: 'admin')
@@ -142,6 +183,8 @@ RSpec.describe 'TrueBuild factories', type: :request do
     get '/api/v1/truebuild_factories', headers: rep_headers
     expect(response).to have_http_status(:forbidden)
     get '/api/admin/truebuild_factories', headers: rep_headers
+    expect(response).to have_http_status(:forbidden)
+    post "/api/admin/truebuild_factories/#{topeka.id}/preview", headers: rep_headers
     expect(response).to have_http_status(:forbidden)
   end
 
