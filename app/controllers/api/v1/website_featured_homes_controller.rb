@@ -18,11 +18,12 @@ class Api::V1::WebsiteFeaturedHomesController < ApplicationController
   def index
     return unless authorize_action!('websites', 'read')
 
-    render json: { items: featured_scope.map { |f| featured_json(f) } }
+    render json: index_json
   end
 
   # PUT /api/v1/websites/:website_id/featured_homes
   # Params: featured_homes: [{ vehicle_id, title, description }, ...] in display order
+  #         settings: { display_count, rotation } (optional; off | visit | day | week)
   def replace
     return unless authorize_action!('websites', 'update')
 
@@ -37,6 +38,9 @@ class Api::V1::WebsiteFeaturedHomesController < ApplicationController
     end
 
     ActiveRecord::Base.transaction do
+      if params.key?(:settings)
+        @website.update!(featured_homes_settings: WebsiteFeaturedHome.normalize_settings(params[:settings].permit(:display_count, :rotation)))
+      end
       @website.featured_homes.delete_all
       rows.uniq { |r| r[:vehicle_id].to_i }.each_with_index do |row, index|
         @website.featured_homes.create!(
@@ -48,7 +52,7 @@ class Api::V1::WebsiteFeaturedHomesController < ApplicationController
       end
     end
 
-    render json: { items: featured_scope.map { |f| featured_json(f) } }
+    render json: index_json
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
@@ -60,6 +64,18 @@ class Api::V1::WebsiteFeaturedHomesController < ApplicationController
     @website = @company.websites.find(params[:website_id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Website not found' }, status: :not_found
+  end
+
+  def index_json
+    {
+      items: featured_scope.map { |f| featured_json(f) },
+      settings: WebsiteFeaturedHome.normalize_settings(@website.featured_homes_settings),
+      # Whether any page has a Featured Homes section, so the editor shows
+      # the picker only to a site that uses it.
+      in_use: @website.website_pages.where(is_deleted: [false, nil]).any? do |page|
+        Array(page.blocks).any? { |b| %w[featuredHomes featured_homes].include?(b.is_a?(Hash) ? b['type'] : nil) }
+      end
+    }
   end
 
   def featured_scope

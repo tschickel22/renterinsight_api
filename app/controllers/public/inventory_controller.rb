@@ -237,6 +237,7 @@ class Public::InventoryController < ApplicationController
             end
 
     if picks.any?
+      picks = WebsiteFeaturedHome.rotate(picks, website.featured_homes_settings)
       vehicles = picks.map(&:vehicle)
       source = 'picked'
     else
