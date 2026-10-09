@@ -42,14 +42,20 @@ RSpec.describe 'The home on a quote', type: :request do
     expect(response.parsed_body['quote']).not_to have_key('home')
   end
 
-  it 'prints the home with its photo and floor plan, asking the image service for JPEG' do
+  it 'prints the quote on its own, then the home on the next page with three photos and the floor plan' do
+    photos = %w[front kitchen bath bedroom].map { |r| { 'url' => "https://s7d9.scene7.com/is/image/championhomes/bay-port-#{r}" } }
+    variant.update!(media: variant.media.merge('photos' => photos))
     home = Vehicle.create!(company: company, year: 2026, make: 'Champion', model: 'Bay Port', vin: "V#{SecureRandom.hex(5)}", status: 'available',
                            is_deleted: false, bedrooms: 3, bathrooms: 2, catalog_plan_variant: variant)
     asked = []
     allow_any_instance_of(QuotePdfGenerator).to receive(:load_logo) { |_, url| asked << url; png }
-    text = PDF::Reader.new(StringIO.new(QuotePdfGenerator.new(quote_for(vehicle: home)).generate)).pages.map(&:text).join("\n")
-    expect(text).to include('The home', '2026 Champion Bay Port', '3 bed', 'Floor plan')
-    expect(asked).to include('https://s7d9.scene7.com/is/image/championhomes/bay-port-kitchen?fmt=jpg&wid=1400')
+    pages = PDF::Reader.new(StringIO.new(QuotePdfGenerator.new(quote_for(vehicle: home)).generate)).pages.map(&:text)
+    expect(pages.size).to eq(2)
+    expect(pages[0]).to include('Bay Port 2856H32168')
+    expect(pages[0]).not_to include('The home')
+    expect(pages[1]).to include('The home', '2026 Champion Bay Port', '3 bed', 'Floor plan')
+    expect(asked).to include('https://s7d9.scene7.com/is/image/championhomes/bay-port-front?fmt=jpg&wid=1400')
+    expect(asked.grep(/bay-port-bedroom/)).to be_empty # three photos, not four
   end
 
   it 'refuses a Deal Sheet of another deal' do
