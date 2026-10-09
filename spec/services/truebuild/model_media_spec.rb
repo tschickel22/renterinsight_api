@@ -18,7 +18,8 @@ RSpec.describe Truebuild::ModelMedia do
       def fetch_all
         [
           { 'id' => 'c-1', 'name' => 'Aspire Winston', 'seriesName' => 'Aspire Multi-Section', 'slug' => 'aspire-winston',
-            'factoryBrand' => 'Dutch Housing Topeka', 'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Aspire 3272H32186 Kitchen 1' }] },
+            'factoryBrand' => 'Dutch Housing Topeka', 'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Aspire 3272H32186 Kitchen 1' },
+                                                                   { 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Main_0002_3272H32186-' }] },
           { 'id' => 'c-2', 'name' => 'Prime Barkley 043', 'seriesName' => 'Prime', 'slug' => 'prime-barkley-043', 'images' => [] },
           { 'id' => 'c-3', 'name' => 'Genesis Belvidere', 'seriesName' => 'Genesis', 'slug' => 'x',
             'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Aspire 2856H32392 Exterior' }] }
@@ -41,6 +42,7 @@ RSpec.describe Truebuild::ModelMedia do
 
     media = winston.reload.media
     expect(media['photos'].map { |p| p['room'] }).to eq(%w[living kitchen])
+    expect(media['floor_plans']).to include('https://s7d9.scene7.com/is/image/championhomes/Main_0002_3272H32186-') # never a photo
     expect(media).to include('slug' => 'aspire-winston', 'matterport_url' => 'https://my.matterport.com/show/?m=abc')
     expect(winston.external_ids['champion_model_id']).to eq('c-1')
     expect(barkley.reload.media['slug']).to eq('prime-barkley-043')
@@ -86,7 +88,7 @@ RSpec.describe Truebuild::ModelMedia do
 
     expect(described_class.refresh!(mfr, client_class: client)).to eq(1) # Winston itself; the rest are shared
     expect(longer.reload.media).to include('slug' => 'aspire-winston', 'shared_from' => '3272H32186')
-    expect(longer.media['floor_plans']).to eq(['https://s7d9.scene7.com/is/image/championhomes/aspire-winston-floorplan'])
+    expect(longer.media['floor_plans']).to include('https://s7d9.scene7.com/is/image/championhomes/aspire-winston-floorplan')
     expect(mirrored.reload.media).to include('slug' => 'aspire-winston', 'shared_from' => '3272H32186')
     expect(own.reload.media['photos']).to eq([{ 'url' => 'https://x/own-photo' }])
     expect(other.reload.media).to eq({})

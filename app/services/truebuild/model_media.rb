@@ -163,14 +163,21 @@ module Truebuild
 
     def media_for(home, client_class)
       pdp = client_class.new(navision_id: DEFAULT_RETAILERS.first).fetch_pdp_media(home['slug'])
-      feed_photos = Array(home['images']).map { |i| i['path'] }.compact
-      gallery = (Array(pdp[:gallery]) + feed_photos).uniq
+      # The listing's own images include the floor plan render
+      # ("Main_0003_3268H32396-"): a floor plan, never a gallery photo.
+      feed_plans, feed_photos = Array(home['images']).map { |i| i['path'] }.compact.partition { |u| floor_plan_url?(u) }
+      gallery = (Array(pdp[:gallery]) + feed_photos).uniq.reject { |u| floor_plan_url?(u) }
       {
         'source' => 'champion', 'slug' => home['slug'], 'name' => home['name'], 'plant' => home['factoryBrand'],
         'photos' => gallery.map { |url| { 'url' => url, 'room' => room_for(url) } },
-        'elevations' => Array(pdp[:elevations]), 'floor_plans' => Array(pdp[:floor_plans]),
+        'elevations' => Array(pdp[:elevations]), 'floor_plans' => (Array(pdp[:floor_plans]) + feed_plans).uniq,
         'matterport_url' => pdp[:matterport_url], 'video_url' => pdp[:video_url], 'fetched_at' => Time.current.iso8601
       }.compact
+    end
+
+    def floor_plan_url?(url)
+      name = url.to_s.split('/').last.to_s
+      name.match?(/\AMain_\d/i) || name.downcase.include?('-standard') || name.downcase.include?('floorplan')
     end
 
     def room_for(url)
