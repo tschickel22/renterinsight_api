@@ -14,6 +14,42 @@ class WebsiteFeaturedHome < ApplicationRecord
 
   scope :ordered, -> { order(:position, :id) }
 
+  ROTATIONS = %w[off visit day week].freeze
+
+  # The site's display settings, cleaned: how many homes to show at a time
+  # (nil shows every pick) and how the shown set changes.
+  def self.normalize_settings(raw)
+    raw = (raw || {}).to_h.stringify_keys
+    count = raw['display_count'].presence && raw['display_count'].to_i
+    rotation = ROTATIONS.include?(raw['rotation'].to_s) ? raw['rotation'].to_s : 'off'
+    { 'display_count' => count && count.clamp(1, 24), 'rotation' => rotation }
+  end
+
+  # Which of the picks to show now, in the dealer's order.
+  #
+  # off:   the first display_count picks.
+  # visit: a fresh handful on every page load.
+  # day / week: the window steps through the list once a day or once a week,
+  #   so every pick gets its turn and a visitor who comes back the same day
+  #   sees the same homes.
+  def self.rotate(picks, settings, today: Date.current, rng: Random)
+    settings = normalize_settings(settings)
+    total = picks.size
+    count = [settings['display_count'] || total, total].min
+    return picks if count >= total
+
+    case settings['rotation']
+    when 'visit'
+      picks.each_with_index.to_a.sample(count, random: rng).sort_by(&:last).map(&:first)
+    when 'day', 'week'
+      step = settings['rotation'] == 'day' ? today.jd : today.jd / 7
+      start = (step * count) % total
+      Array.new(count) { |i| picks[(start + i) % total] }
+    else
+      picks.first(count)
+    end
+  end
+
   def display_title
     title.presence || [vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
   end

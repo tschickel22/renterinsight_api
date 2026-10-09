@@ -42,6 +42,10 @@ class AgreementTemplate < ApplicationRecord
   validates :form_type, inclusion: { in: FORM_TYPES }, allow_blank: true
   validates :state_code, length: { is: 2 }, allow_blank: true
 
+  # A dealer's agreement package (Agreements::PacketRenderer): their contract
+  # as a document model, rendered and filled from the deal.
+  def packet? = packet.to_h['doc'].present?
+
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
   scope :published, -> { where(status: 'active') }

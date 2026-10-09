@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_070000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -455,6 +455,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_070000) do
     t.jsonb "cached_scan_results"
     t.datetime "scan_performed_at"
     t.string "example_document_url"
+    t.jsonb "packet", default: {}, null: false
     t.index ["agreement_category_id"], name: "index_agreement_templates_on_agreement_category_id"
     t.index ["company_id", "category"], name: "idx_agr_templates_company_category"
     t.index ["company_id", "status", "is_deleted"], name: "idx_agr_templates_company_status"
@@ -8286,6 +8287,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_070000) do
     t.jsonb "site_footer", default: {}
     t.string "kind", default: "site", null: false
     t.jsonb "concierge_config", default: {}, null: false
+    t.jsonb "featured_homes_settings", default: {}, null: false
     t.index ["company_id", "slug"], name: "index_websites_on_company_id_and_slug", unique: true
     t.index ["company_id"], name: "index_websites_on_company_id"
     t.index ["domain"], name: "index_websites_on_domain", unique: true, where: "(domain IS NOT NULL)"

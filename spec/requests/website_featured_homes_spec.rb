@@ -139,4 +139,64 @@ RSpec.describe 'Website featured homes', type: :request do
       expect(body['items'].map { |i| i['id'] }).to eq([mine.id])
     end
   end
+
+  describe 'showing some of the picks at a time' do
+    let!(:homes) { Array.new(5) { |i| home(model: "Model #{i}") } }
+
+    before { save_picks(homes.map { |h| { vehicle_id: h.id } }) }
+
+    def save_settings(settings)
+      put "/api/v1/websites/#{website.id}/featured_homes",
+          params: { featured_homes: homes.map { |h| { vehicle_id: h.id } }, settings: settings }.to_json,
+          headers: auth_headers
+    end
+
+    it 'shows every pick when no count is set' do
+      expect(public_featured['items'].size).to eq(5)
+    end
+
+    it 'shows the first few, in order, when rotation is off' do
+      save_settings(display_count: 2, rotation: 'off')
+
+      expect(public_featured['items'].map { |i| i['id'] }).to eq(homes.first(2).map(&:id))
+    end
+
+    it 'saves and returns the settings, and cleans what it does not know' do
+      save_settings(display_count: 99, rotation: 'hourly')
+
+      settings = JSON.parse(response.body)['settings']
+      expect(settings).to eq('display_count' => 24, 'rotation' => 'off')
+    end
+
+    it 'steps through every pick a day at a time, wrapping round' do
+      picks = website.featured_homes.reload.to_a
+      settings = { 'display_count' => 2, 'rotation' => 'day' }
+      day = Date.new(2026, 10, 9)
+
+      shown = (0...5).map { |n| WebsiteFeaturedHome.rotate(picks, settings, today: day + n).map(&:vehicle_id) }
+
+      expect(shown.flatten.uniq).to match_array(homes.map(&:id))
+      expect(WebsiteFeaturedHome.rotate(picks, settings, today: day)).to eq(WebsiteFeaturedHome.rotate(picks, settings, today: day))
+    end
+
+    it 'keeps the dealer order inside a fresh-every-visit handful' do
+      picks = website.featured_homes.reload.to_a
+
+      shown = WebsiteFeaturedHome.rotate(picks, { 'display_count' => 3, 'rotation' => 'visit' }, rng: Random.new(1))
+
+      expect(shown.size).to eq(3)
+      expect(shown.map(&:position)).to eq(shown.map(&:position).sort)
+    end
+  end
+
+  describe 'whether the site uses the section' do
+    it 'says so only when a page has a Featured Homes block' do
+      get "/api/v1/websites/#{website.id}/featured_homes", headers: auth_headers
+      expect(JSON.parse(response.body)['in_use']).to be false
+
+      website.website_pages.create!(title: 'Home', path: '/', blocks: [{ 'type' => 'featuredHomes', 'content' => {} }])
+      get "/api/v1/websites/#{website.id}/featured_homes", headers: auth_headers
+      expect(JSON.parse(response.body)['in_use']).to be true
+    end
+  end
 end
