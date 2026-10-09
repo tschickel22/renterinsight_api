@@ -47,6 +47,34 @@ RSpec.describe Truebuild::ModelMedia do
     expect(belvidere.reload.media).to eq({}) # a Genesis home's photo named an Aspire number: not trusted
   end
 
+  it "takes the models no retailer stocks from Champion's catalog, asked near each plant" do
+    topeka = mfr.factories.create!(name: 'Topeka, Dutch Housing', code: "TOP#{SecureRandom.hex(2)}")
+    feed = Class.new(client) do
+      def fetch_all
+        [{ 'id' => 'c-1', 'name' => 'Aspire Winston', 'seriesName' => 'Aspire Multi-Section', 'slug' => 'aspire-winston',
+           'factoryBrand' => 'Dutch Housing', 'factoryBrandCity' => 'Topeka', 'factoryBrandState' => 'IN', 'images' => [] }]
+      end
+    end
+    asked = []
+    catalog = lambda do |brand, location|
+      asked << [brand, location]
+      next [] unless brand == 'dutch-housing'
+
+      [{ 'id' => 'c-9', 'name' => 'Aspire Bay Port', 'seriesName' => 'Aspire Multi-Section', 'slug' => 'aspire-bay-port',
+         'factoryBrandCity' => 'Topeka', 'factoryBrandState' => 'IN', 'images' => [] },
+       { 'id' => 'c-8', 'name' => 'Ascend Bay Port', 'seriesName' => 'Ascend', 'slug' => 'ascend-bay-port',
+         'factoryBrandCity' => 'Dresden', 'factoryBrandState' => 'TN', 'images' => [] }]
+    end
+    plan = CatalogPlan.create!(manufacturer: mfr, factory: topeka, series: 'Aspire', name: 'Bay Port', slug: 'bay-port')
+    bay_port = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '2852H32222')
+
+    described_class.refresh!(mfr, client_class: feed, catalog: catalog)
+    expect(topeka.reload).to have_attributes(city: 'Topeka', state: 'IN')
+    expect(asked).to contain_exactly(['dutch-housing', 'Topeka, IN'], [mfr.name.parameterize, 'Topeka, IN'])
+    expect(bay_port.reload.media).to include('slug' => 'aspire-bay-port')
+    expect(bay_port.media['floor_plans']).to eq(['https://s7d9.scene7.com/is/image/championhomes/aspire-bay-port-floorplan'])
+  end
+
   it "keeps a platform admin's hidden photos and TrueView choices through a rescan" do
     winston = variant('Aspire', 'Winston', '3272H32186')
     kept = { 'hidden_photos' => ['https://x/old'], 'trueview_photos' => { 'kitchen' => ['https://x/k'] }, 'trueview_auto' => { 'bath' => 'https://x/b' } }

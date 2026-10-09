@@ -25,13 +25,15 @@ module Truebuild
       'exterior' => /exterior|front|porch|elevation|rendering/i
     }.freeze
 
-    def refresh!(manufacturer, client_class: Scrapers::ChampionImsClient)
+    # catalog: fetches Champion's public catalog near a plant (catalog_page);
+    # specs pass their own.
+    def refresh!(manufacturer, client_class: Scrapers::ChampionImsClient, catalog: method(:catalog_page))
       variants = CatalogPlanVariant.where(manufacturer_id: manufacturer.id).includes(:catalog_plan).to_a
       by_champion_id = variants.group_by { |v| v.external_ids['champion_model_id'] }.except(nil)
       by_number = variants.group_by(&:model_number)
       linked = 0
 
-      feed_homes(client_class).each do |home|
+      feed_homes(client_class, manufacturer, catalog).each do |home|
         matches = Array(by_champion_id[home['id']])
         matches |= numbers_in(home).flat_map { |n| Array(by_number[n]) }.select { |v| series_agrees?(v, home) }
         if matches.empty?
@@ -53,9 +55,53 @@ module Truebuild
       linked
     end
 
-    def feed_homes(client_class)
+    # Retailers' feeds list only what those retailers stock; Champion's public
+    # catalog lists every model a plant builds (most of a price book's models
+    # have no retailer feed photos otherwise).
+    def feed_homes(client_class, manufacturer = nil, catalog = method(:catalog_page))
       codes = (ChampionImsRetailer.distinct.pluck(:retailer_navision_id) + DEFAULT_RETAILERS).map(&:upcase).uniq
-      codes.flat_map { |code| client_class.new(navision_id: code).fetch_all }.uniq { |h| h['id'] }
+      ims = codes.flat_map { |code| client_class.new(navision_id: code).fetch_all }
+      (ims + catalog_homes(manufacturer, ims, catalog)).uniq { |h| h['id'] }
+    end
+
+    # The catalog answers by distance from a place, so each plant is asked for
+    # near its own town, under its brand, keeping only that plant's homes.
+    # A plant's town and state come from the feeds' homes when not set.
+    def catalog_homes(manufacturer, ims_homes, catalog)
+      return [] unless manufacturer
+
+      locate_factories!(manufacturer, ims_homes)
+      # A plant builds under its own brand and the manufacturer's: Topeka
+      # builds Dutch Housing's Aspire and Champion Homes' Genesis.
+      manufacturer.factories.where.not(city: [nil, '']).where.not(state: [nil, '']).flat_map do |f|
+        [f.brand, manufacturer.name].compact.map { |b| b.to_s.parameterize }.uniq.flat_map do |brand|
+          Array(catalog.call(brand, "#{f.city}, #{f.state}"))
+            .select { |h| h['factoryBrandCity'].to_s.casecmp?(f.city.to_s) && h['factoryBrandState'].to_s.casecmp?(f.state.to_s) }
+        rescue StandardError => e
+          Rails.logger.warn("[ModelMedia] Champion catalog near #{f.name} (#{brand}): #{e.message}")
+          []
+        end
+      end
+    end
+
+    # "Topeka, Dutch Housing" is the Dutch Housing plant in the town a feed's
+    # home names (factoryBrandCity Topeka, factoryBrandState IN).
+    def locate_factories!(manufacturer, ims_homes)
+      manufacturer.factories.select { |f| f.city.blank? || f.state.blank? }.each do |f|
+        town = f.name.to_s.split(',').first.to_s.strip
+        home = ims_homes.find do |h|
+          h['factoryBrandCity'].to_s.casecmp?(town) && h['factoryBrandState'].present? &&
+            h['factoryBrand'].to_s.downcase.include?(f.brand.to_s.downcase.split.first.to_s)
+        end
+        f.update_columns(city: home['factoryBrandCity'], state: home['factoryBrandState'], updated_at: Time.current) if home
+      end
+    end
+
+    def catalog_page(brand_slug, location)
+      uri = URI(Catalog::PriceBooks::LinkSources::CHAMPION_ENDPOINT)
+      uri.query = URI.encode_www_form('Radius' => 150, 'BrandSlug' => brand_slug, 'Location' => location,
+                                      'pagination-limit' => 500, 'pagination-page' => 1)
+      Array(Catalog::PriceBooks::LinkSources.get_json(uri)['data'])
     end
 
     # Model numbers printed in the feed's photo file names.
