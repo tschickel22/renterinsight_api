@@ -198,6 +198,7 @@ Rails.application.routes.draw do
     resources :inventory, only: [:index, :show], controller: 'inventory' do
       collection do
         get :filters  # Get available filter options
+        get :featured # A website's hand-picked Featured Homes, in order
       end
     end
 
@@ -319,6 +320,9 @@ Rails.application.routes.draw do
       post   'truebuild_designs/:id/quote', to: 'truebuild_designs#create_quote'
       # A deal's home build (E49): the model and the options chosen for it.
       get    'deal_sheets', to: 'deal_sheets#index'
+      # The contract's sale details: the Deal Sheet's sections 4 and 5 (DealSaleDetails).
+      get    'deals/:deal_id/sale_details', to: 'deal_sale_details#show'
+      patch  'deals/:deal_id/sale_details', to: 'deal_sale_details#update'
       get    'deals/:deal_id/home_build', to: 'deal_home_builds#show'
       post   'deals/:deal_id/home_build', to: 'deal_home_builds#create'
       patch  'deals/:deal_id/home_build', to: 'deal_home_builds#update'
@@ -963,6 +967,10 @@ Rails.application.routes.draw do
           end
         end
         
+        # Featured Homes picked for this site (whole list read + replaced at once)
+        get 'featured_homes', to: 'website_featured_homes#index'
+        put 'featured_homes', to: 'website_featured_homes#replace'
+
         # Website Media (nested under websites)
         resources :media, controller: 'website_media'
         
