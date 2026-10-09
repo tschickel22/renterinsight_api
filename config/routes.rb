@@ -195,6 +195,9 @@ Rails.application.routes.draw do
     get 'branding', to: 'branding#show'
     
     # ==================== PUBLIC INVENTORY (Vehicle Catalog) ====================
+    # A lead form's visitor view, for a form embedded in a dealer's site.
+    get 'intake_forms/:id', to: 'intake_forms#show', as: :intake_form
+
     resources :inventory, only: [:index, :show], controller: 'inventory' do
       collection do
         get :filters  # Get available filter options
