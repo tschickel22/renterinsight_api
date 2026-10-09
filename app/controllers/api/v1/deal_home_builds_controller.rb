@@ -24,6 +24,8 @@
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order           { supplier_id | supplier_name, expected_delivery_date?, notes? }
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order/:po_id/refresh   rewrite a draft PO from the sheet
 #   GET    /api/v1/deals/:deal_id/home_build/sheets?sheet=schedule_a|colors     the agreement's standard sheets (PDF; both when no sheet)
+#   GET    /api/v1/deals/:deal_id/home_build/agreement        what Create agreement needs: packages, managers, the ready check
+#   POST   /api/v1/deals/:deal_id/home_build/agreement        { template_id, manager_id } a draft agreement from the LIVE sheet
 class Api::V1::DealHomeBuildsController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -335,6 +337,29 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     pdf = AgreementSheetsPdfGenerator.new(@build, sheets: sheets).generate
     name = sheets.one? ? sheets.first.tr('_', '-') : 'agreement-sheets'
     send_data pdf, filename: "#{@deal.deal_number}-#{name}.pdf", type: 'application/pdf', disposition: 'inline'
+  end
+
+  def agreement_check
+    return unless authorize_action!('agreements', 'read')
+
+    maker = Agreements::FromDealSheet.new(@deal, user: current_user)
+    render json: { templates: maker.templates.map { |t| { id: t.id, name: t.name } }, managers: maker.managers,
+                   check: maker.check(manager: current_user), live: @build.live,
+                   agreements: @company.agreements.where(deal_id: @deal.id).where.not(status: 'voided').order(created_at: :desc).limit(5)
+                                    .map { |a| { id: a.id, number: a.agreement_number, status: a.status, deal_sheet: a.deal_sheet_status } } }
+  end
+
+  def create_agreement
+    return unless authorize_action!('agreements', 'create')
+    return render json: { error: 'Make this version LIVE first: the agreement is made from the LIVE Deal Sheet' }, status: :unprocessable_entity unless @build.live
+
+    maker = Agreements::FromDealSheet.new(@deal, user: current_user)
+    template = maker.templates.find { |t| t.id == params[:template_id].to_i } || maker.templates.first
+    manager = @company.users.find_by(id: params[:manager_id]) if params[:manager_id].present?
+    agreement = maker.create!(template: template, manager: manager)
+    render json: { agreement: { id: agreement.id, number: agreement.agreement_number }, check: maker.check(manager: manager) }, status: :created
+  rescue Agreements::FromDealSheet::NotReady => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def report_price

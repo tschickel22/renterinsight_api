@@ -53,21 +53,30 @@ class AgreementSheetsPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: 'LETTER', margin: [MARGIN, MARGIN, MARGIN + FOOTER, MARGIN])
-    pdf.font_size 9
+    pdf = self.class.document
     ranges = {}
     @sheets.each_with_index do |sheet, i|
       pdf.start_new_page if i.positive?
-      first = pdf.page_number
-      letterhead(pdf, sheet)
-      home_identification(pdf)
-      sheet == 'schedule_a' ? schedule(pdf) : colors(pdf)
-      acknowledgment(pdf, sheet)
-      signatures(pdf, sheet)
-      ranges[sheet] = (first..pdf.page_number)
+      ranges[sheet] = render_sheet(pdf, sheet)
     end
     footers(pdf, ranges)
     pdf.render
+  end
+
+  # The page setup every sheet is drawn for; an agreement packet uses it too.
+  def self.document
+    Prawn::Document.new(page_size: 'LETTER', margin: [MARGIN, MARGIN, MARGIN + FOOTER, MARGIN]).tap { |pdf| pdf.font_size 9 }
+  end
+
+  # Draws one sheet from the current page on; the pages it took.
+  def render_sheet(pdf, sheet)
+    first = pdf.page_number
+    letterhead(pdf, sheet)
+    home_identification(pdf)
+    sheet == 'schedule_a' ? schedule(pdf) : colors(pdf)
+    acknowledgment(pdf, sheet)
+    signatures(pdf, sheet)
+    (first..pdf.page_number)
   end
 
   def signers
@@ -75,6 +84,40 @@ class AgreementSheetsPdfGenerator
     list << { key: 'buyer_2', label: 'Co-Buyer', name: @filled[:buyer_2][:name] } if @filled[:buyer_2]
     list << { key: 'rep', label: 'Dealer representative', name: @deal.owner&.full_name }
     list
+  end
+
+  # Page numbers per sheet, and the buyers' initials on every page.
+  def footers(pdf, ranges)
+    buyers = signers.select { |s| s[:key].start_with?('buyer') }
+    ranges.each do |sheet, pages|
+      pages.each_with_index do |page, i|
+        pdf.go_to_page(page)
+        pdf.canvas do
+          y = MARGIN + 14
+          pdf.fill_color MUTED
+          pdf.draw_text "#{title(sheet)}  |  Page #{i + 1} of #{pages.size}  |  Deal #{@deal.deal_number}", at: [MARGIN, y - 10], size: 7
+          x = PAGE_W - MARGIN
+          buyers.reverse_each do |b|
+            x -= 54
+            pdf.stroke_color INK
+            pdf.stroke_line [x, y - 12], [x + 46, y - 12]
+            pdf.draw_text "#{b[:label]} initials", at: [x, y - 20], size: 6
+            @spots << placement(page, sheet, b[:key], 'initials', x, y + 2, 46, 14)
+          end
+          pdf.fill_color '000000'
+        end
+      end
+    end
+  end
+
+  # The dealership's address lines: the deal's location, else the first active one.
+  def dealer_address
+    loc = @build.location || @deal.location || @company.locations.where(active: true).first
+    return [] unless loc
+
+    street = loc.try(:address_line1).presence || loc.try(:address).presence
+    city = [loc.try(:city), [loc.try(:state), loc.try(:zip_code).presence || loc.try(:zip)].compact.join(' ')].reject(&:blank?).join(', ')
+    [street, city.presence, loc.try(:phone).presence].compact
   end
 
   private
@@ -97,15 +140,6 @@ class AgreementSheetsPdfGenerator
     pdf.stroke_color RULE
     pdf.stroke_horizontal_rule
     pdf.move_down 10
-  end
-
-  def dealer_address
-    loc = @build.location || @deal.location || @company.locations.where(active: true).first
-    return [] unless loc
-
-    street = loc.try(:address_line1).presence || loc.try(:address).presence
-    city = [loc.try(:city), [loc.try(:state), loc.try(:zip_code).presence || loc.try(:zip)].compact.join(' ')].reject(&:blank?).join(', ')
-    [street, city.presence, loc.try(:phone).presence].compact
   end
 
   def home_identification(pdf)
@@ -221,30 +255,6 @@ class AgreementSheetsPdfGenerator
       pdf.text_box [s[:label], s[:name].presence].compact.join(': '), at: [0, pdf.cursor], width: sig_w, size: 7.5, color: MUTED
       pdf.text_box 'Date', at: [date_x, pdf.cursor], width: date_w, size: 7.5, color: MUTED
       pdf.move_down 16
-    end
-  end
-
-  # Page numbers per sheet, and the buyers' initials on every page.
-  def footers(pdf, ranges)
-    buyers = signers.select { |s| s[:key].start_with?('buyer') }
-    ranges.each do |sheet, pages|
-      pages.each_with_index do |page, i|
-        pdf.go_to_page(page)
-        pdf.canvas do
-          y = MARGIN + 14
-          pdf.fill_color MUTED
-          pdf.draw_text "#{title(sheet)}  |  Page #{i + 1} of #{pages.size}  |  Deal #{@deal.deal_number}", at: [MARGIN, y - 10], size: 7
-          x = PAGE_W - MARGIN
-          buyers.reverse_each do |b|
-            x -= 54
-            pdf.stroke_color INK
-            pdf.stroke_line [x, y - 12], [x + 46, y - 12]
-            pdf.draw_text "#{b[:label]} initials", at: [x, y - 20], size: 6
-            @spots << placement(page, sheet, b[:key], 'initials', x, y + 2, 46, 14)
-          end
-          pdf.fill_color '000000'
-        end
-      end
     end
   end
 
