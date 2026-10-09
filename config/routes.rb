@@ -3121,6 +3121,9 @@ Rails.application.routes.draw do
           post :publish
           # Colors that shared one option across sets get one each (Publisher.split_colors!).
           post :split_colors
+          # Series a plant no longer builds or sells (Catalog::RetiredSeries).
+          get :series
+          post :retire_series
           get  'documents/:document_id/download', action: :download_document, as: :download_document
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
           get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs
