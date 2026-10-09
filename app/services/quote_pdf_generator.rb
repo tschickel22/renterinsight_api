@@ -255,11 +255,14 @@ class QuotePdfGenerator
 
       # Add taxable indicator (a credit lowers the taxed amount; it is not a taxed charge)
       taxable = item['taxable'] == true || item['taxable'] == 'true'
-      desc += ' +Tax' if taxable && total.to_f >= 0
+      # A $0 line is a choice that comes with the home (a color, a standard
+      # finish): it says so rather than reading as a missing price.
+      no_charge = price.to_f.zero? && total.to_f.zero?
+      desc += ' +Tax' if taxable && total.to_f.positive?
 
-      row = [desc, qty.to_s, format_currency(price)]
-      row << format_currency(discount) if has_discounts
-      row << format_currency(total)
+      row = [desc, qty.to_s, no_charge ? '' : format_currency(price)]
+      row << (no_charge ? '' : format_currency(discount)) if has_discounts
+      row << (no_charge ? 'No charge' : format_currency(total))
       table_data << row
 
       # Add item notes as a sub-row if present
