@@ -26,6 +26,7 @@ class Agreement < ApplicationRecord
   validates :title, presence: true
   validates :agreement_number, uniqueness: { scope: :company_id }, allow_nil: true
   before_validation :generate_agreement_number, on: :create
+  before_validation :normalize_content_type
   validates :status, presence: true, inclusion: {
     in: %w[draft sent viewed partially_signed completed expired voided declined]
   }
@@ -318,6 +319,23 @@ class Agreement < ApplicationRecord
   end
 
   private
+
+  # An agreement is pdf_upload or rich_text; a template's words are upload
+  # and editor, and copying those across made the builder open a PDF
+  # agreement in the text editor, whose autosave then turned it into text.
+  # upload means a PDF when there is one (the column defaults to it).
+  def normalize_content_type
+    return if content_type == 'pdf_upload'
+
+    # rich_text with no text but a PDF is a PDF agreement the builder's
+    # editor autosaved: it stays a PDF.
+    pdf = read_attribute(:document_url).present? || Array(read_attribute(:document_urls)).any?
+    self.content_type = if pdf && content.blank? then 'pdf_upload'
+                        elsif %w[rich_text editor html].include?(content_type) || content.present? then 'rich_text'
+                        elsif pdf then 'pdf_upload'
+                        else agreement_template&.agreement_content_type || 'pdf_upload'
+                        end
+  end
 
   def generate_agreement_number
     return if agreement_number.present?

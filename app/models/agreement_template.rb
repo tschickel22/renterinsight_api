@@ -46,6 +46,10 @@ class AgreementTemplate < ApplicationRecord
   # as a document model, rendered and filled from the deal.
   def packet? = packet.to_h['doc'].present?
 
+  # What an agreement made from it is: a template says upload or editor, an
+  # agreement pdf_upload or rich_text.
+  def agreement_content_type = template_type == 'editor' ? 'rich_text' : 'pdf_upload'
+
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
   scope :published, -> { where(status: 'active') }
