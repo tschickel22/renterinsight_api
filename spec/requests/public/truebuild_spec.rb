@@ -355,12 +355,55 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(response).to have_http_status(:forbidden)
     end
 
-    it 'works in the embed with the add-on' do
+    it 'works in the embed with the add-on, with a hosted designer link for the button' do
       company.tenant_module_overrides.create!(module_key: 'sales.truebuild_embed', is_enabled: true)
+      company.update!(subdomain: 'summit-homes')
+      link = "#{(ENV['RAILS_API_URL'].presence || 'http://localhost:3001').chomp('/')}/design/summit-homes/#{vehicle.id}"
       get "/public/inventory/#{vehicle.id}", params: embed
-      expect(JSON.parse(response.body)['truebuild']).to eq('available' => true)
+      expect(JSON.parse(response.body)['truebuild']).to eq('available' => true, 'design_url' => link)
+      get '/public/inventory', params: embed
+      expect(JSON.parse(response.body)['items'].find { |i| i['id'] == vehicle.id }).to include('designable' => true, 'design_url' => link)
       get "/public/truebuild/homes/#{vehicle.id}", params: { token: token }
       expect(response).to have_http_status(:ok)
+
+      # The DealerTide site opens the designer in the page: no link.
+      get '/public/inventory', params: embed.merge(website_id: site.id)
+      expect(JSON.parse(response.body)['items'].find { |i| i['id'] == vehicle.id }['design_url']).to be_nil
+    end
+
+    it 'serves the hosted designer page for the link, on the design host too' do
+      company.tenant_module_overrides.create!(module_key: 'sales.truebuild_embed', is_enabled: true)
+      company.update!(subdomain: 'summit-homes')
+      allow(Websites::SpaShell).to receive(:fetch).and_return('<html><head><title>App</title></head><body><div id="root"></div></body></html>')
+
+      get "/design/summit-homes/#{vehicle.id}"
+      expect(response).to have_http_status(:ok)
+      payload = JSON.parse(response.body[%r{<script id="dealertide-design" type="application/json">(.*?)</script>}m, 1])
+      expect(payload).to include('token' => token, 'vehicle_id' => vehicle.id, 'title' => 'Belvidere 2856H32392')
+      expect(payload['dealer']).to include('name' => 'Summit Homes')
+      expect(response.body).to include('<title>Design the Belvidere 2856H32392 | Summit Homes</title>')
+      get "/design/#{token}/#{vehicle.id}" # by token, for a dealer with no subdomain
+      expect(response).to have_http_status(:ok)
+
+      allow(Truebuild::DesignLink).to receive(:host).and_return('design.mydealertide.com')
+      host! 'design.mydealertide.com'
+      get "/summit-homes/#{vehicle.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('dealertide-design')
+      expect(Truebuild::DesignLink.url(company, vehicle)).to eq("https://design.mydealertide.com/summit-homes/#{vehicle.id}")
+    end
+
+    it 'says the home cannot be designed online without the add-on, or with the designer off' do
+      company.update!(subdomain: 'summit-homes')
+      get "/design/summit-homes/#{vehicle.id}"
+      expect(response).to have_http_status(:not_found)
+      company.tenant_module_overrides.create!(module_key: 'sales.truebuild_embed', is_enabled: true)
+      company.dealer_catalog_terms.find_or_initialize_by(manufacturer_id: nil).update!(website_designer: false)
+      get "/design/summit-homes/#{vehicle.id}"
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).to include('cannot be designed online')
+      get "/design/nobody/#{vehicle.id}"
+      expect(response).to have_http_status(:not_found)
     end
 
     it "leaves the dealer's DealerTide site as it was" do
