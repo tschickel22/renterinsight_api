@@ -148,7 +148,7 @@ class Public::InventoryController < ApplicationController
     @vehicles = @vehicles.where(make: params[:make]) if params[:make].present?
     @vehicles = @vehicles.where(model: params[:model]) if params[:model].present?
     @vehicles = @vehicles.where(year: params[:year]) if params[:year].present?
-    @vehicles = @vehicles.where(listing_type: params[:listing_type]) if params[:listing_type].present?
+    @vehicles = apply_listing_type(@vehicles, params[:listing_type])
 
     # HUD, modular, park model. A block can lock a page to some (a dealer's
     # Modular page) and a visitor can narrow within that, so both arrive and
@@ -354,10 +354,7 @@ class Public::InventoryController < ApplicationController
                       .where(is_deleted: [false, nil])
     
     # Apply listing type filter if provided (so filter options match visible vehicles)
-    if params[:listing_type].present?
-      listing_types = params[:listing_type].split(',').map(&:strip)
-      vehicles = vehicles.where(listing_type: listing_types)
-    end
+    vehicles = apply_listing_type(vehicles, params[:listing_type])
 
     # Keep filter options in sync with what the catalog index will return for
     # the same source scope — otherwise users could see a make/year option that
@@ -441,6 +438,27 @@ class Public::InventoryController < ApplicationController
   end
   
   private
+
+  CONDITION_VALUES = {
+    'new' => %w[new],
+    'used' => %w[used pre-owned pre_owned preowned certified],
+  }.freeze
+
+  # The block editor's "Listing types" offers New and Pre-Owned, which are a
+  # home's condition, while listing_type holds rv / manufactured_home. Ticking
+  # New sent listing_type=new and the page found no homes at all. Each value
+  # is read for what it is, case-insensitively (inventory holds both "new" and
+  # "New"), and several can be sent at once.
+  def apply_listing_type(scope, raw)
+    values = raw.to_s.split(',').map { |v| v.strip.downcase }.reject(&:blank?)
+    return scope if values.empty?
+
+    types = values & Vehicle::TYPES
+    conditions = values.flat_map { |v| CONDITION_VALUES[v.tr(' ', '_').sub('pre_owned', 'used')] || [] }.uniq
+    scope = scope.where(listing_type: types) if types.any?
+    scope = scope.where('LOWER(vehicles.condition) IN (?)', conditions) if conditions.any?
+    scope
+  end
 
   # The brand a shared demo is wearing, when the request names one.
   #
