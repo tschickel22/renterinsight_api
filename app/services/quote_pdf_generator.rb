@@ -23,6 +23,7 @@ class QuotePdfGenerator
     pdf.move_down 20
     add_quote_info(pdf, accent)
     pdf.move_down 20
+    add_home(pdf, accent) if @quote.show_home
     add_line_items(pdf, accent)
     pdf.move_down 20
     add_totals(pdf, accent)
@@ -120,6 +121,50 @@ class QuotePdfGenerator
   rescue => e
     Rails.logger.warn "[QuotePDF] Failed to load logo: #{e.message}"
     nil
+  end
+
+  # ── THE HOME (backlog E73) ──
+  # The lead photo, the facts and the floor plan, when the rep chose to show
+  # the home. A picture that will not load or is not JPEG or PNG is left out.
+  def add_home(pdf, accent)
+    home = QuoteHomeShowcase.for(@quote)
+    return unless home
+
+    pdf.text 'The home', size: 11, style: :bold, color: accent
+    pdf.move_down 4
+    pdf.text home['title'].to_s, size: 12, style: :bold
+    facts = [home['bedrooms'] && "#{home['bedrooms']} bed", home['bathrooms'] && "#{home['bathrooms'].to_s.sub(/\.0\z/, '')} bath",
+             home['square_feet'] && "#{home['square_feet']} sq ft", home['size'], home['model_number'] && "Model #{home['model_number']}"].compact
+    pdf.text facts.join('   ·   '), size: 9, color: '555555' if facts.any?
+    pdf.move_down 8
+    if (photo = printable_image(Array(home['photos']).first))
+      pdf.image StringIO.new(photo), fit: [pdf.bounds.width, 240], position: :center
+      pdf.move_down 8
+    end
+    if home['features'].present?
+      pdf.text home['features'].join('  ·  '), size: 9
+      pdf.move_down 8
+    end
+    if (plan = printable_image(Array(home['floor_plans']).first))
+      pdf.text 'Floor plan', size: 9, style: :bold, color: '555555'
+      pdf.move_down 3
+      pdf.image StringIO.new(plan), fit: [pdf.bounds.width, 220], position: :center
+      pdf.move_down 8
+    end
+    pdf.move_down 12
+  end
+
+  def printable_image(url)
+    return nil if url.blank?
+
+    # Champion's image service sends WebP unless asked for JPEG.
+    url = "#{url}#{url.include?('?') ? '&' : '?'}fmt=jpg&wid=1400" if url.include?('scene7.com') && !url.include?('fmt=')
+    data = load_logo(url)
+    return nil unless data
+
+    jpeg = data.byteslice(0, 3)&.bytes == [0xFF, 0xD8, 0xFF]
+    png = data.byteslice(0, 8) == "\x89PNG\r\n\x1A\n".b
+    jpeg || png ? data : nil
   end
 
   # ── HEADER ──

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_030000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6132,12 +6132,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_030000) do
     t.string "delivery_zip"
     t.string "delivery_country"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.bigint "deal_home_build_id"
+    t.integer "deal_sheet_version"
+    t.boolean "show_home", default: false, null: false
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
     t.index ["contact_id"], name: "index_quotes_on_contact_id"
     t.index ["created_at"], name: "index_quotes_on_created_at"
     t.index ["customer_id"], name: "index_quotes_on_customer_id"
+    t.index ["deal_home_build_id"], name: "index_quotes_on_deal_home_build_id"
     t.index ["deal_id"], name: "index_quotes_on_deal_id"
     t.index ["is_deleted"], name: "index_quotes_on_is_deleted"
     t.index ["location_id"], name: "index_quotes_on_location_id"
@@ -8994,6 +8998,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_030000) do
   add_foreign_key "quote_inventory_usages", "users", column: "used_by_id"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
+  add_foreign_key "quotes", "deal_home_builds", on_delete: :nullify
   add_foreign_key "quotes", "locations"
   add_foreign_key "recurring_bills", "chart_of_accounts", column: "expense_account_id"
   add_foreign_key "recurring_bills", "chart_of_accounts", column: "payment_account_id"
