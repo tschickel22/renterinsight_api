@@ -37,7 +37,9 @@ class Api::V1::TruebuildHomesController < ApplicationController
   def update
     return unless authorize_action!('inventory', 'update')
 
-    vehicle = scoped_vehicles.find_by(id: params[:id])
+    # Any of the dealer's homes, sold ones too: the list offers the designable
+    # ones, but a sold home's model is still worth knowing.
+    vehicle = scoped_vehicles(any_status: true).find_by(id: params[:id])
     return render json: { error: 'Not found' }, status: :not_found unless vehicle
 
     variant_id = params[:variant_id].presence&.to_i
@@ -51,8 +53,9 @@ class Api::V1::TruebuildHomesController < ApplicationController
 
   private
 
-  def scoped_vehicles
-    vehicles = @company.vehicles.where(is_deleted: [false, nil], status: STATUSES)
+  def scoped_vehicles(any_status: false)
+    vehicles = @company.vehicles.where(is_deleted: [false, nil])
+    vehicles = vehicles.where(status: STATUSES) unless any_status
     if current_user.uses_rbac? && !current_user.effective_admin?
       ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
       vehicles = ids.any? ? vehicles.where(location_id: ids) : vehicles.none
