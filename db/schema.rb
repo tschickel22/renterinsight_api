@@ -8171,20 +8171,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_070000) do
     t.index ["status"], name: "index_webhook_endpoints_on_status"
   end
 
-  create_table "website_featured_homes", force: :cascade do |t|
-    t.bigint "website_id", null: false
-    t.bigint "vehicle_id", null: false
-    t.integer "position", default: 0, null: false
-    t.string "title"
-    t.text "description"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["vehicle_id"], name: "index_website_featured_homes_on_vehicle_id"
-    t.index ["website_id", "position"], name: "index_website_featured_homes_on_website_id_and_position"
-    t.index ["website_id", "vehicle_id"], name: "index_website_featured_homes_on_website_id_and_vehicle_id", unique: true
-    t.index ["website_id"], name: "index_website_featured_homes_on_website_id"
-  end
-
   create_table "website_media", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "website_id"
@@ -9172,8 +9158,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_070000) do
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify
   add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict
   add_foreign_key "warranty_claims", "service_tickets", on_delete: :restrict
-  add_foreign_key "website_featured_homes", "vehicles"
-  add_foreign_key "website_featured_homes", "websites"
   add_foreign_key "website_media", "companies"
   add_foreign_key "website_media", "users", column: "uploaded_by_id"
   add_foreign_key "website_media", "websites"

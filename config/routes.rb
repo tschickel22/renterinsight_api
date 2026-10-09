@@ -198,7 +198,6 @@ Rails.application.routes.draw do
     resources :inventory, only: [:index, :show], controller: 'inventory' do
       collection do
         get :filters  # Get available filter options
-        get :featured # A website's hand-picked Featured Homes, in order
       end
     end
 
@@ -967,10 +966,6 @@ Rails.application.routes.draw do
           end
         end
         
-        # Featured Homes picked for this site (whole list read + replaced at once)
-        get 'featured_homes', to: 'website_featured_homes#index'
-        put 'featured_homes', to: 'website_featured_homes#replace'
-
         # Website Media (nested under websites)
         resources :media, controller: 'website_media'
         
