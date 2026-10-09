@@ -47,7 +47,7 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant).for_buyer
+    render json: Truebuild::BuyerCatalog.new(@company, variant, show_prices: @preview == true).for_buyer
   end
 
   # GET /public/truebuild/models/:variant_id/trueview
@@ -70,7 +70,8 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location).price(params[:option_ids], params[:addon_ids])
+    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location, show_prices: @preview == true)
+                                       .price(params[:option_ids], params[:addon_ids])
   end
 
   def create_design

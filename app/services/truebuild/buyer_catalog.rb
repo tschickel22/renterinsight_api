@@ -48,7 +48,10 @@ module Truebuild
         designable_homes(company, company.vehicles.where(id: vehicle.id)).exists?
     end
 
-    def initialize(company, variant, location: nil, vehicle: nil)
+    # show_prices: a platform admin's preview (PreviewPass) checks the prices
+    # whatever the dealer shows buyers. Cached apart from the buyer's catalog.
+    def initialize(company, variant, location: nil, vehicle: nil, show_prices: false)
+      @show_prices = show_prices
       @company = company
       @variant = variant
       @vehicle = vehicle
@@ -135,7 +138,7 @@ module Truebuild
                                  option_ids: offered.map(&:catalog_option_id).uniq).call
       retail_by_option = engine.lines.select { |l| l[:kind] == 'option' }.to_h { |l| [l[:option_id], l[:retail]] }
       starting = self.class.starting_retail(engine.lines)
-      show = SHOWS_PRICES.include?(@terms.price_display) && starting.present?
+      show = prices_shown? && starting.present?
       monthly = SHOWS_MONTHLY.include?(@terms.price_display) && starting.present? && payments.enabled?
 
       {
@@ -168,7 +171,7 @@ module Truebuild
     def price(option_ids, addon_ids = [])
       result = PricingEngine.new(company: @company, variant: @variant, location: @location,
                                  option_ids: allowed(option_ids), addon_ids: allowed_addons(addon_ids)).call
-      show = SHOWS_PRICES.include?(@terms.price_display) && result.totals[:retail].present?
+      show = prices_shown? && result.totals[:retail].present?
       monthly = SHOWS_MONTHLY.include?(@terms.price_display) && result.totals[:retail].present? && payments.enabled?
       { show_prices: show, total: show ? result.totals[:retail] : nil,
         monthly: monthly ? payments.monthly(result.totals[:retail]) : nil,
@@ -207,6 +210,8 @@ module Truebuild
                                  .where.not(mode: 'quote_only').includes(:source).order(:position, :id).to_a
     end
 
+    def prices_shown? = @show_prices || SHOWS_PRICES.include?(@terms.price_display)
+
     def addon_json(addon, show)
       { id: addon.id, name: addon.name, description: addon.description.presence, price: show ? addon.price.to_f : nil }
     end
@@ -219,7 +224,7 @@ module Truebuild
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v15:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}"
+      "truebuild:catalog:v15:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}#{':preview' if @show_prices}"
     end
 
     def offered_prices
