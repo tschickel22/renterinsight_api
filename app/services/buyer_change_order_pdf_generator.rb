@@ -115,7 +115,7 @@ class BuyerChangeOrderPdfGenerator
   def totals(pdf, t)
     rows = [['Contract total before this change', money(t['contract_before'])],
             ['Contract total with this change', money(t['contract_after'])],
-            ['Difference', money(t['difference'])]]
+            ['Difference, with tax', money(t['difference'])]]
     rows << ['Unpaid balance with this change', money(t['unpaid_after'])] if t['unpaid_after']
     w = 300
     pdf.table(rows, position: :right, width: w, column_widths: [w * 0.64, w * 0.36],
