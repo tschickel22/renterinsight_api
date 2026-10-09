@@ -908,6 +908,7 @@ class Api::V1::WebsitesController < ApplicationController
         :font_family,
         :font_size_base,
         :heading_font,
+        :accent_font,
         :header_style,
         :footer_style,
         :custom_css

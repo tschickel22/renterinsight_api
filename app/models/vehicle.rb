@@ -69,6 +69,8 @@ class Vehicle < ApplicationRecord
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :inventory_packages, dependent: :destroy
+  # Websites that feature this home. Removing the home takes it off them.
+  has_many :website_featured_homes, dependent: :delete_all
   has_many :tracked_links, dependent: :nullify
   has_many :documents, class_name: 'VehicleDocument', dependent: :destroy
   # Internal-only manufacturer-invoice capture (Max Advance Phase 1). One per vehicle.
