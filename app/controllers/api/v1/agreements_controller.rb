@@ -137,7 +137,7 @@ module Api
             agreement.content = template.content if agreement.content.blank?
             agreement.document_url = template.document_url if agreement.document_url.blank?
             agreement.document_urls = template.document_urls if agreement.document_urls.blank?
-            agreement.content_type = template.template_type if agreement.content_type.blank?
+            agreement.content_type = template.agreement_content_type if params.dig(:agreement, :content_type).blank?
             agreement.field_placements = template.field_placements if agreement.field_placements.blank?
             agreement.merge_field_placements = template.merge_field_placements if agreement.merge_field_placements.blank?
             agreement.merge_field_values = template.merge_fields if agreement.merge_field_values.blank?
@@ -217,6 +217,10 @@ module Api
 
         unless @agreement.can_send?
           return render json: { error: 'Agreement cannot be sent. Ensure it is in draft status with at least one signer.' }, status: :unprocessable_entity
+        end
+
+        if @agreement.deal_id && (problem = Agreements::DealSheetLock.send_problem(@agreement))
+          return render json: { error: problem, code: 'deal_sheet_changed' }, status: :unprocessable_entity
         end
 
         if @agreement.send_to_signers!(current_user)
@@ -366,7 +370,7 @@ module Api
 
         # Map agreement content_type to template_type (upload/editor)
         template_type = case @agreement.content_type
-                        when 'editor', 'html' then 'editor'
+                        when 'rich_text', 'editor', 'html' then 'editor'
                         else 'upload'
                         end
 

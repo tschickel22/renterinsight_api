@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_090000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3532,6 +3532,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_090000) do
     t.boolean "marketing_consent_enabled", default: true, null: false
     t.text "marketing_consent_text"
     t.string "marketing_consent_version", default: "v1", null: false
+    t.boolean "hide_name", default: false, null: false
+    t.boolean "hide_description", default: false, null: false
     t.index ["company_id"], name: "index_intake_forms_on_company_id"
     t.index ["location_id"], name: "index_intake_forms_on_location_id"
     t.index ["notified_user_id"], name: "index_intake_forms_on_notified_user_id"

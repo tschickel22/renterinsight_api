@@ -103,6 +103,18 @@ module Truebuild
       self.class.new(copy).reprice!
     end
 
+    # A change order the buyers signed (Agreements::BuyerChangeOrder): this
+    # version replaces the signed LIVE one and is locked in its turn. Not
+    # repriced: the buyers signed these prices. The deal is written from it.
+    def apply_signed_change!(from:)
+      DealHomeBuild.transaction do
+        from.update!(live: false)
+        @build.update!(live: true, status: 'locked')
+      end
+      sync_deal!
+      self
+    end
+
     # Makes this version the one the deal is written from. The version it
     # replaces stays as a draft. Refused while the LIVE version is signed.
     def make_live!

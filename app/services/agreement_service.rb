@@ -10,7 +10,7 @@ class AgreementService
       description: params[:description] || template.description,
       category: template.category,
       agreement_template: template,
-      content_type: template.template_type,
+      content_type: template.agreement_content_type,
       content: template.content,
       document_url: template.document_url,
       field_placements: template.field_placements,

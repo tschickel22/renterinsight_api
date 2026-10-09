@@ -26,6 +26,8 @@
 #   GET    /api/v1/deals/:deal_id/home_build/sheets?sheet=schedule_a|colors     the agreement's standard sheets (PDF; both when no sheet)
 #   GET    /api/v1/deals/:deal_id/home_build/agreement        what Create agreement needs: packages, managers, the ready check
 #   POST   /api/v1/deals/:deal_id/home_build/agreement        { template_id, manager_id } a draft agreement from the LIVE sheet
+#   GET    /api/v1/deals/:deal_id/home_build/buyer_change_order?version_id=   what a change order from that draft would say
+#   POST   /api/v1/deals/:deal_id/home_build/buyer_change_order?version_id=   a draft change order for the buyers to sign
 class Api::V1::DealHomeBuildsController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -359,6 +361,26 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     agreement = maker.create!(template: template, manager: manager)
     render json: { agreement: { id: agreement.id, number: agreement.agreement_number }, check: maker.check(manager: manager) }, status: :created
   rescue Agreements::FromDealSheet::NotReady => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # A signed deal changes by a change order the buyers sign: the draft
+  # version on screen against the signed LIVE one (Agreements::BuyerChangeOrder).
+  def buyer_change_order
+    return unless authorize_action!('agreements', 'read')
+
+    co = Agreements::BuyerChangeOrder.new(@deal, @build, user: current_user)
+    blocking = co.check
+    render json: { blocking: blocking, number: co.number, changes: (co.changes if @deal.home_build&.locked? && !@build.live?),
+                   signed: co.signed && { id: co.signed.id, number: co.signed.agreement_number } }
+  end
+
+  def create_buyer_change_order
+    return unless authorize_action!('agreements', 'create')
+
+    agreement = Agreements::BuyerChangeOrder.new(@deal, @build, user: current_user).create!
+    render json: { agreement: { id: agreement.id, number: agreement.agreement_number } }, status: :created
+  rescue Agreements::BuyerChangeOrder::NotReady => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
