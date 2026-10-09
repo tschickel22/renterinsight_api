@@ -567,6 +567,7 @@ class PageLayout < ApplicationRecord
           collapsed: false,
           fields: [
             { key: 'home_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'building_code', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'dwelling_type', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'foundation_type', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'sections', type: 'standard', visible: true, required: false, width: 1 },
@@ -1051,6 +1052,7 @@ class PageLayout < ApplicationRecord
           collapsed: false,
           fields: [
             { key: 'home_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'building_code', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'dwelling_type', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'foundation_type', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'sections', type: 'standard', visible: true, required: false, width: 1 },

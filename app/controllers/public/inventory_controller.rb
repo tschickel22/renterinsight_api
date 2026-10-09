@@ -150,6 +150,11 @@ class Public::InventoryController < ApplicationController
     @vehicles = @vehicles.where(year: params[:year]) if params[:year].present?
     @vehicles = @vehicles.where(listing_type: params[:listing_type]) if params[:listing_type].present?
 
+    # HUD, modular, park model. A block can lock a page to some (a dealer's
+    # Modular page) and a visitor can narrow within that, so both arrive and
+    # both must hold. "MOD" also matches a home built either way.
+    @vehicles = apply_building_code_filters(@vehicles)
+
     # Listing Source scope (Share & Embed / public catalog).
     # Mirrors the same scope names used by api/v1/vehicles_controller#index.
     # 'all' or blank → no-op (return everything that matched the other filters).
@@ -316,6 +321,9 @@ class Public::InventoryController < ApplicationController
     # the same source scope — otherwise users could see a make/year option that
     # produces zero results once selected.
     vehicles = apply_source_filter(vehicles, params[:source_filter])
+
+    # A block locked to some codes offers only those homes' other options.
+    vehicles = apply_building_code_filters(vehicles, only: :block)
     
     # Get unique values for filters
     makes = vehicles.where.not(make: [nil, '']).distinct.pluck(:make).compact.sort
@@ -328,6 +336,9 @@ class Public::InventoryController < ApplicationController
     bedrooms = vehicles.where.not(bedrooms: nil).distinct.pluck(:bedrooms).compact.sort
     bathrooms = vehicles.where.not(bathrooms: nil).distinct.pluck(:bathrooms).compact.sort
     sections = vehicles.where.not(sections: nil).distinct.pluck(:sections).compact.sort
+    building_codes = vehicles.where.not(building_code: nil).group(:building_code).count
+                             .sort_by { |code, _| BuildingCode::ALL.index(code) || 99 }
+                             .map { |code, count| { value: code, label: BuildingCode.label(code), count: count } }
     
     # Square footage range
     sqft_values = vehicles.where.not(square_feet: nil).pluck(:square_feet).compact.map(&:to_i)
@@ -379,6 +390,7 @@ class Public::InventoryController < ApplicationController
       bedrooms: bedrooms,
       bathrooms: bathrooms,
       sections: sections,
+      building_codes: building_codes,
       locations: locations,
       price_range: price_range,
       sqft_range: sqft_range,
@@ -426,6 +438,15 @@ class Public::InventoryController < ApplicationController
   # backwards-compatible with existing embeds that don't pass the param.
   # The public catalog only exposes a subset of the model scopes since
   # 'originals_only' and 'synced_only' don't make sense for end customers.
+  # building_codes is the block's lock, building_code the visitor's pick.
+  # Each is comma-separated; a home must satisfy both.
+  def apply_building_code_filters(scope, only: nil)
+    keys = only == :block ? %i[building_codes] : %i[building_codes building_code]
+    keys.reduce(scope) do |rel, key|
+      params[key].present? ? rel.with_building_code(params[key].to_s.split(',')) : rel
+    end
+  end
+
   def apply_source_filter(scope, value)
     case value.to_s
     when 'dealer_preferred' then scope.dealer_preferred
@@ -735,6 +756,8 @@ class Public::InventoryController < ApplicationController
       bathrooms: vehicle.bathrooms,
       square_feet: vehicle.square_feet,
       sections: vehicle.sections,
+      building_code: vehicle.building_code,
+      building_code_label: BuildingCode.label(vehicle.building_code),
       
       # RV fields
       rv_class: vehicle.rv_class,

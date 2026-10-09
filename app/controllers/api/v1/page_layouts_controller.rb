@@ -367,7 +367,7 @@ module Api
 
       def mh_only_field_keys
         %w[
-          home_type dwelling_type bedrooms bathrooms square_feet sections
+          home_type building_code dwelling_type bedrooms bathrooms square_feet sections
           width1 length1 width2 length2 width3 length3
           foundation_type roof_type roof_material siding_type exterior_material
           flooring_type insulation_type ceiling_type wall_type
@@ -696,6 +696,8 @@ module Api
           # MH Specifications
           { key: 'home_type', label: 'Home Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
             options: ['Double Wide', 'Manufactured Home', 'Mobile Home', 'Modular Home', 'Park Model', 'Single Wide', 'Tiny Home', 'Triple Wide'] },
+          { key: 'building_code', label: 'Building Code', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
+            options: BuildingCode::ALL, option_labels: BuildingCode::LABELS },
           { key: 'dwelling_type', label: 'Dwelling Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
             options: ['Single Wide', 'Double Wide', 'Triple Wide', 'Modular Home', 'Park Model', 'Tiny Home', 'Manufactured Home', 'Mobile Home'] },
           { key: 'bedrooms', label: 'Bedrooms', type: 'number', source: 'standard', required: false, protected: false, visibility: 'both' },

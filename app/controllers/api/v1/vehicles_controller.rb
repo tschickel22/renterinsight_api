@@ -119,6 +119,7 @@ module Api
         vehicles = vehicles.where('sale_price >= ?', params[:min_price].to_f) if params[:min_price].present?
         vehicles = vehicles.where('sale_price <= ?', params[:max_price].to_f) if params[:max_price].present?
         vehicles = vehicles.where(home_type: params[:home_type]) if params[:home_type].present?
+        vehicles = vehicles.with_building_code(params[:building_code].to_s.split(',')) if params[:building_code].present?
         
         # Count stats BEFORE search filter (stats tiles show ALL vehicles)
         all_vehicles_count = vehicles.count
@@ -1710,6 +1711,7 @@ module Api
           listingUrl: :listing_url,
           dwellingType: :dwelling_type,
           foundationType: :foundation_type,
+          buildingCode: :building_code,
           flooringType: :flooring_type,
           heatingType: :heating_type,
           coolingType: :cooling_type,
@@ -1844,7 +1846,7 @@ module Api
           :exterior_material, :roof_material, :roof_type, :siding_type,
           :insulation_type, :ceiling_type, :wall_type,
           :flooring_type, :heating_type, :cooling_type, :water_heater_type,
-          :dwelling_type, :foundation_type, :master_bedroom_location,
+          :dwelling_type, :foundation_type, :master_bedroom_location, :building_code,
           # MH appliances
           :garbage_disposal, :refrigerator, :microwave, :oven, :dishwasher,
           :clothes_washer, :clothes_dryer,
@@ -1932,7 +1934,7 @@ module Api
           :seller_name, :seller_phone, :seller_address_street, :seller_address_city,
           :seller_address_state, :seller_address_zip,
           :listing_url,
-          :dwelling_type, :foundation_type, :flooring_type, :heating_type,
+          :dwelling_type, :foundation_type, :flooring_type, :heating_type, :building_code,
           :cooling_type, :water_heater_type, :master_bedroom_location,
           # Address fields
           :location_type, :community_key, :address1, :address2, :county_name, :square_feet,
@@ -2194,6 +2196,7 @@ module Api
             communityName: vehicle.community_name,
             dwellingType: vehicle.dwelling_type,
             foundationType: vehicle.foundation_type,
+            buildingCode: vehicle.building_code,
             flooringType: vehicle.flooring_type,
             heatingType: vehicle.heating_type,
             coolingType: vehicle.cooling_type,
@@ -2419,6 +2422,7 @@ module Api
           flooring_type: row[:flooring_type] || row[:flooringType],
           insulation_type: row[:insulation_type] || row[:insulationType],
           foundation_type: row[:foundation_type] || row[:foundationType],
+          building_code: row[:building_code] || row[:buildingCode],
           # Systems
           heating_type: row[:heating_type] || row[:heatingType],
           cooling_type: row[:cooling_type] || row[:coolingType],

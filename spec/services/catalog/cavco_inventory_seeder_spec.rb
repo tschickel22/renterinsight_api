@@ -150,4 +150,32 @@ RSpec.describe Catalog::CavcoInventorySeeder do
       expect(vehicle.status).to eq('available')
     end
   end
+
+  describe 'building code' do
+    it "reads Cavco's building method" do
+      seeder.call([unit('building_method' => 'Park Model')])
+      expect(company.vehicles.last.building_code).to eq('ANSI')
+    end
+
+    # Seeding is write-once, so homes seeded before the code was read would
+    # never reach a dealer's Modular page without this.
+    it 'fills it on a home seeded before it was read, and on nothing else' do
+      seeder.call([unit])
+      vehicle = company.vehicles.last
+      expect(vehicle.building_code).to be_nil
+
+      seeder.call([unit('building_method' => 'Modular', 'number_of_bedrooms' => 9.0)])
+      expect(vehicle.reload.building_code).to eq('MOD')
+      expect(vehicle.bedrooms).to eq(4)
+    end
+
+    it 'keeps a code the dealer set' do
+      seeder.call([unit])
+      vehicle = company.vehicles.last
+      vehicle.update!(building_code: 'HUD')
+
+      seeder.call([unit('building_method' => 'Modular')])
+      expect(vehicle.reload.building_code).to eq('HUD')
+    end
+  end
 end

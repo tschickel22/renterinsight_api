@@ -23,7 +23,8 @@ module Catalog
     # edit (re-ingest restores the correct {url} image objects).
     # v4: smart re-sync — only refresh a catalog-managed field when the dealer
     # hasn't touched it (current value == previously-synced catalog value).
-    INGESTION_VERSION = 4
+    # v5: building_code (HUD / modular / park model) from the home's property type.
+    INGESTION_VERSION = 5
 
     # Vehicle fields the catalog owns. On re-sync each is updated ONLY when the
     # current value matches catalog_last_synced_values[field] (i.e. dealer hasn't
@@ -33,7 +34,7 @@ module Catalog
     MANAGED_FIELDS = %i[
       model bedrooms bathrooms square_feet width length description
       images floor_plan_images photo_url features
-      virtual_tour_url matterport_url video_url
+      virtual_tour_url matterport_url video_url building_code
     ].freeze
 
     # Sentinel key inside catalog_last_synced_values marking a vehicle that was
@@ -74,8 +75,17 @@ module Catalog
         features:          home.features.flat_map { |section, items| Array(items).map { |i| "#{section}: #{i}" } },
         virtual_tour_url:  virtual_tour,
         matterport_url:    (virtual_tour if virtual_tour.to_s.include?('matterport')),
-        video_url:         home.video_url
+        video_url:         home.video_url,
+        building_code:     building_code_for(home, source)
       }
+    end
+
+    # What the listing says (Cavco's building method, Adventure's HUD/MOD/ANSI),
+    # else the source's default_building_code for a builder whose site never
+    # says because it builds only one kind (Kabco: HUD).
+    def self.building_code_for(home, source)
+      BuildingCode.from_labels(home.property_type) ||
+        BuildingCode.from_label(source&.config.is_a?(Hash) ? source.config['default_building_code'] : nil)
     end
 
     def self.url_images(images)

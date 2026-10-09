@@ -75,6 +75,7 @@ module Scrapers
       serial_number
       year
       home_type
+      building_code
       inventory_id
       matterport_url
       virtual_tour_url
@@ -301,6 +302,9 @@ module Scrapers
         square_feet:             to_int(home_data['squareFeet']),
         sections:                extract_sections(home_data),
         home_type:               extract_home_type(home_data),
+        # nil when the feed is silent, unlike home_type: a guessed code would
+        # put a modular home on a dealer's HUD page.
+        building_code:           BuildingCode.from_label(home_data.dig('buildingCode', 'code')),
         champion_pdp_url:        slug.empty? ? nil : "#{ChampionImsClient::PDP_BASE_URL}/#{slug}",
         champion_series_name:    home_data['seriesName'].presence,
         champion_brand_name:     extract_brand_name(home_data),
