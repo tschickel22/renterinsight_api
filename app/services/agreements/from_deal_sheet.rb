@@ -50,13 +50,15 @@ module Agreements
       Agreement.transaction do
         agreement = @company.agreements.create!(
           title: "#{template.name}: #{@deal.name}".truncate(250), description: template.description,
-          category: template.category, agreement_template: template, content_type: 'upload',
+          category: template.category, agreement_template: template, content_type: 'pdf_upload',
           deal: @deal, contact: @deal.contact, account: @deal.try(:account), location_id: @deal.location_id || Current.location_id,
           prepared_by: @user, expires_at: 30.days.from_now, signing_order: 'parallel', status: 'draft'
         )
         result = PacketRenderer.new(@deal, template, agreement_number: agreement.agreement_number).call
         key = "agreements/#{@company.id}/documents/#{agreement.agreement_number}-#{SecureRandom.hex(4)}.pdf"
-        agreement.assign_attributes(document_url: PrivateFiles.put(result.pdf, key: key, content_type: 'application/pdf'),
+        # An agreement's content_type is pdf_upload (a template's word is upload); the builder reads both fields.
+        document = PrivateFiles.put(result.pdf, key: key, content_type: 'application/pdf')
+        agreement.assign_attributes(document_url: document, document_urls: [document],
                                     field_placements: result.placements, merge_field_placements: [],
                                     custom_field_definitions: result.definitions)
         agreement.metadata = agreement.metadata.to_h.merge('packet' => { 'page_count' => result.page_count, 'signers' => result.signers })

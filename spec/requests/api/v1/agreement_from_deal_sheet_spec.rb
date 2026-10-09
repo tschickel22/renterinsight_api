@@ -47,6 +47,7 @@ RSpec.describe 'Agreement from the Deal Sheet', type: :request do
     agreement = company.agreements.find(body['agreement']['id'])
     expect(agreement).to have_attributes(status: 'draft', deal_id: deal.id, contact_id: buyer.id, agreement_template_id: template.id)
     expect(agreement.document_url).to be_present
+    expect(agreement).to have_attributes(content_type: 'pdf_upload', document_urls: [agreement.read_attribute(:document_url)])
     expect(agreement.agreement_signers.order(:signing_order, :id).map(&:name)).to eq(['Pat Smith', 'Rita Rep', 'Max Manager'])
     signer_fields = agreement.field_placements.select { |p| p['isSignerField'] }
     expect(signer_fields.map { |p| p['signerIndex'] }.uniq).to contain_exactly(0, 1, 2)

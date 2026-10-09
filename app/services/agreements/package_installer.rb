@@ -40,7 +40,7 @@ module Agreements
 
     def summary
       "#{existing ? "Update template ##{existing.id}" : 'Create'} \"#{@packet['name']}\" for #{@company.name}: " \
-        "#{@packet['order'].size} pages, #{@packet['fills'].to_h.size} blanks filled from the deal, signers #{Array(@packet['signers']).join(', ')}"
+        "#{@packet['order'].size} sheets, #{@packet['fills'].to_h.size} blanks filled from the deal, signers #{Array(@packet['signers']).join(', ')}"
     end
 
     def install!
