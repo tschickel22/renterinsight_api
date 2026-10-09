@@ -32,6 +32,7 @@ module Truebuild
       by_champion_id = variants.group_by { |v| v.external_ids['champion_model_id'] }.except(nil)
       by_number = variants.group_by(&:model_number)
       linked = 0
+      fed = {} # variant id => the feed's media, for its other sizes
 
       feed_homes(client_class, manufacturer, catalog).each do |home|
         matches = Array(by_champion_id[home['id']])
@@ -49,10 +50,44 @@ module Truebuild
           v.update_columns(media: v.media_from_feed(media), external_ids: v.external_ids.merge('champion_model_id' => v.external_ids['champion_model_id'] || home['id'],
                                                                             'champion_slug' => v.external_ids['champion_slug'] || home['slug']),
                            updated_at: Time.current)
+          fed[v.id] = media
         end
         linked += matches.size
       end
+      share_with_sizes!(variants, fed)
       linked
+    end
+
+    # Champion photographs one size of a plan. Its other sizes, its HUD and
+    # modular builds (2856H32168, 2860H32168, 2860M32168: one plan, Bay Port)
+    # and its reverse aisle ("Barkley Reverse Aisle" is Barkley mirrored) are
+    # the same home, so they show its photos and floor plans: tagged
+    # shared_from, and never over a model's own photos.
+    def share_with_sizes!(variants, fed)
+      return 0 if fed.empty?
+
+      by_id = variants.index_by(&:id)
+      shared = 0
+      variants.each do |v|
+        next if fed.key?(v.id)
+        next if Array(v.media.to_h['photos']).any? && v.media.to_h['shared_from'].blank?
+
+        source = fed.keys.map { |id| by_id[id] }.find { |src| same_home?(src, v) }
+        next unless source
+
+        v.update_columns(media: v.media_from_feed(fed[source.id].merge('shared_from' => source.model_number)), updated_at: Time.current)
+        shared += 1
+      end
+      shared
+    end
+
+    def same_home?(source, variant)
+      a = source.catalog_plan
+      b = variant.catalog_plan
+      return false unless a && b && a.series == b.series && a.factory_id == b.factory_id
+      return true if a.id == b.id
+
+      b.name.to_s.downcase.squish == "#{a.name.to_s.downcase.squish} reverse aisle"
     end
 
     # Retailers' feeds list only what those retailers stock; Champion's public

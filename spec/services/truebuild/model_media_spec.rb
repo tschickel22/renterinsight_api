@@ -75,6 +75,23 @@ RSpec.describe Truebuild::ModelMedia do
     expect(bay_port.media['floor_plans']).to eq(['https://s7d9.scene7.com/is/image/championhomes/aspire-bay-port-floorplan'])
   end
 
+  it "gives a plan's other sizes and its reverse aisle the photographed size's photos, never over their own" do
+    winston = variant('Aspire', 'Winston', '3272H32186')
+    plan = winston.catalog_plan
+    longer = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '3276M32186')
+    own = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '3280H32186',
+                                     media: { 'photos' => [{ 'url' => 'https://x/own-photo' }] })
+    mirrored = variant('Aspire', 'Winston Reverse Aisle', '3272H32187')
+    other = variant('Aspire', 'Belvidere', '2856H32999')
+
+    expect(described_class.refresh!(mfr, client_class: client)).to eq(1) # Winston itself; the rest are shared
+    expect(longer.reload.media).to include('slug' => 'aspire-winston', 'shared_from' => '3272H32186')
+    expect(longer.media['floor_plans']).to eq(['https://s7d9.scene7.com/is/image/championhomes/aspire-winston-floorplan'])
+    expect(mirrored.reload.media).to include('slug' => 'aspire-winston', 'shared_from' => '3272H32186')
+    expect(own.reload.media['photos']).to eq([{ 'url' => 'https://x/own-photo' }])
+    expect(other.reload.media).to eq({})
+  end
+
   it "keeps a platform admin's hidden photos and TrueView choices through a rescan" do
     winston = variant('Aspire', 'Winston', '3272H32186')
     kept = { 'hidden_photos' => ['https://x/old'], 'trueview_photos' => { 'kitchen' => ['https://x/k'] }, 'trueview_auto' => { 'bath' => 'https://x/b' } }
