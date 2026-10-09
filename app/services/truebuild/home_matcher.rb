@@ -41,7 +41,8 @@ module Truebuild
       named = variants.select { |v| (name = v.catalog_plan&.name.to_s.downcase).length >= 3 && text.downcase.include?(name) }
       length = text[/(\d{2})\s*['’]/, 1]&.to_i || vehicle.try(:length).to_i
       sized = named.select { |v| v.length_ft.to_i == length }
-      sized = sized.select { |v| v.building_code == building_code(vehicle) }
+      code = building_code(vehicle)
+      sized = sized.select { |v| v.building_code == code } if code
       list = sized.any? ? sized.map { |v| [v, "Same name and #{length}' long"] } : named.map { |v| [v, 'Same name'] }
       list.first(3).map { |v, why| variant_json(v).merge(reason: why) }
     end
@@ -95,8 +96,16 @@ module Truebuild
       end
     end
 
+    # HUD or MOD, the two builds a price book prices; nil when either build
+    # fits the home (HUD_MOD) or neither does (a park model), so no build is
+    # ruled out. Homes saved before building_code existed fall back to their
+    # home type.
     def building_code(vehicle)
-      vehicle.try(:home_type).to_s.match?(/modular/i) ? 'MOD' : 'HUD'
+      code = vehicle.try(:building_code)
+      return code if [BuildingCode::HUD, BuildingCode::MOD].include?(code)
+      return nil if code.present?
+
+      vehicle.try(:home_type).to_s.match?(/\bmod(ular)?\b/i) ? 'MOD' : 'HUD'
     end
 
     # Words naming a builder or plant that a published book prices:

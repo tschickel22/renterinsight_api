@@ -64,4 +64,25 @@ RSpec.describe Catalog::IngestionService do
     expect(vehicle.description).to eq('Original description')
     expect(vehicle.square_feet).to eq(9999)
   end
+
+  describe 'building code' do
+    def code_for(key) = company.vehicles.find_by(catalog_source_key: key).building_code
+
+    it 'reads it from the property type the listing publishes' do
+      ingest([FakeCatalogAdapter.home('1', property_type: ['Double Wide', 'Modular'])])
+      expect(code_for('1')).to eq('MOD')
+    end
+
+    # Kabco's site says only "Double Wide"; it builds HUD homes and nothing else.
+    it "falls back to the source's default when the listing never says" do
+      source.update!(config: (source.config || {}).merge('default_building_code' => 'HUD'))
+      ingest([FakeCatalogAdapter.home('1', property_type: ['Double Wide'])])
+      expect(code_for('1')).to eq('HUD')
+    end
+
+    it 'leaves it blank rather than guess' do
+      ingest([FakeCatalogAdapter.home('1', property_type: ['Double Wide'])])
+      expect(code_for('1')).to be_nil
+    end
+  end
 end

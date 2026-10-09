@@ -55,6 +55,7 @@ module Catalog
         # Write-once: presence is decided by Cavco's UUID alone, so a stale
         # status upstream can never resurrect a home the dealer has moved on.
         if existing?(key)
+          fill_building_code(key, doc)
           result.skipped_existing += 1
           next
         end
@@ -82,6 +83,15 @@ module Catalog
       @company.vehicles.where(catalog_source_id: @source.id, catalog_source_key: key).exists?
     end
 
+    # The one field a seeded home takes after it exists, and only while blank:
+    # homes seeded before building_code was read, so a dealer's Modular page
+    # finds them. A code the dealer set is theirs.
+    def fill_building_code(key, doc)
+      code = BuildingCode.from_label(doc['building_method']) or return
+      @company.vehicles.where(catalog_source_id: @source.id, catalog_source_key: key, building_code: nil)
+              .update_all(building_code: code, updated_at: Time.current)
+    end
+
     def build_vehicle(doc, key)
       images = build_images(doc)
 
@@ -98,6 +108,7 @@ module Catalog
         bedrooms:      positive_int(doc['number_of_bedrooms']),
         bathrooms:     decimal(doc['number_of_bathrooms']),
         square_feet:   positive_int(doc['square_foot']),
+        building_code: BuildingCode.from_label(doc['building_method']),
         width:         dimension(doc, 0),
         length:        dimension(doc, 1),
         images:        images,

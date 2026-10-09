@@ -143,6 +143,9 @@ class Vehicle < ApplicationRecord
   # down to the VehicleInvoice when one is created (allowance zone 2/3 adders).
   validates :wind_zone, inclusion: { in: 1..3 }, allow_nil: true
 
+  # The code the home was built to (HUD, modular, park model). See BuildingCode.
+  validates :building_code, inclusion: { in: BuildingCode::ALL }, allow_nil: true
+
   # RV-specific validations
   with_options if: -> { listing_type == 'rv' } do
     validates :vin, presence: true, uniqueness: { scope: :company_id }
@@ -186,6 +189,7 @@ class Vehicle < ApplicationRecord
   scope :by_model, ->(model) { where('LOWER(model) = ?', model.to_s.downcase) }
   scope :rvs, -> { where(listing_type: 'rv') }
   scope :manufactured_homes, -> { where(listing_type: 'manufactured_home') }
+  scope :with_building_code, ->(codes) { where(building_code: BuildingCode.matching(codes)) }
   scope :search, ->(query) do
     # Use case-insensitive search that works with both SQLite and PostgreSQL
     operator = connection.adapter_name.downcase.include?('sqlite') ? 'LIKE' : 'ILIKE'
@@ -446,6 +450,16 @@ class Vehicle < ApplicationRecord
     if listing_type == 'manufactured_home' && serial_number.blank? && vin.present?
       self.serial_number = vin
     end
+
+    normalize_building_code
+  end
+
+  # Imports and the API send "Modular" or "hud"; store the code. A dealer who
+  # picks Home Type "Modular Home" or "Park Model" has said the code too, so
+  # fill it in when they have not set one.
+  def normalize_building_code
+    self.building_code = BuildingCode.from_label(building_code) if building_code_changed?
+    self.building_code ||= BuildingCode.from_label(home_type) if home_type_changed?
   end
 
   # FIX: New method to handle "4+" bedroom/bathroom values

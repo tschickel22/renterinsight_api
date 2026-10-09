@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7927,12 +7927,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_010000) do
     t.jsonb "catalog_last_synced_values", default: {}, null: false
     t.date "estimated_delivery_date"
     t.bigint "catalog_plan_variant_id"
+    t.string "building_code"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["catalog_plan_variant_id"], name: "index_vehicles_on_catalog_plan_variant_id"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
     t.index ["cloned_from_id"], name: "index_vehicles_on_cloned_from_id"
+    t.index ["company_id", "building_code"], name: "index_vehicles_on_company_id_and_building_code"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
     t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "(serial_number IS NOT NULL)"
