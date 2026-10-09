@@ -58,6 +58,20 @@ RSpec.describe 'The home on a quote', type: :request do
     expect(asked.grep(/bay-port-bedroom/)).to be_empty # three photos, not four
   end
 
+  it "shows the Deal Sheet's home, not a different home the deal still names" do
+    contact = company.contacts.create!(first_name: 'A', last_name: 'B', email: 'ab@example.com')
+    deal = company.deals.create!(name: 'Order', contact_id: contact.id)
+    build = DealHomeBuild.create!(company: company, deal: deal, variant: variant, source: 'order', version_number: 1, live: true)
+    other = Vehicle.create!(company: company, year: 2026, make: 'Champion', model: 'Prairie Dune 8710', vin: "V#{SecureRandom.hex(5)}", status: 'available',
+                            is_deleted: false, bedrooms: 3, bathrooms: 2, images: [{ 'url' => 'https://s7d9.scene7.com/is/image/championhomes/prairie-main' }])
+    quote = quote_for(vehicle: other).tap { |q| q.update!(deal: deal, deal_home_build: build) }
+    get "/q/#{quote.public_token}"
+    home = response.parsed_body['quote']['home']
+    expect(home['title']).to include('Bay Port', '2856H32168')
+    expect(home['photos']).to eq(['https://s7d9.scene7.com/is/image/championhomes/bay-port-kitchen'])
+    expect(home['floor_plans']).to eq(['https://s7d9.scene7.com/is/image/championhomes/Main_0002_2856H32168-'])
+  end
+
   it 'refuses a Deal Sheet of another deal' do
     other = create(:company)
     contact = other.contacts.create!(first_name: 'A', last_name: 'B', email: 'ab@example.com')

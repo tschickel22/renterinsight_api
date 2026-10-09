@@ -7,11 +7,15 @@
 class QuoteHomeShowcase
   def self.for(quote) = new(quote).call
 
+  # A quote from a Deal Sheet shows the sheet's home: the lot home it was
+  # built on, or its model for a factory order. The quote's own home is used
+  # only without a sheet; the deal's home can be a different one (a rep can
+  # quote a factory order on a deal that still names a lot home).
   def initialize(quote)
     @quote = quote
-    @vehicle = quote.vehicle
     @build = quote.deal_home_build || quote.deal&.home_build
-    @variant = @vehicle&.catalog_plan_variant || @build&.variant
+    @vehicle = @build ? @build.vehicle : quote.vehicle
+    @variant = @build ? @build.variant : @vehicle&.catalog_plan_variant
   end
 
   # => Hash, or nil when there is no home or nothing to show.
