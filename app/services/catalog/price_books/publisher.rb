@@ -36,6 +36,8 @@ module Catalog
           @book.update!(metadata: @book.metadata.merge('published_counts' => counts))
           @book.publish!(by: @user)
           counts['plants_labelled'] = Plants.label_series(@book).size
+          # A series a platform admin retired stays retired through a new book.
+          counts['retired_kept'] = Catalog::RetiredSeries.apply!(@book.factory)
           Truebuild::PriceBookNotifier.hold_for_review(@book)
           link_inventory
         end

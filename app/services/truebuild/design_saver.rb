@@ -62,6 +62,8 @@ module Truebuild
       design.update!(intake_submission: submission, lead_id: submission.reload.lead_id)
       PortalAccess.call(design)
       design.track!('saved')
+      # A buyer with an open deal: the design reaches it as a draft version.
+      TruebuildDesignToDealJob.perform_later(design.id)
       # Someone else's copy: tell the original buyer's dealer too, unless the
       # buyer saved a new version of their own.
       if @copied_from && @copied_from.buyer_email != design.buyer_email
@@ -108,6 +110,8 @@ module Truebuild
                     'saved_signed_in' => true }.compact.deep_stringify_keys
       )
       design.track!('saved')
+      # A buyer with an open deal: the design reaches it as a draft version.
+      TruebuildDesignToDealJob.perform_later(design.id)
       if @copied_from && @copied_from.buyer_email != design.buyer_email
         @copied_from.track!('copied', copy_id: design.id, copied_by: design.buyer_name.presence)
       end

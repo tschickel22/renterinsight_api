@@ -23,6 +23,8 @@ class Quote < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true
   belongs_to :deal, optional: true
+  # The Deal Sheet version it was built from (the LIVE one or a draft).
+  belongs_to :deal_home_build, optional: true
   belongs_to :sales_rep, class_name: 'User', optional: true
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :quote_inventory_usages, dependent: :destroy
@@ -37,6 +39,7 @@ class Quote < ApplicationRecord
   validates :pricing_display, inclusion: { in: %w[detailed bundled] }, allow_nil: true
   validates :subtotal, :tax, :total, numericality: { greater_than_or_equal_to: 0 }
   validate :items_must_be_array
+  validate :deal_sheet_is_the_deals
   validate :valid_until_must_be_future, if: -> { valid_until.present? && new_record? }
   
   # Scopes
@@ -183,6 +186,9 @@ class Quote < ApplicationRecord
       'notes' => notes,
       'terms' => terms,
       'pricingDisplay' => pricing_display || 'detailed',
+      'dealHomeBuildId' => deal_home_build_id,
+      'dealSheetVersion' => deal_sheet_version,
+      'showHome' => show_home,
       'drawSchedule' => draw_schedule,
       'sent_at' => sent_at,
       'last_sent_at' => last_sent_at,
@@ -330,6 +336,8 @@ class Quote < ApplicationRecord
 
   def public_as_json
     json = as_json
+    # The home, when the rep chose to show it (QuoteHomeShowcase): photos and facts, no prices.
+    json['home'] = QuoteHomeShowcase.for(self) if show_home
     %w[items lineItems].each do |k|
       next unless json[k].is_a?(Array)
 
@@ -347,6 +355,16 @@ class Quote < ApplicationRecord
   end
 
   private
+
+  # A Deal Sheet of another deal or company cannot be named on this quote.
+  def deal_sheet_is_the_deals
+    return if deal_home_build_id.blank?
+
+    build = DealHomeBuild.find_by(id: deal_home_build_id)
+    return if build && build.company_id == company_id && (deal_id.blank? || build.deal_id == deal_id.to_i)
+
+    errors.add(:deal_home_build_id, 'is not a Deal Sheet of this deal')
+  end
   
   def serialize_items(items_array)
     return [] if items_array.nil?

@@ -23,6 +23,19 @@ class PurchaseOrderMailer < ApplicationMailer
            subject: "#{kind} #{po.po_number} from #{@company.name}" }.compact)
   end
 
+  # A change to a factory order already sent (backlog E52), its PDF attached.
+  def change_order(co, to:, sender:, cc: nil, message: nil, from: nil)
+    @po = co.purchase_order
+    @change_order = co
+    @company = @po.company
+    @location = @po.location
+    @sender = sender
+    @message = message
+    attachments["#{co.label}.pdf"] = { mime_type: 'application/pdf', content: ChangeOrderPdfGenerator.new(co).generate }
+    mail({ to: to, cc: cc.presence, reply_to: sender&.email, from: from || default_from_address,
+           subject: "Change order #{co.label} from #{@company.name}" }.compact)
+  end
+
   # The platform's sender (verified with the mail provider), shown under the
   # dealer's name.
   def self.platform_from(company)

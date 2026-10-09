@@ -366,6 +366,33 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
   # POST /api/admin/catalog_price_books/:id/split_colors
   # A book published before colors were keyed by set: its colors that shared
   # one option across sets ("White" in Siding and Shutters) get one each.
+  # GET /api/admin/catalog_price_books/:id/series
+  # The series of this book's plant, with how many models each has and
+  # whether it is retired.
+  def series
+    return render json: { error: 'This book names no plant' }, status: :unprocessable_entity unless @book.factory
+
+    render json: { factory: @book.factory.name, series: series_rows(@book.factory) }
+  end
+
+  # POST /api/admin/catalog_price_books/:id/retire_series { series, retire }
+  # retire false restores it.
+  def retire_series
+    factory = @book.factory
+    return render json: { error: 'This book names no plant' }, status: :unprocessable_entity unless factory
+
+    name = params[:series].to_s
+    known = series_rows(factory).map { |r| r[:name] }
+    return render json: { error: "#{name} is not a series of #{factory.name}" }, status: :unprocessable_entity unless known.any? { |s| s.casecmp?(name) }
+
+    if ActiveModel::Type::Boolean.new.cast(params.fetch(:retire, true))
+      Catalog::RetiredSeries.retire!(factory, name)
+    else
+      Catalog::RetiredSeries.restore!(factory, name)
+    end
+    render json: { factory: factory.name, series: series_rows(factory) }
+  end
+
   def split_colors
     # A book with no import items takes the rows' options as a list.
     rows = params[:rows].presence&.map { |r| r.permit(:price_id, :key, :name, :color_set, :group_key).to_h }
@@ -388,6 +415,16 @@ class Api::Admin::CatalogPriceBooksController < ApplicationController
   end
 
   private
+
+  def series_rows(factory)
+    counts = CatalogPlanVariant.joins(:catalog_plan).where(catalog_plans: { factory_id: factory.id })
+                               .group('catalog_plans.series', 'catalog_plan_variants.status').count
+    counts.group_by { |(series, _), _| series.to_s }.map do |series, rows|
+      by_status = rows.to_h { |(_, status), n| [status, n] }
+      { name: series, active: by_status['active'].to_i, discontinued: by_status['discontinued'].to_i,
+        retired: Catalog::RetiredSeries.retired?(factory, series) }
+    end.reject { |r| r[:name].blank? }.sort_by { |r| r[:name] }
+  end
 
   def set_book
     @book = CatalogPriceBook.find(params[:id])

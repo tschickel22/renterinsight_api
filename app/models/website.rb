@@ -10,6 +10,9 @@ class Website < ApplicationRecord
   has_many :blog_categories, dependent: :destroy
   has_many :website_versions, dependent: :destroy
 
+  # Homes picked for the Featured Homes section, with site-only copy.
+  has_many :featured_homes, -> { ordered }, class_name: 'WebsiteFeaturedHome', dependent: :delete_all
+
   # The address visitors type to reach this site. Assigned on the domain screen, where the
   # DNS records and verification state live, and surfaced here so someone who has just
   # finished building a site can tell whether anyone can actually reach it.

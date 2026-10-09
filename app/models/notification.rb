@@ -51,6 +51,7 @@ class Notification < ApplicationRecord
     
     # CRM notifications
     lead_assigned: { category: 'crm', priority: 'high', title: 'Lead Assigned to You' },
+    deal_sheet_buyer_design: { category: 'crm', priority: 'normal', title: 'A buyer saved a design' },
     contact_assigned: { category: 'crm', priority: 'normal', title: 'Contact Assigned to You' },
     account_assigned: { category: 'crm', priority: 'normal', title: 'Account Assigned to You' },
     contact_updated: { category: 'crm', priority: 'low', title: 'Contact Information Updated' },

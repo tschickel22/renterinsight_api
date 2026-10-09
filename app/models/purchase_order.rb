@@ -21,6 +21,8 @@ class PurchaseOrder < ApplicationRecord
   belongs_to :manufacturer, optional: true
   
   has_many :lines, class_name: 'PurchaseOrderLine', foreign_key: 'purchase_order_id', dependent: :destroy, inverse_of: :purchase_order
+  # Changes to a factory order the factory already has (Truebuild::ChangeOrders).
+  has_many :change_orders, -> { order(:number) }, class_name: 'PurchaseOrderChangeOrder', dependent: :destroy
   has_many :purchase_order_lines, dependent: :destroy
   has_many :parts, through: :purchase_order_lines
   has_many :inventory_transactions, through: :purchase_order_lines

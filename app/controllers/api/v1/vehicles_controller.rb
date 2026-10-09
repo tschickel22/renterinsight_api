@@ -1805,6 +1805,7 @@ module Api
           discountType: :discount_type,
           discountValue: :discount_value,
           discountedPrice: :discounted_price,
+          specialDiscountEndsOn: :special_discount_ends_on,
           # Custom field values (Page Layout Editor)
           customFieldValues: :custom_field_values,
           # MH Standard Columns
@@ -1861,7 +1862,7 @@ module Api
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
           :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
           # Special Discount
-          :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
+          :special_discount_enabled, :discount_type, :discount_value, :discounted_price, :special_discount_ends_on,
           # RV fields
           :body_style, :fuel_type, :transmission, :mileage_unit,
           :exterior_color, :interior_color, :vehicle_interior_type,
@@ -1965,7 +1966,7 @@ module Api
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
           :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
           # Special Discount
-          :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
+          :special_discount_enabled, :discount_type, :discount_value, :discounted_price, :special_discount_ends_on,
           # Location ID and address override
           :location_id,
           :use_location_address,
@@ -2059,6 +2060,7 @@ module Api
           discountType: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
           discountValue: vehicle.respond_to?(:discount_value) ? vehicle.discount_value&.to_f : nil,
           discountedPrice: vehicle.respond_to?(:discounted_price) ? vehicle.discounted_price&.to_f : nil,
+          specialDiscountEndsOn: vehicle.special_discount_ends_on&.iso8601,
           listingUrl: vehicle.listing_url,
           sellerName: vehicle.seller_name,
           sellerPhone: vehicle.seller_phone,

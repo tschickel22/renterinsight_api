@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3226,6 +3226,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.jsonb "deal_desk_baseline"
     t.bigint "co_applicant_contact_id"
     t.string "delivery_point", default: "deliver", null: false
+    t.jsonb "sale_details", default: {}, null: false
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -5822,6 +5823,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.index ["vehicle_id"], name: "idx_projects_vehicle"
   end
 
+  create_table "purchase_order_change_orders", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "purchase_order_id", null: false
+    t.bigint "deal_id"
+    t.bigint "deal_home_build_id"
+    t.integer "number", null: false
+    t.string "status", default: "draft", null: false
+    t.string "production_status", default: "not_released", null: false
+    t.jsonb "changes_list", default: {}, null: false
+    t.jsonb "new_snapshot", default: {}, null: false
+    t.decimal "cost_delta", precision: 12, scale: 2, default: "0.0", null: false
+    t.text "notes"
+    t.datetime "emailed_at"
+    t.string "emailed_to"
+    t.datetime "approved_at"
+    t.datetime "voided_at"
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_purchase_order_change_orders_on_company_id"
+    t.index ["created_by_id"], name: "index_purchase_order_change_orders_on_created_by_id"
+    t.index ["deal_home_build_id"], name: "index_purchase_order_change_orders_on_deal_home_build_id"
+    t.index ["deal_id"], name: "index_purchase_order_change_orders_on_deal_id"
+    t.index ["purchase_order_id", "number"], name: "idx_on_purchase_order_id_number_da3eef4e1b", unique: true
+    t.index ["purchase_order_id"], name: "index_purchase_order_change_orders_on_purchase_order_id"
+  end
+
   create_table "purchase_order_lines", force: :cascade do |t|
     t.bigint "purchase_order_id", null: false
     t.bigint "part_id"
@@ -6132,12 +6160,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.string "delivery_zip"
     t.string "delivery_country"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.bigint "deal_home_build_id"
+    t.integer "deal_sheet_version"
+    t.boolean "show_home", default: false, null: false
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
     t.index ["contact_id"], name: "index_quotes_on_contact_id"
     t.index ["created_at"], name: "index_quotes_on_created_at"
     t.index ["customer_id"], name: "index_quotes_on_customer_id"
+    t.index ["deal_home_build_id"], name: "index_quotes_on_deal_home_build_id"
     t.index ["deal_id"], name: "index_quotes_on_deal_id"
     t.index ["is_deleted"], name: "index_quotes_on_is_deleted"
     t.index ["location_id"], name: "index_quotes_on_location_id"
@@ -7928,6 +7960,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.date "estimated_delivery_date"
     t.bigint "catalog_plan_variant_id"
     t.string "building_code"
+    t.date "special_discount_ends_on"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["catalog_plan_variant_id"], name: "index_vehicles_on_catalog_plan_variant_id"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
@@ -7958,6 +7991,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["sold_via_deal_id"], name: "index_vehicles_on_sold_via_deal_id"
     t.index ["source"], name: "index_vehicles_on_source"
+    t.index ["special_discount_ends_on"], name: "index_vehicles_on_special_discount_ends_on", where: "special_discount_enabled"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["total_cost"], name: "index_vehicles_on_total_cost"
     t.index ["use_location_address"], name: "index_vehicles_on_use_location_address"
@@ -8135,6 +8169,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
     t.index ["company_id"], name: "index_webhook_endpoints_on_company_id"
     t.index ["created_by_user_id"], name: "index_webhook_endpoints_on_created_by_user_id"
     t.index ["status"], name: "index_webhook_endpoints_on_status"
+  end
+
+  create_table "website_featured_homes", force: :cascade do |t|
+    t.bigint "website_id", null: false
+    t.bigint "vehicle_id", null: false
+    t.integer "position", default: 0, null: false
+    t.string "title"
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["vehicle_id"], name: "index_website_featured_homes_on_vehicle_id"
+    t.index ["website_id", "position"], name: "index_website_featured_homes_on_website_id_and_position"
+    t.index ["website_id", "vehicle_id"], name: "index_website_featured_homes_on_website_id_and_vehicle_id", unique: true
+    t.index ["website_id"], name: "index_website_featured_homes_on_website_id"
   end
 
   create_table "website_media", force: :cascade do |t|
@@ -8965,6 +9013,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
   add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
+  add_foreign_key "purchase_order_change_orders", "companies"
+  add_foreign_key "purchase_order_change_orders", "deal_home_builds", on_delete: :nullify
+  add_foreign_key "purchase_order_change_orders", "deals"
+  add_foreign_key "purchase_order_change_orders", "purchase_orders"
+  add_foreign_key "purchase_order_change_orders", "users", column: "created_by_id"
   add_foreign_key "purchase_order_lines", "catalog_options", on_delete: :nullify
   add_foreign_key "purchase_order_lines", "parts"
   add_foreign_key "purchase_order_lines", "purchase_orders"
@@ -8992,6 +9045,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
   add_foreign_key "quote_inventory_usages", "users", column: "used_by_id"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
+  add_foreign_key "quotes", "deal_home_builds", on_delete: :nullify
   add_foreign_key "quotes", "locations"
   add_foreign_key "recurring_bills", "chart_of_accounts", column: "expense_account_id"
   add_foreign_key "recurring_bills", "chart_of_accounts", column: "payment_account_id"
@@ -9118,6 +9172,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_020000) do
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify
   add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict
   add_foreign_key "warranty_claims", "service_tickets", on_delete: :restrict
+  add_foreign_key "website_featured_homes", "vehicles"
+  add_foreign_key "website_featured_homes", "websites"
   add_foreign_key "website_media", "companies"
   add_foreign_key "website_media", "users", column: "uploaded_by_id"
   add_foreign_key "website_media", "websites"

@@ -198,6 +198,7 @@ Rails.application.routes.draw do
     resources :inventory, only: [:index, :show], controller: 'inventory' do
       collection do
         get :filters  # Get available filter options
+        get :featured # A website's hand-picked Featured Homes, in order
       end
     end
 
@@ -319,6 +320,9 @@ Rails.application.routes.draw do
       post   'truebuild_designs/:id/quote', to: 'truebuild_designs#create_quote'
       # A deal's home build (E49): the model and the options chosen for it.
       get    'deal_sheets', to: 'deal_sheets#index'
+      # The contract's sale details: the Deal Sheet's sections 4 and 5 (DealSaleDetails).
+      get    'deals/:deal_id/sale_details', to: 'deal_sale_details#show'
+      patch  'deals/:deal_id/sale_details', to: 'deal_sale_details#update'
       get    'deals/:deal_id/home_build', to: 'deal_home_builds#show'
       post   'deals/:deal_id/home_build', to: 'deal_home_builds#create'
       patch  'deals/:deal_id/home_build', to: 'deal_home_builds#update'
@@ -963,6 +967,10 @@ Rails.application.routes.draw do
           end
         end
         
+        # Featured Homes picked for this site (whole list read + replaced at once)
+        get 'featured_homes', to: 'website_featured_homes#index'
+        put 'featured_homes', to: 'website_featured_homes#replace'
+
         # Website Media (nested under websites)
         resources :media, controller: 'website_media'
         
@@ -1566,10 +1574,21 @@ Rails.application.routes.draw do
           post :post_to_accounting
           # A factory PO (backlog E51): the home arrived.
           post :receive_home, path: 'receive-home'
+          # Homes already in inventory the PO can be received into.
+          get :receive_candidates, path: 'receive-candidates'
           post :email
         end
         collection do
           get :stats
+        end
+        # Changes to a factory order already sent (backlog E52).
+        resources :change_orders, path: 'change-orders', controller: 'purchase_order_change_orders', only: %i[index create update] do
+          member do
+            post :email
+            post :approve
+            post :void
+            get :pdf
+          end
         end
       end
       
@@ -3121,6 +3140,9 @@ Rails.application.routes.draw do
           post :publish
           # Colors that shared one option across sets get one each (Publisher.split_colors!).
           post :split_colors
+          # Series a plant no longer builds or sells (Catalog::RetiredSeries).
+          get :series
+          post :retire_series
           get  'documents/:document_id/download', action: :download_document, as: :download_document
           post 'documents/:document_id/retry', action: :retry_document, as: :retry_document
           get  'documents/:document_id/tabs', action: :tabs, as: :document_tabs

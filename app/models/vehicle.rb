@@ -69,6 +69,8 @@ class Vehicle < ApplicationRecord
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :inventory_packages, dependent: :destroy
+  # Websites that feature this home. Removing the home takes it off them.
+  has_many :website_featured_homes, dependent: :delete_all
   has_many :tracked_links, dependent: :nullify
   has_many :documents, class_name: 'VehicleDocument', dependent: :destroy
   # Internal-only manufacturer-invoice capture (Max Advance Phase 1). One per vehicle.
@@ -308,6 +310,28 @@ class Vehicle < ApplicationRecord
 
   def price_display
     sale_price || rent_price
+  end
+
+  # A sale that ran through its end date, in the dealer's own time zone: it
+  # shows all of that day, and is off the next.
+  def sale_expired?(today = nil)
+    return false unless special_discount_enabled && special_discount_ends_on
+
+    special_discount_ends_on < (today || Time.current.in_time_zone(company&.time_zone || 'America/New_York').to_date)
+  end
+
+  # Every sale past its end date turns off, as if a rep turned it off: the
+  # discount clears and the home shows its base price. Hourly (recurring.yml).
+  def self.expire_sales!
+    ended = 0
+    where(special_discount_enabled: true).where('special_discount_ends_on < ?', Date.current + 1).includes(:company).find_each do |v|
+      next unless v.sale_expired?
+
+      v.special_discount_enabled = false
+      v.save(validate: false)
+      ended += 1
+    end
+    ended
   end
 
   # Computed total: sale_price + all packages that are included_in_total

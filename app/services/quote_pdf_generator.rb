@@ -39,6 +39,9 @@ class QuotePdfGenerator
       add_terms(pdf, accent, terms_text)
     end
 
+    # The home on its own page after the quote (backlog E73).
+    add_home_page(pdf, accent) if @quote.show_home
+
     add_footer(pdf)
 
     pdf.render
@@ -120,6 +123,64 @@ class QuotePdfGenerator
   rescue => e
     Rails.logger.warn "[QuotePDF] Failed to load logo: #{e.message}"
     nil
+  end
+
+  # ── THE HOME (backlog E73) ──
+  # Its own page after the quote, when the rep chose to show the home: the
+  # facts, a lead photo, two more side by side, the floor plan and the
+  # features. A picture that will not load or is not JPEG or PNG is left out.
+  def add_home_page(pdf, accent)
+    home = QuoteHomeShowcase.for(@quote)
+    return unless home
+
+    photos = Array(home['photos']).lazy.filter_map { |u| printable_image(u) }.first(3)
+    plan = printable_image(Array(home['floor_plans']).first)
+    return if photos.empty? && plan.nil? && home['features'].blank?
+
+    pdf.start_new_page
+    pdf.text 'The home', size: 16, style: :bold, color: accent
+    pdf.move_down 4
+    pdf.text home['title'].to_s, size: 12, style: :bold
+    facts = [home['bedrooms'] && "#{home['bedrooms']} bed", home['bathrooms'] && "#{home['bathrooms'].to_s.sub(/\.0\z/, '')} bath",
+             home['square_feet'] && "#{home['square_feet']} sq ft", home['size'], home['model_number'] && "Model #{home['model_number']}"].compact
+    pdf.text facts.join('   ·   '), size: 9, color: '555555' if facts.any?
+    pdf.move_down 10
+
+    if photos.first
+      pdf.image StringIO.new(photos.first), fit: [pdf.bounds.width, 230], position: :center
+      pdf.move_down 8
+    end
+    if photos.size > 1
+      gap = 10
+      width = (pdf.bounds.width - gap) / 2
+      top = pdf.cursor
+      photos.drop(1).each_with_index do |img, i|
+        pdf.bounding_box([i * (width + gap), top], width: width, height: 120) do
+          pdf.image StringIO.new(img), fit: [width, 120], position: :center
+        end
+      end
+      pdf.move_down 10
+    end
+    if plan
+      pdf.text 'Floor plan', size: 9, style: :bold, color: '555555'
+      pdf.move_down 3
+      pdf.image StringIO.new(plan), fit: [pdf.bounds.width, 190], position: :center
+      pdf.move_down 8
+    end
+    pdf.text home['features'].join('  ·  '), size: 9 if home['features'].present?
+  end
+
+  def printable_image(url)
+    return nil if url.blank?
+
+    # Champion's image service sends WebP unless asked for JPEG.
+    url = "#{url}#{url.include?('?') ? '&' : '?'}fmt=jpg&wid=1400" if url.include?('scene7.com') && !url.include?('fmt=')
+    data = load_logo(url)
+    return nil unless data
+
+    jpeg = data.byteslice(0, 3)&.bytes == [0xFF, 0xD8, 0xFF]
+    png = data.byteslice(0, 8) == "\x89PNG\r\n\x1A\n".b
+    jpeg || png ? data : nil
   end
 
   # ── HEADER ──

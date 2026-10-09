@@ -3,7 +3,7 @@
 class Api::V1::PurchaseOrdersController < ApplicationController
   before_action :set_company_scope
   before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history, :post_to_accounting,
-                                            :receive_home, :email]
+                                            :receive_home, :receive_candidates, :email]
 
   def index
     return unless authorize_action!('inventory', 'read')
@@ -272,8 +272,11 @@ class Api::V1::PurchaseOrdersController < ApplicationController
   def receive_home
     return unless authorize_action!('inventory', 'update')
 
-    vehicle = params[:vehicle_id].present? ? @company.vehicles.find_by(id: params[:vehicle_id]) : nil
+    vehicle = params[:vehicle_id].present? ? @company.vehicles.where(is_deleted: [false, nil]).find_by(id: params[:vehicle_id]) : nil
     return render json: { error: 'Home not found' }, status: :not_found if params[:vehicle_id].present? && !vehicle
+    if vehicle && (other = @company.purchase_orders.where.not(id: @purchase_order.id).find_by(received_vehicle_id: vehicle.id))
+      return render json: { error: "That home was already received on #{other.po_number}" }, status: :unprocessable_entity
+    end
 
     Truebuild::FactoryOrder.receive!(@purchase_order, serial_number: params[:serial_number], vehicle: vehicle,
                                                       stock_number: params[:stock_number], user: current_user)
@@ -281,6 +284,31 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     render json: { status: @purchase_order.status, received_vehicle_id: @purchase_order.received_vehicle_id }
   rescue Truebuild::FactoryOrder::Refused, ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/purchase-orders/:id/receive-candidates?search=
+  # Homes already in inventory a factory PO can be received into: its model's
+  # first, then any other home matching the search. Sold homes and ones
+  # another PO already received are left out.
+  def receive_candidates
+    return unless authorize_action!('inventory', 'read')
+
+    build = @purchase_order.deal_home_build || @purchase_order.deal&.home_build
+    taken = @company.purchase_orders.where.not(id: @purchase_order.id).where.not(received_vehicle_id: nil).select(:received_vehicle_id)
+    scope = @company.vehicles.where(is_deleted: [false, nil]).where.not(status: %w[sold delivered]).where.not(id: taken)
+    same = build&.catalog_plan_variant_id ? scope.where(catalog_plan_variant_id: build.catalog_plan_variant_id).order(created_at: :desc).limit(20).to_a : []
+    others = []
+    if params[:search].present?
+      term = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%"
+      others = scope.where.not(id: same.map(&:id))
+                    .where('model ILIKE :t OR serial_number ILIKE :t OR stock_number ILIKE :t OR inventory_id ILIKE :t OR vin ILIKE :t', t: term)
+                    .order(created_at: :desc).limit(20).to_a
+    end
+    row = lambda do |v, same_model|
+      { id: v.id, title: [v.year, v.make, v.model].compact.join(' '), status: v.status, serial_number: v.serial_number,
+        stock_number: v.stock_number, same_model: same_model }
+    end
+    render json: { homes: same.map { |v| row.call(v, true) } + others.map { |v| row.call(v, false) } }
   end
 
   # POST /api/v1/purchase-orders/:id/email  { to?, cc?, message? }

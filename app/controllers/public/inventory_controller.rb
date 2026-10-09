@@ -189,15 +189,7 @@ class Public::InventoryController < ApplicationController
     total_pages = (total_count.to_f / per_page).ceil
     
     @vehicles = @vehicles.offset((page - 1) * per_page).limit(per_page)
-    # Which homes on this page open the designer, and which show finishes on
-    # their photos, for a badge on the card.
-    # Off the DealerTide site without the add-on, none (TruebuildReach).
-    @designable_ids = if truebuild_reachable?
-                        Truebuild::BuyerCatalog.designable_homes(@company, @company.vehicles.where(id: @vehicles.map(&:id))).pluck(:id).to_set
-                      else
-                        Set.new
-                      end
-    @trueview_variant_ids = Truebuild::ModelList.trueview_ready(@vehicles.select { |v| @designable_ids.include?(v.id) }.map(&:catalog_plan_variant_id).uniq)
+    load_design_flags(@vehicles)
     
     # Get branding (Location → Company → Platform hierarchy)
     location = params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : nil
@@ -220,6 +212,55 @@ class Public::InventoryController < ApplicationController
     }
   end
   
+  # GET /public/inventory/featured
+  # A website's hand-picked Featured Homes, in the order the dealer chose,
+  # with the site's own title and description (blank falls back to the
+  # inventory description). Homes no longer for sale drop off on their own.
+  #
+  # A site with nothing picked yet (a fresh template, a demo) gets the newest
+  # homes instead, so the section is never empty; meta.source says which.
+  #
+  # Params:
+  # - token (required), website_id (required for picks)
+  # - statuses (optional): as for index
+  # - limit (optional): newest-homes fallback count (default 6, max 24)
+  def featured
+    statuses = params[:statuses].present? ? params[:statuses].split(',').map(&:strip) : get_public_statuses
+    website = params[:website_id].present? ? @company.websites.find_by(id: params[:website_id]) : nil
+
+    picks = if website
+              website.featured_homes.includes(vehicle: :catalog_plan_variant).select do |f|
+                statuses.include?(f.vehicle.status) && !f.vehicle.is_deleted
+              end
+            else
+              []
+            end
+
+    if picks.any?
+      vehicles = picks.map(&:vehicle)
+      source = 'picked'
+    else
+      limit = (params[:limit] || 6).to_i.clamp(1, 24)
+      vehicles = @company.vehicles.includes(:catalog_plan_variant)
+                         .where(status: statuses, is_deleted: [false, nil])
+                         .order(created_at: :desc).limit(limit).to_a
+      source = 'newest'
+    end
+
+    load_design_flags(vehicles)
+    by_vehicle = picks.index_by(&:vehicle_id)
+
+    items = vehicles.map do |vehicle|
+      pick = by_vehicle[vehicle.id]
+      vehicle_list_json(vehicle).merge(
+        featured_title: pick&.display_title || [vehicle.year, vehicle.make, vehicle.model].compact.join(' '),
+        featured_description: pick ? pick.display_description : vehicle.description
+      )
+    end
+
+    render json: { items: items, meta: { source: source, total: items.size } }
+  end
+
   # GET /public/inventory/:id
   # Get detailed information for a single vehicle
   #
@@ -471,6 +512,18 @@ class Public::InventoryController < ApplicationController
     { available: false, design_url: (truebuild_site_url(vehicle) if designable) }.compact
   end
 
+  # Which of these homes open the designer, and which show finishes on their
+  # photos, for a badge on the card. Off the DealerTide site without the
+  # add-on, none (TruebuildReach). vehicle_list_json reads both.
+  def load_design_flags(vehicles)
+    @designable_ids = if truebuild_reachable?
+                        Truebuild::BuyerCatalog.designable_homes(@company, @company.vehicles.where(id: vehicles.map(&:id))).pluck(:id).to_set
+                      else
+                        Set.new
+                      end
+    @trueview_variant_ids = Truebuild::ModelList.trueview_ready(vehicles.select { |v| @designable_ids.include?(v.id) }.map(&:catalog_plan_variant_id).uniq)
+  end
+
   def authenticate_inventory_token
     token = params[:token] || request.headers['X-Inventory-Token']
     
@@ -710,14 +763,28 @@ class Public::InventoryController < ApplicationController
   end
 
   # JSON for vehicle list view (lighter payload)
+  # The sale price to show, or nil: none set, or a special discount past its end date.
+  def sale_price_for(vehicle)
+    return nil unless vehicle.sale_price.present? && vehicle.sale_price > 0
+    return nil if vehicle.sale_expired?
+
+    vehicle.sale_price.to_f.round(2)
+  end
+
   def vehicle_list_json(vehicle)
     # Determine which price to display (prefer sale_price)
     # NOTE: Prices are stored as decimal dollars, not cents
-    display_price = if vehicle.sale_price.present? && vehicle.sale_price > 0
+    # A sale past its end date (backlog E72) is over here at once, even before
+    # the hourly job turns it off: the home shows its base price.
+    sale = sale_price_for(vehicle)
+    display_price = if sale
       { 
-        amount: vehicle.sale_price.to_f.round(2),
+        amount: sale,
         type: 'sale'
       }
+    elsif vehicle.msrp.present? && vehicle.msrp > 0
+      # The dealer's base asking price, when there is no sale.
+      { amount: vehicle.msrp.to_f.round(2), type: 'base' }
     elsif vehicle.rent_price.present? && vehicle.rent_price > 0
       { 
         amount: vehicle.rent_price.to_f.round(2),
@@ -744,7 +811,12 @@ class Public::InventoryController < ApplicationController
       # Pricing - default to sale_price, fallback to rent_price
       price: display_price&.dig(:amount),
       price_type: display_price&.dig(:type),
-      sale_price: vehicle.sale_price&.to_f&.round(2),
+      sale_price: sale,
+      # The base price, and the sale's last day so a site that copies the feed
+      # can take the sale down on that date between pulls.
+      base_price: vehicle.msrp.to_f.positive? ? vehicle.msrp.to_f.round(2) : nil,
+      on_sale: sale.present? && vehicle.special_discount_enabled == true,
+      sale_ends_on: (vehicle.special_discount_ends_on&.iso8601 if sale && vehicle.special_discount_enabled),
       rent_price: vehicle.rent_price&.to_f&.round(2),
       
       # Specifications
@@ -870,10 +942,10 @@ class Public::InventoryController < ApplicationController
       # Pre-discount total (base + packages before any discount)
       total_price_before_discount: (vehicle.msrp || vehicle.sale_price || 0).to_f + (vehicle.inventory_packages&.where(include_in_total: true)&.sum(:price) || 0).to_f,
       msrp: vehicle.msrp&.to_f,
-      special_discount_enabled: vehicle.respond_to?(:special_discount_enabled) ? vehicle.special_discount_enabled : false,
+      special_discount_enabled: vehicle.respond_to?(:special_discount_enabled) ? (vehicle.special_discount_enabled && !vehicle.sale_expired?) : false,
       discount_type: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
       discount_value: vehicle.respond_to?(:discount_value) ? vehicle.discount_value : nil,
-      discounted_price: vehicle.respond_to?(:discounted_price) ? vehicle.discounted_price&.to_f : nil,
+      discounted_price: vehicle.respond_to?(:discounted_price) && !vehicle.sale_expired? ? vehicle.discounted_price&.to_f : nil,
       inventory_packages: packages_data,
 
       # Full description
