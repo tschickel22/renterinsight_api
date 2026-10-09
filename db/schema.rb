@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_040000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_09_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5822,6 +5822,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_040000) do
     t.index ["vehicle_id"], name: "idx_projects_vehicle"
   end
 
+  create_table "purchase_order_change_orders", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "purchase_order_id", null: false
+    t.bigint "deal_id"
+    t.bigint "deal_home_build_id"
+    t.integer "number", null: false
+    t.string "status", default: "draft", null: false
+    t.string "production_status", default: "not_released", null: false
+    t.jsonb "changes_list", default: {}, null: false
+    t.jsonb "new_snapshot", default: {}, null: false
+    t.decimal "cost_delta", precision: 12, scale: 2, default: "0.0", null: false
+    t.text "notes"
+    t.datetime "emailed_at"
+    t.string "emailed_to"
+    t.datetime "approved_at"
+    t.datetime "voided_at"
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_purchase_order_change_orders_on_company_id"
+    t.index ["created_by_id"], name: "index_purchase_order_change_orders_on_created_by_id"
+    t.index ["deal_home_build_id"], name: "index_purchase_order_change_orders_on_deal_home_build_id"
+    t.index ["deal_id"], name: "index_purchase_order_change_orders_on_deal_id"
+    t.index ["purchase_order_id", "number"], name: "idx_on_purchase_order_id_number_da3eef4e1b", unique: true
+    t.index ["purchase_order_id"], name: "index_purchase_order_change_orders_on_purchase_order_id"
+  end
+
   create_table "purchase_order_lines", force: :cascade do |t|
     t.bigint "purchase_order_id", null: false
     t.bigint "part_id"
@@ -8971,6 +8998,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_040000) do
   add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
+  add_foreign_key "purchase_order_change_orders", "companies"
+  add_foreign_key "purchase_order_change_orders", "deal_home_builds", on_delete: :nullify
+  add_foreign_key "purchase_order_change_orders", "deals"
+  add_foreign_key "purchase_order_change_orders", "purchase_orders"
+  add_foreign_key "purchase_order_change_orders", "users", column: "created_by_id"
   add_foreign_key "purchase_order_lines", "catalog_options", on_delete: :nullify
   add_foreign_key "purchase_order_lines", "parts"
   add_foreign_key "purchase_order_lines", "purchase_orders"

@@ -1,0 +1,11 @@
+Change order <%= @change_order.label %> from <%= @company.name %>, to home order <%= @po.po_number %>
+
+<% if @message.present? %><%= @message %>
+
+<% end %>The change order is attached (<%= @change_order.label %>.pdf): <%= @change_order.lines.size %> line change(s)<% if @change_order.colors.any? %> and <%= @change_order.colors.size %> color or finish change(s)<% end %><% unless @po.hide_prices_for_factory? %>, cost difference <%= number_to_currency(@change_order.cost_delta) %><% end %>.
+Production status: <%= @change_order.production_warning %>
+
+Please confirm the change by replying to this email, or tell us what it costs or why it cannot be made.
+<% if @sender %>
+<%= @sender.try(:name) %>
+<% end %><%= @company.name %>

@@ -1573,6 +1573,15 @@ Rails.application.routes.draw do
         collection do
           get :stats
         end
+        # Changes to a factory order already sent (backlog E52).
+        resources :change_orders, path: 'change-orders', controller: 'purchase_order_change_orders', only: %i[index create update] do
+          member do
+            post :email
+            post :approve
+            post :void
+            get :pdf
+          end
+        end
       end
       
       # Bins
