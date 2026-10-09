@@ -84,6 +84,8 @@ class IntakeForm < ApplicationRecord
       'text' => resolved_marketing_consent_text,
       'version' => marketing_consent_version
     }
+    json['hideName'] = json['hide_name']
+    json['hideDescription'] = json['hide_description']
     json['marketingConsentEnabled'] = json['marketing_consent_enabled']
     json['marketingConsentText'] = json['marketing_consent_text']
     json['marketingConsentVersion'] = json['marketing_consent_version']
@@ -101,6 +103,10 @@ class IntakeForm < ApplicationRecord
     {
       'name' => name,
       'description' => description,
+      'hide_name' => hide_name,
+      'hideName' => hide_name,
+      'hide_description' => hide_description,
+      'hideDescription' => hide_description,
       'fields' => fields,
       'public_id' => public_id,
       'publicId' => public_id,

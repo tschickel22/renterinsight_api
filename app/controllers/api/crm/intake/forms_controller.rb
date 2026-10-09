@@ -297,6 +297,8 @@ module Api
             :notified_user_id, :location_id, :locationId,
             :auto_create_lead, :auto_create_activity,
             :captcha_required, :captchaRequired,
+            # Leave the form's name and description off where visitors see it.
+            :hide_name, :hideName, :hide_description, :hideDescription,
             # Marketing consent checkbox. Wording is editable so a dealer can
             # match their own terms; the version string is what a consent record
             # points at when the text later changes.
@@ -327,6 +329,14 @@ module Api
               p.delete(:locationId)
             elsif p.key?(:locationId)
               p[:location_id] = p.delete(:locationId)
+            end
+            { hide_name: :hideName, hide_description: :hideDescription }.each do |snake, camel|
+              if p.key?(snake)
+                p.delete(camel)
+              elsif p.key?(camel)
+                p[snake] = p.delete(camel)
+              end
+              p[snake] = ActiveModel::Type::Boolean.new.cast(p[snake]) if p.key?(snake)
             end
             # Blank string from an "Any location" dropdown option becomes nil
             # so the form clears its binding cleanly and re-enters the
