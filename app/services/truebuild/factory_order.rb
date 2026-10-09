@@ -125,7 +125,9 @@ module Truebuild
       build = po.deal_home_build || po.deal&.home_build
       PurchaseOrder.transaction do
         vehicle ||= add_home(po, build, serial_number, stock_number)
-        vehicle.update!(serial_number: serial_number) if serial_number.present? && vehicle.serial_number.blank?
+        # The serial typed in at receiving is off the HUD label: it wins over one on file.
+        vehicle.update!(serial_number: serial_number) if serial_number.present? && vehicle.serial_number != serial_number
+        fill_existing_home!(vehicle, po, build, stock_number)
         po.lines.each { |l| l.update!(quantity_received: l.quantity_ordered) }
         po.reload.update!(status: 'received', received_vehicle: vehicle)
         po.update_columns(received_date: Time.current) if po.has_attribute?(:received_date) && po.received_date.nil?
@@ -134,6 +136,17 @@ module Truebuild
         build&.update_columns(vehicle_id: vehicle.id) if build && build.vehicle_id.nil?
       end
       po
+    end
+
+    # A home already in inventory takes what it is missing from the order:
+    # its model link, the factory cost from the PO, a stock number. Nothing
+    # it already has is overwritten.
+    def self.fill_existing_home!(vehicle, po, build, stock_number)
+      fill = {}
+      fill[:catalog_plan_variant_id] = build.catalog_plan_variant_id if build&.catalog_plan_variant_id && vehicle.catalog_plan_variant_id.nil?
+      fill[:dealer_cost] = po.subtotal if vehicle.has_attribute?(:dealer_cost) && vehicle.dealer_cost.blank? && po.subtotal.to_d.positive?
+      fill[:stock_number] = stock_number if stock_number.present? && vehicle.stock_number.blank?
+      vehicle.update_columns(fill.merge(updated_at: Time.current)) if fill.any?
     end
 
     def self.add_home(po, build, serial_number, stock_number)

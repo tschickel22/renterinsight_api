@@ -95,6 +95,30 @@ RSpec.describe 'Factory PO from the Deal Sheet', type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
+  it 'receives into a home already in inventory, offering its model first, and fills only what it lacks' do
+    post "#{path}/purchase_order", headers: headers, params: { supplier_name: 'Factory' }.to_json
+    po = deal.purchase_orders.last
+    post "/api/v1/purchase-orders/#{po.id}/send", headers: headers
+    lot_home = company.vehicles.create!(year: 2026, make: 'Champion', model: 'Apex', vin: 'APEXLOT1', status: 'available', is_deleted: false,
+                                        listing_type: 'manufactured_home', catalog_plan_variant_id: variant.id, stock_number: 'S-9', bedrooms: 3, bathrooms: 2)
+    unlinked = company.vehicles.create!(year: 2026, make: 'Champion', model: 'Apex on the lot', vin: 'APEXLOT2', status: 'available',
+                                        is_deleted: false, listing_type: 'manufactured_home', bedrooms: 3, bathrooms: 2)
+
+    get "/api/v1/purchase-orders/#{po.id}/receive-candidates", headers: headers, params: { search: 'on the lot' }
+    expect(body['homes'].map { |h| [h['id'], h['same_model']] }).to eq([[lot_home.id, true], [unlinked.id, false]])
+
+    post "/api/v1/purchase-orders/#{po.id}/receive-home", headers: headers, params: { vehicle_id: unlinked.id, serial_number: 'DEC999' }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(unlinked.reload).to have_attributes(serial_number: 'DEC999', catalog_plan_variant_id: variant.id, dealer_cost: po.reload.subtotal)
+    expect(deal.reload.vehicle_id).to eq(unlinked.id)
+
+    # A second PO cannot take the same home.
+    other = deal.purchase_orders.create!(company: company, supplier: po.supplier, kind: 'factory_home', status: 'sent', po_number: "PO-#{SecureRandom.hex(3)}")
+    post "/api/v1/purchase-orders/#{other.id}/receive-home", headers: headers, params: { vehicle_id: unlinked.id }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(body['error']).to include(po.po_number)
+  end
+
   it "orders from the home's manufacturer and emails the PO to its orders contact, not the rep" do
     company.company_manufacturers.create!(manufacturer: mfr, contact_email: 'rep@factory.example', po_email: 'orders@factory.example',
                                           po_contact_name: 'Order Desk')
