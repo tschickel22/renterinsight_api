@@ -33,7 +33,7 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
   it 'suggests the model for a home entered by name and length, links one carrying its model number, and links on request' do
     by_name = home("56' Bay Port")
     by_number = home('2860 H32168', status: 'on_order')
-    home('Sold One', status: 'sold')
+    sold = home('Sold One', status: 'sold')
     home("56' Bay Port", company: other)
 
     get '/api/v1/truebuild_homes', headers: admin
@@ -50,6 +50,10 @@ RSpec.describe 'Api::V1::TruebuildHomes', type: :request do
     expect(by_name.reload.catalog_plan_variant_id).to eq(bay56.id)
     patch "/api/v1/truebuild_homes/#{by_name.id}", headers: admin, params: { variant_id: nil }.to_json
     expect(by_name.reload.catalog_plan_variant_id).to be_nil
+
+    # A sold home is not listed, but it can still be linked to its model.
+    patch "/api/v1/truebuild_homes/#{sold.id}", headers: admin, params: { variant_id: bay56.id }.to_json
+    expect(sold.reload.catalog_plan_variant_id).to eq(bay56.id)
   end
 
   it 'links a site-scanned home whose name carries the number, only when the size agrees' do
