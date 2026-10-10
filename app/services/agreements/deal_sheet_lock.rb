@@ -4,11 +4,15 @@ module Agreements
   # The Deal Sheet and its signed agreement (step 5 of the agreement plan):
   # a purchase agreement made from the Deal Sheet locks the version it was
   # made from once everyone has signed, and from then on the sheet changes
-  # only by a change order the buyers sign (BuyerChangeOrder). A signed
-  # agreement cannot be voided, so a locked version stays locked. An
+  # only by a change order the buyers sign (BuyerChangeOrder). When the
+  # deal has to be redone instead, a manager can unlock the LIVE version with
+  # a reason (unlock!): the signed agreement stays as signed, its badge then
+  # shows the sheet has changed, and a new agreement is made and signed. An
   # agreement whose sheet has changed since it was made cannot be sent: the
   # buyers would sign numbers the deal no longer has.
   class DealSheetLock
+    ACTION_UNLOCKED = 'deal_sheet_unlocked'
+
     class << self
       # A purchase agreement: made with Create agreement, or from a purchase
       # agreement template. Other paperwork on a deal does not lock the sheet.
@@ -26,6 +30,36 @@ module Agreements
         build = stamped_build(agreement)
         build&.update!(status: 'locked')
         build
+      end
+
+      # The signed LIVE version opens for changes again. The agreement that
+      # locked it stays completed; the unlock is recorded on it and on the
+      # version, with who and why.
+      def unlock!(build, user:, reason:)
+        reason = reason.to_s.strip
+        raise ArgumentError, 'Say why the signed Deal Sheet is being unlocked' if reason.blank?
+        raise ArgumentError, 'This version is not locked' unless build.locked?
+        raise ArgumentError, 'Only the LIVE version can be unlocked; older signed versions stay as they were' unless build.live?
+
+        signed = signed_agreement(build)
+        entry = { 'at' => Time.current.iso8601, 'by_id' => user&.id, 'by' => user&.full_name, 'reason' => reason.truncate(500),
+                  'agreement_id' => signed&.id, 'agreement_number' => signed&.agreement_number }
+        DealHomeBuild.transaction do
+          build.update!(status: 'draft', metadata: build.metadata.to_h.merge('unlocks' => Array(build.metadata.to_h['unlocks']) + [entry]))
+          if signed
+            signed.update!(metadata: signed.metadata.to_h.merge('deal_sheet_unlocked' => entry))
+            AgreementAuditLog.log!(signed, ACTION_UNLOCKED, performed_by: user,
+                                                            metadata: { reason: entry['reason'], build_id: build.id, version: build.version_name })
+          end
+        end
+        entry
+      end
+
+      # The completed agreement that locked this version: its purchase
+      # agreement, or the change order that made it LIVE.
+      def signed_agreement(build)
+        build.company.agreements.where(deal_id: build.deal_id, status: Agreement::STATUS_COMPLETED).order(completed_at: :desc, id: :desc)
+             .find { |a| a.metadata.to_h.dig('buyer_change_order', 'to_build_id') == build.id || (purchase?(a) && !change_order?(a) && stamped_build(a)&.id == build.id) }
       end
 
       # Why it cannot be sent, or nil.

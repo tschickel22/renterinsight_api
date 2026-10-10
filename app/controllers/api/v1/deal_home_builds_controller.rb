@@ -26,6 +26,7 @@
 #   GET    /api/v1/deals/:deal_id/home_build/sheets?sheet=schedule_a|colors     the agreement's standard sheets (PDF; both when no sheet)
 #   GET    /api/v1/deals/:deal_id/home_build/agreement        what Create agreement needs: packages, managers, the ready check
 #   POST   /api/v1/deals/:deal_id/home_build/agreement        { template_id, manager_id } a draft agreement from the LIVE sheet
+#   POST   /api/v1/deals/:deal_id/home_build/unlock            { reason } reopen the signed LIVE version (agreements delete permission)
 #   GET    /api/v1/deals/:deal_id/home_build/buyer_change_order?version_id=   what a change order from that draft would say
 #   POST   /api/v1/deals/:deal_id/home_build/buyer_change_order?version_id=   a draft change order for the buyers to sign
 class Api::V1::DealHomeBuildsController < ApplicationController
@@ -364,6 +365,18 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # When a signed deal has to be redone rather than changed by a change
+  # order: the LIVE version opens again, with the reason recorded. The
+  # agreements delete permission, as the strongest agreement action.
+  def unlock
+    return unless authorize_action!('agreements', 'delete')
+
+    entry = Agreements::DealSheetLock.unlock!(@build, user: current_user, reason: params[:reason])
+    render json: build_json(@build.reload).merge(unlocked: entry)
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # A signed deal changes by a change order the buyers sign: the draft
   # version on screen against the signed LIVE one (Agreements::BuyerChangeOrder).
   def buyer_change_order
@@ -493,6 +506,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       id: build.id, deal_id: build.deal_id, status: build.status, source: build.source, construction: build.construction,
       notes: build.notes, priced_at: build.priced_at,
       version_number: build.version_number, label: build.label, live: build.live, version_name: build.version_name,
+      last_unlock: Array(build.metadata.to_h['unlocks']).last,
       versions: versions_json(build.deal),
       model: model_json(variant, Truebuild::HomeMatcher.new).merge(factory: variant.catalog_plan.factory&.name,
                                                                    series: variant.catalog_plan.series),

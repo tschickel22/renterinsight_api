@@ -119,4 +119,16 @@ RSpec.describe 'Agreement sheets', type: :request do
     get "#{path}/sheets", headers: headers, params: { sheet: 'cover' }
     expect(response).to have_http_status(:bad_request)
   end
+
+  it 'fits a model with many color choices on one page, with its acknowledgment and signatures' do
+    headers
+    40.times do |n|
+      option(exterior, "exterior--extra-#{n}", "Choice #{n}", 0, kind: 'color', standard: true, metadata: { 'color_set' => "Selection #{n.to_s.rjust(2, '0')}" })
+    end
+    generator = AgreementSheetsPdfGenerator.new(deal.home_build.reload, sheets: ['colors'])
+    reader = PDF::Reader.new(StringIO.new(generator.generate))
+    expect(reader.page_count).to eq(1)
+    expect(reader.pages.first.text).to include('Selection 39', 'Buyer has reviewed every selection above', 'Dealer representative')
+    expect(generator.spots.map { |sp| sp['page'] }.uniq).to eq([0])
+  end
 end
