@@ -66,14 +66,48 @@ module Truebuild
       "#{v.manufacturer&.name} #{v.catalog_plan.name} #{v.model_number}".squish
     end
 
-    # Has the sheet's factory part changed since this PO was written?
+    # Has the sheet's factory part changed since this PO was written? Not
+    # when the dealer kept the factory's order as sent (keep_as_sent!) and
+    # the sheet is still as it was then.
     def self.changed?(po)
       build = po.deal_home_build || po.deal&.home_build
       return false unless build
+      return false if kept?(po)
 
       snap = po.sheet_snapshot.to_h
       snap['lines'] != lines(build) || (snap.key?('colors') && snap['colors'] != colors(build)) ||
         po.deal_home_build_id != po.deal&.home_build&.id
+    end
+
+    # Usually the factory confirms the order it was sent, and the dealer then
+    # updates the Deal Sheet so the agreement is right, not to send the
+    # factory anything new. This records that the sheet's differences are
+    # not for the factory: the PO and what the factory has stay as sent, and
+    # the difference stops being flagged until the sheet changes again. A
+    # change order can still be written from the same difference.
+    def self.keep_as_sent!(po, user:, note: nil)
+      build = po.deal&.home_build
+      raise ArgumentError, 'The deal has no LIVE Deal Sheet' unless build
+      raise ArgumentError, 'A draft PO is updated from the sheet instead' if po.draft?
+
+      snap = po.sheet_snapshot.to_h
+      snap['kept'] = { 'lines' => lines(build), 'colors' => colors(build), 'build_id' => build.id, 'at' => Time.current.iso8601,
+                       'by' => user&.full_name, 'note' => note.to_s.strip.presence&.truncate(500) }
+      po.update!(sheet_snapshot: snap)
+    end
+
+    # Kept as sent, and the sheet still as it was when kept.
+    def self.kept?(po)
+      kept = po.sheet_snapshot.to_h['kept']
+      build = po.deal&.home_build
+      return false unless kept && build
+
+      kept['build_id'] == build.id && kept['lines'] == lines(build) && kept['colors'] == colors(build)
+    end
+
+    # Who kept it, when and why, while it still holds; nil otherwise.
+    def self.kept_info(po)
+      kept?(po) ? po.sheet_snapshot.to_h['kept'].slice('at', 'by', 'note') : nil
     end
 
     # The supplier record that stands for a manufacturer on POs and bills: the

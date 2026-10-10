@@ -544,6 +544,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def purchase_order_json(po)
     { id: po.id, po_number: po.po_number, status: po.status, total: po.total_amount.to_f, supplier: po.supplier&.name,
       version_number: po.sheet_snapshot.to_h['version'], changed_since: Truebuild::FactoryOrder.changed?(po),
+      kept: Truebuild::FactoryOrder.kept_info(po),
       received_vehicle_id: po.received_vehicle_id,
       # A change order still with the factory (backlog E52).
       open_change_order: po.change_orders.open.first&.then { |co| { id: co.id, label: co.label, status: co.status } } }

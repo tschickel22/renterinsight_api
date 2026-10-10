@@ -1592,6 +1592,9 @@ Rails.application.routes.draw do
         end
         # Changes to a factory order already sent (backlog E52).
         resources :change_orders, path: 'change-orders', controller: 'purchase_order_change_orders', only: %i[index create update] do
+          collection do
+            post :keep # the factory's order stays as sent although the sheet differs
+          end
           member do
             post :email
             post :approve
