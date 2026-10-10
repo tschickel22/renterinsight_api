@@ -85,10 +85,12 @@ RSpec.describe 'Agreement from the Deal Sheet', type: :request do
 
     post '/api/admin/agreement_packages', headers: auth, params: { company_id: company.id, package: 'fdhc_indiana', expect: 'Factory Direct', apply: true }.to_json
     expect(response).to have_http_status(:created)
+    expect(body['installed']).to start_with('Create')
     installed = company.agreement_templates.find(body['template']['id'])
     expect(installed).to be_packet
     post '/api/admin/agreement_packages', headers: auth, params: { company_id: company.id, package: 'fdhc_indiana', expect: 'Factory Direct', apply: true }.to_json
     expect(body['template']['id']).to eq(installed.id) # a re-run updates in place
+    expect(body['installed']).to start_with('Update')
 
     get '/api/admin/agreement_packages', headers: headers
     expect(response).to have_http_status(:forbidden)

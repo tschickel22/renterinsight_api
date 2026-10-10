@@ -74,6 +74,9 @@ class AgreementSheetsPdfGenerator
     letterhead(pdf, sheet)
     home_identification(pdf)
     sheet == 'schedule_a' ? schedule(pdf) : colors(pdf)
+    # The acknowledgment stays on the page with the signatures it introduces.
+    closing = pdf.height_of(ACKNOWLEDGE[sheet], size: 8.5, leading: 1.5) + 14 + signers.size * 40
+    pdf.start_new_page if pdf.cursor < closing
     acknowledgment(pdf, sheet)
     signatures(pdf, sheet)
     (first..pdf.page_number)
@@ -213,21 +216,29 @@ class AgreementSheetsPdfGenerator
       return
     end
 
+    # Two selections to a row, so a model with many choices still fits the
+    # page with its signatures.
     w = pdf.bounds.width
     rows.group_by { |c| c['group'] }.each do |group, sets|
-      table = [[{ content: group.upcase, colspan: 3, font_style: :bold, background_color: HEAD, size: 8 }]]
-      sets.each do |c|
-        choice = c['choice'].presence || (c['skipped'] ? 'Not on this home' : 'Not chosen yet')
-        table << [c['set'].to_s, choice, c['code'] ? "Code #{c['code']}" : '']
+      table = [[{ content: escape(group.upcase), colspan: 4, font_style: :bold, background_color: HEAD, size: 7.5 }]]
+      sets.each_slice(2) do |pair|
+        cells = pair.flat_map { |c| [escape(c['set']), color_choice(c)] }
+        cells += ['', ''] if pair.size == 1
+        table << cells
       end
-      pdf.table(table, width: w, column_widths: [w * 0.34, w * 0.48, w * 0.18],
-                       cell_style: { size: 9, padding: [4, 5], border_color: RULE, text_color: INK }) do |t|
-        t.column(2).text_color = MUTED
-        (1...table.size).each { |i| t.row(i).column(1).font_style = :bold if sets[i - 1]['choice'].present? }
+      pdf.table(table, width: w, column_widths: [w * 0.19, w * 0.31, w * 0.19, w * 0.31],
+                       cell_style: { size: 8.5, padding: [3, 5], border_color: RULE, text_color: INK, inline_format: true }) do |t|
+        t.columns([0, 2]).text_color = MUTED
       end
-      pdf.move_down 8
+      pdf.move_down 6
     end
     pdf.move_down 4
+  end
+
+  def color_choice(c)
+    return "<b>#{escape(c['choice'])}</b>#{" <font size='7'><color rgb='#{MUTED}'>#{escape(c['code'])}</color></font>" if c['code']}" if c['choice'].present?
+
+    "<color rgb='#{MUTED}'>#{c['skipped'] ? 'Not on this home' : 'Not chosen yet'}</color>"
   end
 
   def acknowledgment(pdf, sheet)

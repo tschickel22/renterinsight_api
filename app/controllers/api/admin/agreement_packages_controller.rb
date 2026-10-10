@@ -28,8 +28,9 @@ class Api::Admin::AgreementPackagesController < ApplicationController
     installer = Agreements::PackageInstaller.new(company, params[:package])
     return render json: { preview: installer.summary } unless ActiveModel::Type::Boolean.new.cast(params[:apply])
 
+    summary = installer.summary # before installing, so it says Create or Update truly
     template = installer.install!
-    render json: { installed: installer.summary, template: { id: template.id, name: template.name } }, status: :created
+    render json: { installed: summary, template: { id: template.id, name: template.name } }, status: :created
   rescue ArgumentError => e
     render json: { error: e.message }, status: :unprocessable_entity
   end

@@ -131,4 +131,38 @@ RSpec.describe 'Deal Sheet lock and buyer change orders', type: :request do
     expect(other.reload.status).to eq('completed')
     expect(deal.home_build.reload).not_to be_locked
   end
+
+  it 'lets a manager unlock the signed sheet with a reason, and the deal is signed again on a new agreement' do
+    agreement = create_agreement
+    live = deal.home_build
+    post "/api/v1/agreements/#{agreement.id}/send_agreement", headers: headers
+    sign_all(agreement)
+    expect(live.reload).to be_locked
+
+    post "#{path}/unlock", headers: headers, params: { reason: '' }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(body['error']).to include('Say why')
+
+    post "#{path}/unlock", headers: headers, params: { reason: 'Buyer changed to a different floor plan' }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(body['build']).to include('status' => 'draft')
+    expect(body['build']['last_unlock']).to include('reason' => 'Buyer changed to a different floor plan', 'by' => 'Rita Rep',
+                                                    'agreement_number' => agreement.agreement_number)
+    expect(agreement.reload.status).to eq('completed') # what was signed stays signed
+    expect(agreement.metadata['deal_sheet_unlocked']).to include('reason' => 'Buyer changed to a different floor plan')
+    expect(agreement.agreement_audit_logs.where(action: 'deal_sheet_unlocked').count).to eq(1)
+
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: beam.id, quantity: 3 }.to_json
+    expect(response).to have_http_status(:created)
+    expect(agreement.reload.deal_sheet_status).to include(changed: true)
+
+    post "#{path}/unlock", headers: headers, params: { reason: 'again' }.to_json
+    expect(body['error']).to include('not locked')
+
+    again = create_agreement
+    post "/api/v1/agreements/#{again.id}/send_agreement", headers: headers
+    expect(response).to have_http_status(:ok)
+    sign_all(again)
+    expect(live.reload).to be_locked
+  end
 end
