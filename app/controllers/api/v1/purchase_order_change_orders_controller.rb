@@ -8,11 +8,12 @@
 #   POST   .../change-orders/:id/email                                       { to?, cc?, message? }  sent to the factory
 #   POST   .../change-orders/:id/approve                                     the factory accepted: the PO takes it
 #   POST   .../change-orders/:id/void
+#   POST   .../change-orders/keep                                            { note? } the factory's order stays as sent
 #   GET    .../change-orders/:id/pdf
 class Api::V1::PurchaseOrderChangeOrdersController < ApplicationController
   before_action :set_company_scope
   before_action :set_purchase_order
-  before_action :set_change_order, except: %i[index create]
+  before_action :set_change_order, except: %i[index create keep]
 
   def index
     return unless authorize_action!('inventory', 'read')
@@ -24,7 +25,18 @@ class Api::V1::PurchaseOrderChangeOrdersController < ApplicationController
       nil
     end
     render json: { change_orders: @purchase_order.change_orders.map { |co| json(co) }, pending: pending,
+                   kept: Truebuild::FactoryOrder.kept_info(@purchase_order),
                    production_statuses: PurchaseOrderChangeOrder::PRODUCTION }
+  end
+
+  # The sheet's differences are not for the factory (Truebuild::FactoryOrder.keep_as_sent!).
+  def keep
+    return unless authorize_action!('inventory', 'update')
+
+    Truebuild::FactoryOrder.keep_as_sent!(@purchase_order, user: current_user, note: params[:note])
+    render json: { kept: Truebuild::FactoryOrder.kept_info(@purchase_order.reload) }
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def create

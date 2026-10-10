@@ -109,4 +109,37 @@ RSpec.describe 'Factory change orders', type: :request do
     expect(co.reload.status).to eq('void')
     expect(Truebuild::FactoryOrder.changed?(po)).to be(true) # the PO still holds the old order
   end
+
+  it "keeps the factory's order as sent when the sheet changes only for the agreement" do
+    post "#{path}/purchase_order", headers: headers, params: { supplier_name: 'Factory' }.to_json
+    po = deal.purchase_orders.last
+    post "/api/v1/purchase-orders/#{po.id}/send", headers: headers
+    sent_lines = po.reload.lines.map { |l| [l.description, l.quantity_ordered.to_f] }
+
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: beam.id, quantity: 6 }.to_json
+    expect(Truebuild::FactoryOrder.changed?(po.reload)).to be(true)
+
+    post "#{cos(po)}/keep", headers: headers, params: { note: 'Factory confirmed its final; sheet updated for the agreement' }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(body['kept']).to include('note' => 'Factory confirmed its final; sheet updated for the agreement', 'by' => 'T S')
+    expect(Truebuild::FactoryOrder.changed?(po.reload)).to be(false)
+    expect(po.lines.map { |l| [l.description, l.quantity_ordered.to_f] }).to eq(sent_lines) # nothing sent, the PO unchanged
+    expect(ActionMailer::Base.deliveries).to be_empty
+
+    get path, headers: headers
+    sheet_po = body['build']['purchase_orders'].find { |p| p['id'] == po.id }
+    expect(sheet_po).to include('changed_since' => false)
+    expect(sheet_po['kept']).to include('by' => 'T S')
+
+    get cos(po), headers: headers
+    expect(body['kept']).to be_present
+    expect(body['pending']['lines'].map { |l| l['description'] }).to eq(['Wood Beam On Ceiling - Per LF']) # still there if wanted
+
+    # A later change to the sheet is flagged again.
+    sheet_line = deal.home_build.lines.find_by(catalog_option_id: insulation.id)
+    patch "#{path}/lines/#{sheet_line.id}", headers: headers, params: { quantity: 3 }.to_json
+    expect(Truebuild::FactoryOrder.changed?(po.reload)).to be(true)
+    get cos(po), headers: headers
+    expect(body['kept']).to be_nil
+  end
 end
