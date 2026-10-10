@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_09_110000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_10_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4018,6 +4018,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_110000) do
     t.index ["element_type"], name: "index_knowledge_ui_elements_on_element_type"
     t.index ["knowledge_feature_id", "selector"], name: "idx_knowledge_ui_elements_on_feature_and_selector", unique: true
     t.index ["knowledge_feature_id"], name: "index_knowledge_ui_elements_on_knowledge_feature_id"
+  end
+
+  create_table "land_home_packages", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "land_parcel_id", null: false
+    t.bigint "vehicle_id", null: false
+    t.string "name"
+    t.decimal "price", precision: 15, scale: 2
+    t.text "description"
+    t.boolean "show_on_website", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_land_home_packages_on_company_id"
+    t.index ["land_parcel_id", "vehicle_id"], name: "index_land_home_packages_on_land_parcel_id_and_vehicle_id", unique: true
+    t.index ["land_parcel_id"], name: "index_land_home_packages_on_land_parcel_id"
+    t.index ["vehicle_id"], name: "index_land_home_packages_on_vehicle_id"
   end
 
   create_table "land_parcels", force: :cascade do |t|
@@ -8873,6 +8890,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_09_110000) do
   add_foreign_key "knowledge_features", "knowledge_modules"
   add_foreign_key "knowledge_searches", "users"
   add_foreign_key "knowledge_ui_elements", "knowledge_features"
+  add_foreign_key "land_home_packages", "companies"
+  add_foreign_key "land_home_packages", "land_parcels"
+  add_foreign_key "land_home_packages", "vehicles"
   add_foreign_key "land_parcels", "companies"
   add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
   add_foreign_key "lead_activities", "leads"
