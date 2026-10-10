@@ -216,6 +216,9 @@ Rails.application.routes.draw do
     post 'truebuild/designs/:design_token/events', to: 'truebuild#design_event'
     get  'truebuild/buyer', to: 'truebuild#buyer'
 
+    # ==================== PUBLIC LAND + HOME PACKAGES ====================
+    get 'land_home_packages', to: 'land_home_packages#index'
+
     # ==================== PUBLIC LAND PARCELS ====================
     resources :land_parcels, only: [:index, :show], controller: 'land_parcels' do
       collection do
@@ -1312,7 +1315,12 @@ Rails.application.routes.draw do
       end
       
       # ==================== LAND MANAGEMENT ====================
-      resources :land_parcels, path: 'land-parcels' do
+      # Land + home packages (a lot and a home sold together)
+    resources :land_home_packages, path: 'land-home-packages', only: [:index, :create, :update, :destroy] do
+      collection { get :suggested_price }
+    end
+
+    resources :land_parcels, path: 'land-parcels' do
         collection do
           get :stats
           get :export

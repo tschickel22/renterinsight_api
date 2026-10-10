@@ -4,6 +4,8 @@ class LandParcel < ApplicationRecord
   # Associations
   belongs_to :company
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
+  # Homes offered together with this lot, each at its own package price.
+  has_many :land_home_packages, dependent: :destroy
   
   # Constants
   ZONING_TYPES = %w[residential commercial agricultural industrial mixed_use].freeze

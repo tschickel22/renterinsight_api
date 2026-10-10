@@ -30,6 +30,7 @@ class Company < ApplicationRecord
   has_many :listings, dependent: :destroy
   has_many :syndication_partners, dependent: :destroy
   has_many :land_parcels, dependent: :destroy
+  has_many :land_home_packages, dependent: :destroy
   has_many :service_tickets, dependent: :destroy
   has_many :service_ticket_issues, dependent: :destroy
   has_many :service_issue_templates, dependent: :destroy

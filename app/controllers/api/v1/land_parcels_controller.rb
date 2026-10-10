@@ -10,6 +10,8 @@ module Api
         update_actions: [:update],
         delete_actions: [:destroy, :bulk_delete]
 
+      SORTABLE_COLUMNS = %w[created_at updated_at price price_per_acre acreage name parcel_number city state status].freeze
+
       before_action :set_company
       before_action :set_land_parcel, only: [:show, :update, :destroy]
       
@@ -41,9 +43,11 @@ module Api
         parcels = parcels.search(params[:search]) if params[:search].present?
         
         # Sorting
-        sort_by = params[:sort_by] || 'created_at'
-        sort_order = params[:sort_order] || 'desc'
-        parcels = parcels.order("#{sort_by} #{sort_order}")
+        # Whitelisted: these went into the SQL as given, so a crafted sort_by
+        # was an injection.
+        sort_by = SORTABLE_COLUMNS.include?(params[:sort_by].to_s) ? params[:sort_by].to_s : 'created_at'
+        sort_order = params[:sort_order].to_s.downcase == 'asc' ? :asc : :desc
+        parcels = parcels.order(sort_by => sort_order)
         
         # Pagination
         page = params[:page]&.to_i || 1
