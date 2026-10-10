@@ -20,7 +20,9 @@ class LandHomePackage < ApplicationRecord
   # The lot's price plus the home's, the starting point a dealer adjusts.
   def self.suggested_price(land_parcel, vehicle)
     home = vehicle.sale_price.presence || vehicle.msrp.presence
-    return nil if land_parcel.price.nil? && home.nil?
+    # Both or nothing: a home with no price yet would make the lot's price
+    # read as the price of lot and home together.
+    return nil if land_parcel.price.nil? || home.nil?
 
     land_parcel.price.to_d + home.to_d
   end

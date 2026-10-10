@@ -47,6 +47,14 @@ RSpec.describe 'Land + home packages', type: :request do
       expect(body['package']['display_name']).to eq('2026 Kabco Rubicon on Lot 7')
     end
 
+    it 'suggests no total while the home has no price, rather than the lot alone' do
+      body = create_package(land_parcel_id: lot.id, vehicle_id: home(sale_price: nil, msrp: nil).id)
+
+      expect(response).to have_http_status(:created)
+      expect(body['package']['suggested_price']).to be_nil
+      expect(body['package']['price']).to be_nil
+    end
+
     it 'keeps a price the dealer sets' do
       body = create_package(land_parcel_id: lot.id, vehicle_id: home.id, price: 149_900)
       expect(body['package']['price']).to eq(149_900.0)
