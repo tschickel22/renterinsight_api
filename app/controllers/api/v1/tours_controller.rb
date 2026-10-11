@@ -4,9 +4,9 @@ module Api
   module V1
     class ToursController < ApplicationController
       before_action :authenticate_user!
-      before_action :require_platform_admin!, only: %i[create update destroy]
+      before_action :require_platform_admin!, only: %i[create update destroy check_results]
       before_action :set_tour, only: %i[show start complete step_complete dismiss]
-      before_action :set_tour_for_admin, only: %i[update destroy]
+      before_action :set_tour_for_admin, only: %i[update destroy check_results]
 
       # GET /api/v1/tours
       # Lists active tours the current user hasn't completed yet.
@@ -108,6 +108,22 @@ module Api
         completion.dismissed_at ||= Time.current
         completion.save!
         render json: { ok: true, dismissed_at: completion.dismissed_at }
+      end
+
+      # POST /api/v1/tours/:id/check_results  { results: [{ position, status }] }
+      # What a check of the tour against the live app found for each step:
+      # found, missing or ambiguous. Platform admins run it from Knowledge admin.
+      def check_results
+        now = Time.current
+        Array(params[:results]).each do |r|
+          status = r[:status].to_s
+          next unless %w[found missing ambiguous].include?(status)
+
+          @tour.steps.where(position: r[:position].to_i).update_all(check_status: status, checked_at: now)
+        end
+        failing = @tour.steps.where(check_status: %w[missing ambiguous]).exists?
+        @tour.update_columns(checked_at: now, check_status: failing ? 'failing' : 'passing')
+        render json: { ok: true, check_status: @tour.check_status, checked_at: @tour.checked_at }
       end
 
       # POST /api/v1/tours

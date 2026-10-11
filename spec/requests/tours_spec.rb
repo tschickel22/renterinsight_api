@@ -85,6 +85,22 @@ RSpec.describe 'Product tours', type: :request do
     end
   end
 
+  describe 'check results' do
+    it 'records what a check found and marks the tour failing when a step is missing' do
+      admin = make_user(role: 'platform_admin')
+      post "/api/v1/tours/#{tour.id}/check_results",
+           params: { results: [{ position: 1, status: 'found' }, { position: 2, status: 'missing' }] }, headers: auth(admin), as: :json
+
+      expect(JSON.parse(response.body)['check_status']).to eq('failing')
+      expect(tour.steps.find_by(position: 2).check_status).to eq('missing')
+    end
+
+    it 'is for platform admins only' do
+      post "/api/v1/tours/#{tour.id}/check_results", params: { results: [] }, headers: auth(user), as: :json
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
   describe 'trigger types' do
     it 'maps the names older recorders sent onto auto_on_first_visit' do
       %w[first_visit auto_on_route first_login].each do |legacy|

@@ -274,10 +274,19 @@ module Api
               is_active: safe_bool(t, :is_active, default: true),
               module_key: safe_read(t, :knowledge_module)&.key,
               steps_count: t.steps.count,
+              check_status: safe_read(t, :check_status), checked_at: safe_read(t, :checked_at),
+              # Not checked since the latest build: the app may have moved under it.
+              needs_check: latest_build_at.present? && (t.checked_at.nil? || t.checked_at < latest_build_at),
               completion_count: t.completions.where.not(completed_at: nil).count,
               dismissed_count: t.completions.where(completed_at: nil).where.not(dismissed_at: nil).count }
         p[:steps] = t.steps.order(:position).map { |s| step_payload(s) } if include_steps
         p
+      end
+
+      def latest_build_at
+        return @latest_build_at if defined?(@latest_build_at)
+
+        @latest_build_at = Knowledge::Snapshot.where(source: Guide::ReleaseWatcher::SOURCE).maximum(:snapshot_at)
       end
 
       def step_payload(s)
@@ -286,6 +295,7 @@ module Api
           placement: safe_read(s, :placement) || 'bottom',
           highlight_type: safe_read(s, :highlight_type),
           click_required: safe_bool(s, :click_required),
+          check_status: safe_read(s, :check_status), checked_at: safe_read(s, :checked_at),
           input_required: safe_bool(s, :input_required),
           position: s.position }
       end

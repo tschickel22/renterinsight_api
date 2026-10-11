@@ -1,0 +1,104 @@
+# frozen_string_literal: true
+
+module Guide
+  # Drafts a product tour from a goal ("Teach a new rep to start a deal and
+  # send a quote") using only places and markers that exist (backlog E75,
+  # phase 5). The earlier AI tours failed because they guessed CSS selectors;
+  # this one picks from the Atlas's menu walks and the build's data-tour
+  # markers, and anything else it names is dropped. The draft is checked
+  # against the live app and edited in the recorder before it is saved.
+  class TourDrafter
+    TOOL = {
+      name: 'draft_tour',
+      description: 'A guided tour made of steps from the allowed list.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Short, task-shaped, e.g. "Start a deal and send a quote".' },
+          description: { type: 'string', description: 'One sentence shown in the Help menu.' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                place_key: { type: 'string', description: 'Use the menu walk of this place (steps to reach it). Omit when using marker.' },
+                marker: { type: 'string', description: 'A data-tour marker on the page given in route. Omit when using place_key.' },
+                route: { type: 'string', description: 'For a marker step: the page it is on.' },
+                title: { type: 'string' },
+                text: { type: 'string', description: 'One or two sentences.' }
+              },
+              required: %w[title text]
+            }
+          }
+        },
+        required: %w[name description steps]
+      }
+    }.freeze
+
+    SYSTEM = <<~PROMPT
+      You design short guided tours for {{brand}}, software dealerships use for leads, deals, inventory, accounting, service and marketing.
+      - A tour is 3 to 8 steps that walk a person through a real task, in the order they would do it.
+      - Use only the places and markers you are given. A place_key step expands into the clicks that reach that place, so you do not need separate steps for the menu.
+      - Write for a dealership employee: plain words, second person, short. Never use em dashes, en dashes or a spaced hyphen as a dash.
+      - Never describe a button or field you were not given.
+    PROMPT
+
+    def initialize(goal, client: Catalog::PriceBooks::ClaudeClient)
+      @goal = goal.to_s.strip
+      @client = client
+      snapshot = Knowledge::Snapshot.where(source: Guide::ReleaseWatcher::SOURCE).order(snapshot_at: :desc).first
+      @entries = Array(snapshot&.atlas&.dig('entries')).index_by { |e| e['key'] }
+      @markers = snapshot&.atlas&.dig('markers') || {}
+    end
+
+    def draft
+      raise ArgumentError, 'Describe what the tour should teach.' if @goal.blank?
+      raise ArgumentError, 'No feature map yet; the release watcher has not read a build.' if @entries.empty?
+
+      result = @client.call(content: prompt, tool: TOOL, system: Guide::Copy.render(SYSTEM), max_tokens: 4_000,
+                            temperature: 0.3, model: AiModel.for(:help))[:input] || {}
+      { name: clean(result['name']), description: clean(result['description']), steps: expand(Array(result['steps'])) }
+    end
+
+    private
+
+    def expand(steps)
+      steps.flat_map do |s|
+        if s['place_key'].present? && (entry = @entries[s['place_key']])
+          walk = Array(entry['where']).map do |w|
+            { route: w['route'], selector: %([data-tour="#{w['anchor']}"]), title: w['title'], content: w['text'], click_required: w['click'] == true }
+          end
+          # The model's words describe the place; they go on the last step of the walk.
+          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any?
+          walk
+        elsif s['marker'].present? && @markers.key?(s['marker']) && known_page?(s['route'])
+          [{ route: s['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']), click_required: false }]
+        else
+          [] # names something that does not exist: dropped, never guessed
+        end
+      end.first(15).each_with_index.map { |s, i| s.merge(position: i + 1) }
+    end
+
+    def known_page?(route)
+      route.present? && @entries.values.any? { |e| e['route'].to_s.split('?').first == route.to_s.split('?').first }
+    end
+
+    def prompt
+      places = @entries.values.map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
+      markers = @markers.map { |m, files| "#{m} (in #{Array(files).first(2).join(', ')})" }
+      <<~TEXT
+        Goal for the tour: #{@goal}
+
+        Places (key | title | where | what it is):
+        #{places.join("\n")}
+
+        In-page markers (marker (source file)); give the route of the page the file belongs to:
+        #{markers.join("\n").presence || '(none)'}
+      TEXT
+    end
+
+    def clean(text)
+      text.to_s.gsub(/\s*—\s*/, ', ').gsub(/\s*–\s*/, ' to ').gsub(/(?<=\S) - (?=\S)/, ': ').strip
+    end
+  end
+end

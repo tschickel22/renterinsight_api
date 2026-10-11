@@ -40,6 +40,15 @@ module Api
         render json: { found: snapshot.present?, snapshot_id: snapshot&.id, atlas_url: Guide::ReleaseWatcher.atlas_url }
       end
 
+      # POST /api/admin/guide/releases/tour_draft  { goal }
+      # An AI-drafted tour built only from the Atlas and the build's markers,
+      # returned for the recorder to test and save (nothing is saved here).
+      def tour_draft
+        render json: Guide::TourDrafter.new(params[:goal]).draft
+      rescue ArgumentError, Catalog::PriceBooks::ClaudeClient::Error => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       # PATCH /api/admin/guide/releases/items/:id  { drafts: {...} }
       def update
         drafts = params.require(:drafts).permit!.to_h.deep_stringify_keys

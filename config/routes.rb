@@ -2185,6 +2185,7 @@ Rails.application.routes.draw do
           post :complete
           post :step_complete
           post :dismiss
+          post :check_results
         end
       end
 
@@ -3223,6 +3224,7 @@ Rails.application.routes.draw do
       scope 'guide/releases', controller: :guide_releases do
         get  '',                     action: :index
         post 'check',                action: :check
+        post 'tour_draft',           action: :tour_draft
         patch 'items/:id',           action: :update,  constraints: { id: /\d+/ }
         post 'items/:id/approve',    action: :approve, constraints: { id: /\d+/ }
         post 'items/:id/reject',     action: :reject,  constraints: { id: /\d+/ }

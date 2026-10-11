@@ -1,0 +1,48 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe Guide::TourDrafter do
+  before do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: Time.current, modules_hash: 'x',
+      atlas: {
+        'entries' => [
+          { 'key' => 'page:/deals', 'kind' => 'page', 'title' => 'Sales Deals', 'route' => '/deals', 'breadcrumb' => ['CRM & Sales'],
+            'where' => [{ 'anchor' => 'nav-section:crm-sales', 'title' => 'CRM & Sales', 'text' => 'Open CRM & Sales.', 'click' => true },
+                        { 'anchor' => 'nav:/deals', 'title' => 'Sales Deals', 'text' => 'Click Sales Deals.', 'click' => true }] }
+        ],
+        'markers' => { 'add-button' => ['src/modules/crm-sales-deal/CRMSalesDeal.tsx'] }
+      }
+    )
+  end
+
+  let(:client) do
+    Class.new do
+      def self.call(**)
+        { input: { 'name' => 'Start a deal', 'description' => 'From the menu to a new deal — fast.', 'steps' => [
+          { 'place_key' => 'page:/deals', 'title' => 'Your deals', 'text' => 'Every deal lives here.' },
+          { 'marker' => 'add-button', 'route' => '/deals', 'title' => 'New deal', 'text' => 'Start one here.' },
+          { 'marker' => 'made-up', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Invented' },
+          { 'marker' => 'add-button', 'route' => '/not-a-page', 'title' => 'Nope', 'text' => 'Wrong page' },
+          { 'place_key' => 'page:/nowhere', 'title' => 'Nope', 'text' => 'Invented place' }
+        ] } }
+      end
+    end
+  end
+
+  it 'builds steps only from the Atlas menu walk and real markers on real pages' do
+    draft = described_class.new('teach a rep to start a deal', client: client).draft
+
+    expect(draft[:steps].map { |s| s[:selector] }).to eq([
+      '[data-tour="nav-section:crm-sales"]', '[data-tour="nav:/deals"]', '[data-tour="add-button"]'
+    ])
+    expect(draft[:steps][1]).to include(title: 'Your deals', content: 'Every deal lives here.', click_required: true)
+    expect(draft[:steps].map { |s| s[:position] }).to eq([1, 2, 3])
+    expect(draft[:description]).to eq('From the menu to a new deal, fast.')
+  end
+
+  it 'refuses without a goal' do
+    expect { described_class.new('  ', client: client).draft }.to raise_error(ArgumentError)
+  end
+end
