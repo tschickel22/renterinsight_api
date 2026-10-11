@@ -246,6 +246,8 @@ Rails.application.routes.draw do
     namespace :public do
       get 'invitations/verify', to: 'invitations#verify_token'
       post 'invitations/accept', to: 'invitations#accept'
+      # Help approved on staging, for production to copy (E75); token protected.
+      get 'guide_sync/approved', to: 'guide_sync#approved'
     end
     
     # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================

@@ -59,6 +59,29 @@ RSpec.describe 'Release watcher', type: :service do
       expect(snapshot.change_queue_items.find_by(change_type: 'removed').draft_status).to eq('skipped')
     end
 
+    context 'on a server that copies help from staging' do
+      before do
+        ENV['GUIDE_SYNC_SOURCE_URL'] = 'https://staging.example'
+        ENV['GUIDE_SYNC_TOKEN'] = 'x'
+      end
+      after do
+        ENV.delete('GUIDE_SYNC_SOURCE_URL')
+        ENV.delete('GUIDE_SYNC_TOKEN')
+      end
+
+      it 'drafts nothing itself: changes wait for the staging copy and release notes come from staging' do
+        watch(atlas('a1', [pnl]))
+        cash = entry('report:cash-flow', 'Cash Flow Statement', '/accounting/reports/cash-flow')
+        snapshot = nil
+        expect { snapshot = watch(atlas('a2', [pnl, cash], commits: [{ 'sha' => 'a2', 'subject' => 'x' }])) }
+          .not_to have_enqueued_job(Guide::DraftReleaseItemJob)
+
+        items = snapshot.change_queue_items
+        expect(items.map(&:entity_type)).to eq(['atlas_entry'])
+        expect(items.first).to have_attributes(draft_status: 'skipped', context: { 'awaiting_staging' => true })
+      end
+    end
+
     it 'ignores an unreadable atlas' do
       expect(watch(nil)).to be_nil
       expect(watch({ 'oops' => true })).to be_nil

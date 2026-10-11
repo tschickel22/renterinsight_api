@@ -110,6 +110,7 @@ module Api
           id: item.id, change_type: item.change_type, entity_type: item.entity_type, key: item.entity_key,
           title: entry['title'], kind: entry['kind'], route: entry['route'], breadcrumb: entry['breadcrumb'],
           status: item.status, draft_status: item.draft_status, draft_error: item.draft_error, drafts: item.drafts,
+          from_staging: item.context['source'] == 'staging', awaiting_staging: item.context['awaiting_staging'] == true,
           published_at: item.published_at, published_article_id: item.published_article_id,
           published_tour_id: item.published_tour_id, published_note_id: item.published_note_id,
           # A removed place: articles that still send people there.

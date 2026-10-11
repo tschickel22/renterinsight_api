@@ -104,6 +104,18 @@ RSpec.describe 'Help assistant', type: :request do
     expect(AiQueryLog.last.resolved_intent).to eq('unanswered')
   end
 
+  it 'gives a company without the AI add-on 50 help questions a month, help only' do
+    Setting.set('Company', company.id, 'ai_report_queries_monthly_limit', 0)
+    allow(AiQueryLog).to receive(:monthly_limit_for).and_return(0)
+    3.times { AiQueryLog.create!(company: company, feature: 'report_ai', execution_status: 'success') }
+
+    get '/api/v1/guide/assistant', headers: headers
+    expect(JSON.parse(response.body)).to include('enabled' => true, 'limit' => 50, 'remaining' => 50, 'pool' => 'help_only')
+
+    body = ask('where is the P&L report')
+    expect(body['remaining']).to eq(49)
+  end
+
   it 'reports whether it is available' do
     get '/api/v1/guide/assistant', headers: headers
     expect(JSON.parse(response.body)).to include('enabled' => true, 'remaining' => 5)

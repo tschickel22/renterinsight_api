@@ -93,8 +93,9 @@ module Guide
       end
 
       # The release itself: commits can add a button or change a flow without
-      # adding a page, and that still deserves a "What's new" line.
-      return if snapshot.commits.blank?
+      # adding a page, and that still deserves a "What's new" line. Where help
+      # is copied from staging, release notes come from there instead.
+      return if snapshot.commits.blank? || Guide::ApprovedHelpSync.configured?
 
       snapshot.change_queue_items.create!(
         change_type: 'modified', entity_type: 'release', entity_key: snapshot.commit_sha.presence || "snapshot-#{snapshot.id}",
@@ -103,11 +104,16 @@ module Guide
     end
 
     def queue(snapshot, change_type, key, old_value, new_value)
+      # Where help is approved on staging and copied here, nothing is drafted
+      # again: the change waits for the staging copy (Guide::ApprovedHelpSync),
+      # or a person chooses Redraft for something that skipped staging.
+      awaiting = change_type != 'removed' && Guide::ApprovedHelpSync.configured?
       snapshot.change_queue_items.create!(
         change_type: change_type, entity_type: 'atlas_entry', entity_key: key,
         old_value: old_value, new_value: new_value,
         # Removed places need a person to retire their help, not an AI draft.
-        draft_status: change_type == 'removed' ? 'skipped' : 'pending'
+        draft_status: change_type == 'removed' || awaiting ? 'skipped' : 'pending',
+        context: awaiting ? { 'awaiting_staging' => true } : {}
       )
     end
 

@@ -7,6 +7,8 @@ module Guide
 
     def perform
       Guide::ReleaseWatcher.new.run
+      # Production: copy help approved on staging (approve once).
+      Guide::ApprovedHelpSync.new.run if Guide::ApprovedHelpSync.configured?
     end
   end
 end

@@ -130,10 +130,22 @@ module Api
 
       private
 
+      # A company with an AI allowance asks from that shared pool. One without
+      # it (the AI add-on off) still gets a small monthly allowance of help
+      # questions only (Tom, 2026-10-11: 50), counted on help_assistant alone so
+      # it never opens Report AI. The number is a Platform setting.
+      FREE_HELP_QUESTIONS = 50
+
       def allowance
         limit = AiQueryLog.monthly_limit_for(@company, user: original_user)
-        used = AiQueryLog.monthly_used_for(@company)
-        { enabled: limit.positive?, limit: limit, remaining: [limit - used, 0].max }
+        if limit.positive?
+          used = AiQueryLog.monthly_used_for(@company)
+          return { enabled: true, limit: limit, remaining: [limit - used, 0].max, pool: 'shared' }
+        end
+
+        free = (Setting.get('Platform', 0, 'help_assistant_free_monthly', nil).presence || FREE_HELP_QUESTIONS).to_i
+        used = AiQueryLog.monthly_used_for(@company, features: %w[help_assistant])
+        { enabled: free.positive?, limit: free, remaining: [free - used, 0].max, pool: 'help_only' }
       end
 
       def find_or_start_conversation
