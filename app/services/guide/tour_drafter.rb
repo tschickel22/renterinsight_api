@@ -80,7 +80,11 @@ module Guide
       # An orientation tour is about the whole app, not one task.
       return @primary_action = nil if @goal.match?(/\b(welcome|overview|tour of|get to know)\b/i)
 
-      words = subject_words(@goal)
+      # The tour's name (the goal's first sentence) says what it is about; its
+      # description can mention other things ("Managing Accounts" talks about
+      # contacts), so it is only used when the name says nothing.
+      words = subject_words(@goal.split(/(?<=\.)\s/).first)
+      words = subject_words(@goal) if words.empty?
       return @primary_action = nil if words.empty?
 
       # A word in the action's title counts double ("Adding company users" is
