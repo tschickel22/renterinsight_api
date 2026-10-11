@@ -16,7 +16,7 @@ RSpec.describe 'Product tours', type: :request do
 
   let(:user) { make_user }
   let!(:tour) do
-    Tour.create!(key: "t-#{SecureRandom.hex(3)}", name: 'Welcome to {{brand}}', trigger_type: 'manual').tap do |t|
+    Tour.create!(key: "t-#{SecureRandom.hex(3)}", name: 'Welcome to {{brand}}', trigger_type: 'manual', approved_at: Time.current).tap do |t|
       t.steps.create!(position: 1, title: 'One', content: 'Hello from {{brand}}', selector: '[data-tour="a"]')
       t.steps.create!(position: 2, title: 'Two', content: 'Second', selector: '[data-tour="b"]')
     end
@@ -133,6 +133,41 @@ RSpec.describe 'Product tours', type: :request do
 
     it 'does not let other users list tours for checking' do
       get '/api/v1/tours/for_check', headers: auth(user)
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe 'approval' do
+    let!(:draft) do
+      Tour.create!(key: "d-#{SecureRandom.hex(3)}", name: 'Draft tour', trigger_type: 'manual').tap do |t|
+        t.steps.create!(position: 1, title: 'One', content: 'x', selector: '[data-tour="a"]')
+      end
+    end
+
+    it 'keeps tours nobody has approved away from dealers' do
+      expect(tours_json(user)['tours'].map { |t| t['id'] }).not_to include(draft.id)
+      get "/api/v1/tours/#{draft.id}", headers: auth(user)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'shows them to platform admins, flagged' do
+      listed = tours_json(make_user(role: 'platform_admin'))['tours'].find { |t| t['id'] == draft.id }
+      expect(listed['approved']).to eq(false)
+    end
+
+    it 'lets a platform admin approve, and new steps clear it' do
+      admin = make_user(role: 'platform_admin')
+      post "/api/v1/tours/#{draft.id}/approve", headers: auth(admin)
+      expect(draft.reload.approved_at).to be_present
+      expect(tours_json(user)['tours'].map { |t| t['id'] }).to include(draft.id)
+
+      patch "/api/v1/tours/#{draft.id}", params: { tour: { steps: [{ position: 1, selector: '[data-tour="b"]', title: 'New', content: 'y' }] } },
+                                         headers: auth(admin), as: :json
+      expect(draft.reload.approved_at).to be_nil
+    end
+
+    it 'does not let dealers approve' do
+      post "/api/v1/tours/#{draft.id}/approve", headers: auth(user)
       expect(response).to have_http_status(:forbidden)
     end
   end

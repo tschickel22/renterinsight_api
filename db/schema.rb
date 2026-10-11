@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_130000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7410,6 +7410,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_130000) do
     t.string "trigger_route"
     t.datetime "checked_at"
     t.string "check_status"
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
     t.index ["is_active", "position"], name: "index_tours_on_is_active_and_position"
     t.index ["key"], name: "index_tours_on_key"
     t.index ["knowledge_module_id", "key"], name: "index_tours_on_knowledge_module_id_and_key", unique: true

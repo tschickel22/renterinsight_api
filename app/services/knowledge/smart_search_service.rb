@@ -221,6 +221,10 @@ module Knowledge
 
     # While tours are paused only platform admins are offered them, the same
     # rule the tours list follows.
+    def admin_user?
+      @user&.platform_admin? || @user&.super_admin? || false
+    end
+
     def tours_visible?
       return @tours_visible if defined?(@tours_visible)
 
@@ -230,6 +234,7 @@ module Knowledge
 
     def add_tour_result(tour)
       return unless tours_visible?
+      return unless tour.approved_at.present? || admin_user?
 
       @results << {
         type:        'tour',

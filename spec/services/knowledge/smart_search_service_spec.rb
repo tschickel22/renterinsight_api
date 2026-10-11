@@ -51,7 +51,7 @@ RSpec.describe Knowledge::SmartSearchService do
   end
 
   describe 'tours while paused' do
-    let!(:tour) { Tour.create!(key: 'lead-tour', name: 'Leads walkthrough', knowledge_module: leads, trigger_type: 'manual') }
+    let!(:tour) { Tour.create!(key: 'lead-tour', name: 'Leads walkthrough', knowledge_module: leads, trigger_type: 'manual', approved_at: Time.current) }
 
     before { PlatformSetting.tours_paused = true }
     after  { PlatformSetting.tours_paused = false }

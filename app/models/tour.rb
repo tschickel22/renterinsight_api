@@ -35,5 +35,7 @@ class Tour < ApplicationRecord
   before_validation { self.trigger_route = trigger_route.presence }
 
   scope :active,  -> { where(is_active: true) }
+  # Played and approved by a person; only these reach dealers.
+  scope :approved, -> { where.not(approved_at: nil) }
   scope :ordered, -> { order(:position, :name) }
 end

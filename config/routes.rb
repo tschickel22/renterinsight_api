@@ -2194,6 +2194,8 @@ Rails.application.routes.draw do
           post :step_complete
           post :dismiss
           post :check_results
+          post :approve
+          post :unapprove
         end
       end
 
