@@ -69,6 +69,12 @@ module Websites
     # inventorySearch is the filterable grid. The filters are JavaScript, but
     # the homes in it are the same homes, so it renders as the plain list too.
     INVENTORY_TYPES = %w[inventory inventorySearch inventory_search].freeze
+    # The Featured Homes section is drawn in the browser, so a crawler got its
+    # heading and nothing else: on a template home page that left too little
+    # text to rank, and no path from the home page to any home. Rendered as the
+    # same homes the section shows, with what each one is.
+    FEATURED_TYPES = %w[featuredHomes].freeze
+    DEFAULT_FEATURED_LIMIT = 6
 
     MAX_ITEMS = 12
     MAX_IMAGES = 8
@@ -285,6 +291,44 @@ module Websites
       home_link_list(homes)
     end
 
+    # The dealer's picks, in their order, as the section shows them with
+    # rotation off; the newest homes when there are none, as the section falls
+    # back to. Each with its own words, since a bare list of model names is
+    # still too little for anyone to learn what the dealer sells.
+    def featured_list(content)
+      limit = content['limit'].to_i.positive? ? content['limit'].to_i : DEFAULT_FEATURED_LIMIT
+      picks = featured_picks.first(limit)
+      entries = if picks.any?
+                  picks.map { |pick| [pick.vehicle, pick.display_title, pick.display_description] }
+                else
+                  listable_homes.first(limit).map { |v| [v, nil, v.try(:description)] }
+                end
+
+      items = entries.filter_map do |vehicle, title, description|
+        path = HomeUrl.path_for(vehicle)
+        next if path.blank?
+
+        label = title.presence ||
+                [vehicle.try(:year), vehicle.try(:make), vehicle.try(:model)].map { |p| p.to_s.strip.presence }.compact.join(' ').presence ||
+                'Home'
+        about = description.to_s.squish.truncate(240, separator: ' ').presence
+        %(<li><a href="#{esc(path)}">#{esc(label)}</a>#{home_link_specs(vehicle)}#{" <p>#{esc(about)}</p>" if about}</li>)
+      end
+      return '' if items.empty?
+
+      "<ul>\n#{items.join("\n")}\n</ul>\n"
+    end
+
+    def featured_picks
+      @featured_picks ||= Array(@website.try(:featured_homes)&.includes(:vehicle)).select do |pick|
+        vehicle = pick.vehicle
+        vehicle && !vehicle.is_deleted && HomeUrl::SERVABLE_STATUSES.include?(vehicle.status.to_s)
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[BodyRenderer] featured homes failed for #{@website&.id}: #{e.message}")
+      @featured_picks = []
+    end
+
     def home_link_list(homes)
       items = homes.filter_map do |vehicle|
         path = HomeUrl.path_for(vehicle)
@@ -372,6 +416,17 @@ module Websites
 
           parts << (heading_used ? "<h2>#{esc(title.presence || 'Latest posts')}</h2>\n"
                                  : "<h1>#{esc(title.presence || 'Blog')}</h1>\n")
+          heading_used = true
+          parts << listing
+          next
+        end
+
+        if FEATURED_TYPES.include?(type)
+          listing = featured_list(content)
+          next if listing.blank?
+
+          parts << (heading_used ? "<h2>#{esc(title.presence || 'Featured Homes')}</h2>\n"
+                                 : "<h1>#{esc(title.presence || 'Featured Homes')}</h1>\n")
           heading_used = true
           parts << listing
           next

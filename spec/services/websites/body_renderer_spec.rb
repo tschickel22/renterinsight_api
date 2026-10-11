@@ -134,6 +134,48 @@ RSpec.describe Websites::BodyRenderer do
     end
   end
 
+  # Drawn in the browser, so a crawler saw its heading and nothing more: the
+  # Hometown home page scored as thin, with no link from it to any home.
+  describe 'a Featured Homes section' do
+    def home(model, attrs = {})
+      company.vehicles.create!({ vin: SecureRandom.hex(8), year: 2026, make: 'Clayton', model: model,
+                                 status: 'available_to_order', bedrooms: 4, bathrooms: 2, square_feet: 1580,
+                                 description: "The #{model}: an open kitchen and a split bedroom plan." }.merge(attrs))
+    end
+
+    let(:featured_page) do
+      website.website_pages.create!(title: 'Home', path: '/', order: 0, blocks: [
+        { 'type' => 'featuredHomes', 'order' => 1, 'content' => { 'title' => 'Featured Homes', 'limit' => 2 } }
+      ])
+    end
+
+    it "lists the dealer's picks in their order, linked, with what each home is" do
+      cadence = home('Cadence')
+      octave = home('Octave')
+      home('Tempo')
+      website.featured_homes.create!(vehicle: octave, position: 0, description: 'Our best seller.')
+      website.featured_homes.create!(vehicle: cadence, position: 1)
+
+      html = render(page: featured_page)
+      expect(html).to include('<h1>Featured Homes</h1>')
+      expect(html.index('Octave')).to be < html.index('Cadence')
+      expect(html).to include(%(href="#{Websites::HomeUrl.path_for(octave)}"), 'Our best seller.')
+      expect(html).to include('The Cadence: an open kitchen', '4 bed, 2 bath, 1,580 sq ft')
+      expect(html).not_to include('Tempo')
+    end
+
+    it 'shows the newest homes when the dealer picked none, as the section does' do
+      home('Cadence')
+      expect(render(page: featured_page)).to include('Clayton Cadence')
+    end
+
+    it 'leaves out a pick that has sold' do
+      sold = home('Sold', status: 'sold')
+      website.featured_homes.create!(vehicle: sold, position: 0)
+      expect(render(page: featured_page)).not_to include('Clayton Sold')
+    end
+  end
+
   describe 'a home' do
     let(:vehicle) do
       company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',

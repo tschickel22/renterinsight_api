@@ -69,7 +69,7 @@ module Websites
     end
 
     def graph
-      [website_node, store_node, breadcrumb_node, product_node, item_list_node,
+      [website_node, store_node, web_page_node, breadcrumb_node, product_node, item_list_node,
        blog_posting_node, faq_node].compact
     end
 
@@ -299,6 +299,27 @@ module Websites
         'additionalProperty' => vehicle_properties.presence,
         'offers' => offer_node,
         'seller' => (store_node ? { '@id' => store_id } : nil)
+      }.compact
+    end
+
+    # The page itself, with when it was last changed. AI assistants weigh how
+    # current a source is and look for exactly this; the dates are the page's
+    # own save times, never the time of the request, so an untouched page reads
+    # as old rather than pretending to be new. A home or a post describes
+    # itself in its own node instead.
+    def web_page_node
+      return nil if @page.nil? || @vehicle || @blog_post
+      return nil unless @page.respond_to?(:updated_at) && @page.updated_at
+
+      path = normalized_path(@page.path.to_s.presence || '/')
+      {
+        '@type' => 'WebPage',
+        '@id' => "#{base_url}#{path == '/' ? '/' : path}#webpage",
+        'url' => "#{base_url}#{path == '/' ? '/' : path}",
+        'name' => (@page.try(:seo_title).presence || @page.try(:title).presence),
+        'isPartOf' => { '@id' => "#{base_url}/#site" },
+        'datePublished' => @page.try(:created_at)&.iso8601,
+        'dateModified' => @page.updated_at.iso8601
       }.compact
     end
 
