@@ -139,6 +139,32 @@ RSpec.describe Guide::TourDrafter do
     expect(steps.map { |s| s[:selector] }).not_to include('[data-tour="nav:/reports"]')
   end
 
+  it 'starts from the action that matches the goal and does not leave it' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 3.minutes.from_now, modules_hash: 'v',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-contact', 'kind' => 'action', 'title' => 'Add a contact', 'route' => '/contacts/new', 'requires' => [],
+            'synonyms' => ['new contact', 'add customer'],
+            'where' => [{ 'route' => '/contacts', 'anchor' => 'contacts-add', 'title' => 'Add', 'text' => 'Click Add.', 'click' => true }] },
+          { 'key' => 'page:/accounts', 'kind' => 'page', 'title' => 'Accounts', 'route' => '/accounts', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/accounts', 'title' => 'Accounts', 'text' => 'Click Accounts.', 'click' => true }] }
+        ],
+        'markers' => { 'contact-form:save' => ['/contacts/new'] }
+      }
+    )
+    wanders = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'x', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'page:/accounts', 'title' => 'Accounts', 'text' => '.' },
+          { 'marker' => 'contact-form:save', 'route' => '/contacts/new', 'title' => 'Save', 'text' => '.' }
+        ] } }
+      end
+    end
+    selectors = described_class.new('Add a contact to your list', client: wanders).draft[:steps].map { |s| s[:selector] }
+    expect(selectors).to eq(['[data-tour="contacts-add"]', '[data-tour="contact-form:save"]'])
+  end
+
   it 'refuses without a goal' do
     expect { described_class.new('  ', client: client).draft }.to raise_error(ArgumentError)
   end

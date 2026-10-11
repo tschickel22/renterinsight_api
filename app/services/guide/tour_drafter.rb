@@ -68,7 +68,51 @@ module Guide
 
       result = @client.call(content: prompt, tool: TOOL, system: Guide::Copy.render(SYSTEM), max_tokens: 4_000,
                             temperature: 0.3, model: AiModel.for(:help))[:input] || {}
-      { name: clean(result['name']), description: clean(result['description']), steps: expand(Array(result['steps'])) }
+      { name: clean(result['name']), description: clean(result['description']), steps: expand(anchor_on_action(Array(result['steps']))) }
+    end
+
+    # The action that best matches the goal ("Managing Contacts" is Add a
+    # contact), when one clearly does. The model did not reliably pick it, and
+    # tours that skipped it wandered or never opened the form.
+    def primary_action
+      return @primary_action if defined?(@primary_action)
+
+      # An orientation tour is about the whole app, not one task.
+      return @primary_action = nil if @goal.match?(/\b(welcome|overview|tour of|get to know)\b/i)
+
+      words = subject_words(@goal)
+      return @primary_action = nil if words.empty?
+
+      # A word in the action's title counts double ("Adding company users" is
+      # Add a user, not Add an account whose synonyms mention a company).
+      scored = @entries.values.select { |e| e['kind'] == 'action' }.map do |e|
+        title = Guide::Copy.render(e['title'].to_s).downcase
+        rest = Guide::Copy.render_deep([e['synonyms'], e['route']]).flatten.compact.join(' ').downcase
+        [e, words.sum { |w| title.include?(w) ? 2 : (rest.include?(w) ? 1 : 0) }]
+      end
+      best, score = scored.max_by { |_, s| s }
+      @primary_action = score.to_i.positive? ? best : nil
+    end
+
+    # The words that say what a tour is about, without the verbs every goal
+    # shares ("Start your first project" must not match "Start a new deal").
+    GENERIC = %w[start starting create creating add adding new your first the and for with how managing manage using use
+                 setting set up making make building build filing file running run recording record connect connecting
+                 tour guide quick walk through main features time teach person their them this that from].freeze
+
+    def subject_words(text)
+      text.to_s.downcase.scan(/[a-z]+/).reject { |w| w.length < 4 || GENERIC.include?(w) }.map { |w| w.sub(/(ies|es|s)\z/, '') }.uniq
+    end
+
+    # Start with the primary action, and once in it stay in it: later steps
+    # that go to another place are dropped (the task is on this page now).
+    def anchor_on_action(steps)
+      action = primary_action
+      return steps unless action
+
+      i = steps.index { |s| s['place_key'] == action['key'] }
+      steps = i ? steps.drop(i) : [{ 'place_key' => action['key'] }] + steps.reject { |s| s['place_key'].present? }
+      [steps.first] + steps.drop(1).reject { |s| s['place_key'].present? }
     end
 
     private
@@ -99,7 +143,7 @@ module Guide
           # The model's words describe the place; they go on the last step of
           # the walk. An action's own clicks already say exactly what to press
           # ("Choose Add Individual"), so those keep their words.
-          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any? && entry['kind'] != 'action'
+          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any? && entry['kind'] != 'action' && s['title'].present?
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
               marker_on_page?(s['marker'], s['route'])
@@ -172,6 +216,7 @@ module Guide
       end
       <<~TEXT
         Goal for the tour: #{@goal}
+        #{primary_action ? "Start with place_key #{primary_action['key']}, then the form's markers." : ''}
 
         Places (key | title | where | what it is):
         #{places.join("\n")}
