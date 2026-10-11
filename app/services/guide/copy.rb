@@ -10,7 +10,9 @@ module Guide
   #                                  default after the bar. Dealers rename
   #                                  menu items; tour text that said
   #                                  "Prospecting" was wrong for a dealer
-  #                                  whose menu says "Prospects".
+  #                                  whose menu says "Prospects". A lowercase
+  #                                  default ({{label:deal|deal}}) asks for
+  #                                  the word in lowercase, mid-sentence.
   module Copy
     BRAND_TOKEN = '{{brand}}'
     LABEL_TOKEN = /\{\{label:([a-z_]+)\|([^}]*)\}\}/
@@ -22,7 +24,20 @@ module Guide
       return out unless out.include?('{{label:')
 
       labels = company ? (company.resolved_labels rescue {}) || {} : {}
-      out.gsub(LABEL_TOKEN) { labels[Regexp.last_match(1)].presence || Regexp.last_match(2) }
+      out.gsub(LABEL_TOKEN) do
+        fallback = Regexp.last_match(2)
+        label = labels[Regexp.last_match(1)].presence
+        next fallback unless label
+
+        # A lowercase default means the word sits mid-sentence ("open the
+        # deal"), where a menu label's capital ("Deal") reads wrong.
+        fallback.match?(/\A[a-z]/) ? lowercase_words(label) : label
+      end
+    end
+
+    # "Sales Deal" becomes "sales deal"; an acronym such as RV stays.
+    def self.lowercase_words(text)
+      text.split(' ').map { |w| w.match?(/\A[A-Z0-9]{2,}\z/) ? w : w.downcase }.join(' ')
     end
 
     # Every string inside an Atlas entry (title, where-step text, breadcrumb),
