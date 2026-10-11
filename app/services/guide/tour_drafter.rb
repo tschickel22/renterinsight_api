@@ -55,6 +55,7 @@ module Guide
       # people to the admin-only Lot Map).
       @entries = Array(snapshot&.atlas&.dig('entries')).reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
       @markers = snapshot&.atlas&.dig('markers') || {}
+      @marker_labels = snapshot&.atlas&.dig('marker_labels') || {}
     end
 
     def draft
@@ -98,7 +99,7 @@ module Guide
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
               marker_on_page?(s['marker'], s['route'])
-          [{ route: s['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']), click_required: false }]
+          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: false }]
         else
           [] # names something that does not exist: dropped, never guessed
         end
@@ -113,6 +114,11 @@ module Guide
       pages = Array(@markers[marker])
       path = route.to_s.split('?').first
       pages.include?('*') || pages.include?(path)
+    end
+
+    # A data-tour marker, or '#id' for a form field found by its label.
+    def self.selector_for(marker)
+      marker.to_s.start_with?('#') ? %([id="#{marker.delete_prefix('#')}"]) : %([data-tour="#{marker}"])
     end
 
     def platform_only?(entry)
@@ -130,7 +136,8 @@ module Guide
                        .map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
       markers = @markers.filter_map do |m, pages|
         pages = Array(pages).select { |p| p.start_with?('/', '*') }
-        "#{m} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
+        label = @marker_labels[m].present? ? %( "#{@marker_labels[m]}") : ''
+        "#{m}#{label} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
       end
       <<~TEXT
         Goal for the tour: #{@goal}
@@ -138,7 +145,8 @@ module Guide
         Places (key | title | where | what it is):
         #{places.join("\n")}
 
-        In-page markers and the pages they are on; a marker step must use one of its pages as route:
+        In-page markers and the pages they are on; a marker step must use one of its pages as route.
+        Markers starting with # are form fields, shown with the field's label:
         #{markers.join("\n").presence || '(none)'}
       TEXT
     end

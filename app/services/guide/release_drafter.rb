@@ -158,7 +158,7 @@ module Guide
 
     def in_page(steps)
       steps.map do |s|
-        { route: entry['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']),
+        { route: entry['route'], selector: Guide::TourDrafter.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']),
           click_required: false }
       end
     end

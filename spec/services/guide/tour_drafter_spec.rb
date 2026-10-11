@@ -86,7 +86,8 @@ RSpec.describe Guide::TourDrafter do
             'where' => [{ 'anchor' => 'nav:/deals', 'title' => 'Deals', 'text' => 'Click Deals.', 'click' => true },
                         { 'route' => '/deals', 'anchor' => 'add-button', 'title' => 'Start a deal', 'text' => 'Click New.', 'click' => true }] }
         ],
-        'markers' => { 'deal-form:name' => ['/deals/new'], 'deal-form:save' => ['/deals/new'] }
+        'markers' => { 'deal-form:name' => ['/deals/new'], 'deal-form:save' => ['/deals/new'], '#dealNotes' => ['/deals/new'] },
+        'marker_labels' => { '#dealNotes' => 'Notes' }
       }
     )
     form = Class.new do
@@ -95,12 +96,14 @@ RSpec.describe Guide::TourDrafter do
           { 'place_key' => 'action:new-deal', 'title' => 'New deal', 'text' => 'Click New.' },
           { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Name it', 'text' => 'Give it a name.' },
           { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Again', 'text' => 'Repeat.' },
+          { 'marker' => '#dealNotes', 'route' => '/deals/new', 'title' => 'Notes', 'text' => 'Add notes.' },
           { 'marker' => 'deal-form:save', 'route' => '/deals/new', 'title' => 'Save', 'text' => 'Save it.' }
         ] } }
       end
     end
     selectors = described_class.new('start a deal', client: form).draft[:steps].map { |s| s[:selector] }
-    expect(selectors).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]', '[data-tour="deal-form:save"]'])
+    expect(selectors).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]',
+                             '[id="dealNotes"]', '[data-tour="deal-form:save"]'])
   end
 
   it 'refuses without a goal' do
