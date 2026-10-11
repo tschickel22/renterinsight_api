@@ -96,14 +96,16 @@ RSpec.describe Guide::TourDrafter do
           { 'place_key' => 'action:new-deal', 'title' => 'New deal', 'text' => 'Click New.' },
           { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Name it', 'text' => 'Give it a name.' },
           { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Again', 'text' => 'Repeat.' },
-          { 'marker' => '#dealNotes', 'route' => '/deals/new', 'title' => 'Notes', 'text' => 'Add notes.' },
+          { 'marker' => '#dealNotes', 'route' => '/deals/new', 'title' => 'Notes', 'text' => 'Add notes.', 'click' => true },
           { 'marker' => 'deal-form:save', 'route' => '/deals/new', 'title' => 'Save', 'text' => 'Save it.' }
         ] } }
       end
     end
-    selectors = described_class.new('start a deal', client: form).draft[:steps].map { |s| s[:selector] }
-    expect(selectors).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]',
-                             '[id="dealNotes"]', '[data-tour="deal-form:save"]'])
+    steps = described_class.new('start a deal', client: form).draft[:steps]
+    expect(steps.map { |s| s[:selector] }).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]',
+                                                  '[id="dealNotes"]', '[data-tour="deal-form:save"]'])
+    # A field is filled in, never a step that waits for a click.
+    expect(steps[3][:click_required]).to be(false)
   end
 
   it 'stops at the save, keeps steps that must be pressed, and trims long tours from the fields' do

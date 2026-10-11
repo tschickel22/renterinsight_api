@@ -151,7 +151,10 @@ module Guide
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
               marker_on_page?(s['marker'], s['route'])
-          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: s['click'] == true }]
+          # A form field is filled in, not clicked through (a dropdown would
+          # open and the tour would move on behind it).
+          click = s['click'] == true && !s['marker'].to_s.start_with?('#')
+          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: click }]
         else
           [] # names something that does not exist: dropped, never guessed
         end
