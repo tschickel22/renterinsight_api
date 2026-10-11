@@ -49,7 +49,8 @@ module Guide
           commit_sha: atlas['commit'],
           modules_hash: digest,
           features_count: entries.size,
-          atlas: atlas.slice('version', 'generated_at', 'branch', 'context', 'entries', 'markers'),
+          # The tour drafter reads the field labels and their order on each form.
+          atlas: atlas.slice('version', 'generated_at', 'branch', 'context', 'entries', 'markers', 'marker_labels', 'marker_order'),
           commits: new_commits(atlas['commits'], previous)
         )
         queue_changes(snapshot, previous, entries) if previous

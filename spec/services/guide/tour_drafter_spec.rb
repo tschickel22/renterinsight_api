@@ -108,6 +108,34 @@ RSpec.describe Guide::TourDrafter do
     expect(steps[3][:click_required]).to be(false)
   end
 
+  it 'walks a form\'s fields in the order the form shows them' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'z',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-unit', 'kind' => 'action', 'title' => 'Add a unit', 'route' => '/units/new', 'requires' => [],
+            'where' => [{ 'route' => '/units', 'anchor' => 'units-new', 'title' => 'New', 'text' => 'Click New.', 'click' => true }] }
+        ],
+        'markers' => { 'unit-form:make' => ['/units/new'], '#model' => ['/units/new'], '#year' => ['/units/new'], 'unit-form:save' => ['/units/new'] },
+        'marker_order' => { '/units/new' => ['unit-form:save', 'unit-form:make', '#model', '#year'] }
+      }
+    )
+    form = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'Add a unit', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'action:new-unit' },
+          { 'marker' => '#year', 'route' => '/units/new', 'title' => 'Year', 'text' => 'Year.' },
+          { 'marker' => 'unit-form:make', 'route' => '/units/new', 'title' => 'Make', 'text' => 'Make.' },
+          { 'marker' => '#model', 'route' => '/units/new', 'title' => 'Model', 'text' => 'Model.' },
+          { 'marker' => 'unit-form:save', 'route' => '/units/new', 'title' => 'Save', 'text' => 'Save.' }
+        ] } }
+      end
+    end
+    steps = described_class.new('add a unit', client: form).draft[:steps]
+    expect(steps.map { |s| s[:title] }).to eq(%w[New Make Model Year Save])
+    expect(steps.first.keys).not_to include(:marker)
+  end
+
   it 'stops at the save, keeps steps that must be pressed, and trims long tours from the fields' do
     Knowledge::Snapshot.create!(
       source: 'frontend', snapshot_at: 2.minutes.from_now, modules_hash: 'w',

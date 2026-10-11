@@ -60,6 +60,7 @@ module Guide
       @entries = Array(snapshot&.atlas&.dig('entries')).reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
       @markers = snapshot&.atlas&.dig('markers') || {}
       @marker_labels = snapshot&.atlas&.dig('marker_labels') || {}
+      @marker_order = snapshot&.atlas&.dig('marker_order') || {}
     end
 
     def draft
@@ -154,14 +155,38 @@ module Guide
           # A form field is filled in, not clicked through (a dropdown would
           # open and the tour would move on behind it).
           click = s['click'] == true && !s['marker'].to_s.start_with?('#')
-          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: click }]
+          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: click,
+             marker: s['marker'] }]
         else
           [] # names something that does not exist: dropped, never guessed
         end
       end.chunk_while { |a, b| a[:selector] == b[:selector] }.map(&:first) # never the same element twice in a row
+         .then { |all| in_form_order(all) }
          .then { |all| end_at_save(all) }
          .then { |all| fit(all) }
-         .each_with_index.map { |s, i| s.merge(position: i + 1) }
+         .each_with_index.map { |s, i| s.except(:marker).merge(position: i + 1) }
+    end
+
+    # The model lists fields in whatever order occurred to it, and the
+    # highlight jumped up and down the form. A run of fields on one page is
+    # put in the order the form shows them; clicks and the save stay put.
+    def in_form_order(steps)
+      steps.slice_when { |a, b| !(form_field?(a) && form_field?(b) && page_of(a) == page_of(b)) }.flat_map do |run|
+        next run unless run.size > 1 && form_field?(run.first)
+
+        order = Array(@marker_order[page_of(run.first)])
+        next run unless run.all? { |s| order.include?(s[:marker]) }
+
+        run.sort_by { |s| order.index(s[:marker]) }
+      end
+    end
+
+    def form_field?(step)
+      step[:marker].present? && !step[:click_required] && !save_step?(step)
+    end
+
+    def page_of(step)
+      step[:route].to_s.split('?').first
     end
 
     MAX_STEPS = 12

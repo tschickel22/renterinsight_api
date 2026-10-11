@@ -31,6 +31,12 @@ RSpec.describe 'Release watcher', type: :service do
       expect(snapshot.change_queue_items).to be_empty
     end
 
+    it 'keeps the form field labels and their order for the tour drafter' do
+      data = atlas('a1', [pnl]).merge('marker_labels' => { '#year' => 'Year' }, 'marker_order' => { '/units/new' => ['#year'] })
+      snapshot = watch(data)
+      expect(snapshot.reload.atlas).to include('marker_labels' => { '#year' => 'Year' }, 'marker_order' => { '/units/new' => ['#year'] })
+    end
+
     it 'does nothing when the build has not changed' do
       watch(atlas('a1', [pnl]))
       expect(watch(atlas('a1', [pnl]))).to be_nil
