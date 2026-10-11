@@ -295,8 +295,12 @@ module Catalog
       Array(images).map { |i| i.is_a?(Hash) ? (i['url'] || i['source_url']) : i }
     end
 
+    # The building code joins the scraped content: a code can come from the
+    # source's default_building_code rather than the listing, and setting that
+    # default changes nothing scraped, so homes already in stock never got it.
     def content_signature(home)
-      "v#{INGESTION_VERSION}:#{home.content_hash}"
+      code = self.class.building_code_for(home, @source)
+      "v#{INGESTION_VERSION}:#{home.content_hash}#{":#{code}" if code}"
     end
 
     # A source's name is an operator's label, not a manufacturer — see
