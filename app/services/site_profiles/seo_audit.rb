@@ -18,6 +18,7 @@ module SiteProfiles
   # Runs off the HTML the scan already fetched. No second crawl.
   class SeoAudit
     include AiSearchChecks
+    include TrackingChecks
 
     SEVERITY_ORDER = { 'fail' => 0, 'warn' => 1, 'pass' => 2 }.freeze
 
@@ -48,8 +49,9 @@ module SiteProfiles
     DESCRIPTION_MIN = 70
     DESCRIPTION_MAX = 160
 
-    # category: 'seo', or 'ai' for the AI search checks, which also get a
-    # score of their own so a report can say how a site does for AI answers.
+    # category: 'seo'; 'ai' for the AI search checks, which also get a
+    # score of their own so a report can say how a site does for AI answers;
+    # 'tracking' for analytics and ad tags, reported outside both scores.
     Check = Struct.new(:key, :label, :status, :headline, :detail, :urls, :weight, :category,
                        keyword_init: true) do
       def to_h
@@ -104,8 +106,13 @@ module SiteProfiles
         robots_check,
         sitemap_check,
         crawlability_check,
-        *ai_search_checks
+        *ai_search_checks,
+        *tracking_checks
       ].compact.reject { |c| @skip.include?(c.key.to_s) }
+      # Tracking is reported beside the scores, not in them: they measure how
+      # well a site reads to search engines and assistants, which a missing
+      # pixel does not change.
+      scored = checks.reject { |c| c.category == TrackingChecks::CATEGORY }
 
       {
         'generated_at' => Time.current.iso8601,
@@ -113,10 +120,12 @@ module SiteProfiles
         'domain' => domain,
         'pages_checked' => @pages_html.size,
         'from_archive' => @from_archive,
-        'score' => score(checks),
-        'ai_score' => score(checks.select { |c| c.category == 'ai' }),
+        'score' => score(scored),
+        'ai_score' => score(scored.select { |c| c.category == 'ai' }),
         'score_explainer' => SCORE_EXPLAINER,
-        'gap_count' => checks.count { |c| c.status != 'pass' },
+        'gap_count' => scored.count { |c| c.status != 'pass' },
+        'tracking' => tracking_summary,
+        'tracking_gap_count' => checks.count { |c| c.category == TrackingChecks::CATEGORY && c.status != 'pass' },
         'checks' => checks.sort_by { |c| [SEVERITY_ORDER.fetch(c.status, 3), -c.weight.to_i] }
                           .map(&:to_h)
       }
