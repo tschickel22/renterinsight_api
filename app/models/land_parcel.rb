@@ -18,6 +18,8 @@ class LandParcel < ApplicationRecord
   validates :acreage, numericality: { greater_than: 0 }, allow_nil: true
   validates :price, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :latitude, numericality: { greater_than_or_equal_to: -90, less_than_or_equal_to: 90 }, allow_nil: true
+  # A Google Maps link, so the website never links buyers anywhere else.
+  validates :street_view_url, format: { with: %r{\Ahttps://(www\.google\.com/maps|maps\.app\.goo\.gl/)}, message: 'must be a Google Maps Street View link' }, allow_blank: true
   validates :longitude, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }, allow_nil: true
   
   # Scopes
@@ -68,6 +70,16 @@ class LandParcel < ApplicationRecord
   def coordinates
     return nil unless latitude.present? && longitude.present?
     { latitude: latitude.to_f, longitude: longitude.to_f }
+  end
+
+  # Where the lot is, as the website may show it: the address and map pin when
+  # the dealer shows the exact location, otherwise only the area.
+  def public_location
+    area = { city: city, state: state, zip: zip, county: county }
+    return area.merge(exact_location: false) unless show_exact_location
+
+    area.merge(exact_location: true, address: address, full_address: full_address,
+               latitude: latitude&.to_f, longitude: longitude&.to_f, street_view_url: street_view_url.presence)
   end
   
   def has_utilities?

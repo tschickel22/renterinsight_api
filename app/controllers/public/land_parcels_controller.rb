@@ -48,7 +48,7 @@ class Public::LandParcelsController < ApplicationController
     if params[:search].present?
       search_term = "%#{params[:search]}%"
       @parcels = @parcels.where(
-        "parcel_number ILIKE ? OR name ILIKE ? OR address ILIKE ? OR city ILIKE ? OR county ILIKE ? OR description ILIKE ?",
+        "parcel_number ILIKE ? OR name ILIKE ? OR (show_exact_location AND address ILIKE ?) OR city ILIKE ? OR county ILIKE ? OR description ILIKE ?",
         search_term, search_term, search_term, search_term, search_term, search_term
       )
     end
@@ -186,7 +186,10 @@ class Public::LandParcelsController < ApplicationController
     status.to_s.split('_').map(&:capitalize).join(' ')
   end
 
+  # The address and map pin only when the dealer shows the lot's exact
+  # location; otherwise just the area it's in.
   def parcel_list_json(parcel)
+    location = parcel.public_location
     {
       id: parcel.id,
       type: 'land',  # Distinguishes from vehicles in combined views
@@ -199,26 +202,24 @@ class Public::LandParcelsController < ApplicationController
       acreage: parcel.acreage&.to_f,
       price: parcel.price&.to_f,
       price_per_acre: parcel.price_per_acre&.to_f,
-      address: parcel.address,
-      city: parcel.city,
-      state: parcel.state,
-      zip: parcel.zip,
-      county: parcel.county,
-      full_address: parcel.full_address,
+      **location.slice(:city, :state, :zip, :county, :exact_location),
+      address: location[:address],
+      full_address: location[:full_address],
       images: parcel.images || [],
-      has_coordinates: parcel.latitude.present? && parcel.longitude.present?,
+      has_coordinates: location[:latitude].present? && location[:longitude].present?,
       created_at: parcel.created_at,
       updated_at: parcel.updated_at
     }
   end
 
   def parcel_detail_json(parcel)
+    location = parcel.public_location
     parcel_list_json(parcel).merge(
       description: parcel.description,
       features: parcel.features || [],
       utilities: parcel.utilities || {},
-      latitude: parcel.latitude&.to_f,
-      longitude: parcel.longitude&.to_f,
+      latitude: location[:latitude],
+      longitude: location[:longitude],
       owner_name: nil,  # Don't expose owner info publicly
       documents: [],     # Don't expose documents publicly
       notes: nil         # Don't expose internal notes publicly

@@ -250,13 +250,26 @@ module Api
           value = get_param.call(field_str)
           transformed[field_str.to_sym] = value if value.present?
         end
+
+        # A pin can be removed, so an explicit null clears it.
+        %w[latitude longitude].each do |field|
+          transformed[field.to_sym] = nil if raw_params.key?(field) && raw_params[field].nil?
+        end
+
+        # Can be cleared, so a blank one counts.
+        street_view = raw_params.key?(:streetViewUrl) ? raw_params[:streetViewUrl] : raw_params[:street_view_url]
+        transformed[:street_view_url] = street_view.to_s.strip.presence if raw_params.key?(:streetViewUrl) || raw_params.key?(:street_view_url)
+
+        # A switch, so false counts: present? would drop it.
+        show_exact = raw_params.key?(:showExactLocation) ? raw_params[:showExactLocation] : raw_params[:show_exact_location]
+        transformed[:show_exact_location] = ActiveModel::Type::Boolean.new.cast(show_exact) unless show_exact.nil?
         
         # Return as ActionController::Parameters
         ActionController::Parameters.new(transformed).permit(
           :parcel_number, :name, :address, :city, :state, :zip, :county,
           :latitude, :longitude, :acreage, :zoning_type, :status, :price,
           :price_per_acre, :owner_name, :owner_phone, :owner_email,
-          :acquisition_date, :description, :notes,
+          :acquisition_date, :description, :notes, :show_exact_location, :street_view_url,
           utilities: {}, features: [], images: [], documents: []
         )
       end
@@ -307,6 +320,8 @@ module Api
           county: parcel.county,
           fullAddress: parcel.full_address,
           coordinates: parcel.coordinates,
+          showExactLocation: parcel.show_exact_location,
+          streetViewUrl: parcel.street_view_url,
           utilities: parcel.utilities || {},
           features: parcel.features || [],
           images: full_image_urls,

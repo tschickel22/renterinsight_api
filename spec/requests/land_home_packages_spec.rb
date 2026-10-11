@@ -139,6 +139,39 @@ RSpec.describe 'Land + home packages', type: :request do
       expect(public_packages.map { |i| i['title'] }).to eq(['2026 Kabco Shown on Lot 9'])
     end
 
+    it 'shows where the lot is, or only its area when the dealer keeps that private' do
+      parcel = lot(address: '1200 Croom Rd', zip: '34601', latitude: 28.5321, longitude: -82.3456)
+      create_package(land_parcel_id: parcel.id, vehicle_id: home.id)
+      view = 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=28.5337,-82.3174&heading=90'
+      patch "/api/v1/land-parcels/#{parcel.id}", params: { parcel: { streetViewUrl: view } }.to_json, headers: headers
+
+      expect(public_packages.first['land']).to include(
+        'exact_location' => true, 'address' => '1200 Croom Rd', 'full_address' => '1200 Croom Rd, Brooksville, FL, 34601',
+        'latitude' => 28.5321, 'longitude' => -82.3456, 'street_view_url' => view
+      )
+
+      patch "/api/v1/land-parcels/#{parcel.id}", params: { parcel: { streetViewUrl: 'https://evil.example.com/x' } }.to_json, headers: headers
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      patch "/api/v1/land-parcels/#{parcel.id}", params: { parcel: { showExactLocation: false } }.to_json, headers: headers
+      expect(parcel.reload.show_exact_location).to be false
+
+      land = public_packages.first['land']
+      expect(land).to include('exact_location' => false, 'city' => 'Brooksville', 'state' => 'FL')
+      expect(land.keys).not_to include('address', 'full_address', 'latitude', 'longitude', 'street_view_url')
+
+      get "/public/land_parcels/#{parcel.id}", params: { token: company.public_inventory_token }
+      detail = JSON.parse(response.body)['parcel']
+      expect(detail.values_at('address', 'full_address', 'latitude', 'longitude')).to all(be_nil)
+      expect(detail['has_coordinates']).to be false
+
+      get '/public/land_parcels', params: { token: company.public_inventory_token, search: 'Croom' }
+      expect(JSON.parse(response.body)['items']).to be_empty
+
+      patch "/api/v1/land-parcels/#{parcel.id}", params: { parcel: { latitude: nil, longitude: nil } }.to_json, headers: headers
+      expect(parcel.reload.values_at(:latitude, :longitude, :address)).to eq([nil, nil, '1200 Croom Rd'])
+    end
+
     it 'refuses a wrong token' do
       get '/public/land_home_packages', params: { token: 'nope' }
       expect(response).to have_http_status(:unauthorized)
