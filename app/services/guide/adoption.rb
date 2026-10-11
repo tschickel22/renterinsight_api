@@ -10,6 +10,10 @@ module Guide
     def initialize(now: Time.current)
       @now = now
       @module_features = module_features
+      # "Nobody opened it in a month" is only true once tracking has run for
+      # a month. Before that every add-on looks unused.
+      first_event = GuideEvent.minimum(:occurred_at)
+      @full_window = first_event.present? && first_event <= @now - WINDOW
     end
 
     # ids: just these companies (one dealer's own tips), else all active ones.
@@ -55,6 +59,8 @@ module Guide
 
     # Module keys on the plan whose Atlas pages nobody at the company opened.
     def unused_modules(company, used)
+      return [] unless @full_window
+
       enabled = ModuleAccessService.new(company).enabled_modules rescue []
       Array(enabled).filter_map do |key|
         features = @module_features[key]

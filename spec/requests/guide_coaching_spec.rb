@@ -64,6 +64,22 @@ RSpec.describe 'Coaching, adoption and content gaps', type: :request do
   describe 'platform admin views' do
     let(:platform) { make_user(role: 'platform_admin') }
 
+    it 'does not call add-ons unused until tracking has covered a full month' do
+      allow_any_instance_of(ModuleAccessService).to receive(:enabled_modules).and_return(['crm.deals'])
+      Knowledge::Snapshot.create!(source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'y',
+                                  atlas: { 'entries' => [{ 'key' => 'page:/deals', 'title' => 'Deals', 'route' => '/deals',
+                                                           'requires' => [{ 'moduleKey' => 'crm.deals' }] }] })
+      rep = make_user
+      use!(rep, 'page:/crm', at: 2.days.ago)
+
+      row = Guide::Adoption.new.companies(ids: [company.id]).first
+      expect(row[:unused_paid_modules]).to eq([])
+
+      use!(make_user, 'page:/crm', at: 40.days.ago)
+      row = Guide::Adoption.new.companies(ids: [company.id]).first
+      expect(row[:unused_paid_modules]).to eq(['crm.deals'])
+    end
+
     it 'flags a dealership nobody has used for two weeks as drifting' do
       rep = make_user
       use!(rep, 'page:/deals', at: 20.days.ago)
