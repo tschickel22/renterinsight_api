@@ -90,8 +90,12 @@ module Guide
       @item.new_value || {}
     end
 
+    # Markers on this place's own page (or on every page), so an in-page
+    # step never points at a marker that page does not have.
     def allowed_markers
-      (Array(entry['anchors']) + Array(snapshot.atlas['markers']&.keys)).uniq
+      path = entry['route'].to_s.split('?').first
+      on_page = (snapshot.atlas['markers'] || {}).select { |_, pages| Array(pages).include?('*') || Array(pages).include?(path) }.keys
+      (Array(entry['anchors']) + on_page).uniq
     end
 
     def draft_entry

@@ -91,7 +91,7 @@ RSpec.describe 'Release watcher', type: :service do
   describe Guide::ReleaseDrafter do
     let(:snapshot) do
       Knowledge::Snapshot.create!(source: 'frontend', snapshot_at: Time.current, modules_hash: 'x', commit_sha: 'a2',
-                                  atlas: { 'markers' => { 'add-button' => ['src/x.tsx'] } },
+                                  atlas: { 'markers' => { 'add-button' => ['/accounting/reports/cash-flow'], 'main-table' => ['/crm'] } },
                                   commits: [{ 'sha' => 'a2', 'subject' => 'Cash flow', 'body' => '' }])
     end
     let(:item) do

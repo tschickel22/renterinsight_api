@@ -63,20 +63,35 @@ module Guide
     private
 
     def expand(steps)
+      opened_sections = Set.new
       steps.flat_map do |s|
         if s['place_key'].present? && (entry = @entries[s['place_key']])
-          walk = Array(entry['where']).map do |w|
+          # A menu section the tour already opened stays open; clicking it
+          # again would close it and hide the next step.
+          walk_steps = Array(entry['where']).reject do |w|
+            w['anchor'].to_s.start_with?('nav-section:') && !opened_sections.add?(w['anchor'])
+          end
+          walk = walk_steps.map do |w|
             { route: w['route'], selector: %([data-tour="#{w['anchor']}"]), title: w['title'], content: w['text'], click_required: w['click'] == true }
           end
           # The model's words describe the place; they go on the last step of the walk.
           walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any?
           walk
-        elsif s['marker'].present? && @markers.key?(s['marker']) && known_page?(s['route'])
+        elsif s['marker'].present? && known_page?(s['route']) && marker_on_page?(s['marker'], s['route'])
           [{ route: s['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']), click_required: false }]
         else
           [] # names something that does not exist: dropped, never guessed
         end
       end.first(15).each_with_index.map { |s, i| s.merge(position: i + 1) }
+    end
+
+    # atlas.json says which pages each marker is on ('*' for every page).
+    # Builds from before that recorded source files instead, which say
+    # nothing about pages, so those markers are not used.
+    def marker_on_page?(marker, route)
+      pages = Array(@markers[marker])
+      path = route.to_s.split('?').first
+      pages.include?('*') || pages.include?(path)
     end
 
     def known_page?(route)
@@ -85,14 +100,17 @@ module Guide
 
     def prompt
       places = @entries.values.map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
-      markers = @markers.map { |m, files| "#{m} (in #{Array(files).first(2).join(', ')})" }
+      markers = @markers.filter_map do |m, pages|
+        pages = Array(pages).select { |p| p.start_with?('/', '*') }
+        "#{m} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
+      end
       <<~TEXT
         Goal for the tour: #{@goal}
 
         Places (key | title | where | what it is):
         #{places.join("\n")}
 
-        In-page markers (marker (source file)); give the route of the page the file belongs to:
+        In-page markers and the pages they are on; a marker step must use one of its pages as route:
         #{markers.join("\n").presence || '(none)'}
       TEXT
     end

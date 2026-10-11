@@ -12,7 +12,7 @@ RSpec.describe Guide::TourDrafter do
             'where' => [{ 'anchor' => 'nav-section:crm-sales', 'title' => 'CRM & Sales', 'text' => 'Open CRM & Sales.', 'click' => true },
                         { 'anchor' => 'nav:/deals', 'title' => 'Sales Deals', 'text' => 'Click Sales Deals.', 'click' => true }] }
         ],
-        'markers' => { 'add-button' => ['src/modules/crm-sales-deal/CRMSalesDeal.tsx'] }
+        'markers' => { 'add-button' => ['/deals'], 'main-table' => ['/crm'] }
       }
     )
   end
@@ -24,6 +24,7 @@ RSpec.describe Guide::TourDrafter do
           { 'place_key' => 'page:/deals', 'title' => 'Your deals', 'text' => 'Every deal lives here.' },
           { 'marker' => 'add-button', 'route' => '/deals', 'title' => 'New deal', 'text' => 'Start one here.' },
           { 'marker' => 'made-up', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Invented' },
+          { 'marker' => 'main-table', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Real marker, wrong page' },
           { 'marker' => 'add-button', 'route' => '/not-a-page', 'title' => 'Nope', 'text' => 'Wrong page' },
           { 'place_key' => 'page:/nowhere', 'title' => 'Nope', 'text' => 'Invented place' }
         ] } }
@@ -40,6 +41,19 @@ RSpec.describe Guide::TourDrafter do
     expect(draft[:steps][1]).to include(title: 'Your deals', content: 'Every deal lives here.', click_required: true)
     expect(draft[:steps].map { |s| s[:position] }).to eq([1, 2, 3])
     expect(draft[:description]).to eq('From the menu to a new deal, fast.')
+  end
+
+  it 'does not open a menu section a second time' do
+    twice = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'Deals twice', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'page:/deals', 'title' => 'One', 'text' => 'a' },
+          { 'place_key' => 'page:/deals', 'title' => 'Two', 'text' => 'b' }
+        ] } }
+      end
+    end
+    selectors = described_class.new('deals', client: twice).draft[:steps].map { |s| s[:selector] }
+    expect(selectors.count('[data-tour="nav-section:crm-sales"]')).to eq(1)
   end
 
   it 'refuses without a goal' do
