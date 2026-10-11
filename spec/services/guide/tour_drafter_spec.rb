@@ -27,6 +27,7 @@ RSpec.describe Guide::TourDrafter do
           { 'marker' => 'add-button', 'route' => '/deals', 'title' => 'New deal', 'text' => 'Start one here.' },
           { 'marker' => 'made-up', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Invented' },
           { 'marker' => 'main-table', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Real marker, wrong page' },
+          { 'marker' => 'main-table', 'route' => '/crm', 'title' => 'Nope', 'text' => 'Real marker on its page, but the tour is not there' },
           { 'marker' => 'add-button', 'route' => '/not-a-page', 'title' => 'Nope', 'text' => 'Wrong page' },
           { 'place_key' => 'page:/nowhere', 'title' => 'Nope', 'text' => 'Invented place' },
           { 'place_key' => 'page:/lot-map', 'title' => 'Nope', 'text' => 'Admin only' }

@@ -39,6 +39,7 @@ module Guide
       You design short guided tours for {{brand}}, software dealerships use for leads, deals, inventory, accounting, service and marketing.
       - A tour is 3 to 8 steps that walk a person through a real task, in the order they would do it.
       - Use only the places and markers you are given. A place_key step expands into the clicks that reach that place, so you do not need separate steps for the menu.
+      - A marker step points at something on the page the tour has just reached: put it right after the place_key step for that page, with that page as its route.
       - Write for a dealership employee: plain words, second person, short. Never use em dashes, en dashes or a spaced hyphen as a dash.
       - Never describe a button or field you were not given.
     PROMPT
@@ -67,8 +68,13 @@ module Guide
 
     def expand(steps)
       opened_sections = Set.new
+      # The page the person is on after the steps so far. An in-page step must
+      # be on it: the model once met the other rules by sending an inventory
+      # tour to the Leads page for a table called "Browse your stock".
+      here = nil
       steps.flat_map do |s|
         if s['place_key'].present? && (entry = @entries[s['place_key']])
+          here = entry['route'].to_s.split('?').first
           # A menu section the tour already opened stays open; clicking it
           # again would close it and hide the next step.
           walk_steps = Array(entry['where']).reject do |w|
@@ -80,7 +86,8 @@ module Guide
           # The model's words describe the place; they go on the last step of the walk.
           walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any?
           walk
-        elsif s['marker'].present? && known_page?(s['route']) && marker_on_page?(s['marker'], s['route'])
+        elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
+              marker_on_page?(s['marker'], s['route'])
           [{ route: s['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']), click_required: false }]
         else
           [] # names something that does not exist: dropped, never guessed
