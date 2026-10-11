@@ -106,6 +106,39 @@ RSpec.describe Guide::TourDrafter do
                              '[id="dealNotes"]', '[data-tour="deal-form:save"]'])
   end
 
+  it 'stops at the save, keeps steps that must be pressed, and trims long tours from the fields' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 2.minutes.from_now, modules_hash: 'w',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-x', 'kind' => 'action', 'title' => 'New x', 'route' => '/x/new', 'requires' => [],
+            'where' => [{ 'route' => '/x', 'anchor' => 'x-new', 'title' => 'New', 'text' => 'Click New.', 'click' => true }] },
+          { 'key' => 'page:/reports', 'kind' => 'page', 'title' => 'Reports', 'route' => '/reports', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/reports', 'title' => 'Reports', 'text' => 'Click Reports.', 'click' => true }] }
+        ],
+        'markers' => { 'x-type-a' => ['/x/new'], 'x-form:save' => ['/x/new'] }.merge((1..14).to_h { |n| ["#f#{n}", ['/x/new']] })
+      }
+    )
+    long = Class.new do
+      def self.call(**)
+        fields = (1..14).map { |n| { 'marker' => "#f#{n}", 'route' => '/x/new', 'title' => "F#{n}", 'text' => '.' } }
+        { input: { 'name' => 'x', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'action:new-x', 'title' => 'New', 'text' => '.' },
+          { 'marker' => 'x-type-a', 'route' => '/x/new', 'title' => 'Pick A', 'text' => '.', 'click' => true },
+          *fields,
+          { 'marker' => 'x-form:save', 'route' => '/x/new', 'title' => 'Save', 'text' => '.' },
+          { 'place_key' => 'page:/reports', 'title' => 'Detour', 'text' => '.' }
+        ] } }
+      end
+    end
+    steps = described_class.new('make an x', client: long).draft[:steps]
+
+    expect(steps.size).to eq(12)
+    expect(steps.last[:selector]).to eq('[data-tour="x-form:save"]')
+    expect(steps.find { |s| s[:selector] == '[data-tour="x-type-a"]' }[:click_required]).to eq(true)
+    expect(steps.map { |s| s[:selector] }).not_to include('[data-tour="nav:/reports"]')
+  end
+
   it 'refuses without a goal' do
     expect { described_class.new('  ', client: client).draft }.to raise_error(ArgumentError)
   end

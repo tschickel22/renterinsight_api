@@ -24,6 +24,7 @@ module Guide
                 place_key: { type: 'string', description: 'Use the menu walk of this place (steps to reach it). Omit when using marker.' },
                 marker: { type: 'string', description: 'A data-tour marker on the page given in route. Omit when using place_key.' },
                 route: { type: 'string', description: 'For a marker step: the page it is on.' },
+                click: { type: 'boolean', description: 'For a marker step the person must press to reach the next step (opening a dialog, choosing a type, a Next button).' },
                 title: { type: 'string' },
                 text: { type: 'string', description: 'One or two sentences.' }
               },
@@ -38,7 +39,10 @@ module Guide
     SYSTEM = <<~PROMPT
       You design short guided tours for {{brand}}, software dealerships use for leads, deals, inventory, accounting, service and marketing.
       - A tour walks a person through one real task, in the order they would do it, and ends when the task is done. Nothing else: no detours to other areas, no "you can also" steps, never the same place twice.
-      - For a tour about creating something (a lead, a deal), start with its action place (keys beginning action:), which already includes clicking the New button. Then point at the form's own markers in the order a person fills them in (the important fields only), and end on the form's save marker.
+      - For a tour about creating something (a lead, a deal, a calendar event), start with its action place (keys beginning action:), which already includes clicking the New button. Then point at the form's own markers in the order a person fills them in, and end on the form's save marker. Nothing comes after the save.
+      - Pick at most 5 fields: the ones a person must fill in to finish. Skip optional and advanced fields.
+      - When a marker has to be pressed for the next part to appear (choosing a type card, opening a dialog, a Next button), set click to true on it.
+      - At most 12 steps in all.
       - Use only the places and markers you are given. A place_key step expands into the clicks that reach that place, so you do not need separate steps for the menu.
       - A marker step points at something on the page the tour has just reached: put it right after the place_key step for that page, with that page as its route.
       - Write for a dealership employee: plain words, second person, short. Never use em dashes, en dashes or a spaced hyphen as a dash.
@@ -99,12 +103,39 @@ module Guide
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
               marker_on_page?(s['marker'], s['route'])
-          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: false }]
+          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: s['click'] == true }]
         else
           [] # names something that does not exist: dropped, never guessed
         end
       end.chunk_while { |a, b| a[:selector] == b[:selector] }.map(&:first) # never the same element twice in a row
-         .first(15).each_with_index.map { |s, i| s.merge(position: i + 1) }
+         .then { |all| end_at_save(all) }
+         .then { |all| fit(all) }
+         .each_with_index.map { |s, i| s.merge(position: i + 1) }
+    end
+
+    MAX_STEPS = 12
+
+    def save_step?(step)
+      step[:selector].to_s.match?(/:save\b|:save-/)
+    end
+
+    # The task is done at the save: anything after it is a detour.
+    def end_at_save(steps)
+      i = steps.index { |s| save_step?(s) }
+      i ? steps.first(i + 1) : steps
+    end
+
+    # Too long: drop the last plain field steps before the save, never the
+    # walk in, a step that must be clicked, or the save itself.
+    def fit(steps)
+      steps = steps.dup
+      while steps.size > MAX_STEPS
+        i = steps.rindex { |s| !s[:click_required] && !save_step?(s) && s[:selector].to_s.match?(/form:|\[id=/) }
+        break unless i
+
+        steps.delete_at(i)
+      end
+      steps.first(MAX_STEPS + 3)
     end
 
     # atlas.json says which pages each marker is on ('*' for every page).
