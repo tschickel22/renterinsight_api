@@ -11,6 +11,9 @@ RSpec.describe Guide::TourDrafter do
           { 'key' => 'page:/deals', 'kind' => 'page', 'title' => 'Sales Deals', 'route' => '/deals', 'breadcrumb' => ['CRM & Sales'],
             'where' => [{ 'anchor' => 'nav-section:crm-sales', 'title' => 'CRM & Sales', 'text' => 'Open CRM & Sales.', 'click' => true },
                         { 'anchor' => 'nav:/deals', 'title' => 'Sales Deals', 'text' => 'Click Sales Deals.', 'click' => true }] },
+          { 'key' => 'page:/settings', 'kind' => 'page', 'title' => 'Company Settings', 'route' => '/settings', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav-section:administration', 'title' => 'Administration', 'text' => 'Open it.', 'click' => true },
+                        { 'anchor' => 'nav:/settings', 'title' => 'Company Settings', 'text' => 'Click it.', 'click' => true }] },
           { 'key' => 'page:/lot-map', 'kind' => 'page', 'title' => 'Lot Map', 'route' => '/lot-map', 'requires' => [{ 'adminOnly' => true }],
             'where' => [{ 'anchor' => 'nav:/lot-map', 'title' => 'Lot Map', 'text' => 'Click Lot Map.', 'click' => true }] }
         ],
@@ -58,6 +61,20 @@ RSpec.describe Guide::TourDrafter do
     end
     selectors = described_class.new('deals', client: twice).draft[:steps].map { |s| s[:selector] }
     expect(selectors.count('[data-tour="nav-section:crm-sales"]')).to eq(1)
+  end
+
+  it 'opens a section again after another one has closed it' do
+    back_and_forth = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'x', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'page:/deals', 'title' => 'One', 'text' => 'a' },
+          { 'place_key' => 'page:/settings', 'title' => 'Two', 'text' => 'b' },
+          { 'place_key' => 'page:/deals', 'title' => 'Three', 'text' => 'c' }
+        ] } }
+      end
+    end
+    selectors = described_class.new('x', client: back_and_forth).draft[:steps].map { |s| s[:selector] }
+    expect(selectors.count('[data-tour="nav-section:crm-sales"]')).to eq(2)
   end
 
   it 'refuses without a goal' do

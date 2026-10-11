@@ -67,7 +67,8 @@ module Guide
     private
 
     def expand(steps)
-      opened_sections = Set.new
+      # The sidebar is an accordion: opening a section closes the one before.
+      open_section = nil
       # The page the person is on after the steps so far. An in-page step must
       # be on it: the model once met the other rules by sending an inventory
       # tour to the Leads page for a table called "Browse your stock".
@@ -75,10 +76,15 @@ module Guide
       steps.flat_map do |s|
         if s['place_key'].present? && (entry = @entries[s['place_key']])
           here = entry['route'].to_s.split('?').first
-          # A menu section the tour already opened stays open; clicking it
-          # again would close it and hide the next step.
+          # Clicking the section that is already open would close it and hide
+          # the next step, so that click is left out. Any other section is
+          # clicked: an earlier one has been closed by whatever opened since.
           walk_steps = Array(entry['where']).reject do |w|
-            w['anchor'].to_s.start_with?('nav-section:') && !opened_sections.add?(w['anchor'])
+            next false unless w['anchor'].to_s.start_with?('nav-section:')
+
+            already_open = w['anchor'] == open_section
+            open_section = w['anchor']
+            already_open
           end
           walk = walk_steps.map do |w|
             { route: w['route'], selector: %([data-tour="#{w['anchor']}"]), title: w['title'], content: w['text'], click_required: w['click'] == true }
