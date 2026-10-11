@@ -59,6 +59,24 @@ module Api
         render json: { error: 'The assistant is not available right now. Search still works.' }, status: :bad_gateway
       end
 
+      # GET /api/v1/guide/checklist
+      # Getting started: the company setup list (for admins) and this person's
+      # learning path, each item ticked from real data or real use.
+      def checklist
+        prefs = Setting.get('User', current_user.id, 'guide_checklist', {}) || {}
+        data = Guide::Checklist.new(current_user, @company).to_h(selected_path: prefs['path'])
+        render json: data.merge(dismissed: prefs['dismissed'] == true)
+      end
+
+      # PATCH /api/v1/guide/checklist  { path?, dismissed? }
+      def update_checklist
+        prefs = (Setting.get('User', current_user.id, 'guide_checklist', {}) || {}).to_h.deep_stringify_keys
+        prefs['path'] = params[:path].to_s if Guide::Checklist::PATHS.key?(params[:path].to_s)
+        prefs['dismissed'] = ActiveModel::Type::Boolean.new.cast(params[:dismissed]) if params.key?(:dismissed)
+        Setting.set('User', current_user.id, 'guide_checklist', prefs)
+        checklist
+      end
+
       # GET /api/v1/guide/usage
       # What this person has used, most recent first.
       def usage

@@ -2172,6 +2172,8 @@ Rails.application.routes.draw do
         get  'usage',     action: :usage
         get  'assistant', action: :assistant_status
         post 'assistant', action: :assistant
+        get   'checklist', action: :checklist
+        patch 'checklist', action: :update_checklist
       end
 
       # Interactive guided tours (list/start/complete/step tracking).
