@@ -17,6 +17,7 @@ RSpec.describe 'Public inventory contact details', type: :request do
   let!(:corporate) { Location.ensure_corporate_for(company).tap { |l| l.update!(name: 'Corporate', active: true) } }
   let!(:vehicle) do
     Vehicle.create!(company: company, year: 2026, make: 'Clayton', model: 'Cadence', location: corporate,
+                    width: 28, length: 60,
                     vin: "VIN#{SecureRandom.hex(6).upcase}", status: 'available', is_deleted: false)
   end
 
@@ -30,6 +31,12 @@ RSpec.describe 'Public inventory contact details', type: :request do
                                'address' => '9011 McIntyre Rd', 'city' => 'Brooksville',
                                'full_address' => '9011 McIntyre Rd, Brooksville, FL, 34601',
                                'location_name' => 'Corporate')
+  end
+
+  # Quoted as width by length; only the length was sent.
+  it "sends the home's width with its length" do
+    get "/public/inventory/#{vehicle.id}", params: { token: company.public_inventory_token, company_id: company.id }
+    expect(JSON.parse(response.body)['vehicle'].values_at('width', 'length')).to eq([28, 60])
   end
 
   it "prefers the location's own, and takes an address whole from one record" do
