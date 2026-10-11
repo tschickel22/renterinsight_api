@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_110000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_11_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3459,6 +3459,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_110000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "active"], name: "index_fni_products_on_company_id_and_active"
     t.index ["company_id"], name: "index_fni_products_on_company_id"
+  end
+
+  create_table "guide_conversations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "messages", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "updated_at"], name: "index_guide_conversations_on_user_id_and_updated_at"
   end
 
   create_table "guide_events", force: :cascade do |t|

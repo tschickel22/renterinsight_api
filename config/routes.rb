@@ -2168,8 +2168,10 @@ Rails.application.routes.draw do
 
       # In-app guidance: usage events and summary (backlog E75).
       scope :guide, controller: :guide do
-        post 'events', action: :events
-        get  'usage',  action: :usage
+        post 'events',    action: :events
+        get  'usage',     action: :usage
+        get  'assistant', action: :assistant_status
+        post 'assistant', action: :assistant
       end
 
       # Interactive guided tours (list/start/complete/step tracking).
