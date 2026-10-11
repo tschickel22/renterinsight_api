@@ -86,7 +86,13 @@ module Guide
       @item.snapshot
     end
 
+    # For the prompt: dealer-word tokens shown as their defaults. The stored
+    # tour steps keep the tokens, filled in per dealer when served.
     def entry
+      Guide::Copy.render_deep(@item.new_value || {})
+    end
+
+    def raw_entry
       @item.new_value || {}
     end
 
@@ -144,7 +150,7 @@ module Guide
     # The menu walk comes from the Atlas, not the model, so it cannot point
     # anywhere that does not exist.
     def where_steps
-      Array(entry['where']).map do |s|
+      Array(raw_entry['where']).map do |s|
         { route: s['route'], selector: %([data-tour="#{s['anchor']}"]), title: s['title'], content: s['text'],
           click_required: s['click'] == true }
       end

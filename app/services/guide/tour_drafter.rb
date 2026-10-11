@@ -43,6 +43,7 @@ module Guide
       - A marker step points at something on the page the tour has just reached: put it right after the place_key step for that page, with that page as its route.
       - Write for a dealership employee: plain words, second person, short. Never use em dashes, en dashes or a spaced hyphen as a dash.
       - Never describe a button or field you were not given.
+      - Never name a button, menu item or field by its words: dealers rename them. Say "the highlighted button", "this field", "this menu item" and describe what it does.
     PROMPT
 
     def initialize(goal, client: Catalog::PriceBooks::ClaudeClient)
@@ -90,8 +91,10 @@ module Guide
           walk = walk_steps.map do |w|
             { route: w['route'], selector: %([data-tour="#{w['anchor']}"]), title: w['title'], content: w['text'], click_required: w['click'] == true }
           end
-          # The model's words describe the place; they go on the last step of the walk.
-          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any?
+          # The model's words describe the place; they go on the last step of
+          # the walk. An action's own clicks already say exactly what to press
+          # ("Choose Add Individual"), so those keep their words.
+          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any? && entry['kind'] != 'action'
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
               marker_on_page?(s['marker'], s['route'])
@@ -123,7 +126,8 @@ module Guide
     end
 
     def prompt
-      places = @entries.values.map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
+      places = @entries.values.map { |e| Guide::Copy.render_deep(e) }
+                       .map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
       markers = @markers.filter_map do |m, pages|
         pages = Array(pages).select { |p| p.start_with?('/', '*') }
         "#{m} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
