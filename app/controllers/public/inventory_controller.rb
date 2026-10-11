@@ -302,18 +302,7 @@ class Public::InventoryController < ApplicationController
     contact_location ||= @company.locations.where(is_deleted: [false, nil], active: true, is_corporate: true).first
     contact_location ||= @company.locations.where(is_deleted: [false, nil], active: true).order(:created_at).first
     
-    # Contact info - from resolved contact location
-    company_data = {
-      name: @company.name,
-      phone: contact_location&.phone,
-      email: contact_location&.email,
-      address: contact_location&.address_line1,
-      city: contact_location&.city,
-      state: contact_location&.state,
-      zip: contact_location&.zip_code,
-      full_address: contact_location&.full_address,
-      location_name: contact_location&.name
-    }
+    company_data = contact_details(contact_location)
 
     # On a demo, the dealer whose brand is on the page, not the lot lending the
     # homes. A demo borrows a real lot so a design can be shown with real stock
@@ -664,6 +653,28 @@ class Public::InventoryController < ApplicationController
   end
   
   # Resolve branding with Location → Company → Platform hierarchy
+  # How to reach the dealer about a home: the resolved location's details,
+  # and the company's wherever the location has none. A dealer's homes often
+  # sit on a location created with a name and nothing else (Easy Homesource's
+  # "Corporate"), which left every printed sheet and enquiry panel with no
+  # phone, email or address. The address is taken whole from one record or the
+  # other, so a street never lands beside another record's city.
+  def contact_details(location)
+    address_from = location&.address_line1.present? ? location : @company
+    {
+      name: @company.name,
+      phone: location&.phone.presence || @company.phone.presence,
+      email: location&.email.presence || @company.email.presence,
+      address: address_from.address_line1.presence,
+      city: address_from.city.presence,
+      state: address_from.state.presence,
+      zip: address_from.zip_code.presence,
+      full_address: [address_from.address_line1, address_from.address_line2, address_from.city,
+                     address_from.state, address_from.zip_code].map(&:presence).compact.join(', ').presence,
+      location_name: location&.name
+    }
+  end
+
   def resolve_branding(location = nil)
     # Start with platform defaults
     branding = {
