@@ -47,7 +47,10 @@ module Guide
       @goal = goal.to_s.strip
       @client = client
       snapshot = Knowledge::Snapshot.where(source: Guide::ReleaseWatcher::SOURCE).order(snapshot_at: :desc).first
-      @entries = Array(snapshot&.atlas&.dig('entries')).index_by { |e| e['key'] }
+      # Tours are for dealers: places only platform admins see are left out
+      # (the nightly check, signed in as a dealer, caught a tour sending
+      # people to the admin-only Lot Map).
+      @entries = Array(snapshot&.atlas&.dig('entries')).reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
       @markers = snapshot&.atlas&.dig('markers') || {}
     end
 
@@ -92,6 +95,12 @@ module Guide
       pages = Array(@markers[marker])
       path = route.to_s.split('?').first
       pages.include?('*') || pages.include?(path)
+    end
+
+    def platform_only?(entry)
+      Array(entry['requires']).any? do |r|
+        r['adminOnly'] || r['settingsAccess'] == 'platformAdmin' || r['integrationsSub'] == 'platform'
+      end
     end
 
     def known_page?(route)

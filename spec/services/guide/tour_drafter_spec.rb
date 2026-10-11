@@ -10,7 +10,9 @@ RSpec.describe Guide::TourDrafter do
         'entries' => [
           { 'key' => 'page:/deals', 'kind' => 'page', 'title' => 'Sales Deals', 'route' => '/deals', 'breadcrumb' => ['CRM & Sales'],
             'where' => [{ 'anchor' => 'nav-section:crm-sales', 'title' => 'CRM & Sales', 'text' => 'Open CRM & Sales.', 'click' => true },
-                        { 'anchor' => 'nav:/deals', 'title' => 'Sales Deals', 'text' => 'Click Sales Deals.', 'click' => true }] }
+                        { 'anchor' => 'nav:/deals', 'title' => 'Sales Deals', 'text' => 'Click Sales Deals.', 'click' => true }] },
+          { 'key' => 'page:/lot-map', 'kind' => 'page', 'title' => 'Lot Map', 'route' => '/lot-map', 'requires' => [{ 'adminOnly' => true }],
+            'where' => [{ 'anchor' => 'nav:/lot-map', 'title' => 'Lot Map', 'text' => 'Click Lot Map.', 'click' => true }] }
         ],
         'markers' => { 'add-button' => ['/deals'], 'main-table' => ['/crm'] }
       }
@@ -26,7 +28,8 @@ RSpec.describe Guide::TourDrafter do
           { 'marker' => 'made-up', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Invented' },
           { 'marker' => 'main-table', 'route' => '/deals', 'title' => 'Nope', 'text' => 'Real marker, wrong page' },
           { 'marker' => 'add-button', 'route' => '/not-a-page', 'title' => 'Nope', 'text' => 'Wrong page' },
-          { 'place_key' => 'page:/nowhere', 'title' => 'Nope', 'text' => 'Invented place' }
+          { 'place_key' => 'page:/nowhere', 'title' => 'Nope', 'text' => 'Invented place' },
+          { 'place_key' => 'page:/lot-map', 'title' => 'Nope', 'text' => 'Admin only' }
         ] } }
       end
     end
