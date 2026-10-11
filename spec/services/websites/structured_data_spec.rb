@@ -128,6 +128,26 @@ RSpec.describe Websites::StructuredData do
     end
   end
 
+  # AI assistants weigh how current a source is; the page says when it was
+  # last changed, from its own save time, never the time of the request.
+  describe 'the page node' do
+    it 'says when the page was published and last changed' do
+      page.update_columns(created_at: Time.zone.parse('2026-09-01 10:00'), updated_at: Time.zone.parse('2026-10-09 15:30'))
+      web_page = node(graph(page: page.reload), 'WebPage')
+
+      expect(web_page).to include('url' => 'https://summitpark.mydealertide.com/inventory',
+                                  'datePublished' => page.created_at.iso8601,
+                                  'dateModified' => page.updated_at.iso8601)
+      expect(web_page['isPartOf']).to eq('@id' => 'https://summitpark.mydealertide.com/#site')
+    end
+
+    it 'is left to the home on a home page' do
+      vehicle = company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Clayton', model: 'Cadence',
+                                         status: 'available')
+      expect(node(graph(page: page, vehicle: vehicle), 'WebPage')).to be_nil
+    end
+  end
+
   describe 'breadcrumbs' do
     it 'gives a two-step trail from home to the page' do
       trail = node(graph(page: page), 'BreadcrumbList')['itemListElement']
