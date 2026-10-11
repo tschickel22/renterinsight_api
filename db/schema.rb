@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_11_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7636,6 +7636,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.jsonb "steps_completed", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "dismissed_at"
     t.index ["completed_at"], name: "index_user_tour_completions_on_completed_at"
     t.index ["tour_id"], name: "index_user_tour_completions_on_tour_id"
     t.index ["user_id", "tour_id"], name: "index_user_tour_completions_on_user_id_and_tour_id", unique: true

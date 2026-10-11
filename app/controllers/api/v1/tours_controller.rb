@@ -5,24 +5,25 @@ module Api
     class ToursController < ApplicationController
       before_action :authenticate_user!
       before_action :require_platform_admin!, only: %i[create update destroy]
-      before_action :set_tour, only: %i[show start complete step_complete]
+      before_action :set_tour, only: %i[show start complete step_complete dismiss]
       before_action :set_tour_for_admin, only: %i[update destroy]
 
       # GET /api/v1/tours
       # Lists active tours the current user hasn't completed yet.
       def index
-        # Global master switch: when paused, serve no tours to end users.
-        return render(json: { tours: [], tours_paused: true }) if PlatformSetting.tours_paused?
+        # Global master switch: when paused, end users get no tours. Platform
+        # admins still do, so the tours can be tested and fixed while paused.
+        paused = PlatformSetting.tours_paused?
+        return render(json: { tours: [], tours_paused: true }) if paused && !platform_admin_request?
 
-        completed_ids = current_user.user_tour_completions
-                                    .where.not(completed_at: nil)
-                                    .pluck(:tour_id)
+        completions = current_user.user_tour_completions.index_by(&:tour_id)
+        completed_ids = completions.values.select(&:completed?).map(&:tour_id)
 
         scope = params[:include_completed] == 'true' ? Tour.active : Tour.active.where.not(id: completed_ids)
         scope = scope.where(knowledge_module_id: Knowledge::Module.find_by!(key: params[:module]).id) if params[:module].present?
 
-        tours = scope.ordered.includes(:knowledge_module).map { |t| tour_payload(t) }
-        render json: { tours: tours }
+        tours = scope.ordered.includes(:knowledge_module, :steps).map { |t| tour_payload(t, completion: completions[t.id]) }
+        render json: { tours: tours, tours_paused: paused }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'module not found' }, status: :not_found
       end
@@ -50,6 +51,8 @@ module Api
 
       # POST /api/v1/tours/:id/start
       def start
+        return render(json: { ok: true, recorded: false }) if impersonating?
+
         completion = UserTourCompletion.find_or_initialize_by(user: current_user, tour: @tour)
         completion.steps_completed ||= {}
         completion.save!
@@ -58,6 +61,8 @@ module Api
 
       # POST /api/v1/tours/:id/complete
       def complete
+        return render(json: { ok: true, recorded: false }) if impersonating?
+
         completion = UserTourCompletion.find_or_initialize_by(user: current_user, tour: @tour)
         completion.steps_completed ||= {}
         completion.completed_at = Time.current
@@ -70,21 +75,39 @@ module Api
       def step_complete
         position = params[:step_position].to_i
         return render json: { error: 'step_position required' }, status: :bad_request if position <= 0
+        return render(json: { ok: true, recorded: false }) if impersonating?
 
         completion = UserTourCompletion.find_or_initialize_by(user: current_user, tour: @tour)
         completion.steps_completed ||= {}
-        completion.steps_completed[position.to_s] = { completed_at: Time.current.iso8601 }
-        # Auto-finalize when every step is done.
-        total = @tour.steps.count
-        completion.completed_at = Time.current if completion.steps_completed.keys.size >= total
+        completion.steps_completed[position.to_s] = { 'completed_at' => Time.current.iso8601 }
+        # Auto-finalize when every step is done. Only positions that still exist
+        # count, so a tour edited down to fewer steps cannot finish early.
+        positions = @tour.steps.pluck(:position).map(&:to_s)
+        total = positions.size
+        done = (completion.steps_completed.keys & positions).size
+        completion.completed_at ||= Time.current if total.positive? && done >= total
         completion.save!
 
         render json: {
           ok: true,
-          steps_completed: completion.steps_completed.keys.size,
+          steps_completed: done,
           total_steps:     total,
           completed_at:    completion.completed_at
         }
+      end
+
+      # POST /api/v1/tours/:id/dismiss
+      # The user closed the tour early or declined the "take the tour" prompt.
+      # It stops being offered automatically but stays in their tour list, and
+      # it is not counted as a completion.
+      def dismiss
+        return render(json: { ok: true, recorded: false }) if impersonating?
+
+        completion = UserTourCompletion.find_or_initialize_by(user: current_user, tour: @tour)
+        completion.steps_completed ||= {}
+        completion.dismissed_at ||= Time.current
+        completion.save!
+        render json: { ok: true, dismissed_at: completion.dismissed_at }
       end
 
       # POST /api/v1/tours
@@ -132,8 +155,23 @@ module Api
 
       private
 
+      def platform_admin_request?
+        admin = original_user
+        admin&.platform_admin? || admin&.super_admin?
+      end
+
+      # ?raw=true (platform admins only) returns the stored copy with its
+      # {{brand}} tokens intact, so the recorder saves them back unchanged.
+      def copy(text)
+        return text if params[:raw] == 'true' && platform_admin_request?
+
+        Guide::Copy.render(text, company: current_user&.company)
+      end
+
       def set_tour
-        @tour = Tour.active.find_by(id: params[:id])
+        # Platform admins can open an inactive tour to test or edit it.
+        scope = platform_admin_request? ? Tour.all : Tour.active
+        @tour = scope.find_by(id: params[:id])
         render json: { error: 'tour not found' }, status: :not_found unless @tour
       end
 
@@ -190,8 +228,8 @@ module Api
         payload = {
           id:           tour.id,
           key:          tour.key,
-          name:         tour.name,
-          description:  tour.description,
+          name:         copy(tour.name),
+          description:  copy(tour.description),
           position:     tour.position,
           trigger_type:  tour.trigger_type,
           trigger_route: tour.trigger_route,
@@ -199,6 +237,7 @@ module Api
           category:      tour.knowledge_module&.category,
           step_count:   tour.steps.size,
           completed:    !!completion&.completed_at,
+          dismissed:    !!completion&.dismissed_at,
           started:      completion.present?
         }
         if include_steps
@@ -206,8 +245,8 @@ module Api
             {
               position:       s.position,
               selector:       s.selector,
-              title:          s.title,
-              content:        s.content,
+              title:          copy(s.title),
+              content:        copy(s.content),
               placement:      s.placement,
               highlight_type: s.highlight_type,
               click_required: s.click_required,

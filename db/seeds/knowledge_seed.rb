@@ -318,7 +318,7 @@ TOURS = [
   {
     module_key:    'dashboard',
     key:           'first_time_onboarding',
-    name:          'Welcome to Renter Insight',
+    name:          'Welcome to {{brand}}',
     description:   'A quick tour of the dashboard and main navigation for first-time users.',
     trigger_type:  'auto_on_first_visit',
     position:      1,

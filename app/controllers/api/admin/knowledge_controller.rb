@@ -127,7 +127,7 @@ module Api
           }}
         when 'tours'
           render json: { completions: (UserTourCompletion.includes(:tour).order(created_at: :desc).limit(100).map { |c|
-            { id: c.id, tour_name: c.tour&.name, user_id: c.user_id, completed_at: c.completed_at }
+            { id: c.id, tour_name: c.tour&.name, user_id: c.user_id, completed_at: c.completed_at, dismissed_at: c.dismissed_at }
           } rescue []) }
         when 'articles'
           render json: { articles: Knowledge::Article.includes(:knowledge_module).order(updated_at: :desc).limit(50).map { |a| article_payload(a) } }
@@ -173,9 +173,9 @@ module Api
         when 'modules'         then source.permit(:key, :name, :icon, :route, :description, :position, :is_active)
         when 'features'        then source.permit(:knowledge_module_id, :key, :name, :route, :ui_selector, :permission_key, :position)
         when 'articles'        then source.permit(:knowledge_module_id, :knowledge_feature_id, :module_key, :feature_key, :slug, :title, :excerpt, :content, :content_html, :article_type, :is_published, :status, :position)
-        when 'tours'           then source.permit(:name, :description, :trigger_type, :start_url, :position, :is_active)
-        when 'tour_steps'      then source.permit(:tour_id, :selector, :title, :content, :placement, :highlight_type, :click_required, :input_required, :position)
-        when 'intent_patterns' then source.permit(:pattern, :intent_type, :entity_key, :priority, :is_active)
+        when 'tours'           then source.permit(:knowledge_module_id, :key, :name, :description, :trigger_type, :trigger_route, :position, :is_active)
+        when 'tour_steps'      then source.permit(:tour_id, :route, :selector, :title, :content, :placement, :highlight_type, :click_required, :input_required, :position)
+        when 'intent_patterns' then source.permit(:pattern, :intent_type, :entity_key, :priority)
         when 'entity_aliases'  then source.permit(:alias_name, :canonical_key)
         else {}
         end
@@ -267,20 +267,21 @@ module Api
       end
 
       def tour_payload(t, include_steps: false)
-        p = { id: t.id, name: t.name, description: safe_read(t, :description),
+        p = { id: t.id, key: t.key, name: t.name, description: safe_read(t, :description),
               trigger_type: safe_read(t, :trigger_type),
-              start_url: safe_read(t, :start_url),
+              trigger_route: safe_read(t, :trigger_route),
               position: safe_read(t, :position) || 0,
               is_active: safe_bool(t, :is_active, default: true),
               module_key: safe_read(t, :knowledge_module)&.key,
               steps_count: t.steps.count,
-              completion_count: 0 }
+              completion_count: t.completions.where.not(completed_at: nil).count,
+              dismissed_count: t.completions.where(completed_at: nil).where.not(dismissed_at: nil).count }
         p[:steps] = t.steps.order(:position).map { |s| step_payload(s) } if include_steps
         p
       end
 
       def step_payload(s)
-        { id: s.id, tour_id: s.tour_id, selector: s.selector, title: s.title,
+        { id: s.id, tour_id: s.tour_id, route: safe_read(s, :route), selector: s.selector, title: s.title,
           content: safe_read(s, :content),
           placement: safe_read(s, :placement) || 'bottom',
           highlight_type: safe_read(s, :highlight_type),

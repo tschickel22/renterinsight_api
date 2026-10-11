@@ -2176,6 +2176,7 @@ Rails.application.routes.draw do
           post :start
           post :complete
           post :step_complete
+          post :dismiss
         end
       end
 

@@ -12,6 +12,12 @@ module Api
         return render json: { error: 'query is required' }, status: :bad_request if query.empty?
 
         results = Knowledge::SmartSearchService.new(query, user: current_user).search
+        results = Array(results).map do |r|
+          next r unless r.is_a?(Hash)
+
+          r.except('title', 'description')
+           .merge(title: copy(r[:title] || r['title']), description: copy(r[:description] || r['description']))
+        end
         render json: { query: query, results: results }
       end
 
@@ -246,6 +252,8 @@ module Api
           - Don't include the title as a heading (it's shown separately)
           - Focus on actionable how-to content
           - When describing navigation, use the EXACT navigation paths from the platform context below
+          - Write the platform's name as {{brand}} (it is filled in when the article is shown), never a literal product name
+          - Never use em dashes or en dashes; use a period, comma, colon or parentheses instead
           #{platform_context}
         PROMPT
 
@@ -291,7 +299,7 @@ module Api
             title   = topic.titleize if title.empty?
             slug    = topic.parameterize
             first_p = generated_content.split("\n\n").find { |p| !p.start_with?('#') && p.strip.length > 20 }
-            excerpt = first_p ? first_p.strip[0..200] : "Learn about #{topic.downcase} in #{Brand.current.name}."
+            excerpt = first_p ? first_p.strip[0..200] : "Learn about #{topic.downcase} in #{Guide::Copy::BRAND_TOKEN}."
 
             render json: { title: title, slug: slug, excerpt: excerpt, content: generated_content, generated: true }
           else
@@ -318,14 +326,22 @@ module Api
 
       def article_payload(article, include_body: false)
         payload = {
-          id: article.id, slug: article.slug, title: article.title,
-          excerpt: article.excerpt, article_type: article.article_type,
+          id: article.id, slug: article.slug, title: copy(article.title),
+          excerpt: copy(article.excerpt), article_type: article.article_type,
           module: article.knowledge_module&.key, feature: article.knowledge_feature&.key,
           is_published: article.is_published, position: article.position,
           updated_at: article.updated_at
         }
-        payload.merge!(content: article.content, content_html: article.content_html) if include_body
+        payload.merge!(content: copy(article.content), content_html: copy(article.content_html)) if include_body
         payload
+      end
+
+      # ?raw=true (platform admins only) keeps {{brand}} tokens intact for the
+      # article editor, so saving an article does not bake in today's name.
+      def copy(text)
+        return text if params[:raw] == 'true' && platform_admin?
+
+        Guide::Copy.render(text, company: current_user&.company)
       end
 
       def extract_action(result)
