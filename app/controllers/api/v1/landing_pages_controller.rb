@@ -527,7 +527,7 @@ class Api::V1::LandingPagesController < ApplicationController
       # into the document as written, so what may be set here is worth being
       # explicit about.
       tracking_config: [
-        :google_analytics_id, :google_tag_manager_id, :facebook_pixel_id, :hotjar_id,
+        *Websites::TrackingTags::FIELDS,
         { custom_scripts: %i[head body] }
       ],
       blocks: [:id, :type, :order, { content: {}, settings: {} }]

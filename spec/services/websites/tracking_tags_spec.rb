@@ -52,6 +52,49 @@ RSpec.describe Websites::TrackingTags do
       expect(result.head).to include('hjid:1234567')
     end
 
+    # Easy Homesource's old site ran a Google Ads tag and no analytics; most
+    # dealers' ad pixels sit beside GA4. One Google tag serves both.
+    it 'gives Google Ads and GA4 one Google tag with a config line each' do
+      result = described_class.new(
+        website: site('google_analytics_id' => 'G-ABC12345', 'google_ads_id' => 'AW-17782600637')
+      ).call
+
+      expect(result.head.scan('googletagmanager.com/gtag/js').size).to eq(1)
+      expect(result.head).to include("gtag('config', 'G-ABC12345')", "gtag('config', 'AW-17782600637')")
+    end
+
+    it 'emits a Google Ads tag on its own' do
+      result = described_class.new(website: site('google_ads_id' => 'AW-17782600637')).call
+      expect(result.head).to include('gtag/js?id=AW-17782600637', "gtag('config', 'AW-17782600637')")
+    end
+
+    {
+      'tiktok_pixel_id'      => ['C4ABCDEFGHIJKLMNOPQR', "ttq.load('C4ABCDEFGHIJKLMNOPQR')"],
+      'snapchat_pixel_id'    => ['1b2c3d4e-0000-4a4a-9b9b-0123456789ab', "snaptr('init', '1b2c3d4e-0000-4a4a-9b9b-0123456789ab'"],
+      'pinterest_tag_id'     => ['2612345678901', "pintrk('load', '2612345678901')"],
+      'linkedin_partner_id'  => ['1234567', '_linkedin_partner_id = "1234567"'],
+      'x_pixel_id'           => ['o1abc', "twq('config', 'o1abc')"],
+      'reddit_pixel_id'      => ['t2_abc123', "rdt('init', 't2_abc123')"],
+      'microsoft_uet_tag_id' => ['187012345', 'ti:"187012345"'],
+      'microsoft_clarity_id' => ['k8x2abcd9z', '"clarity", "script", "k8x2abcd9z"'],
+      'logrocket_app_id'     => ['abc123/easy-homesource', "LogRocket.init('abc123/easy-homesource')"]
+    }.each do |key, (id, expected)|
+      it "emits #{key} from an id alone" do
+        result = described_class.new(website: site(key => id)).call
+        expect(result.head).to include(expected)
+      end
+    end
+
+    # The id lands inside a script; a value with anything its vendor never
+    # uses is refused, so a pasted snippet or a quote can't break out of it.
+    it 'refuses an id carrying characters its vendor never uses' do
+      result = described_class.new(
+        website: site('tiktok_pixel_id' => "C4ABC');alert(1);//", 'logrocket_app_id' => '<script>x</script>')
+      ).call
+
+      expect(result.head).to be_nil
+    end
+
     # A mistyped id produces a snippet that silently does nothing and a console
     # error, which is harder to diagnose than no snippet at all.
     it 'skips an id that is not shaped like its vendor and still emits the rest' do

@@ -942,11 +942,8 @@ class Api::V1::WebsitesController < ApplicationController
         keywords: []
       ],
       tracking_config: [
-        :google_analytics_id,
-        :google_tag_manager_id,
-        :facebook_pixel_id,
-        :hotjar_id,
-        custom_scripts: [:head, :body]
+        *Websites::TrackingTags::FIELDS,
+        { custom_scripts: [:head, :body] }
       ]
     )
     # CRITICAL: NEVER permit company_id
