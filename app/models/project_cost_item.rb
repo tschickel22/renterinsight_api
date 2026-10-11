@@ -20,12 +20,16 @@ class ProjectCostItem < ApplicationRecord
   belongs_to :part, optional: true
   belongs_to :inventory_transaction, optional: true
   belongs_to :contractor, foreign_key: :vendor_id, optional: true
+  # Any vendor type (contractor, supplier, ...) — the cost picker lists them all,
+  # while :contractor only resolves vendor_type='contractor'.
+  belongs_to :vendor, optional: true
 
   validates :description, presence: true
   validates :amount, presence: true, numericality: true
   validates :cost_type, presence: true, inclusion: { in: COST_TYPES }
   validates :category, inclusion: { in: CATEGORIES }, allow_nil: true, allow_blank: true
   validates :status, inclusion: { in: STATUSES }
+  validate :vendor_belongs_to_company
 
   scope :not_deleted, -> { where(is_deleted: [false, nil]) }
   scope :by_type, ->(type) { where(cost_type: type) if type.present? }
@@ -46,9 +50,17 @@ class ProjectCostItem < ApplicationRecord
   private
 
   def auto_populate_vendor_name
-    if contractor_id.present? && vendor_name.blank?
-      self.vendor_name = contractor&.name
+    if vendor_id.present? && vendor_name.blank?
+      self.vendor_name = vendor&.name
     end
+  end
+
+  # contractor_id arrives from the client; never let it point at another company's vendor.
+  def vendor_belongs_to_company
+    return if vendor_id.blank? || !will_save_change_to_vendor_id?
+    return if Vendor.where(company_id: company_id, id: vendor_id).exists?
+
+    errors.add(:contractor_id, 'is not a vendor in this company')
   end
 
   def recalculate_parent_costs

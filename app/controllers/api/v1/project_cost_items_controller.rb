@@ -52,14 +52,7 @@ module Api
         items = items.offset((page - 1) * per_page).limit(per_page)
 
         render json: {
-          cost_items: items.includes(:contractor).map { |item|
-            item.as_json(
-              only: %i[id project_id project_phase_id project_task_id cost_type category
-                       description vendor_name invoice_number amount quantity unit_price
-                       date status paid_at approved_by_id notes receipt_url part_id
-                       contractor_id inventory_transaction_id metadata created_at updated_at]
-            ).merge('contractor_name' => item.contractor&.name)
-          },
+          cost_items: items.includes(:vendor).map { |item| serialize_cost_item(item) },
           stats: stats,
           meta: { total_count: total_count, page: page, per_page: per_page }
         }
@@ -69,12 +62,7 @@ module Api
       def show
         return unless authorize_action!('projects', 'read')
 
-        render json: @cost_item.as_json(
-          only: %i[id project_id project_phase_id project_task_id cost_type category
-                   description vendor_name invoice_number amount quantity unit_price
-                   date status paid_at approved_by_id notes receipt_url receipt_s3_key
-                   part_id inventory_transaction_id metadata created_at updated_at]
-        )
+        render json: serialize_cost_item(@cost_item, extra: %i[receipt_s3_key])
       end
 
       # POST /api/v1/projects/:project_id/cost_items
@@ -83,12 +71,6 @@ module Api
 
         @cost_item = @project.project_cost_items.build(cost_item_params)
         @cost_item.company_id = @company.id
-
-        # Auto-populate vendor_name from contractor if provided
-        if @cost_item.contractor_id.present? && @cost_item.vendor_name.blank?
-          contractor = @company.contractors.find_by(id: @cost_item.contractor_id)
-          @cost_item.vendor_name = contractor&.name
-        end
 
         # Auto-populate from part if provided
         if @cost_item.part_id.present?
@@ -100,12 +82,7 @@ module Api
         end
 
         if @cost_item.save
-          render json: @cost_item.as_json(
-            only: %i[id project_id project_phase_id project_task_id cost_type category
-                     description vendor_name invoice_number amount quantity unit_price
-                     date status paid_at approved_by_id notes receipt_url part_id
-                     inventory_transaction_id metadata created_at updated_at]
-          ), status: :created
+          render json: serialize_cost_item(@cost_item), status: :created
         else
           render json: { errors: @cost_item.errors.full_messages }, status: :unprocessable_entity
         end
@@ -116,12 +93,7 @@ module Api
         return unless authorize_action!('projects', 'update')
 
         if @cost_item.update(cost_item_params)
-          render json: @cost_item.as_json(
-            only: %i[id project_id project_phase_id project_task_id cost_type category
-                     description vendor_name invoice_number amount quantity unit_price
-                     date status paid_at approved_by_id notes receipt_url part_id
-                     inventory_transaction_id metadata created_at updated_at]
-          )
+          render json: serialize_cost_item(@cost_item)
         else
           render json: { errors: @cost_item.errors.full_messages }, status: :unprocessable_entity
         end
@@ -191,6 +163,20 @@ module Api
 
       def set_cost_item
         @cost_item = @project.project_cost_items.not_deleted.find(params[:id])
+      end
+
+      COST_ITEM_FIELDS = %i[id project_id project_phase_id project_task_id cost_type category
+                            description vendor_name invoice_number amount quantity unit_price
+                            date status paid_at approved_by_id notes receipt_url part_id
+                            inventory_transaction_id metadata created_at updated_at].freeze
+
+      # contractor_id is an alias of the vendor_id column, and as_json(only:)
+      # skips aliases — so it is added by hand, or the edit form loses the vendor.
+      def serialize_cost_item(item, extra: [])
+        item.as_json(only: COST_ITEM_FIELDS + extra).merge(
+          'contractor_id' => item.vendor_id,
+          'contractor_name' => item.vendor&.name
+        )
       end
 
       def cost_item_params
