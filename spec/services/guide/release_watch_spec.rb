@@ -115,6 +115,38 @@ RSpec.describe 'Release watcher', type: :service do
     end
   end
 
+  describe 'a content gap' do
+    let(:snapshot) do
+      Knowledge::Snapshot.create!(source: 'frontend', snapshot_at: Time.current, modules_hash: 'x',
+                                  atlas: { 'entries' => [entry('report:ap-aging', 'AP Aging', '/accounting/reports/ap-aging', 'synonyms' => ['what we owe', 'vendor balances'])] })
+    end
+    let(:item) do
+      snapshot.change_queue_items.create!(change_type: 'added', entity_type: 'gap', entity_key: 'what do we owe vendors',
+                                          new_value: { 'title' => 'What do we owe vendors?' }, context: { 'question' => 'What do we owe vendors?' })
+    end
+    let(:client) do
+      Class.new do
+        def self.call(content:, **)
+          raise 'related place not offered' unless content.include?('AP Aging')
+
+          { input: { 'article_title' => 'See what you owe vendors', 'article_excerpt' => 'Use AP Aging.',
+                     'article_markdown' => '## Steps', 'whats_new' => 'ignored for gaps' }, input_tokens: 1, output_tokens: 1 }
+        end
+      end
+    end
+
+    it 'drafts an article from the related places and publishes only the article' do
+      Guide::ReleaseDrafter.new(item, client: client).draft!
+      expect(item.reload.drafts).to include('whats_new' => '')
+
+      Guide::ReleasePublisher.new(item, nil).publish!
+      item.reload
+      expect(Knowledge::Article.find(item.published_article_id).title).to eq('See what you owe vendors')
+      expect(item.published_tour_id).to be_nil
+      expect(item.published_note_id).to be_nil
+    end
+  end
+
   describe Guide::ReleasePublisher do
     let(:admin) { User.new(id: nil) }
     let(:snapshot) { Knowledge::Snapshot.create!(source: 'frontend', snapshot_at: Time.current, modules_hash: 'x') }

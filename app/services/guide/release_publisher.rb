@@ -16,6 +16,7 @@ module Guide
       Knowledge::ChangeQueueItem.transaction do
         case @item.entity_type
         when 'atlas_entry' then publish_entry unless @item.change_type == 'removed'
+        when 'gap'         then publish_entry
         when 'release'     then publish_release
         end
         @item.update!(status: 'approved', reviewed_by: @user, reviewed_at: Time.current, published_at: Time.current)
@@ -35,6 +36,8 @@ module Guide
         record = upsert_article(@item.published_article_id, article['title'], article['excerpt'], article['content'], 'how_to')
         @item.published_article_id = record.id
       end
+
+      return if @item.entity_type == 'gap'
 
       steps = Array(@drafts.dig('tour', 'steps'))
       if steps.any?

@@ -40,6 +40,26 @@ module Api
         render json: { found: snapshot.present?, snapshot_id: snapshot&.id, atlas_url: Guide::ReleaseWatcher.atlas_url }
       end
 
+      # GET /api/admin/guide/releases/adoption
+      def adoption
+        render json: { companies: Guide::Adoption.new.companies }
+      end
+
+      # GET /api/admin/guide/releases/gaps
+      def gaps
+        render json: { gaps: Guide::Gaps.list }
+      end
+
+      # POST /api/admin/guide/releases/gaps  { question }
+      # Draft an article for a question nobody could answer; it appears in the
+      # release queue for review.
+      def draft_gap
+        item = Guide::Gaps.queue!(params[:question])
+        render json: { queued: true, item_id: item.id }
+      rescue ArgumentError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       # POST /api/admin/guide/releases/tour_draft  { goal }
       # An AI-drafted tour built only from the Atlas and the build's markers,
       # returned for the recorder to test and save (nothing is saved here).

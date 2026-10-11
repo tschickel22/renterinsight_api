@@ -4,8 +4,9 @@ class Knowledge::ChangeQueueItem < ApplicationRecord
   self.table_name = 'knowledge_change_queue'
 
   CHANGE_TYPES = %w[added removed modified renamed].freeze
-  # atlas_entry and release come from the release watcher (Guide::ReleaseWatcher).
-  ENTITY_TYPES = %w[module feature permission route ui_element atlas_entry release].freeze
+  # atlas_entry and release come from the release watcher (Guide::ReleaseWatcher);
+  # gap is a question the help could not answer (Guide::Gaps).
+  ENTITY_TYPES = %w[module feature permission route ui_element atlas_entry release gap].freeze
   DRAFT_STATUSES = %w[pending drafting drafted failed skipped].freeze
   STATUSES     = %w[pending approved rejected auto_applied].freeze
 

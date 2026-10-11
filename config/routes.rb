@@ -2174,6 +2174,9 @@ Rails.application.routes.draw do
         post 'assistant', action: :assistant
         get   'checklist', action: :checklist
         patch 'checklist', action: :update_checklist
+        get   'tips',         action: :tips
+        post  'tips/dismiss', action: :dismiss_tip
+        get   'team',         action: :team
       end
 
       # Interactive guided tours (list/start/complete/step tracking).
@@ -3227,6 +3230,9 @@ Rails.application.routes.draw do
         get  '',                     action: :index
         post 'check',                action: :check
         post 'tour_draft',           action: :tour_draft
+        get  'adoption',             action: :adoption
+        get  'gaps',                 action: :gaps
+        post 'gaps',                 action: :draft_gap
         patch 'items/:id',           action: :update,  constraints: { id: /\d+/ }
         post 'items/:id/approve',    action: :approve, constraints: { id: /\d+/ }
         post 'items/:id/reject',     action: :reject,  constraints: { id: /\d+/ }

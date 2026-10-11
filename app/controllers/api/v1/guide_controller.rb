@@ -77,6 +77,44 @@ module Api
         checklist
       end
 
+      # GET /api/v1/guide/tips
+      def tips
+        render json: { tips: Guide::Tips.new(current_user, @company).to_a }
+      end
+
+      # POST /api/v1/guide/tips/dismiss  { key }
+      def dismiss_tip
+        dismissed = Array(Setting.get('User', current_user.id, 'guide_tips_dismissed', []))
+        Setting.set('User', current_user.id, 'guide_tips_dismissed', (dismissed + [params[:key].to_s.first(120)]).uniq.last(200))
+        tips
+      end
+
+      # GET /api/v1/guide/team
+      # For a dealership's admins: how far each person has got with the
+      # product. Their own company only.
+      def team
+        return render(json: { error: 'Admins only' }, status: :forbidden) unless current_user.effective_admin?
+
+        since = 30.days.ago
+        users = @company.users.where(status: 'active').order(:first_name).limit(200).to_a
+        used = GuideFeatureUsage.where(company_id: @company.id, user_id: users.map(&:id)).group_by(&:user_id)
+        recent = GuideEvent.where(company_id: @company.id, occurred_at: since..).group(:user_id).distinct.count(:feature_key)
+        render json: {
+          people: users.map do |u|
+            path = Guide::Checklist.new(u, @company)
+            prefs = Setting.get('User', u.id, 'guide_checklist', {}) || {}
+            data = path.to_h(selected_path: prefs['path'])
+            chosen = data[:paths].find { |p| p[:key] == data[:selected_path] }
+            {
+              id: u.id, name: [u.first_name, u.last_name].compact.join(' ').presence || u.email,
+              last_active_at: u.try(:last_active_at), features_used_30d: recent[u.id].to_i,
+              features_ever: Array(used[u.id]).size,
+              path: chosen && { name: chosen[:name], done: chosen[:items].count { |i| i[:done] }, total: chosen[:items].size }
+            }
+          end
+        }
+      end
+
       # GET /api/v1/guide/usage
       # What this person has used, most recent first.
       def usage

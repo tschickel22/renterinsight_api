@@ -69,7 +69,11 @@ module Guide
 
     def draft!
       @item.update!(draft_status: 'drafting', draft_error: nil)
-      drafts = @item.entity_type == 'release' ? draft_release : draft_entry
+      drafts = case @item.entity_type
+               when 'release' then draft_release
+               when 'gap' then draft_gap
+               else draft_entry
+               end
       @item.update!(drafts: drafts.deep_stringify_keys, draft_status: 'drafted')
     rescue StandardError => e
       @item.update!(draft_status: 'failed', draft_error: "#{e.class}: #{e.message}".first(1000))
@@ -101,6 +105,30 @@ module Guide
         },
         whats_new: clean(result['whats_new']),
         tour: { name: "Where to find #{entry['title']}", steps: where_steps + in_page(steps) }
+      }
+    end
+
+    # A question people asked that the help did not answer: an article that
+    # answers it from the places in the product that fit, or a note that the
+    # product does not do it.
+    def draft_gap
+      question = @item.context['question'].presence || @item.entity_key
+      places = Guide::Atlas.search(Array(snapshot.atlas['entries']), question, limit: 8)
+      result = ask(ENTRY_TOOL, <<~TEXT)
+        People using the product asked this and the help had no answer:
+        "#{question}"
+
+        Places in the product that may be related (title | where | what it is | how to get there):
+        #{places.map { |e| "#{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']} | #{Array(e['where']).map { |s| s['text'] }.join(' ')}" }.join("\n").presence || '(none found)'}
+
+        Existing help articles, so you do not duplicate one:
+        #{Knowledge::Article.published.limit(80).pluck(:title).join("\n")}
+
+        Write an article that answers the question using only these places. If none of them fits, write a short article saying the product does not do this today, and leave whats_new empty. Do not invent features.
+      TEXT
+      {
+        article: { title: clean(result['article_title']), excerpt: clean(result['article_excerpt']).first(240), content: clean(result['article_markdown']) },
+        whats_new: ''
       }
     end
 

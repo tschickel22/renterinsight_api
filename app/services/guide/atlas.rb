@@ -11,6 +11,18 @@ module Guide
       Array(snapshot&.atlas&.dig('entries'))
     end
 
+    # Plain word match over titles, synonyms, where and description.
+    def self.search(entries, query, limit: 6)
+      words = query.to_s.downcase.scan(/[a-z0-9&]+/).reject { |w| w.length < 3 }
+      return [] if words.empty?
+
+      entries.map do |e|
+        title = e['title'].to_s.downcase
+        other = [e['synonyms'], e['breadcrumb'], e['description']].flatten.compact.join(' ').downcase
+        [e, words.sum { |w| (title.include?(w) ? 3 : 0) + (other.include?(w) ? 1 : 0) }]
+      end.select { |_, s| s.positive? }.sort_by { |_, s| -s }.first(limit).map(&:first)
+    end
+
     def initialize(user, company)
       @user = user
       @company = company
