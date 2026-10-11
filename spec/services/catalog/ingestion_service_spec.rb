@@ -80,6 +80,18 @@ RSpec.describe Catalog::IngestionService do
       expect(code_for('1')).to eq('HUD')
     end
 
+    # Clayton and Legacy homes went in with no code; setting the source's
+    # default afterwards scraped nothing new, so the next run skipped them.
+    it "gives homes already in stock the default once it is set" do
+      home = FakeCatalogAdapter.home('1', property_type: ['Double Wide'])
+      ingest([home])
+      expect(code_for('1')).to be_nil
+
+      source.update!(config: (source.config || {}).merge('default_building_code' => 'HUD'))
+      ingest([home])
+      expect(code_for('1')).to eq('HUD')
+    end
+
     it 'leaves it blank rather than guess' do
       ingest([FakeCatalogAdapter.home('1', property_type: ['Double Wide'])])
       expect(code_for('1')).to be_nil
