@@ -77,6 +77,32 @@ RSpec.describe Guide::TourDrafter do
     expect(selectors.count('[data-tour="nav-section:crm-sales"]')).to eq(2)
   end
 
+  it 'follows an action into its form and allows that form\'s markers' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'z',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-deal', 'kind' => 'action', 'title' => 'Start a deal', 'route' => '/deals/new', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/deals', 'title' => 'Deals', 'text' => 'Click Deals.', 'click' => true },
+                        { 'route' => '/deals', 'anchor' => 'add-button', 'title' => 'Start a deal', 'text' => 'Click New.', 'click' => true }] }
+        ],
+        'markers' => { 'deal-form:name' => ['/deals/new'], 'deal-form:save' => ['/deals/new'] }
+      }
+    )
+    form = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'Start a deal', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'action:new-deal', 'title' => 'New deal', 'text' => 'Click New.' },
+          { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Name it', 'text' => 'Give it a name.' },
+          { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Again', 'text' => 'Repeat.' },
+          { 'marker' => 'deal-form:save', 'route' => '/deals/new', 'title' => 'Save', 'text' => 'Save it.' }
+        ] } }
+      end
+    end
+    selectors = described_class.new('start a deal', client: form).draft[:steps].map { |s| s[:selector] }
+    expect(selectors).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]', '[data-tour="deal-form:save"]'])
+  end
+
   it 'refuses without a goal' do
     expect { described_class.new('  ', client: client).draft }.to raise_error(ArgumentError)
   end
