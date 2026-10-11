@@ -858,6 +858,9 @@ class Public::InventoryController < ApplicationController
       bathrooms: vehicle.bathrooms,
       square_feet: vehicle.square_feet,
       sections: vehicle.sections,
+      # A home's size is quoted as width by length (28' x 60'); only the
+      # second and third sections' widths were sent, so a sheet said "60' long".
+      width: vehicle.width,
       building_code: vehicle.building_code,
       building_code_label: BuildingCode.label(vehicle.building_code),
       
