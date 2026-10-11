@@ -219,7 +219,18 @@ module Knowledge
     # Result builders
     # ═══════════════════════════════════════════════════════════
 
+    # While tours are paused only platform admins are offered them, the same
+    # rule the tours list follows.
+    def tours_visible?
+      return @tours_visible if defined?(@tours_visible)
+
+      @tours_visible = !PlatformSetting.tours_paused? ||
+                       @user&.platform_admin? || @user&.super_admin? || false
+    end
+
     def add_tour_result(tour)
+      return unless tours_visible?
+
       @results << {
         type:        'tour',
         title:       tour.name,
@@ -289,12 +300,15 @@ module Knowledge
       name.to_s.sub(/s\z/, '').sub(/ie\z/, 'y')
     end
 
+    # result_count leaves out the "No match" placeholder, so a search that
+    # found nothing is logged as 0 and shows up as a failed search (the list
+    # of questions the help content does not answer yet).
     def record_search
       Knowledge::Search.create!(
         user_id:         @user&.id,
         query:           @query,
         intent_detected: @intent_result&.intent,
-        result_count:    @results.size,
+        result_count:    @results.count { |r| r[:source] != 'fallback' },
         action_taken:    @steps_run.last.to_s
       )
     rescue StandardError => e

@@ -20,12 +20,12 @@ end
 TOURS = [
   # ============================================================ Getting Started
   {
-    key: 'first_time_onboarding', name: 'Welcome to Renter Insight', module_key: 'dashboard',
-    trigger_type: 'auto_on_first_visit',
+    key: 'first_time_onboarding', name: 'Welcome to {{brand}}', module_key: 'dashboard',
+    trigger_type: 'auto_on_first_visit', trigger_route: '/',
     description: 'Quick tour of the main features for first-time users.',
     steps: [
       step('/', 'nav', 'Welcome!',
-           'Welcome to Renter Insight! This quick tour will show you around the main features of your new dealer management system.'),
+           'Welcome to {{brand}}! This quick tour will show you around the main features of your new dealer management system.'),
       step('/', 'nav a[href*="crm"]', 'CRM & Sales',
            'Manage your leads, contacts, accounts, and deals. Track your sales pipeline from first contact to closed deal.',
            placement: 'right'),
@@ -46,7 +46,7 @@ TOURS = [
   {
     key: 'setup_email', name: 'Connect Your Email Account', module_key: 'users',
     trigger_type: 'manual',
-    description: 'Connect Google or Microsoft to send tracked email from Renter Insight.',
+    description: 'Connect Google or Microsoft to send tracked email from {{brand}}.',
     steps: [
       step('/account/settings?tab=email', '[role="tablist"] button:nth-child(2), [data-tab="email"]',
            'Email Tab', 'Navigate to Account Settings and click the Email tab to manage your email connections.'),
@@ -464,6 +464,7 @@ TOURS.each_with_index do |spec, idx|
     name:                spec[:name],
     description:         spec[:description],
     trigger_type:        spec[:trigger_type],
+    trigger_route:       spec[:trigger_route],
     is_active:           true,
     position:            idx + 1,
     knowledge_module_id: mod.id

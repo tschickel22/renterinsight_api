@@ -246,6 +246,8 @@ Rails.application.routes.draw do
     namespace :public do
       get 'invitations/verify', to: 'invitations#verify_token'
       post 'invitations/accept', to: 'invitations#accept'
+      # Help approved on staging, for production to copy (E75); token protected.
+      get 'guide_sync/approved', to: 'guide_sync#approved'
     end
     
     # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================
@@ -2166,16 +2168,32 @@ Rails.application.routes.draw do
         post   'categories',            action: :manage_category
       end
 
+      # In-app guidance: usage events and summary (backlog E75).
+      scope :guide, controller: :guide do
+        post 'events',    action: :events
+        get  'usage',     action: :usage
+        get  'assistant', action: :assistant_status
+        post 'assistant', action: :assistant
+        get   'checklist', action: :checklist
+        patch 'checklist', action: :update_checklist
+        get   'tips',         action: :tips
+        post  'tips/dismiss', action: :dismiss_tip
+        get   'team',         action: :team
+      end
+
       # Interactive guided tours (list/start/complete/step tracking).
       resources :tours, only: %i[index show create update destroy] do
         collection do
           get   :pause_state
           patch :pause_state, action: :set_pause_state
+          get   :for_check
         end
         member do
           post :start
           post :complete
           post :step_complete
+          post :dismiss
+          post :check_results
         end
       end
 
@@ -3210,6 +3228,20 @@ Rails.application.routes.draw do
       end
 
       # ==================== KNOWLEDGE BASE ADMIN (Platform Admin Only) ====================
+      # Release queue: help drafted for what changed in each build (E75).
+      scope 'guide/releases', controller: :guide_releases do
+        get  '',                     action: :index
+        post 'check',                action: :check
+        post 'tour_draft',           action: :tour_draft
+        get  'adoption',             action: :adoption
+        get  'gaps',                 action: :gaps
+        post 'gaps',                 action: :draft_gap
+        patch 'items/:id',           action: :update,  constraints: { id: /\d+/ }
+        post 'items/:id/approve',    action: :approve, constraints: { id: /\d+/ }
+        post 'items/:id/reject',     action: :reject,  constraints: { id: /\d+/ }
+        post 'items/:id/redraft',    action: :redraft, constraints: { id: /\d+/ }
+      end
+
       # Resource-dispatched CRUD — ?resource=modules|features|articles|tours|...
       scope :knowledge, controller: :knowledge do
         get    'analytics',           action: :analytics

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_11_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3461,6 +3461,41 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.index ["company_id"], name: "index_fni_products_on_company_id"
   end
 
+  create_table "guide_conversations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "messages", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "updated_at"], name: "index_guide_conversations_on_user_id_and_updated_at"
+  end
+
+  create_table "guide_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "kind", null: false
+    t.string "feature_key", null: false
+    t.string "route"
+    t.datetime "occurred_at", null: false
+    t.datetime "created_at", null: false
+    t.index ["company_id", "occurred_at"], name: "index_guide_events_on_company_id_and_occurred_at"
+    t.index ["occurred_at"], name: "index_guide_events_on_occurred_at"
+    t.index ["user_id", "occurred_at"], name: "index_guide_events_on_user_id_and_occurred_at"
+  end
+
+  create_table "guide_feature_usages", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "feature_key", null: false
+    t.datetime "first_used_at", null: false
+    t.datetime "last_used_at", null: false
+    t.integer "use_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "feature_key"], name: "index_guide_feature_usages_on_company_id_and_feature_key"
+    t.index ["user_id", "feature_key"], name: "index_guide_feature_usages_on_user_id_and_feature_key", unique: true
+  end
+
   create_table "import_jobs", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "user_id", null: false
@@ -3920,6 +3955,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.datetime "reviewed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "context", default: {}, null: false
+    t.jsonb "drafts", default: {}, null: false
+    t.string "draft_status", default: "pending", null: false
+    t.text "draft_error"
+    t.datetime "published_at"
+    t.bigint "published_article_id"
+    t.bigint "published_note_id"
+    t.bigint "published_tour_id"
     t.index ["change_type"], name: "index_knowledge_change_queue_on_change_type"
     t.index ["entity_key"], name: "index_knowledge_change_queue_on_entity_key"
     t.index ["entity_type", "entity_key"], name: "index_knowledge_change_queue_on_entity_type_and_entity_key"
@@ -4003,8 +4046,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.jsonb "changes_detected", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "source"
+    t.string "commit_sha"
+    t.jsonb "atlas", default: {}, null: false
+    t.jsonb "commits", default: [], null: false
     t.index ["modules_hash"], name: "index_knowledge_snapshots_on_modules_hash"
     t.index ["snapshot_at"], name: "index_knowledge_snapshots_on_snapshot_at"
+    t.index ["source", "snapshot_at"], name: "index_knowledge_snapshots_on_source_and_snapshot_at"
   end
 
   create_table "knowledge_ui_elements", force: :cascade do |t|
@@ -7343,6 +7391,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "route"
+    t.string "check_status"
+    t.datetime "checked_at"
     t.index ["tour_id", "position"], name: "index_tour_steps_on_tour_id_and_position", unique: true
     t.index ["tour_id"], name: "index_tour_steps_on_tour_id"
   end
@@ -7358,6 +7408,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "trigger_route"
+    t.datetime "checked_at"
+    t.string "check_status"
     t.index ["is_active", "position"], name: "index_tours_on_is_active_and_position"
     t.index ["key"], name: "index_tours_on_key"
     t.index ["knowledge_module_id", "key"], name: "index_tours_on_knowledge_module_id_and_key", unique: true
@@ -7636,6 +7688,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_010000) do
     t.jsonb "steps_completed", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "dismissed_at"
     t.index ["completed_at"], name: "index_user_tour_completions_on_completed_at"
     t.index ["tour_id"], name: "index_user_tour_completions_on_tour_id"
     t.index ["user_id", "tour_id"], name: "index_user_tour_completions_on_user_id_and_tour_id", unique: true
