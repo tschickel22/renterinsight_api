@@ -58,6 +58,16 @@ RSpec.describe 'Product tours', type: :request do
       expect(JSON.parse(response.body)['name']).to eq('Welcome to {{brand}}')
     end
 
+    it "fills in dealer words from the company being viewed" do
+      other = create(:company)
+      allow_any_instance_of(Company).to receive(:resolved_labels) { |c| c.id == other.id ? { 'deals' => 'Opportunities' } : {} }
+      tour.update!(name: 'Open {{label:deals|Sales Deals}}')
+      admin = make_user(role: 'platform_admin')
+
+      get "/api/v1/tours/#{tour.id}", headers: auth(admin).merge('X-Company-ID' => other.id.to_s)
+      expect(JSON.parse(response.body)['name']).to eq('Open Opportunities')
+    end
+
     it 'ignores raw for everyone else' do
       get "/api/v1/tours/#{tour.id}", params: { raw: 'true' }, headers: auth(user)
 

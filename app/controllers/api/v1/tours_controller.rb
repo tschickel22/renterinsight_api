@@ -196,10 +196,18 @@ module Api
 
       # ?raw=true (platform admins only) returns the stored copy with its
       # {{brand}} tokens intact, so the recorder saves them back unchanged.
+      # The company being viewed (a platform admin switched into a dealer sees
+      # that dealer's words), not necessarily the person's own.
+      def copy_company
+        return @copy_company if defined?(@copy_company)
+
+        @copy_company = ::Company.find_by(id: current_company_id) || current_user&.company
+      end
+
       def copy(text)
         return text if params[:raw] == 'true' && platform_admin_request?
 
-        Guide::Copy.render(text, company: current_user&.company)
+        Guide::Copy.render(text, company: copy_company)
       end
 
       def set_tour
