@@ -2,124 +2,67 @@
 
 require 'rails_helper'
 
+# Runs against real records. The previous version stubbed every relation the
+# service touched, and the stubs drifted from the queries until four of these
+# failed on code that worked.
 RSpec.describe Knowledge::SmartSearchService do
-  # We stub the whole knowledge graph (modules, features, articles, tours) so
-  # these specs verify pipeline behavior without relying on seed data or a
-  # populated database. Embedding/AI steps are never called in the happy path.
-
-  let(:matcher_result) do
-    Knowledge::IntentMatcher::Result.new(
-      intent: 'create', entity: 'leads', confidence: 0.9, matched_text: 'how do I create a lead'
-    )
+  let!(:leads) do
+    Knowledge::Module.create!(key: 'leads', name: 'Leads', route: '/crm', description: 'Prospects and inquiries', is_active: true)
   end
-
-  let(:feature) do
-    instance_double(Knowledge::Feature,
-                    key: 'create', route: '/crm/leads/new', ui_selector: '#leads-new-button', name: 'Create Lead')
+  let!(:create_feature) do
+    leads.features.create!(key: 'create', name: 'Create Lead', route: '/crm', ui_selector: '[data-tour="add-button"]')
   end
-
-  let(:leads_module) do
-    m = double('Knowledge::Module', id: 1, key: 'leads', name: 'Leads', route: '/crm/leads')
-    features_rel = double('ActiveRecord::Relation')
-    # The service maps the user's intent to a feature key (create→create,
-    # navigate→list). Accept any key — return the stub for 'create' and nil
-    # for anything else so we still exercise the no-feature fallback path.
-    allow(features_rel).to receive(:find_by) { |args| args[:key] == 'create' ? feature : nil }
-    allow(m).to receive(:features).and_return(features_rel)
-    m
+  let!(:article) do
+    Knowledge::Article.create!(knowledge_module: leads, title: 'Working your leads', slug: 'working-leads',
+                               content: 'How to follow up with prospects', is_published: true)
   end
 
   before do
-    allow(Knowledge::IntentMatcher).to receive(:new).and_return(
-      instance_double(Knowledge::IntentMatcher, parse: matcher_result)
-    )
-
-    active_modules = double('ActiveRecord::Relation', find_by: leads_module)
-    allow(Knowledge::Module).to receive(:active).and_return(active_modules)
-
-    empty_ordered = double('ActiveRecord::Relation', first: nil)
-    empty_where   = double('ActiveRecord::Relation', ordered: empty_ordered)
-    active_tours  = double('ActiveRecord::Relation', where: empty_where)
-    allow(Tour).to receive(:active).and_return(active_tours)
-
-    articles_rel = double('ActiveRecord::Relation')
-    allow(articles_rel).to receive(:where).and_return(articles_rel)
-    allow(articles_rel).to receive(:ordered).and_return(articles_rel)
-    allow(articles_rel).to receive(:limit).and_return([])
-    allow(Knowledge::Article).to receive(:published).and_return(articles_rel)
-
-    # SmartSearchService always records the search.
-    allow(Knowledge::Search).to receive(:create!)
+    Knowledge::IntentPattern.create!(pattern: '\b(create|add|new)\b.*\blead', intent_type: 'create', entity_key: 'leads', priority: 10)
   end
 
-  describe '#search' do
-    it 'returns empty for blank query without writing analytics' do
-      expect(Knowledge::Search).not_to receive(:create!)
-      expect(described_class.new('').search).to eq([])
+  def search(q, user: nil)
+    described_class.new(q, user: user).search
+  end
+
+  it 'returns empty for a blank query without writing analytics' do
+    expect { expect(search('')).to eq([]) }.not_to change(Knowledge::Search, :count)
+  end
+
+  it 'returns a navigate result for a confident intent and entity' do
+    result = search('how do I create a lead').first
+    expect(result).to include(type: 'navigate', module: 'leads', feature: 'create', route: '/crm')
+  end
+
+  it 'finds published articles by their words' do
+    expect(search('follow up prospects').map { |r| r[:slug] }).to include('working-leads')
+  end
+
+  it 'resolves a bare synonym through the alias table' do
+    Knowledge::EntityAlias.create!(alias_name: 'prospects', canonical_key: 'leads', entity_type: 'module')
+    expect(search('prospects').first).to include(type: 'navigate', module: 'leads')
+  end
+
+  it 'logs a search that found nothing with a result count of zero' do
+    results = search('zzqx gibberish')
+
+    expect(results.first[:source]).to eq('fallback')
+    expect(Knowledge::Search.last).to have_attributes(query: 'zzqx gibberish', result_count: 0)
+  end
+
+  describe 'tours while paused' do
+    let!(:tour) { Tour.create!(key: 'lead-tour', name: 'Leads walkthrough', knowledge_module: leads, trigger_type: 'manual') }
+
+    before { PlatformSetting.tours_paused = true }
+    after  { PlatformSetting.tours_paused = false }
+
+    it 'leaves them out for dealers' do
+      expect(search('leads walkthrough').map { |r| r[:type] }).not_to include('tour')
     end
 
-    it 'returns a navigate result for a confident intent+entity match' do
-      results = described_class.new('how do I create a lead').search
-      expect(results.first).to include(
-        type: 'navigate',
-        module: 'leads',
-        feature: 'create',
-        route: '/crm/leads/new',
-        selector: '#leads-new-button'
-      )
-    end
-
-    it 'escalates to step 4 (semantic) then step 5 (fallback) when graph returns nothing' do
-      # Force matcher to produce a below-threshold result so feature lookup bails out.
-      allow(Knowledge::IntentMatcher).to receive(:new).and_return(
-        instance_double(Knowledge::IntentMatcher, parse: Knowledge::IntentMatcher::Result.new(
-          intent: nil, entity: nil, confidence: 0.0, matched_text: 'gibberish'
-        ))
-      )
-      stub_alias_miss
-
-      results = described_class.new('gibberish').search
-      expect(results.first[:type]).to eq('suggestion')
-      expect(results.first[:source]).to eq('fallback')
-    end
-
-    it 'uses the alias step when the query is a bare synonym' do
-      allow(Knowledge::IntentMatcher).to receive(:new).and_return(
-        instance_double(Knowledge::IntentMatcher, parse: Knowledge::IntentMatcher::Result.new(
-          intent: nil, entity: nil, confidence: 0.0, matched_text: 'home'
-        ))
-      )
-      alias_hit = double('Knowledge::EntityAlias', canonical_key: 'leads')
-      stub_alias_hit(alias_hit)
-
-      results = described_class.new('home').search
-      expect(results.first[:type]).to eq('navigate')
-    end
-
-    it 'persists a knowledge_searches row even when the query yields no results' do
-      allow(Knowledge::IntentMatcher).to receive(:new).and_return(
-        instance_double(Knowledge::IntentMatcher, parse: Knowledge::IntentMatcher::Result.new(
-          intent: nil, entity: nil, confidence: 0.0, matched_text: 'gibberish'
-        ))
-      )
-      stub_alias_miss
-
-      expect(Knowledge::Search).to receive(:create!).with(hash_including(
-        query: 'gibberish', intent_detected: nil, result_count: 1
-      ))
-      described_class.new('gibberish').search
-    end
-
-    def stub_alias_miss
-      chain = double('ActiveRecord::Relation')
-      allow(chain).to receive(:order).and_return(double('ActiveRecord::Relation', first: nil))
-      allow(Knowledge::EntityAlias).to receive(:where).and_return(chain)
-    end
-
-    def stub_alias_hit(hit)
-      chain = double('ActiveRecord::Relation')
-      allow(chain).to receive(:order).and_return(double('ActiveRecord::Relation', first: hit))
-      allow(Knowledge::EntityAlias).to receive(:where).and_return(chain)
+    it 'still offers them to platform admins' do
+      admin = User.new(role: 'platform_admin')
+      expect(search('leads walkthrough', user: admin).map { |r| r[:type] }).to include('tour')
     end
   end
 end

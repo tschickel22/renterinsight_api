@@ -2166,6 +2166,12 @@ Rails.application.routes.draw do
         post   'categories',            action: :manage_category
       end
 
+      # In-app guidance: usage events and summary (backlog E75).
+      scope :guide, controller: :guide do
+        post 'events', action: :events
+        get  'usage',  action: :usage
+      end
+
       # Interactive guided tours (list/start/complete/step tracking).
       resources :tours, only: %i[index show create update destroy] do
         collection do

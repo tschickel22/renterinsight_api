@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_090000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_11_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3459,6 +3459,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_090000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "active"], name: "index_fni_products_on_company_id_and_active"
     t.index ["company_id"], name: "index_fni_products_on_company_id"
+  end
+
+  create_table "guide_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "kind", null: false
+    t.string "feature_key", null: false
+    t.string "route"
+    t.datetime "occurred_at", null: false
+    t.datetime "created_at", null: false
+    t.index ["company_id", "occurred_at"], name: "index_guide_events_on_company_id_and_occurred_at"
+    t.index ["occurred_at"], name: "index_guide_events_on_occurred_at"
+    t.index ["user_id", "occurred_at"], name: "index_guide_events_on_user_id_and_occurred_at"
+  end
+
+  create_table "guide_feature_usages", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "feature_key", null: false
+    t.datetime "first_used_at", null: false
+    t.datetime "last_used_at", null: false
+    t.integer "use_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "feature_key"], name: "index_guide_feature_usages_on_company_id_and_feature_key"
+    t.index ["user_id", "feature_key"], name: "index_guide_feature_usages_on_user_id_and_feature_key", unique: true
   end
 
   create_table "import_jobs", force: :cascade do |t|
