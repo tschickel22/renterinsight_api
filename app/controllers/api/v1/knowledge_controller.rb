@@ -56,6 +56,8 @@ module Api
         scope = scope.ordered
         scope = scope.joins(:knowledge_module).where(knowledge_modules: { key: params[:module] }) if params[:module].present?
         scope = scope.of_type(params[:article_type]) if params[:article_type].present?
+        # What's New reads newest first.
+        scope = scope.reorder(created_at: :desc) if params[:article_type] == 'release_note'
 
         total = scope.count
         render json: {

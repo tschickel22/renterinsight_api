@@ -3217,6 +3217,16 @@ Rails.application.routes.draw do
       end
 
       # ==================== KNOWLEDGE BASE ADMIN (Platform Admin Only) ====================
+      # Release queue: help drafted for what changed in each build (E75).
+      scope 'guide/releases', controller: :guide_releases do
+        get  '',                     action: :index
+        post 'check',                action: :check
+        patch 'items/:id',           action: :update,  constraints: { id: /\d+/ }
+        post 'items/:id/approve',    action: :approve, constraints: { id: /\d+/ }
+        post 'items/:id/reject',     action: :reject,  constraints: { id: /\d+/ }
+        post 'items/:id/redraft',    action: :redraft, constraints: { id: /\d+/ }
+      end
+
       # Resource-dispatched CRUD — ?resource=modules|features|articles|tours|...
       scope :knowledge, controller: :knowledge do
         get    'analytics',           action: :analytics

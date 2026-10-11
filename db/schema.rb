@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_100000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_11_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3946,6 +3946,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_100000) do
     t.datetime "reviewed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "context", default: {}, null: false
+    t.jsonb "drafts", default: {}, null: false
+    t.string "draft_status", default: "pending", null: false
+    t.text "draft_error"
+    t.datetime "published_at"
+    t.bigint "published_article_id"
+    t.bigint "published_note_id"
+    t.bigint "published_tour_id"
     t.index ["change_type"], name: "index_knowledge_change_queue_on_change_type"
     t.index ["entity_key"], name: "index_knowledge_change_queue_on_entity_key"
     t.index ["entity_type", "entity_key"], name: "index_knowledge_change_queue_on_entity_type_and_entity_key"
@@ -4029,8 +4037,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_100000) do
     t.jsonb "changes_detected", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "source"
+    t.string "commit_sha"
+    t.jsonb "atlas", default: {}, null: false
+    t.jsonb "commits", default: [], null: false
     t.index ["modules_hash"], name: "index_knowledge_snapshots_on_modules_hash"
     t.index ["snapshot_at"], name: "index_knowledge_snapshots_on_snapshot_at"
+    t.index ["source", "snapshot_at"], name: "index_knowledge_snapshots_on_source_and_snapshot_at"
   end
 
   create_table "knowledge_ui_elements", force: :cascade do |t|

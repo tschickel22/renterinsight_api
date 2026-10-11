@@ -1,5 +1,8 @@
 class AiQueryLog < ApplicationRecord
-  belongs_to :company
+  # Optional for platform work that belongs to no dealer (drafting help for a
+  # release, guide_release_draft). Limits count by company_id, so a row without
+  # one never touches any tenant's allowance.
+  belongs_to :company, optional: true
   belongs_to :user, optional: true
   belongs_to :location, optional: true
 
@@ -8,7 +11,7 @@ class AiQueryLog < ApplicationRecord
   # and, because callers rescue logging failures, fails silently.
   FEATURES = %w[report_ai vision_scan ai_campaign_generate ai_campaign_refine ai_audience_generate
                 ai_audience_refine bill_scan ai_template_generate ai_sequence_generate deal_desk_ai
-                ai_landing_page_generate site_content_profile].freeze
+                ai_landing_page_generate site_content_profile guide_release_draft].freeze
   STATUSES = %w[success error rate_limited no_results classified no_match disambiguation].freeze
 
   # AI features that draw from the company's single monthly AI query budget. Deal Desk AI

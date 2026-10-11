@@ -22,7 +22,10 @@ module AiModel
     # short questions from facts it is handed, which is the cheapest class of
     # work we do and the highest volume, since it sits on every dealer page.
     # AI_MODEL_CONCIERGE moves it without a deploy if the answers need more.
-    concierge:      'claude-haiku-4-5'
+    concierge:      'claude-haiku-4-5',
+    # In-app help (backlog E75): drafting articles and tours for new features,
+    # and later the help assistant. AI_MODEL_HELP moves it without a deploy.
+    help:           'claude-sonnet-4-6'
   }.freeze
 
   def self.for(role)

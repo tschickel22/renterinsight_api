@@ -32,6 +32,11 @@ default: &default
     class: Guide::PruneEventsJob
     queue: low
     schedule: every day at 3:30am
+  # Notices new frontend builds and drafts help for what changed (E75).
+  guide_release_watch:
+    class: Guide::ReleaseWatchJob
+    queue: low
+    schedule: every 10 minutes
   # Scheduled TrueView factory runs start, and batch runs send and collect
   # their Gemini batches.
   truebuild_factory_run_tick:
