@@ -108,6 +108,35 @@ RSpec.describe Guide::TourDrafter do
     expect(steps[3][:click_required]).to be(false)
   end
 
+  it 'never offers a dealer a button only platform admins see' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'z',
+      atlas: {
+        'entries' => [
+          { 'key' => 'page:/site', 'kind' => 'page', 'title' => 'Your website', 'route' => '/site', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/site', 'title' => 'Website', 'text' => 'Click Website.', 'click' => true }] },
+          { 'key' => 'action:new-site', 'kind' => 'action', 'title' => 'New site', 'route' => '/site', 'requires' => [{ 'adminOnly' => true }],
+            'where' => [{ 'anchor' => 'nav:/site', 'title' => 'Website', 'text' => 'Click Website.', 'click' => true },
+                        { 'route' => '/site', 'anchor' => 'site-new', 'title' => 'New', 'text' => 'Click New.', 'click' => true }] }
+        ],
+        'markers' => { 'site-new' => ['/site'], 'site-edit' => ['/site'] }
+      }
+    )
+    form = Class.new do
+      def self.call(content:, **)
+        raise 'admin marker offered' if content.include?('site-new')
+
+        { input: { 'name' => 'Website', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'page:/site' },
+          { 'marker' => 'site-new', 'route' => '/site', 'title' => 'New', 'text' => 'Click New.', 'click' => true },
+          { 'marker' => 'site-edit', 'route' => '/site', 'title' => 'Edit', 'text' => 'Edit it.', 'click' => true }
+        ] } }
+      end
+    end
+    selectors = described_class.new('edit your website', client: form).draft[:steps].map { |s| s[:selector] }
+    expect(selectors).to eq(['[data-tour="nav:/site"]', '[data-tour="site-edit"]'])
+  end
+
   it 'walks a form\'s fields in the order the form shows them' do
     Knowledge::Snapshot.create!(
       source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'z',

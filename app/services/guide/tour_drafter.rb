@@ -57,7 +57,12 @@ module Guide
       # Tours are for dealers: places only platform admins see are left out
       # (the nightly check, signed in as a dealer, caught a tour sending
       # people to the admin-only Lot Map).
-      @entries = Array(snapshot&.atlas&.dig('entries')).reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
+      all = Array(snapshot&.atlas&.dig('entries'))
+      @entries = all.reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
+      # Buttons only platform admins see (New Website): a marker that only a
+      # platform-only entry walks to is never offered to a dealer's tour.
+      dealer_anchors = @entries.values.flat_map { |e| Array(e['where']).map { |w| w['anchor'] } }
+      @admin_markers = all.select { |e| platform_only?(e) }.flat_map { |e| Array(e['where']).map { |w| w['anchor'] } }.compact.uniq - dealer_anchors
       @markers = snapshot&.atlas&.dig('markers') || {}
       @marker_labels = snapshot&.atlas&.dig('marker_labels') || {}
       @marker_order = snapshot&.atlas&.dig('marker_order') || {}
@@ -151,7 +156,7 @@ module Guide
           walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any? && entry['kind'] != 'action' && s['title'].present?
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
-              marker_on_page?(s['marker'], s['route'])
+              marker_on_page?(s['marker'], s['route']) && !@admin_markers.include?(s['marker'])
           # A form field is filled in, not clicked through (a dropdown would
           # open and the tour would move on behind it).
           click = s['click'] == true && !s['marker'].to_s.start_with?('#')
@@ -241,7 +246,7 @@ module Guide
     def prompt
       places = @entries.values.map { |e| Guide::Copy.render_deep(e) }
                        .map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
-      markers = @markers.filter_map do |m, pages|
+      markers = @markers.except(*@admin_markers).filter_map do |m, pages|
         pages = Array(pages).select { |p| p.start_with?('/', '*') }
         label = @marker_labels[m].present? ? %( "#{@marker_labels[m]}") : ''
         "#{m}#{label} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
