@@ -4,7 +4,8 @@ module Api
   module V1
     class ToursController < ApplicationController
       before_action :authenticate_user!
-      before_action :require_platform_admin!, only: %i[create update destroy check_results]
+      before_action :require_platform_admin!, only: %i[create update destroy]
+      before_action :require_admin_or_checker!, only: %i[for_check check_results]
       before_action :set_tour, only: %i[show start complete step_complete dismiss]
       before_action :set_tour_for_admin, only: %i[update destroy check_results]
 
@@ -110,6 +111,16 @@ module Api
         render json: { ok: true, dismissed_at: completion.dismissed_at }
       end
 
+      # GET /api/v1/tours/for_check
+      # Every active tour with its steps as stored, for the tour check (the
+      # nightly run or an admin), whether or not tours are paused.
+      def for_check
+        tours = Tour.active.ordered.includes(:steps)
+        render json: { tours: tours.map { |t| { id: t.id, key: t.key, name: t.name, steps: t.steps.map { |s|
+          { position: s.position, route: s.route, selector: s.selector, click_required: s.click_required }
+        } } } }
+      end
+
       # POST /api/v1/tours/:id/check_results  { results: [{ position, status }] }
       # What a check of the tour against the live app found for each step:
       # found, missing or ambiguous. Platform admins run it from Knowledge admin.
@@ -170,6 +181,13 @@ module Api
       end
 
       private
+
+      def require_admin_or_checker!
+        return true if platform_admin_request? || Guide::Checker.user?(current_user)
+
+        render json: { error: 'Forbidden' }, status: :forbidden
+        false
+      end
 
       def platform_admin_request?
         admin = original_user

@@ -2186,6 +2186,7 @@ Rails.application.routes.draw do
         collection do
           get   :pause_state
           patch :pause_state, action: :set_pause_state
+          get   :for_check
         end
         member do
           post :start

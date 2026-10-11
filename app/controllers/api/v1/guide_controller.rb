@@ -13,7 +13,8 @@ module Api
       # and platform admins switched into a dealer are not recorded, so looking
       # around a dealer's account never shows up as that dealer using it.
       def events
-        return head(:no_content) if impersonating? || @company.id != current_user.company_id
+        # The nightly tour check is a robot, not someone using the product.
+        return head(:no_content) if impersonating? || @company.id != current_user.company_id || Guide::Checker.user?(current_user)
 
         recorded = Guide::UsageRecorder.new(user: current_user, company_id: @company.id)
                                        .record(params[:events])

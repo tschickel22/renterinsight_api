@@ -99,6 +99,32 @@ RSpec.describe 'Product tours', type: :request do
       post "/api/v1/tours/#{tour.id}/check_results", params: { results: [] }, headers: auth(user), as: :json
       expect(response).to have_http_status(:forbidden)
     end
+
+    context 'the nightly checker account' do
+      before { ENV['GUIDE_CHECK_EMAIL'] = user.email.upcase }
+      after  { ENV.delete('GUIDE_CHECK_EMAIL') }
+
+      it 'can list tours while paused and record results' do
+        PlatformSetting.tours_paused = true
+        get '/api/v1/tours/for_check', headers: auth(user)
+        expect(JSON.parse(response.body)['tours'].map { |t| t['id'] }).to include(tour.id)
+
+        post "/api/v1/tours/#{tour.id}/check_results", params: { results: [{ position: 1, status: 'found' }] }, headers: auth(user), as: :json
+        expect(response).to have_http_status(:ok)
+      ensure
+        PlatformSetting.tours_paused = false
+      end
+
+      it 'is not counted as product usage' do
+        post '/api/v1/guide/events', params: { events: [{ kind: 'page', feature: 'page:/deals' }] }, headers: auth(user), as: :json
+        expect(GuideEvent.count).to eq(0)
+      end
+    end
+
+    it 'does not let other users list tours for checking' do
+      get '/api/v1/tours/for_check', headers: auth(user)
+      expect(response).to have_http_status(:forbidden)
+    end
   end
 
   describe 'trigger types' do
