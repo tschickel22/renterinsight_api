@@ -42,27 +42,18 @@ RSpec.describe 'Release watcher', type: :service do
       expect(watch(atlas('a1', [pnl]))).to be_nil
     end
 
-    it 'queues added, changed and removed places, plus the release, and starts drafting' do
+    it 'records each build with only its own commits, and drafts nothing per deploy' do
       watch(atlas('a1', [pnl, bs]))
-      renamed = pnl.merge('title' => 'Profit and Loss')
       cash = entry('report:cash-flow', 'Cash Flow Statement', '/accounting/reports/cash-flow')
       commits = [{ 'sha' => 'a2', 'subject' => 'Reports: cash flow statement', 'body' => 'Adds it.' },
                  { 'sha' => 'a1', 'subject' => 'older', 'body' => '' }]
 
       snapshot = nil
-      expect { snapshot = watch(atlas('a2', [renamed, cash], commits: commits)) }
-        .to have_enqueued_job(Guide::DraftReleaseItemJob).exactly(3).times
+      expect { snapshot = watch(atlas('a2', [pnl, cash], commits: commits)) }.not_to have_enqueued_job(Guide::DraftReleaseItemJob)
 
-      items = snapshot.change_queue_items.map { |i| [i.change_type, i.entity_type, i.entity_key] }
-      expect(items).to contain_exactly(
-        ['added', 'atlas_entry', 'report:cash-flow'],
-        ['removed', 'atlas_entry', 'report:balance-sheet'],
-        ['modified', 'atlas_entry', 'report:profit-and-loss'],
-        ['modified', 'release', 'a2']
-      )
-      # Only commits since the previous build.
+      # Help is drafted weekly from the net change (Guide::WeeklyDigest).
+      expect(snapshot.change_queue_items).to be_empty
       expect(snapshot.commits.map { |c| c['sha'] }).to eq(['a2'])
-      expect(snapshot.change_queue_items.find_by(change_type: 'removed').draft_status).to eq('skipped')
     end
 
     context 'on a server that copies help from staging' do

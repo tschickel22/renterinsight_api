@@ -32,11 +32,18 @@ default: &default
     class: Guide::PruneEventsJob
     queue: low
     schedule: every day at 3:30am
-  # Notices new frontend builds and drafts help for what changed (E75).
+  # Records each new frontend build (E75). Help is drafted weekly, below.
   guide_release_watch:
     class: Guide::ReleaseWatchJob
     queue: low
     schedule: every 10 minutes
+  # Monday's help digest: the week's net change, help drafted for what dealers
+  # would notice, and an email with the tours to approve. Staging only in
+  # effect: production copies what staging approves.
+  guide_weekly_digest:
+    class: Guide::WeeklyDigestJob
+    queue: low
+    schedule: every monday at 7am America/Denver
   # Scheduled TrueView factory runs start, and batch runs send and collect
   # their Gemini batches.
   truebuild_factory_run_tick:

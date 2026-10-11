@@ -1,0 +1,23 @@
+Help digest for the week of <%= @release.context['week'] %>
+
+<% if @drafts['user_facing'] %><%= @drafts['title'] %>
+<%= @drafts['notes'] %>
+<% else %>Nothing a dealer would notice this week<% if @release.draft_status == 'failed' %> (the summary could not be written: <%= @release.draft_error.to_s.first(200) %>)<% end %>.
+<% end %>
+Review everything here: <%= @review_url %> (Releases tab for help, Tours tab to play and approve tours)
+
+Help to review (<%= @items.size %>)
+<% if @items.empty? %>  None this week.
+<% else %><% @items.each do |i| %>  - <%= (i.new_value || i.old_value || {})['title'] || i.entity_key %>: <%= { 'added' => 'new', 'modified' => 'changed', 'removed' => 'removed, retire its help' }[i.change_type] %><%= i.published_article_id ? ', updates its existing article' : '' %><%= Array(i.drafts&.dig('tour', 'steps')).any? ? ', new tour drafted' : '' %><%= i.draft_status == 'failed' ? ', draft failed (Redraft it)' : '' %>
+<% end %><% end %>
+New tours drafted this week (<%= @new_tours.size %>). They become tours to play and approve once you approve the help.
+<% @new_tours.each do |i| %>  - <%= i.drafts.dig('tour', 'name') %>
+<% end %>
+Tours waiting for you to play and approve (<%= @tours_to_approve.size %>). Dealers see a tour only after you approve it.
+<% @tours_to_approve.each do |t| %>  - <%= t.name %>
+<% end %>
+<% skipped = Array(@drafts['skipped']) %><% if skipped.any? %>
+Left out as not visible to dealers (<%= skipped.size %>)
+<% skipped.first(40).each do |s| %>  - <%= s['what'] %>: <%= s['why'] %>
+<% end %><% end %>
+<%= (@release.context['commits'] || []).size %> commits and <%= (@release.context['changes'] || []).size %> changed places went into this week.

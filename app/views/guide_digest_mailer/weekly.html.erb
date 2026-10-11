@@ -1,0 +1,45 @@
+<h2 style="margin-bottom:4px">Help digest for the week of <%= @release.context['week'] %></h2>
+<% if @drafts['user_facing'] %>
+  <p style="margin:0 0 4px"><strong><%= @drafts['title'] %></strong></p>
+  <div style="white-space:pre-line"><%= @drafts['notes'] %></div>
+<% else %>
+  <p>Nothing a dealer would notice this week<% if @release.draft_status == 'failed' %> (the summary could not be written: <%= @release.draft_error.to_s.first(200) %>)<% end %>.</p>
+<% end %>
+
+<p><a href="<%= @review_url %>">Open Knowledge admin</a>: the Releases tab has the help to review, the Tours tab the tours to play and approve.</p>
+
+<h3 style="margin-bottom:4px">Help to review (<%= @items.size %>)</h3>
+<% if @items.empty? %>
+  <p style="margin-top:0">None this week.</p>
+<% else %>
+  <ul style="margin-top:0">
+    <% @items.each do |i| %>
+      <li>
+        <strong><%= (i.new_value || i.old_value || {})['title'] || i.entity_key %></strong>:
+        <%= { 'added' => 'new', 'modified' => 'changed', 'removed' => 'removed, retire its help' }[i.change_type] %><%= i.published_article_id ? ', updates its existing article' : '' %><%= Array(i.drafts&.dig('tour', 'steps')).any? ? ', new tour drafted' : '' %><%= i.draft_status == 'failed' ? ', draft failed (Redraft it)' : '' %>
+      </li>
+    <% end %>
+  </ul>
+<% end %>
+
+<h3 style="margin-bottom:4px">New tours drafted this week (<%= @new_tours.size %>)</h3>
+<p style="margin-top:0">Each becomes a tour to play and approve once you approve its help.</p>
+<% if @new_tours.any? %>
+  <ul><% @new_tours.each do |i| %><li><%= i.drafts.dig('tour', 'name') %></li><% end %></ul>
+<% end %>
+
+<h3 style="margin-bottom:4px">Tours waiting for you to play and approve (<%= @tours_to_approve.size %>)</h3>
+<p style="margin-top:0">Dealers see a tour only after you approve it.</p>
+<% if @tours_to_approve.any? %>
+  <ul><% @tours_to_approve.each do |t| %><li><%= t.name %></li><% end %></ul>
+<% end %>
+
+<% skipped = Array(@drafts['skipped']) %>
+<% if skipped.any? %>
+  <h3 style="margin-bottom:4px">Left out as not visible to dealers (<%= skipped.size %>)</h3>
+  <ul style="margin-top:0;color:#555">
+    <% skipped.first(40).each do |s| %><li><%= s['what'] %>: <%= s['why'] %></li><% end %>
+  </ul>
+<% end %>
+
+<p style="color:#777"><%= (@release.context['commits'] || []).size %> commits and <%= (@release.context['changes'] || []).size %> changed places went into this week.</p>

@@ -234,6 +234,10 @@ module Guide
     end
 
     def platform_only?(entry)
+      self.class.platform_only?(entry)
+    end
+
+    def self.platform_only?(entry)
       Array(entry['requires']).any? do |r|
         r['adminOnly'] || r['settingsAccess'] == 'platformAdmin' || r['integrationsSub'] == 'platform'
       end

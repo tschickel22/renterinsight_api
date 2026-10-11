@@ -3234,6 +3234,7 @@ Rails.application.routes.draw do
       scope 'guide/releases', controller: :guide_releases do
         get  '',                     action: :index
         post 'check',                action: :check
+        post 'digest',               action: :digest
         post 'tour_draft',           action: :tour_draft
         get  'adoption',             action: :adoption
         get  'gaps',                 action: :gaps

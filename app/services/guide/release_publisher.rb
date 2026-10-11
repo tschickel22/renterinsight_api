@@ -81,7 +81,9 @@ module Guide
       tour.assign_attributes(
         name: @drafts.dig('tour', 'name').presence || "Where to find #{entry['title']}",
         description: @drafts.dig('article', 'excerpt'),
-        trigger_type: 'manual', is_active: true
+        trigger_type: 'manual', is_active: true,
+        # New steps reach dealers only after a person plays and approves them.
+        approved_at: nil, approved_by_id: nil
       )
       tour.save!
       tour.steps.destroy_all

@@ -3,8 +3,10 @@
 require 'net/http'
 
 module Guide
-  # Notices what changed in the product between frontend builds and queues
-  # help to be drafted for it (backlog E75, "release watcher").
+  # Notices what changed in the product between frontend builds (backlog E75,
+  # "release watcher"). Every build is recorded as a snapshot; help is drafted
+  # once a week from the net change (Guide::WeeklyDigest), because a week holds
+  # dozens of small deploys and drafting for each buried the few that matter.
   #
   # Each build publishes atlas.json (see the frontend's
   # scripts/export-atlas.ts): every page, report, setting and action, plus the
@@ -53,7 +55,9 @@ module Guide
           atlas: atlas.slice('version', 'generated_at', 'branch', 'context', 'entries', 'markers', 'marker_labels', 'marker_order'),
           commits: new_commits(atlas['commits'], previous)
         )
-        queue_changes(snapshot, previous, entries) if previous
+        # Production only: placeholders that wait for the help approved on
+        # staging (no AI). Staging drafts weekly instead.
+        queue_changes(snapshot, previous, entries) if previous && Guide::ApprovedHelpSync.configured?
         snapshot
       end.tap { |snapshot| enqueue_drafts(snapshot) }
     end
@@ -92,16 +96,6 @@ module Guide
 
         queue(snapshot, 'modified', key, before[key], entries[key])
       end
-
-      # The release itself: commits can add a button or change a flow without
-      # adding a page, and that still deserves a "What's new" line. Where help
-      # is copied from staging, release notes come from there instead.
-      return if snapshot.commits.blank? || Guide::ApprovedHelpSync.configured?
-
-      snapshot.change_queue_items.create!(
-        change_type: 'modified', entity_type: 'release', entity_key: snapshot.commit_sha.presence || "snapshot-#{snapshot.id}",
-        new_value: { 'commit_count' => snapshot.commits.size }, context: { 'commits' => snapshot.commits }
-      )
     end
 
     def queue(snapshot, change_type, key, old_value, new_value)
