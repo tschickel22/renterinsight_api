@@ -68,6 +68,12 @@ module Truebuild
       service
     end
 
+    # Locked by a signed agreement, or out with the buyers for signature.
+    def self.assert_editable!(build)
+      problem = Agreements::DealSheetLock.edit_problem(build)
+      raise Locked, problem if problem
+    end
+
     def self.next_version(deal)
       deal.home_builds.maximum(:version_number).to_i + 1
     end
@@ -121,7 +127,8 @@ module Truebuild
       return reprice! if @build.live?
 
       current = @build.deal.home_build
-      raise Locked, "#{current.version_name} is locked by a signed agreement; change it with a change order" if current&.locked?
+      self.class.assert_editable!(current) if current
+      self.class.assert_editable!(@build)
 
       DealHomeBuild.transaction do
         current&.update!(live: false)
@@ -352,7 +359,7 @@ module Truebuild
     private
 
     def guard!
-      raise Locked, 'This build is locked by a signed agreement; change it with a change order' if @build.locked?
+      self.class.assert_editable!(@build)
     end
 
     def engine(option_ids:, addon_ids:)

@@ -143,8 +143,10 @@ module Agreements
       @company.agreements.where(deal_id: @deal.id, status: Agreement::STATUS_COMPLETED).order(completed_at: :desc, id: :desc).to_a
     end
 
+    # The home's own line too: a new copy is priced from today's book, and a
+    # price move there must show on the change order, not hide in its total.
     def keyed(build)
-      build.lines.reject { |l| l.kind == 'base' }.index_by { |l| l.catalog_option_id ? "o#{l.catalog_option_id}" : "#{l.kind}:#{l.label.downcase}" }
+      build.lines.index_by { |l| l.catalog_option_id ? "o#{l.catalog_option_id}" : "#{l.kind}:#{l.label.downcase}" }
     end
 
     def price(line) = line.tbd ? nil : line.retail.to_d.round(2)

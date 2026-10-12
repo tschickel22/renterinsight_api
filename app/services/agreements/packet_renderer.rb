@@ -38,6 +38,8 @@ module Agreements
     FILL = '1E3A8A' # filled-in values, so a reader sees what was typed for this deal
     TOTAL_TWIPS = 10_800.0
     PLACEHOLDER = /\A(\u2014|-+)?\s*(select)?\s*(\u2014|-+)?\z/i
+    # Who signs when a package names no one, in signing order.
+    DEFAULT_SIGNERS = %w[buyer_1 rep manager buyer_2].freeze
     SIGNER_LABELS = { 'buyer_1' => 'Buyer 1', 'buyer_2' => 'Buyer 2', 'rep' => 'Dealer Representative', 'manager' => 'Manager / Member' }.freeze
     FIELD_TYPES = { 'signature' => 'signature', 'initials' => 'initials', 'date' => 'date_signed' }.freeze
 
@@ -50,7 +52,7 @@ module Agreements
       end
     end
 
-    def initialize(deal, template, agreement_number: nil, date: Date.current)
+    def initialize(deal, template, agreement_number: nil, date: nil)
       @deal = deal
       @template = template
       @packet = template.packet.to_h
@@ -60,7 +62,7 @@ module Agreements
       @fields = {}      # key => definition
       @field_spots = [] # [{ page, key, box }]
       present = %w[buyer_1 buyer_2].select { |b| @values["#{b}.name"] }
-      @signers = Array(@packet['signers']).presence || %w[buyer_1 rep manager buyer_2]
+      @signers = Array(@packet['signers']).presence || DEFAULT_SIGNERS
       @signers = @signers.reject { |s| s.start_with?('buyer') && !present.include?(s) }
     end
 

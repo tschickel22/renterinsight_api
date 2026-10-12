@@ -12,6 +12,7 @@ module Api
       before_action :set_company_scope
       before_action :set_deal
       before_action :set_deal_product, only: [:show, :update, :destroy]
+      before_action :refuse_when_sheet_signed, only: [:create, :update, :destroy, :bulk_create]
 
       # GET /api/crm/deals/:deal_id/products
       def index
@@ -128,7 +129,15 @@ module Api
       def deal_sheet_json
         live = @deal.home_build
         live && { live_version_id: live.id, live_version_number: live.version_number, live_version_name: live.version_name,
-                  version_count: @deal.home_builds.count }
+                  version_count: @deal.home_builds.count, locked_reason: Agreements::DealSheetLock.edit_problem(live) }
+      end
+
+      # The deal's lines are the LIVE Deal Sheet's. Once the buyers have
+      # signed it, or while an agreement for it is out, they change only on
+      # the Deal Sheet, by a change order.
+      def refuse_when_sheet_signed
+        problem = @deal.home_build && Agreements::DealSheetLock.edit_problem(@deal.home_build)
+        render json: { error: problem }, status: :conflict if problem
       end
 
       # Products and the Deal Sheet are one record (backlog E49). The Products

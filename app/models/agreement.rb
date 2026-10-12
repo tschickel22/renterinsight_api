@@ -24,6 +24,10 @@ class Agreement < ApplicationRecord
 
   # Validations
   validates :title, presence: true
+  validate :linked_records_in_company
+
+  # Metadata the server writes about the Deal Sheet; clients never set it.
+  SERVER_METADATA_KEYS = %w[deal_sheet packet buyer_change_order deal_sheet_unlocked deal_sheet_not_applied].freeze
   validates :agreement_number, uniqueness: { scope: :company_id }, allow_nil: true
   before_validation :generate_agreement_number, on: :create
   before_validation :normalize_content_type
@@ -306,7 +310,9 @@ class Agreement < ApplicationRecord
     { version_name: stamp['version_name'], version_number: stamp['version_number'],
       live: live.present? && live.id == stamp['build_id'],
       changed: current.present? && (current['build_id'] != stamp['build_id'] || current['digest'] != stamp['digest']),
-      live_version_name: live&.version_name }
+      live_version_name: live&.version_name,
+      # Signed, but the sheet had moved, so it was not locked or applied.
+      not_applied: metadata.to_h.dig('deal_sheet_not_applied', 'reason') }
   end
 
   def initialize_field_definitions_from_template!
@@ -402,5 +408,17 @@ class Agreement < ApplicationRecord
 
   def log_creation
     AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_CREATED, performed_by: prepared_by)
+  end
+
+  # The deal, contact, account and location an agreement names must be this
+  # company's: an id from another company would show its names here and read
+  # its Deal Sheet.
+  def linked_records_in_company
+    { deal: :deal_id, contact: :contact_id, account: :account_id, location: :location_id }.each do |assoc, column|
+      next if self[column].blank? || !(new_record? || will_save_change_to_attribute?(column))
+
+      record = public_send(assoc)
+      errors.add(column, 'is not one of this company\'s records') unless record && record.company_id == company_id
+    end
   end
 end

@@ -64,24 +64,31 @@ module Agreements
         agreement.metadata = agreement.metadata.to_h.merge('packet' => { 'page_count' => result.page_count, 'signers' => result.signers })
         agreement.stamp_deal_sheet!
         agreement.save!
-        result.signers.each { |key_name| add_signer(agreement, key_name, manager) }
+        # Every signer the package places fields for must be a person: one
+        # skipped would hand the next one its fields (signerIndex is position).
+        people = result.signers.map { |key_name| [key_name, person_for(key_name, manager)] }
+        missing = people.select { |_, who| who.nil? }.map { |key_name, _| PacketRenderer::SIGNER_LABELS[key_name] || key_name }
+        raise NotReady, "No one to sign as #{missing.join(', ')}" if missing.any?
+
+        people.each { |_, who| add_signer(agreement, who) }
         agreement
       end
     end
 
     private
 
-    def manager_required? = templates.any? { |t| Array(t.packet['signers']).include?('manager') }
+    def manager_required? = templates.any? { |t| (Array(t.packet.to_h['signers']).presence || PacketRenderer::DEFAULT_SIGNERS).include?('manager') }
 
-    def add_signer(agreement, key, manager)
-      who = case key
-            when 'buyer_1' then @deal.contact
-            when 'buyer_2' then @deal.co_applicant_contact
-            when 'rep' then @deal.owner || @user
-            when 'manager' then manager
-            end
-      return unless who
+    def person_for(key, manager)
+      case key
+      when 'buyer_1' then @deal.contact
+      when 'buyer_2' then @deal.co_applicant_contact
+      when 'rep' then @deal.owner || @user
+      when 'manager' then manager
+      end
+    end
 
+    def add_signer(agreement, who)
       name = who.respond_to?(:full_name) && who.full_name.present? ? who.full_name : [who.try(:first_name), who.try(:last_name)].compact.join(' ')
       agreement.agreement_signers.create!(role: 'signer', signing_order: 1,
                                           name: name.presence || who.email, email: who.email, signable: who)
