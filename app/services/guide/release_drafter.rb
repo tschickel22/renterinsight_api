@@ -56,7 +56,16 @@ module Guide
         properties: {
           user_facing: { type: 'boolean', description: 'False when nothing here changes what a dealer sees or can do.' },
           title: { type: 'string', description: 'Short headline for the release, e.g. "Land and home packages on your website".' },
-          notes_markdown: { type: 'string', description: 'A short bulleted list of what dealers can now do. Empty when not user facing.' }
+          notes_markdown: { type: 'string', description: 'A short bulleted list of what dealers can now do. Empty when not user facing.' },
+          dealer_visible_keys: {
+            type: 'array', items: { type: 'string' },
+            description: 'For a weekly summary: the keys of the changed places a dealer would notice and that deserve help written or updated. Leave out renames of internal pages, admin tools and anything the commits show is a fix with no visible change.'
+          },
+          skipped: {
+            type: 'array',
+            description: 'For a weekly summary: the changes left out, each with a few words on why.',
+            items: { type: 'object', properties: { what: { type: 'string' }, why: { type: 'string' } }, required: %w[what why] }
+          }
         },
         required: %w[user_facing title notes_markdown]
       }
@@ -86,7 +95,13 @@ module Guide
       @item.snapshot
     end
 
+    # For the prompt: dealer-word tokens shown as their defaults. The stored
+    # tour steps keep the tokens, filled in per dealer when served.
     def entry
+      Guide::Copy.render_deep(@item.new_value || {})
+    end
+
+    def raw_entry
       @item.new_value || {}
     end
 
@@ -108,8 +123,15 @@ module Guide
           content: clean(result['article_markdown'])
         },
         whats_new: clean(result['whats_new']),
-        tour: { name: "Where to find #{entry['title']}", steps: where_steps + in_page(steps) }
-      }
+        # A tour only for a new place. A changed place keeps its tour; the
+        # nightly tour check says if the change broke it.
+        tour: (@item.change_type == 'added' && @item.published_tour_id.blank? ? { name: "Where to find #{entry['title']}", steps: where_steps + in_page(steps) } : nil)
+      }.compact
+    end
+
+    # The help already written for this place, so a change updates it.
+    def existing_article
+      @existing_article ||= @item.published_article_id && Knowledge::Article.find_by(id: @item.published_article_id)
     end
 
     # A question people asked that the help did not answer: an article that
@@ -138,13 +160,18 @@ module Guide
 
     def draft_release
       result = ask(RELEASE_TOOL, release_prompt)
-      { user_facing: result['user_facing'] == true, title: clean(result['title']), notes: clean(result['notes_markdown']) }
+      known = Array(@item.context['changes']).map { |c| c['key'] }
+      {
+        user_facing: result['user_facing'] == true, title: clean(result['title']), notes: clean(result['notes_markdown']),
+        dealer_visible_keys: Array(result['dealer_visible_keys']).map(&:to_s) & known,
+        skipped: Array(result['skipped']).map { |x| { what: clean(x['what']), why: clean(x['why']) } }
+      }
     end
 
     # The menu walk comes from the Atlas, not the model, so it cannot point
     # anywhere that does not exist.
     def where_steps
-      Array(entry['where']).map do |s|
+      Array(raw_entry['where']).map do |s|
         { route: s['route'], selector: %([data-tour="#{s['anchor']}"]), title: s['title'], content: s['text'],
           click_required: s['click'] == true }
       end
@@ -152,7 +179,7 @@ module Guide
 
     def in_page(steps)
       steps.map do |s|
-        { route: entry['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']),
+        { route: entry['route'], selector: Guide::TourDrafter.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']),
           click_required: false }
       end
     end
@@ -174,12 +201,25 @@ module Guide
         Markers you may use for in_page_steps (exact strings; use none if none fit):
         #{allowed_markers.join(', ').presence || '(none)'}
 
+        #{existing_article ? "This place already has this article. Rewrite it for the change: keep what is still true, fix what changed, and keep its title unless the place was renamed.\n## #{existing_article.title}\n#{existing_article.content.to_s.first(6000)}\n" : ''}
         Existing help articles, so you do not duplicate one:
         #{Knowledge::Article.published.limit(80).pluck(:title).join("\n")}
       TEXT
     end
 
     def release_prompt
+      changes = Array(@item.context['changes'])
+      return <<~TEXT if changes.any?
+        This is one week of work on the product: many small deploys. Most are fixes and internal work a dealer never sees.
+        Decide what a dealer would actually notice this week, write short release notes for it, and pick which changed places deserve help written or updated (dealer_visible_keys). List what you left out in skipped.
+
+        Places that changed this week (change | key | title | where):
+        #{changes.map { |c| "#{c['change']} | #{c['key']} | #{c['title']} | #{c['where']}" }.join("\n")}
+
+        Commits this week:
+        #{commit_text(all: true)}
+      TEXT
+
       <<~TEXT
         These commits went into one release of the product. Decide whether anything in them changes what a dealer sees or can do. If so, write short release notes.
 

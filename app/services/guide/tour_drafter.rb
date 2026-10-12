@@ -24,6 +24,7 @@ module Guide
                 place_key: { type: 'string', description: 'Use the menu walk of this place (steps to reach it). Omit when using marker.' },
                 marker: { type: 'string', description: 'A data-tour marker on the page given in route. Omit when using place_key.' },
                 route: { type: 'string', description: 'For a marker step: the page it is on.' },
+                click: { type: 'boolean', description: 'For a marker step the person must press to reach the next step (opening a dialog, choosing a type, a Next button).' },
                 title: { type: 'string' },
                 text: { type: 'string', description: 'One or two sentences.' }
               },
@@ -38,11 +39,15 @@ module Guide
     SYSTEM = <<~PROMPT
       You design short guided tours for {{brand}}, software dealerships use for leads, deals, inventory, accounting, service and marketing.
       - A tour walks a person through one real task, in the order they would do it, and ends when the task is done. Nothing else: no detours to other areas, no "you can also" steps, never the same place twice.
-      - For a tour about creating something (a lead, a deal), start with its action place (keys beginning action:), which already includes clicking the New button. Then point at the form's own markers in the order a person fills them in (the important fields only), and end on the form's save marker.
+      - For a tour about creating something (a lead, a deal, a calendar event), start with its action place (keys beginning action:), which already includes clicking the New button. Then point at the form's own markers in the order a person fills them in, and end on the form's save marker. Nothing comes after the save.
+      - Pick at most 5 fields: the ones a person must fill in to finish. Skip optional and advanced fields.
+      - When a marker has to be pressed for the next part to appear (choosing a type card, opening a dialog, a Next button), set click to true on it.
+      - At most 12 steps in all.
       - Use only the places and markers you are given. A place_key step expands into the clicks that reach that place, so you do not need separate steps for the menu.
       - A marker step points at something on the page the tour has just reached: put it right after the place_key step for that page, with that page as its route.
       - Write for a dealership employee: plain words, second person, short. Never use em dashes, en dashes or a spaced hyphen as a dash.
       - Never describe a button or field you were not given.
+      - Never name a button, menu item or field by its words: dealers rename them. Say "the highlighted button", "this field", "this menu item" and describe what it does.
     PROMPT
 
     def initialize(goal, client: Catalog::PriceBooks::ClaudeClient)
@@ -52,8 +57,15 @@ module Guide
       # Tours are for dealers: places only platform admins see are left out
       # (the nightly check, signed in as a dealer, caught a tour sending
       # people to the admin-only Lot Map).
-      @entries = Array(snapshot&.atlas&.dig('entries')).reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
+      all = Array(snapshot&.atlas&.dig('entries'))
+      @entries = all.reject { |e| platform_only?(e) }.index_by { |e| e['key'] }
+      # Buttons only platform admins see (New Website): a marker that only a
+      # platform-only entry walks to is never offered to a dealer's tour.
+      dealer_anchors = @entries.values.flat_map { |e| Array(e['where']).map { |w| w['anchor'] } }
+      @admin_markers = all.select { |e| platform_only?(e) }.flat_map { |e| Array(e['where']).map { |w| w['anchor'] } }.compact.uniq - dealer_anchors
       @markers = snapshot&.atlas&.dig('markers') || {}
+      @marker_labels = snapshot&.atlas&.dig('marker_labels') || {}
+      @marker_order = snapshot&.atlas&.dig('marker_order') || {}
     end
 
     def draft
@@ -62,7 +74,55 @@ module Guide
 
       result = @client.call(content: prompt, tool: TOOL, system: Guide::Copy.render(SYSTEM), max_tokens: 4_000,
                             temperature: 0.3, model: AiModel.for(:help))[:input] || {}
-      { name: clean(result['name']), description: clean(result['description']), steps: expand(Array(result['steps'])) }
+      { name: clean(result['name']), description: clean(result['description']), steps: expand(anchor_on_action(Array(result['steps']))) }
+    end
+
+    # The action that best matches the goal ("Managing Contacts" is Add a
+    # contact), when one clearly does. The model did not reliably pick it, and
+    # tours that skipped it wandered or never opened the form.
+    def primary_action
+      return @primary_action if defined?(@primary_action)
+
+      # An orientation tour is about the whole app, not one task.
+      return @primary_action = nil if @goal.match?(/\b(welcome|overview|tour of|get to know)\b/i)
+
+      # The tour's name (the goal's first sentence) says what it is about; its
+      # description can mention other things ("Managing Accounts" talks about
+      # contacts), so it is only used when the name says nothing.
+      words = subject_words(@goal.split(/(?<=\.)\s/).first)
+      words = subject_words(@goal) if words.empty?
+      return @primary_action = nil if words.empty?
+
+      # A word in the action's title counts double ("Adding company users" is
+      # Add a user, not Add an account whose synonyms mention a company).
+      scored = @entries.values.select { |e| e['kind'] == 'action' }.map do |e|
+        title = Guide::Copy.render(e['title'].to_s).downcase
+        rest = Guide::Copy.render_deep([e['synonyms'], e['route']]).flatten.compact.join(' ').downcase
+        [e, words.sum { |w| title.include?(w) ? 2 : (rest.include?(w) ? 1 : 0) }]
+      end
+      best, score = scored.max_by { |_, s| s }
+      @primary_action = score.to_i.positive? ? best : nil
+    end
+
+    # The words that say what a tour is about, without the verbs every goal
+    # shares ("Start your first project" must not match "Start a new deal").
+    GENERIC = %w[start starting create creating add adding new your first the and for with how managing manage using use
+                 setting set up making make building build filing file running run recording record connect connecting
+                 tour guide quick walk through main features time teach person their them this that from].freeze
+
+    def subject_words(text)
+      text.to_s.downcase.scan(/[a-z]+/).reject { |w| w.length < 4 || GENERIC.include?(w) }.map { |w| w.sub(/(ies|es|s)\z/, '') }.uniq
+    end
+
+    # Start with the primary action, and once in it stay in it: later steps
+    # that go to another place are dropped (the task is on this page now).
+    def anchor_on_action(steps)
+      action = primary_action
+      return steps unless action
+
+      i = steps.index { |s| s['place_key'] == action['key'] }
+      steps = i ? steps.drop(i) : [{ 'place_key' => action['key'] }] + steps.reject { |s| s['place_key'].present? }
+      [steps.first] + steps.drop(1).reject { |s| s['place_key'].present? }
     end
 
     private
@@ -90,17 +150,73 @@ module Guide
           walk = walk_steps.map do |w|
             { route: w['route'], selector: %([data-tour="#{w['anchor']}"]), title: w['title'], content: w['text'], click_required: w['click'] == true }
           end
-          # The model's words describe the place; they go on the last step of the walk.
-          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any?
+          # The model's words describe the place; they go on the last step of
+          # the walk. An action's own clicks already say exactly what to press
+          # ("Choose Add Individual"), so those keep their words.
+          walk[-1] = walk[-1].merge(title: clean(s['title']), content: clean(s['text'])) if walk.any? && entry['kind'] != 'action' && s['title'].present?
           walk
         elsif s['marker'].present? && here.present? && s['route'].to_s.split('?').first == here &&
-              marker_on_page?(s['marker'], s['route'])
-          [{ route: s['route'], selector: %([data-tour="#{s['marker']}"]), title: clean(s['title']), content: clean(s['text']), click_required: false }]
+              marker_on_page?(s['marker'], s['route']) && !@admin_markers.include?(s['marker'])
+          # A form field is filled in, not clicked through (a dropdown would
+          # open and the tour would move on behind it).
+          click = s['click'] == true && !s['marker'].to_s.start_with?('#')
+          [{ route: s['route'], selector: self.class.selector_for(s['marker']), title: clean(s['title']), content: clean(s['text']), click_required: click,
+             marker: s['marker'] }]
         else
           [] # names something that does not exist: dropped, never guessed
         end
       end.chunk_while { |a, b| a[:selector] == b[:selector] }.map(&:first) # never the same element twice in a row
-         .first(15).each_with_index.map { |s, i| s.merge(position: i + 1) }
+         .then { |all| in_form_order(all) }
+         .then { |all| end_at_save(all) }
+         .then { |all| fit(all) }
+         .each_with_index.map { |s, i| s.except(:marker).merge(position: i + 1) }
+    end
+
+    # The model lists fields in whatever order occurred to it, and the
+    # highlight jumped up and down the form. A run of fields on one page is
+    # put in the order the form shows them; clicks and the save stay put.
+    def in_form_order(steps)
+      steps.slice_when { |a, b| !(form_field?(a) && form_field?(b) && page_of(a) == page_of(b)) }.flat_map do |run|
+        next run unless run.size > 1 && form_field?(run.first)
+
+        order = Array(@marker_order[page_of(run.first)])
+        next run unless run.all? { |s| order.include?(s[:marker]) }
+
+        run.sort_by { |s| order.index(s[:marker]) }
+      end
+    end
+
+    def form_field?(step)
+      step[:marker].present? && !step[:click_required] && !save_step?(step)
+    end
+
+    def page_of(step)
+      step[:route].to_s.split('?').first
+    end
+
+    MAX_STEPS = 12
+
+    def save_step?(step)
+      step[:selector].to_s.match?(/:save\b|:save-/)
+    end
+
+    # The task is done at the save: anything after it is a detour.
+    def end_at_save(steps)
+      i = steps.index { |s| save_step?(s) }
+      i ? steps.first(i + 1) : steps
+    end
+
+    # Too long: drop the last plain field steps before the save, never the
+    # walk in, a step that must be clicked, or the save itself.
+    def fit(steps)
+      steps = steps.dup
+      while steps.size > MAX_STEPS
+        i = steps.rindex { |s| !s[:click_required] && !save_step?(s) && s[:selector].to_s.match?(/form:|\[id=/) }
+        break unless i
+
+        steps.delete_at(i)
+      end
+      steps.first(MAX_STEPS + 3)
     end
 
     # atlas.json says which pages each marker is on ('*' for every page).
@@ -112,7 +228,16 @@ module Guide
       pages.include?('*') || pages.include?(path)
     end
 
+    # A data-tour marker, or '#id' for a form field found by its label.
+    def self.selector_for(marker)
+      marker.to_s.start_with?('#') ? %([id="#{marker.delete_prefix('#')}"]) : %([data-tour="#{marker}"])
+    end
+
     def platform_only?(entry)
+      self.class.platform_only?(entry)
+    end
+
+    def self.platform_only?(entry)
       Array(entry['requires']).any? do |r|
         r['adminOnly'] || r['settingsAccess'] == 'platformAdmin' || r['integrationsSub'] == 'platform'
       end
@@ -123,18 +248,22 @@ module Guide
     end
 
     def prompt
-      places = @entries.values.map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
-      markers = @markers.filter_map do |m, pages|
+      places = @entries.values.map { |e| Guide::Copy.render_deep(e) }
+                       .map { |e| "#{e['key']} | #{e['title']} | #{Array(e['breadcrumb']).join(' > ')} | #{e['description']}" }
+      markers = @markers.except(*@admin_markers).filter_map do |m, pages|
         pages = Array(pages).select { |p| p.start_with?('/', '*') }
-        "#{m} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
+        label = @marker_labels[m].present? ? %( "#{@marker_labels[m]}") : ''
+        "#{m}#{label} (on #{pages.include?('*') ? 'every page' : pages.join(', ')})" if pages.any?
       end
       <<~TEXT
         Goal for the tour: #{@goal}
+        #{primary_action ? "Start with place_key #{primary_action['key']}, then the form's markers." : ''}
 
         Places (key | title | where | what it is):
         #{places.join("\n")}
 
-        In-page markers and the pages they are on; a marker step must use one of its pages as route:
+        In-page markers and the pages they are on; a marker step must use one of its pages as route.
+        Markers starting with # are form fields, shown with the field's label:
         #{markers.join("\n").presence || '(none)'}
       TEXT
     end

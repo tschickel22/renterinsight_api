@@ -275,6 +275,7 @@ module Api
               module_key: safe_read(t, :knowledge_module)&.key,
               steps_count: t.steps.count,
               check_status: safe_read(t, :check_status), checked_at: safe_read(t, :checked_at),
+              approved_at: safe_read(t, :approved_at),
               # Not checked since the latest build: the app may have moved under it.
               needs_check: latest_build_at.present? && (t.checked_at.nil? || t.checked_at < latest_build_at),
               completion_count: t.completions.where.not(completed_at: nil).count,

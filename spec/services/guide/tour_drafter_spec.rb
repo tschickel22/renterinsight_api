@@ -86,7 +86,8 @@ RSpec.describe Guide::TourDrafter do
             'where' => [{ 'anchor' => 'nav:/deals', 'title' => 'Deals', 'text' => 'Click Deals.', 'click' => true },
                         { 'route' => '/deals', 'anchor' => 'add-button', 'title' => 'Start a deal', 'text' => 'Click New.', 'click' => true }] }
         ],
-        'markers' => { 'deal-form:name' => ['/deals/new'], 'deal-form:save' => ['/deals/new'] }
+        'markers' => { 'deal-form:name' => ['/deals/new'], 'deal-form:save' => ['/deals/new'], '#dealNotes' => ['/deals/new'] },
+        'marker_labels' => { '#dealNotes' => 'Notes' }
       }
     )
     form = Class.new do
@@ -95,12 +96,132 @@ RSpec.describe Guide::TourDrafter do
           { 'place_key' => 'action:new-deal', 'title' => 'New deal', 'text' => 'Click New.' },
           { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Name it', 'text' => 'Give it a name.' },
           { 'marker' => 'deal-form:name', 'route' => '/deals/new', 'title' => 'Again', 'text' => 'Repeat.' },
+          { 'marker' => '#dealNotes', 'route' => '/deals/new', 'title' => 'Notes', 'text' => 'Add notes.', 'click' => true },
           { 'marker' => 'deal-form:save', 'route' => '/deals/new', 'title' => 'Save', 'text' => 'Save it.' }
         ] } }
       end
     end
-    selectors = described_class.new('start a deal', client: form).draft[:steps].map { |s| s[:selector] }
-    expect(selectors).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]', '[data-tour="deal-form:save"]'])
+    steps = described_class.new('start a deal', client: form).draft[:steps]
+    expect(steps.map { |s| s[:selector] }).to eq(['[data-tour="nav:/deals"]', '[data-tour="add-button"]', '[data-tour="deal-form:name"]',
+                                                  '[id="dealNotes"]', '[data-tour="deal-form:save"]'])
+    # A field is filled in, never a step that waits for a click.
+    expect(steps[3][:click_required]).to be(false)
+  end
+
+  it 'never offers a dealer a button only platform admins see' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'z',
+      atlas: {
+        'entries' => [
+          { 'key' => 'page:/site', 'kind' => 'page', 'title' => 'Your website', 'route' => '/site', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/site', 'title' => 'Website', 'text' => 'Click Website.', 'click' => true }] },
+          { 'key' => 'action:new-site', 'kind' => 'action', 'title' => 'New site', 'route' => '/site', 'requires' => [{ 'adminOnly' => true }],
+            'where' => [{ 'anchor' => 'nav:/site', 'title' => 'Website', 'text' => 'Click Website.', 'click' => true },
+                        { 'route' => '/site', 'anchor' => 'site-new', 'title' => 'New', 'text' => 'Click New.', 'click' => true }] }
+        ],
+        'markers' => { 'site-new' => ['/site'], 'site-edit' => ['/site'] }
+      }
+    )
+    form = Class.new do
+      def self.call(content:, **)
+        raise 'admin marker offered' if content.include?('site-new')
+
+        { input: { 'name' => 'Website', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'page:/site' },
+          { 'marker' => 'site-new', 'route' => '/site', 'title' => 'New', 'text' => 'Click New.', 'click' => true },
+          { 'marker' => 'site-edit', 'route' => '/site', 'title' => 'Edit', 'text' => 'Edit it.', 'click' => true }
+        ] } }
+      end
+    end
+    selectors = described_class.new('edit your website', client: form).draft[:steps].map { |s| s[:selector] }
+    expect(selectors).to eq(['[data-tour="nav:/site"]', '[data-tour="site-edit"]'])
+  end
+
+  it 'walks a form\'s fields in the order the form shows them' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 1.minute.from_now, modules_hash: 'z',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-unit', 'kind' => 'action', 'title' => 'Add a unit', 'route' => '/units/new', 'requires' => [],
+            'where' => [{ 'route' => '/units', 'anchor' => 'units-new', 'title' => 'New', 'text' => 'Click New.', 'click' => true }] }
+        ],
+        'markers' => { 'unit-form:make' => ['/units/new'], '#model' => ['/units/new'], '#year' => ['/units/new'], 'unit-form:save' => ['/units/new'] },
+        'marker_order' => { '/units/new' => ['unit-form:save', 'unit-form:make', '#model', '#year'] }
+      }
+    )
+    form = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'Add a unit', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'action:new-unit' },
+          { 'marker' => '#year', 'route' => '/units/new', 'title' => 'Year', 'text' => 'Year.' },
+          { 'marker' => 'unit-form:make', 'route' => '/units/new', 'title' => 'Make', 'text' => 'Make.' },
+          { 'marker' => '#model', 'route' => '/units/new', 'title' => 'Model', 'text' => 'Model.' },
+          { 'marker' => 'unit-form:save', 'route' => '/units/new', 'title' => 'Save', 'text' => 'Save.' }
+        ] } }
+      end
+    end
+    steps = described_class.new('add a unit', client: form).draft[:steps]
+    expect(steps.map { |s| s[:title] }).to eq(%w[New Make Model Year Save])
+    expect(steps.first.keys).not_to include(:marker)
+  end
+
+  it 'stops at the save, keeps steps that must be pressed, and trims long tours from the fields' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 2.minutes.from_now, modules_hash: 'w',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-x', 'kind' => 'action', 'title' => 'New x', 'route' => '/x/new', 'requires' => [],
+            'where' => [{ 'route' => '/x', 'anchor' => 'x-new', 'title' => 'New', 'text' => 'Click New.', 'click' => true }] },
+          { 'key' => 'page:/reports', 'kind' => 'page', 'title' => 'Reports', 'route' => '/reports', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/reports', 'title' => 'Reports', 'text' => 'Click Reports.', 'click' => true }] }
+        ],
+        'markers' => { 'x-type-a' => ['/x/new'], 'x-form:save' => ['/x/new'] }.merge((1..14).to_h { |n| ["#f#{n}", ['/x/new']] })
+      }
+    )
+    long = Class.new do
+      def self.call(**)
+        fields = (1..14).map { |n| { 'marker' => "#f#{n}", 'route' => '/x/new', 'title' => "F#{n}", 'text' => '.' } }
+        { input: { 'name' => 'x', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'action:new-x', 'title' => 'New', 'text' => '.' },
+          { 'marker' => 'x-type-a', 'route' => '/x/new', 'title' => 'Pick A', 'text' => '.', 'click' => true },
+          *fields,
+          { 'marker' => 'x-form:save', 'route' => '/x/new', 'title' => 'Save', 'text' => '.' },
+          { 'place_key' => 'page:/reports', 'title' => 'Detour', 'text' => '.' }
+        ] } }
+      end
+    end
+    steps = described_class.new('make an x', client: long).draft[:steps]
+
+    expect(steps.size).to eq(12)
+    expect(steps.last[:selector]).to eq('[data-tour="x-form:save"]')
+    expect(steps.find { |s| s[:selector] == '[data-tour="x-type-a"]' }[:click_required]).to eq(true)
+    expect(steps.map { |s| s[:selector] }).not_to include('[data-tour="nav:/reports"]')
+  end
+
+  it 'starts from the action that matches the goal and does not leave it' do
+    Knowledge::Snapshot.create!(
+      source: 'frontend', snapshot_at: 3.minutes.from_now, modules_hash: 'v',
+      atlas: {
+        'entries' => [
+          { 'key' => 'action:new-contact', 'kind' => 'action', 'title' => 'Add a contact', 'route' => '/contacts/new', 'requires' => [],
+            'synonyms' => ['new contact', 'add customer'],
+            'where' => [{ 'route' => '/contacts', 'anchor' => 'contacts-add', 'title' => 'Add', 'text' => 'Click Add.', 'click' => true }] },
+          { 'key' => 'page:/accounts', 'kind' => 'page', 'title' => 'Accounts', 'route' => '/accounts', 'requires' => [],
+            'where' => [{ 'anchor' => 'nav:/accounts', 'title' => 'Accounts', 'text' => 'Click Accounts.', 'click' => true }] }
+        ],
+        'markers' => { 'contact-form:save' => ['/contacts/new'] }
+      }
+    )
+    wanders = Class.new do
+      def self.call(**)
+        { input: { 'name' => 'x', 'description' => 'x', 'steps' => [
+          { 'place_key' => 'page:/accounts', 'title' => 'Accounts', 'text' => '.' },
+          { 'marker' => 'contact-form:save', 'route' => '/contacts/new', 'title' => 'Save', 'text' => '.' }
+        ] } }
+      end
+    end
+    selectors = described_class.new('Add a contact to your list', client: wanders).draft[:steps].map { |s| s[:selector] }
+    expect(selectors).to eq(['[data-tour="contacts-add"]', '[data-tour="contact-form:save"]'])
   end
 
   it 'refuses without a goal' do

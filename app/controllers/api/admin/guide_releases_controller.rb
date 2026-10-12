@@ -40,6 +40,13 @@ module Api
         render json: { found: snapshot.present?, snapshot_id: snapshot&.id, atlas_url: Guide::ReleaseWatcher.atlas_url }
       end
 
+      # POST /api/admin/guide/releases/digest
+      # The weekly digest now, for a launch that should not wait for Monday.
+      def digest
+        Guide::WeeklyDigestJob.perform_later(true)
+        render json: { queued: true, email_to: Guide::WeeklyDigest.recipient }
+      end
+
       # GET /api/admin/guide/releases/adoption
       def adoption
         render json: { companies: Guide::Adoption.new.companies }

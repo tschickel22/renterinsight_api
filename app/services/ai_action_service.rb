@@ -8,6 +8,9 @@ class AiActionService
   INTENT_WRITE   = 'write'
   INTENT_CONFIRM = 'confirm'
   INTENT_DRAFT   = 'draft'
+  # How to use the software ("how do I add a user", "where is the P&L"):
+  # answered by the help assistant (Guide::Assistant), not run as an action.
+  INTENT_HELP    = 'help'
   INTENT_UNKNOWN = 'unknown'
 
   SAFE_ACTIONS = %w[
@@ -221,6 +224,15 @@ class AiActionService
         "params": {}
       }
 
+      For HOW TO USE THE SOFTWARE ("how do I", "where is", "where do I find", "how do I set up", "what does this page do", "can I"):
+      {
+        "intent": "help",
+        "action": "help_answer",
+        "requires_confirmation": false,
+        "explanation": "How-to question for the help assistant",
+        "params": {}
+      }
+
       For SUMMARIZE a record:
       {
         "intent": "draft",
@@ -258,6 +270,7 @@ class AiActionService
       - If entity ID or number is mentioned, include it; otherwise set to null
       - Omit fields you cannot extract — do not guess email or phone
       - For ambiguous intent, prefer "read" over "write"
+      - "help" is for questions about using the software itself. A question about the dealership's own records or numbers ("how many leads", "which deals close this month") is "read", even when it starts with "how".
       - CRITICAL entity type distinction:
         - "lead" = prospective buyer/customer in the sales pipeline (use create_lead)
         - "contact" = a person associated with an account, not in the sales pipeline (use create_contact)

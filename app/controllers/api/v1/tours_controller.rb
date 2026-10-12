@@ -4,10 +4,10 @@ module Api
   module V1
     class ToursController < ApplicationController
       before_action :authenticate_user!
-      before_action :require_platform_admin!, only: %i[create update destroy]
+      before_action :require_platform_admin!, only: %i[create update destroy approve unapprove]
       before_action :require_admin_or_checker!, only: %i[for_check check_results]
       before_action :set_tour, only: %i[show start complete step_complete dismiss]
-      before_action :set_tour_for_admin, only: %i[update destroy check_results]
+      before_action :set_tour_for_admin, only: %i[update destroy check_results approve unapprove]
 
       # GET /api/v1/tours
       # Lists active tours the current user hasn't completed yet.
@@ -20,7 +20,10 @@ module Api
         completions = current_user.user_tour_completions.index_by(&:tour_id)
         completed_ids = completions.values.select(&:completed?).map(&:tour_id)
 
-        scope = params[:include_completed] == 'true' ? Tour.active : Tour.active.where.not(id: completed_ids)
+        # Dealers only get tours a person has played and approved; admins see
+        # the rest too, flagged, so they can test and approve them.
+        base = platform_admin_request? ? Tour.active : Tour.active.approved
+        scope = params[:include_completed] == 'true' ? base : base.where.not(id: completed_ids)
         scope = scope.where(knowledge_module_id: Knowledge::Module.find_by!(key: params[:module]).id) if params[:module].present?
 
         tours = scope.ordered.includes(:knowledge_module, :steps).map { |t| tour_payload(t, completion: completions[t.id]) }
@@ -121,6 +124,19 @@ module Api
         } } } }
       end
 
+      # POST /api/v1/tours/:id/approve
+      # A platform admin played the tour and it teaches the task.
+      def approve
+        @tour.update!(approved_at: Time.current, approved_by_id: original_user&.id)
+        render json: { ok: true, approved_at: @tour.approved_at }
+      end
+
+      # POST /api/v1/tours/:id/unapprove
+      def unapprove
+        @tour.update!(approved_at: nil, approved_by_id: nil)
+        render json: { ok: true, approved_at: nil }
+      end
+
       # POST /api/v1/tours/:id/check_results  { results: [{ position, status }] }
       # What a check of the tour against the live app found for each step:
       # found, missing or ambiguous. Platform admins run it from Knowledge admin.
@@ -164,6 +180,8 @@ module Api
         attrs = tour_attrs_from_params
         @tour.knowledge_module_id = resolve_module_id(attrs[:module_key]) if attrs[:module_key].present?
 
+        # New steps are a new tour as far as approval goes: play it again.
+        @tour.approved_at = nil if attrs.key?(:steps)
         if @tour.update(attrs.except(:module_key, :steps))
           rebuild_steps(@tour, attrs[:steps]) if attrs.key?(:steps)
           render json: tour_payload(@tour.reload, include_steps: true)
@@ -196,15 +214,23 @@ module Api
 
       # ?raw=true (platform admins only) returns the stored copy with its
       # {{brand}} tokens intact, so the recorder saves them back unchanged.
+      # The company being viewed (a platform admin switched into a dealer sees
+      # that dealer's words), not necessarily the person's own.
+      def copy_company
+        return @copy_company if defined?(@copy_company)
+
+        @copy_company = ::Company.find_by(id: current_company_id) || current_user&.company
+      end
+
       def copy(text)
         return text if params[:raw] == 'true' && platform_admin_request?
 
-        Guide::Copy.render(text, company: current_user&.company)
+        Guide::Copy.render(text, company: copy_company)
       end
 
       def set_tour
         # Platform admins can open an inactive tour to test or edit it.
-        scope = platform_admin_request? ? Tour.all : Tour.active
+        scope = platform_admin_request? ? Tour.all : Tour.active.approved
         @tour = scope.find_by(id: params[:id])
         render json: { error: 'tour not found' }, status: :not_found unless @tour
       end
@@ -270,6 +296,7 @@ module Api
           module:        tour.knowledge_module&.key,
           category:      tour.knowledge_module&.category,
           step_count:   tour.steps.size,
+          approved:     tour.approved_at.present?,
           completed:    !!completion&.completed_at,
           dismissed:    !!completion&.dismissed_at,
           started:      completion.present?

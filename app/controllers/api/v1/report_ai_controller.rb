@@ -266,7 +266,7 @@ module Api
           page_entity_id:   page_entity_id
         })
 
-        AiQueryLog.create!(
+        log = AiQueryLog.create!(
           company_id:       @company.id,
           user_id:          current_user&.id,
           location_id:      Current.location_id,
@@ -285,12 +285,18 @@ module Api
           response_time_ms: result[:response_time_ms]
         )
 
+        # How-to questions, and ones the classifier could not place, get an
+        # answer from the help assistant. The question has already counted
+        # once above, so this is not charged again.
+        help = help_answer(question, log) if [AiActionService::INTENT_HELP, AiActionService::INTENT_UNKNOWN].include?(result[:intent])
+
         render json: {
-          intent:                result[:intent],
-          action:                result[:action],
-          requires_confirmation: result[:requires_confirmation],
+          intent:                help ? AiActionService::INTENT_HELP : result[:intent],
+          action:                help ? 'help_answer' : result[:action],
+          requires_confirmation: help ? false : result[:requires_confirmation],
           explanation:           result[:explanation],
           params:                result[:params],
+          help:                  help,
           usage:                 ai_report_usage
         }
 
@@ -699,6 +705,25 @@ module Api
       rescue => e
         Rails.logger.error "[DigestDrilldown] #{e.message}"
         render json: { error: 'Drilldown failed' }, status: :internal_server_error
+      end
+
+      # The help assistant's answer (Guide::Assistant), with its cost added to
+      # the question's own log row rather than a second use.
+      def help_answer(question, log)
+        answer = Guide::Assistant.new(user: current_user, company: @company, data_assistant: true)
+                                 .ask(question, page: params[:page])
+        log.update_columns(
+          resolved_intent: AiActionService::INTENT_HELP,
+          execution_status: answer.answered ? 'success' : 'no_match',
+          failure_reason: answer.answered ? nil : 'help_not_found',
+          input_tokens: log.input_tokens.to_i + answer.input_tokens.to_i,
+          output_tokens: log.output_tokens.to_i + answer.output_tokens.to_i,
+          cost_cents: log.cost_cents.to_i + (Catalog::PriceBooks::ClaudeClient.cost_usd(answer.input_tokens.to_i, answer.output_tokens.to_i) * 100).round
+        )
+        { answer: answer.answer, articles: answer.articles, places: answer.places, answered: answer.answered }
+      rescue StandardError => e
+        Rails.logger.error("[ReportAI#help_answer] #{e.class} #{e.message}")
+        nil
       end
 
       def load_context_record(context_type, context_id)

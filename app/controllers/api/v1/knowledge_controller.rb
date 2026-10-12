@@ -340,10 +340,18 @@ module Api
 
       # ?raw=true (platform admins only) keeps {{brand}} tokens intact for the
       # article editor, so saving an article does not bake in today's name.
+      # The company being viewed (a platform admin switched into a dealer sees
+      # that dealer's words), not necessarily the person's own.
+      def copy_company
+        return @copy_company if defined?(@copy_company)
+
+        @copy_company = ::Company.find_by(id: current_company_id) || current_user&.company
+      end
+
       def copy(text)
         return text if params[:raw] == 'true' && platform_admin?
 
-        Guide::Copy.render(text, company: current_user&.company)
+        Guide::Copy.render(text, company: copy_company)
       end
 
       def extract_action(result)
