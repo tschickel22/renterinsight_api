@@ -460,6 +460,26 @@ class Deal < ApplicationRecord
   # (returns nil) — we never apply a default margin.
   # ----------------------------------------------------------------------------
 
+  # The homesite, where the home is delivered. When the deal has no delivery
+  # address, it starts as the billing address (the deal's, else the buyer's),
+  # written into the delivery fields so the Deal Sheet, freight and the
+  # agreement all read one address the rep can change. True when it filled.
+  def fill_delivery_address_from_billing!
+    return false if delivery_street.present? || delivery_zip.present?
+
+    from = if billing_street.present? || billing_zip.present?
+             [billing_street, billing_city, billing_state, billing_zip]
+           elsif contact && (contact.street.present? || contact.zip.present?)
+             [contact.street, contact.city, contact.state, contact.zip]
+           end
+    return false unless from
+
+    street, city, state, zip = from
+    update_columns(delivery_street: street, delivery_city: city, delivery_zip: zip,
+                   delivery_state: delivery_state.presence || state, updated_at: Time.current)
+    true
+  end
+
   # True once the deal is closed/posted and its cost is frozen on the deal.
   def cost_snapshotted?
     gl_posted? || stage_is_won?

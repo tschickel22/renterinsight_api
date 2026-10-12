@@ -9,7 +9,7 @@
 #   GET    /api/v1/deals/:deal_id/home_build                 build, or what it could start from
 #   POST   /api/v1/deals/:deal_id/home_build                 { variant_id, vehicle_id?, design_id? }
 #   PATCH  /api/v1/deals/:deal_id/home_build                 { label?, variant_id?, construction?, notes?, freight_miles?, discounts?,
-#                                                              deal: { trade_allowance, trade_payoff, down_payment, delivery_point, delivery_state } }
+#                                                              deal: { trade_allowance, trade_payoff, down_payment, delivery_point, delivery_street, delivery_city, delivery_state, delivery_zip } }
 #   DELETE /api/v1/deals/:deal_id/home_build
 #   POST   /api/v1/deals/:deal_id/home_build/versions        { copy_from_id? | variant_id, label?, live? } a new version
 #   POST   /api/v1/deals/:deal_id/home_build/make_live       { version_id } that version writes the deal
@@ -53,8 +53,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return render json: { error: 'That version is not on this deal' }, status: :not_found if params[:version_id].present? && !build
     return render json: { build: nil, start_from: start_from } unless build
 
+    # A deal with no delivery address takes the billing one, while the sheet
+    # can still change (freight and tax follow it).
+    filled = build.live? && Agreements::DealSheetLock.edit_problem(build).nil? && @deal.fill_delivery_address_from_billing!
     # A Products save or an older sheet: bring the numbers up to date before showing them.
-    if Truebuild::DealBuild.stale?(build)
+    if filled || Truebuild::DealBuild.stale?(build)
       service = Truebuild::DealBuild.new(build).reprice!
       return render json: build_json(build.reload, service.warnings)
     end
@@ -72,6 +75,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     design = params[:design_id].present? ? @company.truebuild_designs.find_by(id: params[:design_id]) : nil
     return render json: { error: 'Design not found' }, status: :not_found if params[:design_id].present? && !design
 
+    @deal.fill_delivery_address_from_billing!
     service = Truebuild::DealBuild.start(deal: @deal, variant: design&.variant || variant, vehicle: vehicle, design: design, user: current_user)
     render json: build_json(service.build, service.warnings), status: :created
   end
@@ -140,7 +144,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       # payment, and where the buyer takes the home (which state taxes it).
       if params[:deal].present?
         attrs = params.require(:deal).permit(:trade_allowance, :trade_payoff, :down_payment, :additional_payment,
-                                             :delivery_point, :delivery_state).to_h
+                                             :delivery_point, :delivery_street, :delivery_city, :delivery_state,
+                                             :delivery_zip).to_h
         if attrs.key?('delivery_point') && !%w[deliver lot].include?(attrs['delivery_point'])
           return render json: { error: 'delivery_point must be deliver or lot' }, status: :unprocessable_entity
         end
@@ -531,8 +536,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number,
                                   title: [build.vehicle.year, build.vehicle.make, build.vehicle.model].compact.join(' ') },
       design_id: build.truebuild_design_id,
-      deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_state: @deal.delivery_state,
-                    location_state: @deal.location&.state },
+      deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_street: @deal.delivery_street,
+                    delivery_city: @deal.delivery_city, delivery_state: @deal.delivery_state,
+                    delivery_zip: @deal.delivery_zip, location_state: @deal.location&.state },
       books: { base: build.price_book&.name, cost: build.cost_book&.name, options: build.options_book&.name },
       totals: build.totals,
       discounts: build.discounts,
