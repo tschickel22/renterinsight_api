@@ -206,7 +206,7 @@ module Knowledge
     def search_tours(terms, exclude_ids: Set.new)
       sql, *binds = build_ilike_conditions(terms, %w[name description])
 
-      tours = Tour.where(is_active: true)
+      tours = offerable_tours
                   .where(sql, *binds)
                   .where.not(id: exclude_ids.to_a)
                   .includes(:steps)
@@ -232,15 +232,23 @@ module Knowledge
                        @user&.platform_admin? || @user&.super_admin? || false
     end
 
+    # Unapproved tours are dropped before the limit, so one cannot crowd out
+    # an approved match.
+    def offerable_tours
+      scope = Tour.where(is_active: true)
+      admin_user? ? scope : scope.approved
+    end
+
     def add_tour_result(tour)
       return unless tours_visible?
       return unless tour.approved_at.present? || admin_user?
 
+      name = Guide::Copy.render(tour.name, company: @user&.company)
       @results << {
         type:        'tour',
-        title:       tour.name,
-        label:       "Tour: #{tour.name}",
-        description: tour.respond_to?(:description) ? tour.description : nil,
+        title:       name,
+        label:       "Tour: #{name}",
+        description: tour.respond_to?(:description) ? Guide::Copy.render(tour.description, company: @user&.company) : nil,
         module:      tour.respond_to?(:knowledge_module) ? tour.knowledge_module&.key : nil,
         tour_id:     tour.id,
         tour_key:    tour.respond_to?(:key) ? tour.key : nil,
@@ -261,7 +269,7 @@ module Knowledge
     end
 
     def find_tour_for_module(module_id)
-      Tour.where(is_active: true)
+      offerable_tours
           .where(knowledge_module_id: module_id)
           .includes(:steps)
           .order(:position)

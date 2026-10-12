@@ -48,7 +48,8 @@ module Api
 
       # GET /api/v1/knowledge/articles?module=leads
       def articles
-        scope = case params[:published].to_s
+        # Drafts are for platform admins; a dealer always gets published help.
+        scope = case (platform_admin? ? params[:published].to_s : '')
                 when 'false' then Knowledge::Article.where(is_published: false)
                 when 'all'   then Knowledge::Article.all
                 else              Knowledge::Article.published

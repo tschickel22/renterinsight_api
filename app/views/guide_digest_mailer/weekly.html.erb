@@ -25,13 +25,13 @@
 <h3 style="margin-bottom:4px">New tours drafted this week (<%= @new_tours.size %>)</h3>
 <p style="margin-top:0">Each becomes a tour to play and approve once you approve its help.</p>
 <% if @new_tours.any? %>
-  <ul><% @new_tours.each do |i| %><li><%= i.drafts.dig('tour', 'name') %></li><% end %></ul>
+  <ul><% @new_tours.each do |i| %><li><%= Guide::Copy.render(i.drafts.dig('tour', 'name').to_s) %></li><% end %></ul>
 <% end %>
 
 <h3 style="margin-bottom:4px">Tours waiting for you to play and approve (<%= @tours_to_approve.size %>)</h3>
 <p style="margin-top:0">Dealers see a tour only after you approve it.</p>
 <% if @tours_to_approve.any? %>
-  <ul><% @tours_to_approve.each do |t| %><li><%= t.name %></li><% end %></ul>
+  <ul><% @tours_to_approve.each do |t| %><li><%= Guide::Copy.render(t.name) %></li><% end %></ul>
 <% end %>
 
 <% skipped = Array(@drafts['skipped']) %>

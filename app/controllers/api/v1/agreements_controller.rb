@@ -283,14 +283,28 @@ module Api
           return render json: { error: 'File size exceeds 25MB limit' }, status: :unprocessable_entity
         end
 
+        # Signed on paper: a draft or one out for signature completes, the
+        # same as an e-signed one (the Deal Sheet locks, a change order
+        # applies). A completed one only gets its document replaced. A voided,
+        # declined or expired agreement stays as it is.
+        completing = [Agreement::STATUS_DRAFT, *Agreements::DealSheetLock::OPEN].include?(@agreement.status)
+        unless completing || @agreement.status == Agreement::STATUS_COMPLETED
+          return render json: { error: "A #{@agreement.status} agreement cannot take a signed document. Make a new one." }, status: :unprocessable_entity
+        end
+        if completing && @agreement.status == Agreement::STATUS_DRAFT && (problem = Agreements::DealSheetLock.send_problem(@agreement))
+          return render json: { error: problem }, status: :unprocessable_entity
+        end
+
         begin
           folder = "agreements/#{@company.id}/#{@agreement.id}/signed"
           result = PrivateFiles.upload(file, folder: folder)
 
-          @agreement.update!(
-            sealed_document_url: result[:ref],
-            status: Agreement::STATUS_COMPLETED
-          )
+          if completing
+            @agreement.update!(sealed_document_url: result[:ref], status: Agreement::STATUS_COMPLETED, completed_at: Time.current)
+            @agreement.deal_sheet_completed
+          else
+            @agreement.update!(sealed_document_url: result[:ref])
+          end
 
           AgreementAuditLog.log!(
             @agreement,
@@ -1181,7 +1195,16 @@ module Api
         permitted[:field_placements] = raw[:field_placements] if raw[:field_placements].present?
         permitted[:merge_field_values] = raw[:merge_field_values] if raw[:merge_field_values].present?
         permitted[:merge_field_placements] = raw[:merge_field_placements] if raw[:merge_field_placements].present?
-        permitted[:metadata] = raw[:metadata] if raw[:metadata].present?
+        if raw[:metadata].present?
+          # What the server records about the Deal Sheet (its stamp, the
+          # package, a change order, an unlock) decides locking and sending,
+          # so a client never writes it: incoming values are dropped and the
+          # agreement's own are kept.
+          incoming = raw[:metadata].to_h.deep_stringify_keys.except(*Agreement::SERVER_METADATA_KEYS)
+          kept = @agreement ? @agreement.metadata.to_h.slice(*Agreement::SERVER_METADATA_KEYS) : {}
+          base = @agreement ? @agreement.metadata.to_h : {}
+          permitted[:metadata] = base.merge(incoming).merge(kept)
+        end
         permitted[:document_urls] = raw[:document_urls] if raw[:document_urls].present?
         permitted[:custom_field_values] = raw[:custom_field_values] if raw[:custom_field_values].present?
         permitted[:custom_field_definitions] = raw[:custom_field_definitions] if raw[:custom_field_definitions].present?

@@ -11,13 +11,21 @@ module Agreements
 
     attr_reader :build, :sheets
 
-    def initialize(deal, agreement_number: nil, date: Date.current)
+    def initialize(deal, agreement_number: nil, date: nil)
       @deal = deal
       @build = deal.home_build
       @sheets = @build && Truebuild::AgreementSheets.new(@build)
       @details = DealSaleDetails.new(deal)
       @agreement_number = agreement_number
-      @date = date
+      @date = date || self.class.today_for(deal.company)
+    end
+
+    # The dealer's date, not the server's: an agreement made on a Denver
+    # evening is dated that day, not tomorrow (UTC).
+    def self.today_for(company)
+      Time.current.in_time_zone(company&.time_zone.presence || 'America/New_York').to_date
+    rescue ArgumentError
+      Date.current
     end
 
     def [](key) = to_h[key.to_s]

@@ -81,6 +81,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def create_version
     return unless authorize_action!('deals', 'update')
 
+    # A new LIVE version replaces the current one: check that first, so a
+    # refusal leaves no orphan draft behind.
+    live = ActiveModel::Type::Boolean.new.cast(params[:live])
+    Truebuild::DealBuild.assert_editable!(@deal.home_build) if live && @deal.home_build
+
     if params[:copy_from_id].present?
       source = @deal.home_builds.find_by(id: params[:copy_from_id])
       return render json: { error: 'That version is not on this deal' }, status: :not_found unless source
@@ -110,7 +115,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     @build.update!(label: params[:label].presence) if params.key?(:label)
     # Color sets marked "Not on this home" (Colors & finishes checklist).
     if params.key?(:color_skips)
-      raise Truebuild::DealBuild::Locked, 'This build is locked by a signed agreement' if @build.locked?
+      Truebuild::DealBuild.assert_editable!(@build)
 
       @build.update!(metadata: @build.metadata.to_h.merge('color_skips' => Array(params[:color_skips]).map(&:to_s).reject(&:blank?).uniq))
     end
@@ -121,14 +126,14 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     if params[:variant_id].present? && params[:variant_id].to_i != @build.catalog_plan_variant_id
       # A different home: its options are not this one's, so the build starts over.
       variant = priced_variant(params[:variant_id]) or return
-      raise Truebuild::DealBuild::Locked, 'This build is locked by a signed agreement' if @build.locked?
+      Truebuild::DealBuild.assert_editable!(@build)
 
       @build.lines.delete_all
       vehicle = @build.vehicle&.catalog_plan_variant_id == variant.id ? @build.vehicle : nil
       @build.update!(variant: variant, vehicle: vehicle, source: vehicle ? 'lot' : 'order')
       service.seed
     else
-      raise Truebuild::DealBuild::Locked, 'This build is locked by a signed agreement' if @build.locked?
+      Truebuild::DealBuild.assert_editable!(@build)
 
       @build.update!(params.permit(:construction, :notes).to_h)
       # The sale terms the sheet shows live on the deal: trade-in, down
@@ -154,7 +159,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   def destroy
     return unless authorize_action!('deals', 'update')
-    return render json: { error: 'This build is locked by a signed agreement' }, status: :conflict if @build.locked?
+    problem = Agreements::DealSheetLock.edit_problem(@build)
+    return render json: { error: problem }, status: :conflict if problem
     if @build.live? && @deal.home_builds.where.not(id: @build.id).exists?
       return render json: { error: 'This is the LIVE version. Make another version live before deleting it.' }, status: :unprocessable_entity
     end
@@ -346,8 +352,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('agreements', 'read')
 
     maker = Agreements::FromDealSheet.new(@deal, user: current_user)
+    # No manager is chosen yet, so the check says one is needed; the dialog
+    # drops that line once the rep picks one. Assuming the viewer told a
+    # platform admin (not in the list) nothing, then Create failed.
     render json: { templates: maker.templates.map { |t| { id: t.id, name: t.name } }, managers: maker.managers,
-                   check: maker.check(manager: current_user), live: @build.live,
+                   check: maker.check(manager: nil), live: @build.live,
                    agreements: @company.agreements.where(deal_id: @deal.id).where.not(status: 'voided').order(created_at: :desc).limit(5)
                                     .map { |a| { id: a.id, number: a.agreement_number, status: a.status, deal_sheet: a.deal_sheet_status } } }
   end
@@ -357,8 +366,16 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return render json: { error: 'Make this version LIVE first: the agreement is made from the LIVE Deal Sheet' }, status: :unprocessable_entity unless @build.live
 
     maker = Agreements::FromDealSheet.new(@deal, user: current_user)
-    template = maker.templates.find { |t| t.id == params[:template_id].to_i } || maker.templates.first
-    manager = @company.users.find_by(id: params[:manager_id]) if params[:manager_id].present?
+    template = params[:template_id].present? ? maker.templates.find { |t| t.id == params[:template_id].to_i } : maker.templates.first
+    return render json: { error: 'That agreement package is not one of yours, or is not active' }, status: :unprocessable_entity if params[:template_id].present? && !template
+
+    manager = nil
+    if params[:manager_id].present?
+      # Only someone the dialog offers: this company's people, still active.
+      return render json: { error: 'Choose the manager from the list' }, status: :unprocessable_entity unless maker.managers.any? { |m| m[:id] == params[:manager_id].to_i }
+
+      manager = @company.users.find(params[:manager_id])
+    end
     agreement = maker.create!(template: template, manager: manager)
     render json: { agreement: { id: agreement.id, number: agreement.agreement_number }, check: maker.check(manager: manager) }, status: :created
   rescue Agreements::FromDealSheet::NotReady => e
@@ -507,6 +524,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       notes: build.notes, priced_at: build.priced_at,
       version_number: build.version_number, label: build.label, live: build.live, version_name: build.version_name,
       last_unlock: Array(build.metadata.to_h['unlocks']).last,
+      out_for_signature: (out = Agreements::DealSheetLock.out_for_signature(build)) && { id: out.id, number: out.agreement_number, status: out.status },
       versions: versions_json(build.deal),
       model: model_json(variant, Truebuild::HomeMatcher.new).merge(factory: variant.catalog_plan.factory&.name,
                                                                    series: variant.catalog_plan.series),

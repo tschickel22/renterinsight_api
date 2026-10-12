@@ -191,10 +191,12 @@ class Deal < ApplicationRecord
   def snapshot_landed_cost_on_close
     return if home_cost.present? && home_cost.to_f > 0 # respect explicit / deal-desk cost
 
-    # Freeze the home LINE ITEM cost (mirrored onto unit_cost by the deal form) first —
-    # that's the cost the rep actually entered for this deal. Only fall back to the
-    # vehicle's structured cost when no line-item cost was provided.
-    uc = unit_cost.to_f
+    # Freeze the home LINE ITEM cost first: that's the cost the rep actually entered
+    # for this deal (the Deal Sheet writes only the line, the deal form also mirrors it
+    # onto unit_cost). Only fall back to the vehicle's structured cost when no
+    # line-item cost was provided.
+    uc = home_line_item_cost.to_f
+    uc = unit_cost.to_f unless uc > 0
     if uc > 0
       self.home_cost = uc
       return

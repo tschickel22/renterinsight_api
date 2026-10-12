@@ -33,7 +33,7 @@ module Truebuild
       return current if acceptable?(company, current)
 
       earlier = covering(variant, CatalogPriceBook.where(status: %w[published superseded]))
-                .where('published_at < ?', current.published_at)
+                .where('published_at IS NULL OR published_at < ?', current.published_at || Time.current)
       earlier.detect { |b| acceptable?(company, b) } || current
     end
 
@@ -50,7 +50,9 @@ module Truebuild
       if plan.factory_id
         scope = scope.or(books.where(factory_id: plan.factory_id, id: CatalogOptionPrice.select(:catalog_price_book_id)))
       end
-      scope.order(published_at: :desc, id: :desc)
+      # A book with no publish date counts as older, not newest (Postgres
+      # puts NULLs first in a descending order).
+      scope.order(Arel.sql('published_at DESC NULLS LAST, id DESC'))
     end
 
     # The rows of a book that apply to this model.

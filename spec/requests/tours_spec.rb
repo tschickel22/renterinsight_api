@@ -16,9 +16,11 @@ RSpec.describe 'Product tours', type: :request do
 
   let(:user) { make_user }
   let!(:tour) do
-    Tour.create!(key: "t-#{SecureRandom.hex(3)}", name: 'Welcome to {{brand}}', trigger_type: 'manual', approved_at: Time.current).tap do |t|
+    Tour.create!(key: "t-#{SecureRandom.hex(3)}", name: 'Welcome to {{brand}}', trigger_type: 'manual').tap do |t|
       t.steps.create!(position: 1, title: 'One', content: 'Hello from {{brand}}', selector: '[data-tour="a"]')
       t.steps.create!(position: 2, title: 'Two', content: 'Second', selector: '[data-tour="b"]')
+      # Approved after its steps are in: a step change sends a tour back for approval.
+      t.update!(approved_at: Time.current)
     end
   end
 

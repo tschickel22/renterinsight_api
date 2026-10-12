@@ -16,7 +16,7 @@ module Truebuild
     def current_for(variant)
       CatalogPriceBook.published.where(manufacturer_id: variant.manufacturer_id)
                       .where(id: CatalogVariantPrice.where(catalog_plan_variant_id: variant.id).select(:catalog_price_book_id))
-                      .order(published_at: :desc, id: :desc).first ||
+                      .order(Arel.sql('published_at DESC NULLS LAST, id DESC')).first ||
         CatalogPriceBook.current_for(manufacturer_id: variant.manufacturer_id, factory_id: variant.catalog_plan.factory_id)
     end
 

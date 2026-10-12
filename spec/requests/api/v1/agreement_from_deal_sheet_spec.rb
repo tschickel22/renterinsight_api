@@ -35,7 +35,7 @@ RSpec.describe 'Agreement from the Deal Sheet', type: :request do
     get path, headers: headers
     expect(body['templates'].map { |t| t['name'] }).to eq(['FD Packet'])
     expect(body['managers'].map { |m| m['name'] }).to include('Max Manager')
-    expect(body['check']['blocking']).to be_empty
+    expect(body['check']['blocking']).to eq(['Choose the manager who accepts the agreement'])
     expect(body['check']['open']).to include('Deal Sheet: Cash or finance')
 
     post path, headers: headers, params: { template_id: template.id }.to_json

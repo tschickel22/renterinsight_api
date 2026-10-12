@@ -50,6 +50,14 @@ RSpec.describe Knowledge::SmartSearchService do
     expect(Knowledge::Search.last).to have_attributes(query: 'zzqx gibberish', result_count: 0)
   end
 
+  it 'offers an approved tour even when unapproved ones match first, with the brand filled in' do
+    3.times { |i| Tour.create!(key: "draft-#{i}", name: "Walkthrough draft #{i}", trigger_type: 'manual', position: i) }
+    Tour.create!(key: 'ok', name: 'Walkthrough of {{brand}}', trigger_type: 'manual', position: 9, approved_at: Time.current)
+
+    titles = search('walkthrough').select { |r| r[:type] == 'tour' }.map { |r| r[:title] }
+    expect(titles).to eq(["Walkthrough of #{Brand.current.name}"])
+  end
+
   describe 'tours while paused' do
     let!(:tour) { Tour.create!(key: 'lead-tour', name: 'Leads walkthrough', knowledge_module: leads, trigger_type: 'manual', approved_at: Time.current) }
 

@@ -127,6 +127,7 @@ module Api
       # pre-close, but it is always the explicit mutate-the-deal action — never auto-run.
       def apply
         return unless authorize_action!(RESOURCE, 'write')
+        return unless sheet_open!(@scenario.deal)
 
         @scenario.write_back_to_deal!
         # Add-only merge of the scenario's line items + F&I onto the deal as deal_products, so
@@ -155,6 +156,7 @@ module Api
         if deal.gl_posted?
           return render json: { error: 'Cannot swap unit: deal is already posted to the GL' }, status: :unprocessable_entity
         end
+        return unless sheet_open!(deal)
 
         result = @scenario.apply_unit_swap_to_deal!
         render json: { scenario: scenario_json(@scenario), swap: result }
@@ -177,6 +179,7 @@ module Api
         if deal.gl_posted?
           return render json: { error: 'Cannot revert swap: deal is already posted to the GL' }, status: :unprocessable_entity
         end
+        return unless sheet_open!(deal)
 
         result = @scenario.revert_unit_swap_on_deal!
         render json: { scenario: scenario_json(@scenario), revert: result }
@@ -338,6 +341,16 @@ module Api
       end
 
       private
+
+      # A signed Deal Sheet (or one out for signature) owns the deal's lines:
+      # they change only by a change order on the sheet.
+      def sheet_open!(deal)
+        problem = deal&.home_build && Agreements::DealSheetLock.edit_problem(deal.home_build)
+        return true unless problem
+
+        render json: { error: problem }, status: :conflict
+        false
+      end
 
       def set_scenario
         @scenario = @company.deal_desk_scenarios.find(params[:id])

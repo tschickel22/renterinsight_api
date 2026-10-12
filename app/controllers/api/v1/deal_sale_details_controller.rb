@@ -19,10 +19,20 @@ class Api::V1::DealSaleDetailsController < ApplicationController
     return unless authorize_action!('deals', 'update')
 
     permitted = params.permit(*DealSaleDetails::FIELDS.keys, *DealSaleDetails::DEAL_FIELDS).to_h
+    # What prints on the contract is fixed once the buyers sign (or while
+    # they are signing). The unit's identity is filled in after the home is
+    # built, so it stays open.
+    problem = @deal.home_build && Agreements::DealSheetLock.edit_problem(@deal.home_build)
+    if problem && (permitted.keys - AFTER_SIGNING).any?
+      return render json: { error: problem }, status: :conflict
+    end
+
     render json: DealSaleDetails.new(@deal).update!(permitted).as_json
   rescue DealSaleDetails::Invalid, ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
+
+  AFTER_SIGNING = %w[hud_labels model_year].freeze
 
   private
 

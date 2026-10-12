@@ -16,6 +16,8 @@ module Guide
   class Assistant
     MAX_ROUNDS = 5
     HISTORY = 12
+    # Said when Claude replies without an answer: never stored empty.
+    NO_ANSWER = 'I could not find an answer to that in the help. Try asking it another way, or open Help to search.'
 
     SYSTEM = <<~PROMPT
       You are the help assistant inside {{brand}}, software dealerships (manufactured homes, RVs) use for leads, deals, inventory, accounting, service and marketing. You help the person in front of you use it.
@@ -88,7 +90,11 @@ module Guide
 
     # history: earlier [{ 'role', 'content' }] turns; page: where the person is.
     def ask(question, history: [], page: nil)
+      # An empty turn is refused by the API and would fail every later question.
       messages = Array(history).last(HISTORY).map { |m| { role: m['role'], content: m['content'].to_s } }
+                               .reject { |m| m[:content].strip.empty? }
+      messages.shift while messages.first && messages.first[:role] != 'user'
+      messages.pop while messages.last && messages.last[:role] == 'user'
       messages << { role: 'user', content: framed(question, page) }
       tokens_in = 0
       tokens_out = 0
@@ -170,11 +176,12 @@ module Guide
     def finish(input, tokens_in, tokens_out)
       articles = Array(input['article_slugs']).filter_map { |s| @seen_articles[s] }.uniq.first(4)
       places = Array(input['place_keys']).filter_map { |k| @seen_places[k] }.uniq.first(3)
+      answer = clean(input['answer_markdown'])
       Result.new(
-        answer: clean(input['answer_markdown']),
+        answer: answer.presence || NO_ANSWER,
         articles: articles.map { |a| { slug: a.slug, title: Guide::Copy.render(a.title, company: @company) } },
         places: places.map { |e| { key: e['key'], title: e['title'], kind: e['kind'], route: e['route'] } },
-        answered: input['answered'] != false,
+        answered: answer.present? && input['answered'] != false,
         input_tokens: tokens_in, output_tokens: tokens_out
       )
     end
