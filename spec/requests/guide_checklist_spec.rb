@@ -67,6 +67,18 @@ RSpec.describe 'Getting started checklist', type: :request do
     expect(facebook.call['done']).to eq(false)
   end
 
+  it 'asks for the business description the AI writers use, done once someone has written it' do
+    admin = user(role: 'admin')
+    about = -> { JSON.parse(response.body)['setup'].find { |i| i['key'] == 'about' } }
+
+    get '/api/v1/guide/checklist', headers: headers_for(admin)
+    expect(about.call).to include('done' => false, 'route' => '/settings?tab=general')
+
+    Setting.set('Company', company.id, 'company_profile', { 'business_description' => 'Family owned manufactured home dealer since 1998.' })
+    get '/api/v1/guide/checklist', headers: headers_for(admin)
+    expect(about.call['done']).to eq(true)
+  end
+
   it 'remembers the chosen path and a dismissal' do
     rep = user
     patch '/api/v1/guide/checklist', params: { path: 'manager', dismissed: true }, headers: headers_for(rep), as: :json

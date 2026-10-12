@@ -102,6 +102,12 @@ module Guide
         item('locations', 'Add your locations', '/locations', feature: 'page:/locations') { @company.locations.where(active: true, is_deleted: false).exists? },
         item('team', 'Invite your team', '/settings?tab=users', feature: 'setting:users') { @company.users.where.not(id: @user.id).exists? },
         item('branding', 'Add your logo', '/settings?tab=branding', feature: 'setting:branding') { logo? },
+        # What every AI writer (campaigns, social posts, workflows, nurture
+        # emails) is told about the business. Done once it is written, by the
+        # dealer or by us during setup.
+        item('about', 'Tell the AI about your business', '/settings?tab=general', feature: 'page:/settings') do
+          (Setting.get('Company', @company.id, 'company_profile', nil) || {})['business_description'].to_s.strip.length >= 20
+        end,
         item('pipeline', 'Set your deal stages', '/settings?tab=pipeline', feature: 'setting:pipeline') { Setting.get('Company', @company.id, 'pipeline_stages', nil).present? },
         item('email', 'Connect your email', '/account/settings?tab=email', feature: 'action:connect-email') do
           UserEmailConnection.where(company_id: @company.id).active.exists? || @company.company_domains.email_verified.exists?

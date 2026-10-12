@@ -26,6 +26,12 @@ module Guide
         quickbooks: fact { QuickbooksConnection.where(company_id: @company.id).any?(&:connected?) ? 'connected' : 'not connected' },
         bank_accounts: fact { @company.bank_accounts.active.count },
         website: fact { website },
+        facebook_page: fact do
+          page = FacebookIntegration.current_for(@company)
+          page.nil? ? 'not connected' : (page.token_expired? ? 'connected but expired, needs reconnecting' : 'connected')
+        end,
+        # What the AI writers are told about the business (About Your Business).
+        about_the_business: fact { (Setting.get('Company', @company.id, 'company_profile', nil) || {}).slice('business_description', 'industry_vertical', 'brand_voice', 'target_audience', 'products_services').compact_blank.presence || 'not filled in' },
         texting_number: fact { @company.twilio_accounts.active.exists? ? 'set up' : 'not set up' },
         your_email_connected: fact { UserEmailConnection.where(user_id: @user.id).active.exists? },
         your_role: fact { @user.try(:roles)&.map(&:name)&.join(', ').presence || @user.role },
