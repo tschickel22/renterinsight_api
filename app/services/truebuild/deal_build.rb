@@ -111,13 +111,14 @@ module Truebuild
 
     # A change order the buyers signed (Agreements::BuyerChangeOrder): this
     # version replaces the signed LIVE one and is locked in its turn. Not
-    # repriced: the buyers signed these prices. The deal is written from it.
-    def apply_signed_change!(from:)
+    # repriced: the buyers signed these prices. The deal is written from it,
+    # won or posted too (see write_closed_deal!).
+    def apply_signed_change!(from:, agreement: nil)
       DealHomeBuild.transaction do
         from.update!(live: false)
         @build.update!(live: true, status: 'locked')
+        @build.deal.cost_snapshotted? ? write_closed_deal!(agreement) : sync_deal!
       end
-      sync_deal!
       self
     end
 
@@ -296,12 +297,44 @@ module Truebuild
     end
 
     # Writes the deal from the build (see the class comment). Skipped once the
-    # deal is won or posted to the GL: its price and cost are frozen then.
+    # deal is won or posted to the GL: its price and cost are frozen then, and
+    # only a change the buyers sign moves them (write_closed_deal!).
     def sync_deal!
-      deal = @build.deal
       return unless @build.live?
-      return if deal.cost_snapshotted?
+      return if @build.deal.cost_snapshotted?
 
+      write_deal!(@build.deal)
+    end
+
+    # A signed change order on a won or posted deal. The deal takes the new
+    # lines and totals like any other, and also the selling price and cost
+    # that froze at close (the cost moves by what the home's cost moved, so a
+    # cost set at close for another reason is kept). A posted deal gets a
+    # journal entry for the difference, dated today, and its invoice is
+    # recalculated (paid draws stay as they are).
+    def write_closed_deal!(agreement)
+      deal = @build.deal
+      before = Accounting::DealAccountingService.new(deal).posting_lines if deal.gl_posted?
+      old_cost = deal.home_line_item&.cost.to_d
+      write_deal!(deal)
+
+      deal.reload
+      new_cost = deal.home_line_item&.cost.to_d
+      attrs = { selling_price: deal.home_line_item_price, unit_cost: new_cost }
+      attrs[:home_cost] = deal.home_cost.to_d + new_cost - old_cost if deal.home_cost.to_d.positive?
+      deal.update_columns(attrs)
+      deal.reload
+
+      if before
+        Accounting::DealAccountingService.new(deal)
+          .post_change_adjustment!(before: before, memo: ['Change order', agreement&.agreement_number].compact.join(' '),
+                                   user: agreement&.prepared_by)
+      end
+      invoice = deal.deal_invoice_id && deal.company.invoices.find_by(id: deal.deal_invoice_id)
+      DealInvoiceService.new(deal).sync_invoice!(invoice) if invoice
+    end
+
+    def write_deal!(deal)
       lines = @build.lines.reload.select(&:priced?)
       extras = lines.reject { |l| %w[base option freight].include?(l.kind) }
       t = @build.totals.to_h

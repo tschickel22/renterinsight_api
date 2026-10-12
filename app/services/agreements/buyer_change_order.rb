@@ -133,7 +133,7 @@ module Agreements
       to = builds.find_by(id: co['to_build_id'])
       return unless from && to && to.deal_id == agreement.deal_id
 
-      Truebuild::DealBuild.new(to).apply_signed_change!(from: from)
+      Truebuild::DealBuild.new(to).apply_signed_change!(from: from, agreement: agreement)
       to
     end
 

@@ -24,119 +24,10 @@ module Accounting
       return { error: 'Deal is not closed/won' } unless deal_is_closed?
       return { error: 'Already posted to GL' } if @deal.gl_posted?
 
-      settings = AccountingSettings.for_company(@company)
       posting_service = ManualPostingService.new(@company)
-      ar_account = settings.default_ar_account
 
       ActiveRecord::Base.transaction do
-        lines = []
-        deal_location_id = @deal.try(:location_id)
-
-        selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
-        # PRODUCT cost relieved to COGS = vehicle structured cost (close-time snapshot) +
-        # reconditioning, from the SAME snapshot GP uses, so the COGS product cost and GP's
-        # product component can never drift. Floor-plan interest and delivery/setup are
-        # PERIOD costs — included in the GP margin view but NEVER posted to COGS/inventory.
-        home_cost = (@deal.vehicle_landed_cost || @deal.home_cost || BigDecimal('0')).to_d
-        recon_cost = (@deal.reconditioning_cost || BigDecimal('0')).to_d
-        recon_cogs = @company.chart_of_accounts.find_by(account_number: '5110')
-        recon_wip  = @company.chart_of_accounts.find_by(account_number: '1240')
-        # Reconditioning relieves its own WIP account when that pair is configured;
-        # otherwise it was capitalized into the unit's inventory value, so fold it into the
-        # main COGS/inventory relief. Either path keeps the COGS debit == vehicle + recon —
-        # recon is never silently dropped from COGS.
-        recon_dedicated = recon_cost > 0 && recon_cogs && recon_wip
-        folded_recon = recon_dedicated ? BigDecimal('0') : recon_cost
-
-        if selling_price > 0
-          revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
-                            settings.default_sales_revenue_account
-
-          if revenue_account && ar_account
-            lines << { chart_of_account_id: ar_account.id, debit_amount: selling_price, credit_amount: 0,
-                       memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id,
-                       vehicle_id: @deal.try(:vehicle_id), contact_id: @deal.try(:contact_id) || @deal.try(:lead_id) }
-            lines << { chart_of_account_id: revenue_account.id, debit_amount: 0, credit_amount: selling_price,
-                       memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id,
-                       vehicle_id: @deal.try(:vehicle_id) }
-          end
-        end
-
-        cogs_relief = home_cost + folded_recon
-        if cogs_relief > 0
-          cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs') ||
-                         settings.default_cogs_account
-          inventory_account = @company.chart_of_accounts.find_by(account_number: '1210')
-
-          if cogs_account && inventory_account
-            lines << { chart_of_account_id: cogs_account.id, debit_amount: cogs_relief, credit_amount: 0,
-                       memo: "COGS — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id,
-                       vehicle_id: @deal.try(:vehicle_id) }
-            lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: cogs_relief,
-                       memo: "Inventory relief — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id,
-                       vehicle_id: @deal.try(:vehicle_id) }
-          end
-        end
-
-        if recon_dedicated
-          lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
-                     memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
-                     department: deal_department, deal_id: @deal.id }
-          lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
-                     memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
-                     department: deal_department, deal_id: @deal.id }
-        end
-
-        fp_amount = @deal.try(:floor_plan_amount) || BigDecimal('0')
-        if fp_amount > 0
-          fp_liability = @company.chart_of_accounts.find_by(account_number: '2110')
-          bank_account = @company.chart_of_accounts.where(sub_type: 'bank', is_active: true).order(:account_number).first
-          if fp_liability && bank_account
-            lines << { chart_of_account_id: fp_liability.id, debit_amount: fp_amount, credit_amount: 0,
-                       memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
-                       deal_id: @deal.id, vehicle_id: @deal.try(:vehicle_id) }
-            lines << { chart_of_account_id: bank_account.id, debit_amount: 0, credit_amount: fp_amount,
-                       memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
-                       deal_id: @deal.id }
-          end
-        end
-
-        fi_products = @deal.try(:deal_products) || []
-        fi_products.each do |product|
-          product_revenue = product.try(:price) || product.try(:amount) || product.try(:total) || BigDecimal('0')
-          next if product_revenue <= 0
-
-          fi_revenue_account = resolve_fi_account(product) ||
-                               @company.chart_of_accounts.find_by(account_number: '4110')
-
-          if fi_revenue_account && ar_account
-            lines << { chart_of_account_id: ar_account.id, debit_amount: product_revenue, credit_amount: 0,
-                       memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
-                       location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
-            lines << { chart_of_account_id: fi_revenue_account.id, debit_amount: 0, credit_amount: product_revenue,
-                       memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
-                       location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
-          end
-        end
-
-        commission = @deal.commission_amount || BigDecimal('0')
-        if commission > 0
-          commission_exp = @company.chart_of_accounts.find_by(account_number: '6010')
-          accrued_comp = @company.chart_of_accounts.find_by(account_number: '2020')
-          if commission_exp && accrued_comp
-            lines << { chart_of_account_id: commission_exp.id, debit_amount: commission, credit_amount: 0,
-                       memo: "Commission — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id }
-            lines << { chart_of_account_id: accrued_comp.id, debit_amount: 0, credit_amount: commission,
-                       memo: "Commission — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id }
-          end
-        end
-
+        lines = closing_lines
         if lines.any?
           je = posting_service.post_complex!(
             lines: lines,
@@ -159,54 +50,144 @@ module Accounting
       end
     end
 
-    def post_sales_tax_entries!(user: nil)
+    # The lines the closing entry posts for the deal as it stands: revenue, COGS
+    # and inventory relief, reconditioning, floor plan payoff, the deal's other
+    # line items and commission. Posts nothing; post_closing_entries! posts them
+    # and post_change_adjustment! posts the difference a change makes to them.
+    def closing_lines
       settings = AccountingSettings.for_company(@company)
-      return { success: true, skipped: 'sales_tax_disabled', entries: [], total_tax: BigDecimal('0') } unless settings.sales_tax_enabled
-
-      state_code = deal_state_code
-      return { success: true, skipped: 'no_state_code', entries: [], total_tax: BigDecimal('0') } if state_code.blank?
-
       ar_account = settings.default_ar_account
-      return { success: true, skipped: 'missing_ar_account', entries: [], total_tax: BigDecimal('0') } unless ar_account
+      lines = []
+      deal_location_id = @deal.try(:location_id)
 
-      selling_price = BigDecimal((@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || 0).to_s)
-      return { success: true, skipped: 'no_selling_price', entries: [], total_tax: BigDecimal('0') } if selling_price <= 0
+      selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
+      # PRODUCT cost relieved to COGS = vehicle structured cost (close-time snapshot) +
+      # reconditioning, from the SAME snapshot GP uses, so the COGS product cost and GP's
+      # product component can never drift. Floor-plan interest and delivery/setup are
+      # PERIOD costs — included in the GP margin view but NEVER posted to COGS/inventory.
+      home_cost = (@deal.vehicle_landed_cost || @deal.home_cost || BigDecimal('0')).to_d
+      recon_cost = (@deal.reconditioning_cost || BigDecimal('0')).to_d
+      recon_cogs = @company.chart_of_accounts.find_by(account_number: '5110')
+      recon_wip  = @company.chart_of_accounts.find_by(account_number: '1240')
+      # Reconditioning relieves its own WIP account when that pair is configured;
+      # otherwise it was capitalized into the unit's inventory value, so fold it into the
+      # main COGS/inventory relief. Either path keeps the COGS debit == vehicle + recon —
+      # recon is never silently dropped from COGS.
+      recon_dedicated = recon_cost > 0 && recon_cogs && recon_wip
+      folded_recon = recon_dedicated ? BigDecimal('0') : recon_cost
 
-      # The taxing state's rules (Tax::DealTax, backlog E45): Indiana taxes 65% of
-      # the price after trade, Michigan collects at titling, Ohio has the dealer
-      # owe use tax instead. Other states: the whole price, as before.
-      tax = Tax::DealTax.new(deal: @deal, selling_price: selling_price, trade: @deal.try(:trade_allowance) || 0,
-                             cost_basis: @deal.landed_cost || 0, used: @deal.try(:vehicle)&.condition.to_s.casecmp?('used')).call
-      if tax[:payer] && tax[:payer] != 'dealer_collects'
-        return { success: true, skipped: "not_collected_in_#{tax[:state]}", entries: [], total_tax: BigDecimal('0') }
+      if selling_price > 0
+        revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
+                          settings.default_sales_revenue_account
+
+        if revenue_account && ar_account
+          lines << { chart_of_account_id: ar_account.id, debit_amount: selling_price, credit_amount: 0,
+                     memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id,
+                     vehicle_id: @deal.try(:vehicle_id), contact_id: @deal.try(:contact_id) || @deal.try(:lead_id) }
+          lines << { chart_of_account_id: revenue_account.id, debit_amount: 0, credit_amount: selling_price,
+                     memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id,
+                     vehicle_id: @deal.try(:vehicle_id) }
+        end
       end
-      state_code = tax[:state] || state_code
-      rates = tax[:rates].present? ? tax[:rates].transform_values { |v| BigDecimal(v.to_s) } : settings.combined_tax_rate(state_code)
-      accounts = settings.tax_accounts
-      posting_service = ManualPostingService.new(@company)
 
+      cogs_relief = home_cost + folded_recon
+      if cogs_relief > 0
+        cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs') ||
+                       settings.default_cogs_account
+        inventory_account = @company.chart_of_accounts.find_by(account_number: '1210')
+
+        if cogs_account && inventory_account
+          lines << { chart_of_account_id: cogs_account.id, debit_amount: cogs_relief, credit_amount: 0,
+                     memo: "COGS — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id,
+                     vehicle_id: @deal.try(:vehicle_id) }
+          lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: cogs_relief,
+                     memo: "Inventory relief — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id,
+                     vehicle_id: @deal.try(:vehicle_id) }
+        end
+      end
+
+      if recon_dedicated
+        lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
+                   memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                   department: deal_department, deal_id: @deal.id }
+        lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
+                   memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                   department: deal_department, deal_id: @deal.id }
+      end
+
+      fp_amount = @deal.try(:floor_plan_amount) || BigDecimal('0')
+      if fp_amount > 0
+        fp_liability = @company.chart_of_accounts.find_by(account_number: '2110')
+        bank_account = @company.chart_of_accounts.where(sub_type: 'bank', is_active: true).order(:account_number).first
+        if fp_liability && bank_account
+          lines << { chart_of_account_id: fp_liability.id, debit_amount: fp_amount, credit_amount: 0,
+                     memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
+                     deal_id: @deal.id, vehicle_id: @deal.try(:vehicle_id) }
+          lines << { chart_of_account_id: bank_account.id, debit_amount: 0, credit_amount: fp_amount,
+                     memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
+                     deal_id: @deal.id }
+        end
+      end
+
+      # The deal's other line items. The home line is the selling price posted
+      # above, so it is left out here, and each line counts before tax: the
+      # sales tax entries post the tax.
+      fi_products = (@deal.try(:deal_products) || []).reject(&:home_line_item?)
+      fi_products.each do |product|
+        product_revenue = pre_tax(product)
+        next if product_revenue <= 0
+
+        fi_revenue_account = resolve_fi_account(product) ||
+                             @company.chart_of_accounts.find_by(account_number: '4110')
+
+        if fi_revenue_account && ar_account
+          lines << { chart_of_account_id: ar_account.id, debit_amount: product_revenue, credit_amount: 0,
+                     memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
+                     location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
+          lines << { chart_of_account_id: fi_revenue_account.id, debit_amount: 0, credit_amount: product_revenue,
+                     memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
+                     location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
+        end
+      end
+
+      commission = @deal.commission_amount || BigDecimal('0')
+      if commission > 0
+        commission_exp = @company.chart_of_accounts.find_by(account_number: '6010')
+        accrued_comp = @company.chart_of_accounts.find_by(account_number: '2020')
+        if commission_exp && accrued_comp
+          lines << { chart_of_account_id: commission_exp.id, debit_amount: commission, credit_amount: 0,
+                     memo: "Commission — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id }
+          lines << { chart_of_account_id: accrued_comp.id, debit_amount: 0, credit_amount: commission,
+                     memo: "Commission — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id }
+        end
+      end
+      lines
+    end
+
+    def post_sales_tax_entries!(user: nil)
+      plan = sales_tax_plan
+      return { success: true, skipped: plan[:skipped], entries: [], total_tax: BigDecimal('0') } if plan[:skipped]
+
+      posting_service = ManualPostingService.new(@company)
       entries = []
       je_ids = []
       total_tax = BigDecimal('0')
-      location_id = @deal.try(:location_id)
 
-      [:state, :county, :city].each do |slot|
-        rate = rates[slot] || BigDecimal('0')
-        account = accounts[slot]
-        next if rate.nil? || rate <= 0
-        next if account.nil?
-
-        amount = BigDecimal(tax[:slots][slot].to_s)
-        next if amount <= 0
-
+      plan[:slots].each do |slot|
         je = posting_service.post_simple!(
-          debit_account: ar_account,
-          credit_account: account,
-          amount: amount,
-          memo: "Sales tax (#{slot.to_s.capitalize}) — #{deal_description}",
+          debit_account: plan[:ar_account],
+          credit_account: slot[:account],
+          amount: slot[:amount],
+          memo: "Sales tax (#{slot[:slot].to_s.capitalize}) — #{deal_description}",
           entry_date: deal_close_date,
           source_entity: @deal,
-          location_id: location_id,
+          location_id: @deal.try(:location_id),
           department: deal_department,
           contact_id: @deal.try(:contact_id) || @deal.try(:lead_id),
           deal_id: @deal.id,
@@ -216,13 +197,14 @@ module Accounting
 
         next unless je
 
-        entries << { jurisdiction: slot, rate: rate, amount: amount, journal_entry_id: je.id }
+        entries << { jurisdiction: slot[:slot], rate: slot[:rate], amount: slot[:amount], journal_entry_id: je.id }
         je_ids << je.id
-        total_tax += amount
+        total_tax += slot[:amount]
       end
 
+      rates = plan[:rates]
       @deal.update!(
-        delivery_state: state_code,
+        delivery_state: plan[:state_code],
         state_tax_rate: rates[:state],
         county_tax_rate: rates[:county],
         city_tax_rate: rates[:city],
@@ -232,6 +214,54 @@ module Accounting
       )
 
       { success: true, entries: entries, total_tax: total_tax }
+    end
+
+    # The sales tax lines post_sales_tax_entries! posts, as closing_lines gives them.
+    def sales_tax_lines
+      plan = sales_tax_plan
+      return [] if plan[:skipped]
+
+      plan[:slots].flat_map do |slot|
+        line = { location_id: @deal.try(:location_id), department: deal_department, deal_id: @deal.id,
+                 vehicle_id: @deal.try(:vehicle_id), memo: "Sales tax (#{slot[:slot].to_s.capitalize}) — #{deal_description}" }
+        [line.merge(chart_of_account_id: plan[:ar_account].id, debit_amount: slot[:amount], credit_amount: 0),
+         line.merge(chart_of_account_id: slot[:account].id, debit_amount: 0, credit_amount: slot[:amount])]
+      end
+    end
+
+    # A change the buyers signed after the deal was posted (a Deal Sheet change
+    # order). `before` is posting_lines from before the change; this posts the
+    # difference to what the deal posts now, dated today, so the GL follows the
+    # deal without reopening the closed entry. Nil when nothing moved.
+    def post_change_adjustment!(before:, memo:, user: nil)
+      return nil unless @deal.gl_posted?
+
+      delta = Hash.new(0.to_d)
+      sample = {}
+      [[before, -1], [posting_lines, 1]].each do |lines, sign|
+        lines.each do |l|
+          key = [l[:chart_of_account_id], l[:department], l[:location_id]]
+          delta[key] += sign * (l[:debit_amount].to_d - l[:credit_amount].to_d)
+          sample[key] ||= l
+        end
+      end
+      lines = delta.reject { |_, amount| amount.round(2).zero? }.map do |key, amount|
+        amount = amount.round(2)
+        sample[key].slice(:chart_of_account_id, :location_id, :department, :deal_id, :vehicle_id)
+                   .merge(debit_amount: [amount, 0].max, credit_amount: [-amount, 0].max, memo: "#{memo}: #{deal_description}")
+      end
+      return nil if lines.empty?
+
+      je = ManualPostingService.new(@company).post_complex!(lines: lines, memo: "#{memo}: #{deal_description}",
+                                                             entry_date: Date.current, source_entity: @deal, posted_by: user)
+      raise ActiveRecord::RecordInvalid.new(@deal), 'The change could not be posted to the GL' unless je
+
+      je
+    end
+
+    # Everything the deal posts: the closing entry and its sales tax.
+    def posting_lines
+      closing_lines + sales_tax_lines
     end
 
     def profitability_summary
@@ -322,6 +352,45 @@ module Accounting
 
     private
 
+    # What the deal owes in sales tax and where it posts: { skipped: reason }
+    # when it posts none, otherwise the AR account, rates and one slot per
+    # jurisdiction ({ slot:, rate:, account:, amount: }).
+    def sales_tax_plan
+      settings = AccountingSettings.for_company(@company)
+      return { skipped: 'sales_tax_disabled' } unless settings.sales_tax_enabled
+
+      state_code = deal_state_code
+      return { skipped: 'no_state_code' } if state_code.blank?
+
+      ar_account = settings.default_ar_account
+      return { skipped: 'missing_ar_account' } unless ar_account
+
+      selling_price = BigDecimal((@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || 0).to_s)
+      return { skipped: 'no_selling_price' } if selling_price <= 0
+
+      # The taxing state's rules (Tax::DealTax, backlog E45): Indiana taxes 65% of
+      # the price after trade, Michigan collects at titling, Ohio has the dealer
+      # owe use tax instead. Other states: the whole price, as before.
+      tax = Tax::DealTax.new(deal: @deal, selling_price: selling_price, trade: @deal.try(:trade_allowance) || 0,
+                             cost_basis: @deal.landed_cost || 0, used: @deal.try(:vehicle)&.condition.to_s.casecmp?('used')).call
+      return { skipped: "not_collected_in_#{tax[:state]}" } if tax[:payer] && tax[:payer] != 'dealer_collects'
+
+      state_code = tax[:state] || state_code
+      rates = tax[:rates].present? ? tax[:rates].transform_values { |v| BigDecimal(v.to_s) } : settings.combined_tax_rate(state_code)
+      accounts = settings.tax_accounts
+      slots = %i[state county city].filter_map do |slot|
+        rate = rates[slot] || BigDecimal('0')
+        account = accounts[slot]
+        next if rate <= 0 || account.nil?
+
+        amount = BigDecimal(tax[:slots][slot].to_s)
+        next if amount <= 0
+
+        { slot: slot, rate: rate, account: account, amount: amount }
+      end
+      { ar_account: ar_account, state_code: state_code, rates: rates, slots: slots }
+    end
+
     def deal_is_closed?
       # Legacy fallbacks (closed/completed) kept alongside tenant-resolved keys
       # for edge cases where deal.status carries a coarser value than deal.stage.
@@ -360,6 +429,12 @@ module Accounting
             @deal.try(:billing_state).presence ||
             @deal.try(:location)&.try(:state).presence
       raw&.to_s&.strip&.upcase.presence
+    end
+
+    def pre_tax(product)
+      subtotal = product.quantity.to_i * product.unit_price.to_d
+      off = product.discount_type == 'percentage' ? subtotal * product.discount.to_d / 100 : product.discount.to_d
+      (subtotal - off).round(2)
     end
 
     def resolve_fi_account(product)
