@@ -525,18 +525,47 @@ class AgreementPdfService
 
     return false unless tempfile
 
+    inked = ink_only(tempfile.path)
     begin
-      pdf.image tempfile.path,
-        at: [x, y],
-        fit: [w, h]
+      path = inked&.path || tempfile.path
+      iw, ih = (Vips::Image.new_from_file(path).then { |i| [i.width, i.height] } rescue [w, h])
+      scale = [w / iw.to_f, h / ih.to_f].min
+      pdf.image path,
+        at: [x + (w - iw * scale) / 2, y - (h - ih * scale) / 2],
+        width: iw * scale, height: ih * scale
       true
     rescue => e
       Rails.logger.warn("[AgreementPdfService] Image stamp failed: #{e.class}: #{e.message}")
       false
     ensure
-      tempfile.close rescue nil
-      tempfile.unlink rescue nil
+      [tempfile, inked].compact.each do |f|
+        f.close rescue nil
+        f.unlink rescue nil
+      end
     end
+  end
+
+  # A drawn signature or initials sits small in the middle of its pad. Crop
+  # the pad to the ink (plus a little margin) so the mark fills its box.
+  def ink_only(path)
+    img = Vips::Image.new_from_file(path)
+    flat = img.has_alpha? ? img.flatten(background: [255] * (img.bands - 1)) : img
+    ink = flat.colourspace(:b_w)[0].invert
+    left, top, width, height = ink.find_trim(threshold: 20, background: [0])
+    return nil if width.zero? || height.zero?
+
+    pad = (height * 0.08).ceil
+    l = [left - pad, 0].max
+    t = [top - pad, 0].max
+    box = [l, t, [left + width + pad, img.width].min - l, [top + height + pad, img.height].min - t]
+    # Only the ink prints, so the pad's paper never covers the line it sits on.
+    cropped = flat.colourspace(:srgb).crop(*box).bandjoin(ink.crop(*box))
+    out = Tempfile.new(['ink', '.png'])
+    cropped.write_to_file(out.path)
+    out
+  rescue => e
+    Rails.logger.warn("[AgreementPdfService] Ink crop skipped: #{e.class}: #{e.message}")
+    nil
   end
 
   def decode_base64_image(data_uri)

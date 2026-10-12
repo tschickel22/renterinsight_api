@@ -74,9 +74,14 @@ RSpec.describe Agreements::PacketRenderer do
   end
 
   it 'leaves Buyer 2 out when the deal has one buyer' do
+    initials = ->(r) { r.placements.select { |p| p['fieldType'] == 'initials' && p['signerIndex'].zero? }.size }
+    both = initials.call(described_class.new(deal.reload, template).call)
+
     deal.update!(co_applicant_contact_id: nil)
     result = described_class.new(deal.reload, template).call
     expect(result.signers).to eq(%w[buyer_1 rep manager])
     expect(result.placements.select { |p| p['isSignerField'] }.map { |p| p['signerIndex'] }.uniq).to contain_exactly(0, 1, 2)
+    # Buyer 2's half of each "x____ x____" pair stays blank, not a second Buyer 1 box
+    expect(initials.call(result)).to eq(both)
   end
 end
