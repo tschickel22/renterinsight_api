@@ -16,6 +16,7 @@ class Brand
     name
     short_name
     support_email
+    support_phone
     sales_email
     from_email
     from_name
@@ -99,6 +100,7 @@ class Brand
     @name           = resolve(overrides, :name,           platform[:platformName])
     @short_name     = resolve(overrides, :short_name,     platform[:shortName]) || @name
     @support_email  = resolve(overrides, :support_email,  platform[:supportEmail])
+    @support_phone  = resolve(overrides, :support_phone,  platform[:supportPhone] || PlatformSetting.default_general[:supportPhone])
     @sales_email    = resolve(overrides, :sales_email,    platform[:salesEmail])
     @from_email     = resolve(overrides, :from_email,     platform[:fromEmail])
     @from_name      = resolve(overrides, :from_name,      platform[:fromName]) || @name
