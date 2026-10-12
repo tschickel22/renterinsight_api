@@ -525,7 +525,7 @@ class AgreementPdfService
 
     return false unless tempfile
 
-    inked = ink_only(tempfile.path)
+    inked = ink_only(tempfile.path, w, h)
     begin
       path = inked&.path || tempfile.path
       iw, ih = (Vips::Image.new_from_file(path).then { |i| [i.width, i.height] } rescue [w, h])
@@ -545,27 +545,43 @@ class AgreementPdfService
     end
   end
 
+  # Thinnest line a drawn mark may print at, in points. The pad's pen is a
+  # few pixels on a canvas hundreds wide, so shrunk onto a signature line or
+  # an initials box it printed as a hairline nobody could see.
+  MIN_STROKE_PT = 1.2
+
   # A drawn signature or initials sits small in the middle of its pad. Crop
-  # the pad to the ink (plus a little margin) so the mark fills its box.
-  def ink_only(path)
+  # the pad to the ink so the mark fills its w x h box, thicken the strokes so
+  # they print at MIN_STROKE_PT, and print solid ink on no paper.
+  def ink_only(path, w, h)
     img = Vips::Image.new_from_file(path)
     flat = img.has_alpha? ? img.flatten(background: [255] * (img.bands - 1)) : img
     ink = flat.colourspace(:b_w)[0].invert
     left, top, width, height = ink.find_trim(threshold: 20, background: [0])
     return nil if width.zero? || height.zero?
 
-    pad = (height * 0.08).ceil
-    l = [left - pad, 0].max
-    t = [top - pad, 0].max
-    box = [l, t, [left + width + pad, img.width].min - l, [top + height + pad, img.height].min - t]
-    # Only the ink prints, so the pad's paper never covers the line it sits on.
-    cropped = flat.colourspace(:srgb).crop(*box).bandjoin(ink.crop(*box))
+    # Grow the ink until its strokes are thick enough at the size it prints.
+    scale = [w / width.to_f, h / height.to_f].min
+    grow = ((MIN_STROKE_PT / scale - stroke_px(ink.crop(left, top, width, height))) / 2).ceil.clamp(0, 12)
+    pad = (height * 0.08).ceil + grow
+    canvas = ink.embed(pad, pad, ink.width + 2 * pad, ink.height + 2 * pad)
+    canvas = canvas.rank(2 * grow + 1, 2 * grow + 1, (2 * grow + 1)**2 - 1) if grow.positive?
+    alpha = canvas.crop(left, top, width + 2 * pad, height + 2 * pad).linear(1.6, 0).cast(:uchar)
+    cropped = (alpha * 0).bandjoin([alpha * 0, alpha * 0, alpha]).cast(:uchar).copy(interpretation: :srgb)
     out = Tempfile.new(['ink', '.png'])
     cropped.write_to_file(out.path)
     out
   rescue => e
     Rails.logger.warn("[AgreementPdfService] Ink crop skipped: #{e.class}: #{e.message}")
     nil
+  end
+
+  # Average stroke width in pixels: ink area over half its outline.
+  def stroke_px(ink)
+    on = ink > 100
+    area = on.avg * on.width * on.height / 255.0
+    edge = (on - on.erode(Vips::Image.new_from_array([[255] * 3] * 3))).avg * on.width * on.height / 255.0
+    edge.positive? ? 2 * area / edge : 1.0
   end
 
   def decode_base64_image(data_uri)

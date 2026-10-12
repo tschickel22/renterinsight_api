@@ -18,7 +18,7 @@ RSpec.describe AgreementPdfService, 'drawn marks' do
 
   it 'crops a pad to its ink' do
     file = service.send(:decode_base64_image, pad)
-    inked = service.send(:ink_only, file.path)
+    inked = service.send(:ink_only, file.path, 30, 12)
     img = Vips::Image.new_from_file(inked.path)
     expect(img.width).to be < 50
     expect(img.height).to be < 70
@@ -28,8 +28,17 @@ RSpec.describe AgreementPdfService, 'drawn marks' do
     white = (Vips::Image.black(464, 120) + 255).bandjoin([255, 255, 255]).copy(interpretation: :srgb)
     ink = Vips::Image.black(32, 51).bandjoin([0, 0, 255]).copy(interpretation: :srgb)
     file = Tempfile.new(['pad', '.png']).tap { |f| white.insert(ink, 234, 43).write_to_file(f.path) }
-    img = Vips::Image.new_from_file(service.send(:ink_only, file.path).path)
+    img = Vips::Image.new_from_file(service.send(:ink_only, file.path, 30, 12).path)
     expect([img.width, img.height]).to all(be < 70)
+  end
+
+  it 'thickens a hairline pen stroke so it prints at a visible weight' do
+    pad = (Vips::Image.black(464, 180) + 255).copy(interpretation: :b_w)
+    line = Vips::Image.black(300, 2) # a 2px stroke, shrunk about 3x onto a signature line
+    file = Tempfile.new(['pad', '.png']).tap { |f| pad.insert(line, 80, 90).write_to_file(f.path) }
+    img = Vips::Image.new_from_file(service.send(:ink_only, file.path, 100, 28).path)
+    printed = service.send(:stroke_px, img[3]) * 100.0 / 300
+    expect(printed).to be >= described_class::MIN_STROKE_PT * 0.9
   end
 
   it 'fills the box with the mark instead of the empty pad' do
