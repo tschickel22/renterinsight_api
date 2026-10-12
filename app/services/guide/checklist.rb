@@ -106,6 +106,12 @@ module Guide
         item('email', 'Connect your email', '/account/settings?tab=email') do
           UserEmailConnection.where(company_id: @company.id).active.exists? || @company.company_domains.email_verified.exists?
         end,
+        # Posts, comments and Facebook lead ads all need the Page. An expired
+        # connection is not done: it needs reconnecting.
+        item('facebook', 'Connect your Facebook Page', '/settings?tab=integrations') do
+          page = FacebookIntegration.current_for(@company)
+          page.present? && !page.token_expired?
+        end,
         item('inventory', 'Add your inventory', '/inventory') { @company.vehicles.exists? },
         item('leads', 'Get your first lead in', '/crm') { @company.leads.exists? },
         (item('quickbooks', 'Connect QuickBooks', '/settings?tab=integrations') { QuickbooksConnection.where(company_id: @company.id).any?(&:connected?) } if module?('finance.accounting')),
