@@ -64,12 +64,26 @@ module Guide
 
     Result = Struct.new(:answer, :articles, :places, :answered, :input_tokens, :output_tokens, keyword_init: true)
 
-    def initialize(user:, company:, client: Guide::ClaudeChat.new)
+    # data_assistant: whether this company has the AI Assistant (the sparkle
+    # in the header), which answers questions about its own records.
+    def initialize(user:, company:, client: Guide::ClaudeChat.new, data_assistant: nil)
       @user = user
       @company = company
       @client = client
+      @data_assistant = data_assistant.nil? ? (AiQueryLog.monthly_limit_for(company, user: user).positive? rescue false) : data_assistant
       @seen_articles = {}
       @seen_places = {}
+    end
+
+    # Questions about the dealership's own records (which deals, how many
+    # leads) are not help. Point them where they can be answered instead of
+    # guessing.
+    def data_rule
+      if @data_assistant
+        "- You cannot look up this dealership's records or numbers. When asked for them (which deals, how many leads, unpaid invoices), say that the AI Assistant, the sparkle icon at the top of the screen, answers questions about their data, and call reply with answered true.\n"
+      else
+        "- You cannot look up this dealership's records or numbers. When asked for them (which deals, how many leads, unpaid invoices), use find_place to point them to the report or list that shows it, and call reply with answered true.\n"
+      end
     end
 
     # history: earlier [{ 'role', 'content' }] turns; page: where the person is.
@@ -80,7 +94,7 @@ module Guide
       tokens_out = 0
 
       MAX_ROUNDS.times do
-        response = @client.call(system: Guide::Copy.render(SYSTEM, company: @company), messages: messages, tools: TOOLS)
+        response = @client.call(system: Guide::Copy.render(SYSTEM + data_rule, company: @company), messages: messages, tools: TOOLS)
         tokens_in += response.dig('usage', 'input_tokens').to_i
         tokens_out += response.dig('usage', 'output_tokens').to_i
         content = Array(response['content'])
