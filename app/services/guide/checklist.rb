@@ -99,23 +99,23 @@ module Guide
 
     def setup_items
       [
-        item('locations', 'Add your locations', '/locations') { @company.locations.where(active: true, is_deleted: false).exists? },
-        item('team', 'Invite your team', '/settings?tab=users') { @company.users.where.not(id: @user.id).exists? },
-        item('branding', 'Add your logo', '/settings?tab=branding') { logo? },
-        item('pipeline', 'Set your deal stages', '/settings?tab=pipeline') { Setting.get('Company', @company.id, 'pipeline_stages', nil).present? },
-        item('email', 'Connect your email', '/account/settings?tab=email') do
+        item('locations', 'Add your locations', '/locations', feature: 'page:/locations') { @company.locations.where(active: true, is_deleted: false).exists? },
+        item('team', 'Invite your team', '/settings?tab=users', feature: 'setting:users') { @company.users.where.not(id: @user.id).exists? },
+        item('branding', 'Add your logo', '/settings?tab=branding', feature: 'setting:branding') { logo? },
+        item('pipeline', 'Set your deal stages', '/settings?tab=pipeline', feature: 'setting:pipeline') { Setting.get('Company', @company.id, 'pipeline_stages', nil).present? },
+        item('email', 'Connect your email', '/account/settings?tab=email', feature: 'action:connect-email') do
           UserEmailConnection.where(company_id: @company.id).active.exists? || @company.company_domains.email_verified.exists?
         end,
         # Posts, comments and Facebook lead ads all need the Page. An expired
         # connection is not done: it needs reconnecting.
-        item('facebook', 'Connect your Facebook Page', '/settings?tab=integrations') do
+        item('facebook', 'Connect your Facebook Page', '/settings?tab=integrations', feature: 'setting:integrations') do
           page = FacebookIntegration.current_for(@company)
           page.present? && !page.token_expired?
         end,
-        item('inventory', 'Add your inventory', '/inventory') { @company.vehicles.exists? },
-        item('leads', 'Get your first lead in', '/crm') { @company.leads.exists? },
-        (item('quickbooks', 'Connect QuickBooks', '/settings?tab=integrations') { QuickbooksConnection.where(company_id: @company.id).any?(&:connected?) } if module?('finance.accounting')),
-        (item('website', 'Publish your website', '/company/settings/website') { @company.websites.where(status: 'published').exists? } if module?('marketing.website'))
+        item('inventory', 'Add your inventory', '/inventory', feature: 'page:/inventory') { @company.vehicles.exists? },
+        item('leads', 'Get your first lead in', '/crm', feature: 'page:/crm') { @company.leads.exists? },
+        (item('quickbooks', 'Connect QuickBooks', '/settings?tab=integrations', feature: 'setting:integrations') { QuickbooksConnection.where(company_id: @company.id).any?(&:connected?) } if module?('finance.accounting')),
+        (item('website', 'Publish your website', '/company/settings/website', feature: 'page:/company/settings/website') { @company.websites.where(status: 'published').exists? } if module?('marketing.website'))
       ].compact
     end
 
@@ -131,14 +131,15 @@ module Guide
     end
 
     # One failing lookup marks its item not done rather than breaking the list.
-    def item(key, label, route)
+    # feature: the place in the Atlas, so the panel can show the way there.
+    def item(key, label, route, feature: nil)
       done = begin
         yield ? true : false
       rescue StandardError => e
         Rails.logger.info("[Guide::Checklist] #{key}: #{e.class} #{e.message}")
         false
       end
-      { key: key, label: label, route: route, done: done }
+      { key: key, label: label, route: route, feature: feature, done: done }
     end
   end
 end
