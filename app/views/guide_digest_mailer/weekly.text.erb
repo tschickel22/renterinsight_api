@@ -11,10 +11,10 @@ Help to review (<%= @items.size %>)
 <% else %><% @items.each do |i| %>  - <%= (i.new_value || i.old_value || {})['title'] || i.entity_key %>: <%= { 'added' => 'new', 'modified' => 'changed', 'removed' => 'removed, retire its help' }[i.change_type] %><%= i.published_article_id ? ', updates its existing article' : '' %><%= Array(i.drafts&.dig('tour', 'steps')).any? ? ', new tour drafted' : '' %><%= i.draft_status == 'failed' ? ', draft failed (Redraft it)' : '' %>
 <% end %><% end %>
 New tours drafted this week (<%= @new_tours.size %>). They become tours to play and approve once you approve the help.
-<% @new_tours.each do |i| %>  - <%= i.drafts.dig('tour', 'name') %>
+<% @new_tours.each do |i| %>  - <%= Guide::Copy.render(i.drafts.dig('tour', 'name').to_s) %>
 <% end %>
 Tours waiting for you to play and approve (<%= @tours_to_approve.size %>). Dealers see a tour only after you approve it.
-<% @tours_to_approve.each do |t| %>  - <%= t.name %>
+<% @tours_to_approve.each do |t| %>  - <%= Guide::Copy.render(t.name) %>
 <% end %>
 <% skipped = Array(@drafts['skipped']) %><% if skipped.any? %>
 Left out as not visible to dealers (<%= skipped.size %>)

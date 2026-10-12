@@ -181,7 +181,7 @@ module Api
         @tour.knowledge_module_id = resolve_module_id(attrs[:module_key]) if attrs[:module_key].present?
 
         # New steps are a new tour as far as approval goes: play it again.
-        @tour.approved_at = nil if attrs.key?(:steps)
+        @tour.assign_attributes(approved_at: nil, approved_by_id: nil) if attrs.key?(:steps)
         if @tour.update(attrs.except(:module_key, :steps))
           rebuild_steps(@tour, attrs[:steps]) if attrs.key?(:steps)
           render json: tour_payload(@tour.reload, include_steps: true)

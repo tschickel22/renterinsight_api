@@ -46,6 +46,28 @@ RSpec.describe 'AI Assistant how-to questions', type: :request do
     end
   end
 
+  it 'says the help could not be reached rather than going quiet' do
+    allow(Guide::Assistant).to receive(:new).and_return(instance_double(Guide::Assistant).tap { |a| allow(a).to receive(:ask).and_raise(Guide::ClaudeChat::Error, 'overloaded') })
+    allow_any_instance_of(AiActionService).to receive(:classify).and_return(classified('help'))
+
+    post '/api/v1/report-ai/classify', params: { question: 'how do I add a user' }, headers: headers
+
+    body = JSON.parse(response.body)
+    expect(body['intent']).to eq('help')
+    expect(body['help']).to include('answered' => false)
+    expect(body['help']['answer']).to include('could not reach the help')
+    expect(AiQueryLog.last).to have_attributes(execution_status: 'error', failure_reason: 'help_unavailable')
+  end
+
+  it 'falls back to the classifier for an unknown question when the help fails' do
+    allow(Guide::Assistant).to receive(:new).and_return(instance_double(Guide::Assistant).tap { |a| allow(a).to receive(:ask).and_raise(Guide::ClaudeChat::Error, 'overloaded') })
+    allow_any_instance_of(AiActionService).to receive(:classify).and_return(classified('unknown'))
+
+    post '/api/v1/report-ai/classify', params: { question: 'zzz' }, headers: headers
+
+    expect(JSON.parse(response.body)).to include('intent' => 'unknown', 'help' => nil)
+  end
+
   it 'leaves data questions to the report engine' do
     allow_any_instance_of(AiActionService).to receive(:classify).and_return(classified('read').merge(action: 'report_query'))
 

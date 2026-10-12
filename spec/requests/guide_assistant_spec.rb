@@ -116,6 +116,21 @@ RSpec.describe 'Help assistant', type: :request do
     expect(body['remaining']).to eq(49)
   end
 
+  it 'never stores an empty answer, so the next question still works' do
+    sent = []
+    allow(fake_claude).to receive(:call) do |messages:, **|
+      sent << messages
+      { 'content' => [{ 'type' => 'tool_use', 'id' => 'x', 'name' => 'reply', 'input' => { 'answered' => true } }], 'usage' => {} }
+    end
+    body = ask('first question')
+    expect(body['answer']).to eq(Guide::Assistant::NO_ANSWER)
+    expect(body['answered']).to be(false)
+
+    ask('second question', { conversation_id: body['conversation_id'] })
+    expect(sent.last.size).to be > 1
+    expect(sent.last.map { |m| m[:content].to_s.strip }).to all(be_present)
+  end
+
   it 'reports whether it is available' do
     get '/api/v1/guide/assistant', headers: headers
     expect(JSON.parse(response.body)).to include('enabled' => true, 'remaining' => 5)

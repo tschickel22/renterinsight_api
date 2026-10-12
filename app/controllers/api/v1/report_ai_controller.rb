@@ -21,7 +21,7 @@ module Api
         # Reject non-business questions before spending tokens.
         unless business_relevant?(question)
           return render json: {
-            explanation: "I can only help with questions about your dealership data — leads, deals, invoices, service tickets, homes, and payments. Try asking something like 'Show me deals closed this week'.",
+            explanation: "I can only help with questions about your dealership data: leads, deals, invoices, service tickets, homes, and payments. Try asking something like 'Show me deals closed this week'.",
             query: nil,
             data: nil,
             usage: ai_report_usage
@@ -288,7 +288,7 @@ module Api
         # How-to questions, and ones the classifier could not place, get an
         # answer from the help assistant. The question has already counted
         # once above, so this is not charged again.
-        help = help_answer(question, log) if [AiActionService::INTENT_HELP, AiActionService::INTENT_UNKNOWN].include?(result[:intent])
+        help = help_answer(question, log, required: result[:intent] == AiActionService::INTENT_HELP) if [AiActionService::INTENT_HELP, AiActionService::INTENT_UNKNOWN].include?(result[:intent])
 
         render json: {
           intent:                help ? AiActionService::INTENT_HELP : result[:intent],
@@ -630,7 +630,7 @@ module Api
             { key: 'source',     label: 'Source' },
             { key: 'created_at', label: 'Created' },
           ]
-          explanation = "Leads created this week (#{week_start.strftime('%b %d')} – #{now.strftime('%b %d')}), company-wide."
+          explanation = "Leads created this week (#{week_start.strftime('%b %d')} to #{now.strftime('%b %d')}), company-wide."
 
         when 'deals_closed'
           records = @company.deals
@@ -657,7 +657,7 @@ module Api
             { key: 'stage',       label: 'Stage' },
             { key: 'closed_at',   label: 'Closed' },
           ]
-          explanation = "Deals marked closed-won this week (#{week_start.strftime('%b %d')} – #{now.strftime('%b %d')}), company-wide."
+          explanation = "Deals marked closed-won this week (#{week_start.strftime('%b %d')} to #{now.strftime('%b %d')}), company-wide."
 
         when 'overdue_tickets'
           records = @company.service_tickets
@@ -709,7 +709,10 @@ module Api
 
       # The help assistant's answer (Guide::Assistant), with its cost added to
       # the question's own log row rather than a second use.
-      def help_answer(question, log)
+      # required: a how-to question, which must get some answer even when the
+      # help is unreachable; an unknown one falls back to the classifier's own
+      # explanation instead.
+      def help_answer(question, log, required: false)
         answer = Guide::Assistant.new(user: current_user, company: @company, data_assistant: true)
                                  .ask(question, page: params[:page])
         log.update_columns(
@@ -723,7 +726,11 @@ module Api
         { answer: answer.answer, articles: answer.articles, places: answer.places, answered: answer.answered }
       rescue StandardError => e
         Rails.logger.error("[ReportAI#help_answer] #{e.class} #{e.message}")
-        nil
+        log.update_columns(execution_status: 'error', failure_reason: 'help_unavailable') if required
+        return nil unless required
+
+        { answer: 'I could not reach the help just now. Please try again in a moment, or open Help to search it.',
+          articles: [], places: [], answered: false }
       end
 
       def load_context_record(context_type, context_id)
@@ -764,11 +771,9 @@ module Api
       end
 
       def ai_report_usage
-        used = AiQueryLog
-          .where(company_id: @company.id, feature: 'report_ai')
-          .where.not(execution_status: 'rate_limited')
-          .where('created_at >= ?', Time.current.beginning_of_month)
-          .count
+        # One pool: Deal Desk AI and help questions draw from the same
+        # allowance, so Report AI counts them too (AiQueryLog::SHARED_AI_FEATURES).
+        used = AiQueryLog.monthly_used_for(@company)
 
         limit = get_ai_report_limit
 

@@ -45,7 +45,9 @@ module Guide
         context: { 'weekly' => true, 'week' => week, 'base_snapshot_id' => base&.id, 'commits' => commits,
                    'changes' => changes.map { |c| summary(c) } }
       )
-      draft(release)
+      # A quiet week (no build since the last digest) costs no AI: the email
+      # still goes out for the tours waiting on approval.
+      draft(release) if changes.any? || commits.any?
 
       keep = Array(release.reload.drafts['dealer_visible_keys'])
       changes.select { |c| keep.include?(c[:key]) }.each { |c| draft(queue(head, c)) }
@@ -68,9 +70,12 @@ module Guide
       Knowledge::ChangeQueueItem.where(entity_type: 'release').where("context ->> 'weekly' = 'true'")
     end
 
-    # Where the last digest ended; the first one looks back a week.
-    def base_snapshot(head)
-      last = weekly_items.where.not(knowledge_snapshot_id: head.id).order(created_at: :desc).first
+    # Where the last digest ended; the first one looks back a week. When no
+    # build came since, that is the head itself and there is nothing new: a
+    # week without a deploy, or Draft now pressed again, must not report the
+    # last digest's changes a second time.
+    def base_snapshot(_head)
+      last = weekly_items.order(created_at: :desc).first
       return last.snapshot if last
 
       snapshots.where('snapshot_at <= ?', @now - 7.days).first || snapshots.last
