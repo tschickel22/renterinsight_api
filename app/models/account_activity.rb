@@ -1,6 +1,7 @@
 class AccountActivity < ApplicationRecord
   include ActivityTrackable
   include EmitsWorkflowActivityEvents
+  include NotifiesActivityAssignee
   workflow_parent :account
 
   belongs_to :account
