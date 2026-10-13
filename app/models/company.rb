@@ -672,13 +672,14 @@ class Company < ApplicationRecord
     (lost_stage_keys - ['closed_lost']).first || 'closed_lost'
   end
 
-  # Stage a freshly-converted deal should land in: the first stage explicitly
-  # marked active (by order), falling back to the first defined stage when no
-  # stage carries an active flag (legacy/default configs). Always returns a
-  # key that passes Deal stage validation.
+  # Stage a freshly-converted deal should land in: the first active stage (by
+  # order), falling back to the first defined stage. A stage is active unless
+  # it is explicitly turned off: stages saved without the flag (legacy and
+  # default configs) are active, so turning one stage ON must not make it the
+  # landing stage. Always returns a key that passes Deal stage validation.
   def default_deal_stage
     ordered = pipeline_stages.sort_by { |s| (s['order'] || s[:order] || 0).to_i }
-    active = ordered.find { |s| [true, 'true'].include?(s['active'] || s[:active]) }
+    active = ordered.find { |s| ![false, 'false'].include?(s.key?('active') ? s['active'] : s[:active]) }
     chosen = active || ordered.first
     chosen && (chosen['key'] || chosen[:key]).to_s.downcase
   end

@@ -336,12 +336,12 @@ module Api
 
       if stages.nil?
         stages = [
-          { key: 'lead',         name: 'Lead',         probability: 10,  color: '#94a3b8', locked: false, order: 0 },
-          { key: 'qualified',    name: 'Qualified',    probability: 25,  color: '#60a5fa', locked: false, order: 1 },
-          { key: 'proposal',     name: 'Proposal',     probability: 50,  color: '#f59e0b', locked: false, order: 2 },
-          { key: 'negotiation',  name: 'Negotiation',  probability: 75,  color: '#f97316', locked: false, order: 3 },
-          { key: 'won',          name: 'Won',          probability: 100, color: '#22c55e', locked: true,  order: 4 },
-          { key: 'lost',         name: 'Lost',         probability: 0,   color: '#ef4444', locked: true,  order: 5 }
+          { key: 'lead',         name: 'Lead',         probability: 10,  color: '#94a3b8', locked: false, active: true, order: 0 },
+          { key: 'qualified',    name: 'Qualified',    probability: 25,  color: '#60a5fa', locked: false, active: true, order: 1 },
+          { key: 'proposal',     name: 'Proposal',     probability: 50,  color: '#f59e0b', locked: false, active: true, order: 2 },
+          { key: 'negotiation',  name: 'Negotiation',  probability: 75,  color: '#f97316', locked: false, active: true, order: 3 },
+          { key: 'won',          name: 'Won',          probability: 100, color: '#22c55e', locked: true,  active: true, order: 4 },
+          { key: 'lost',         name: 'Lost',         probability: 0,   color: '#ef4444', locked: true,  active: true, order: 5 }
         ]
       end
 
