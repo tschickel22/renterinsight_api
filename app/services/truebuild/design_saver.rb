@@ -88,9 +88,20 @@ module Truebuild
       company.intake_forms.create!(
         name: FORM_NAME, description: 'Buyers who save a home they designed on your website.',
         schema: schema, field_mappings: schema.to_h { |f| [f['name'], f['leadField']] }, source_id: source.id,
+        notified_user_id: default_notified_user(company)&.id,
         is_active: true, auto_create_lead: true, auto_create_activity: true, submit_button_text: 'Save my design',
         thank_you_message: "Thanks. Someone from #{company.name} will be in touch about your home."
       )
+    end
+
+    # Nobody turned the play on, so nobody chose who hears about these leads.
+    # Until the dealer changes it on the form, the company's first admin does:
+    # with no one named, the lead arrives unowned and nobody is told.
+    def self.default_notified_user(company)
+      admins = company.users.active.where(role: 'company_admin')
+                      .or(company.users.active.where(id: UserRoleAssignment.active.company_tier.where(company_id: company.id)
+                        .joins(:role).where(roles: { key: 'company_admin' }).select(:user_id)))
+      admins.order(:id).first
     end
 
     private
