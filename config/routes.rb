@@ -524,6 +524,13 @@ Rails.application.routes.draw do
         patch 'menu', action: :update
       end
 
+      # ==================== QUICK LOG OPTIONS ====================
+      scope path: 'company', controller: 'quick_log_options' do
+        get   'quick-log', action: :show
+        put   'quick-log', action: :update
+        patch 'quick-log', action: :update
+      end
+
       # ==================== CONVERSION TRACKING ====================
       # Company default + per-location overrides for public-form ad tracking.
       scope path: 'company', controller: 'tracking_settings' do
