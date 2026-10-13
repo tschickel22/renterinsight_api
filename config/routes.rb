@@ -517,6 +517,13 @@ Rails.application.routes.draw do
         delete 'labels/:key',    action: :destroy
       end
 
+      # ==================== SIDE MENU (hidden items) ====================
+      scope path: 'company', controller: 'menu_settings' do
+        get   'menu', action: :show
+        put   'menu', action: :update
+        patch 'menu', action: :update
+      end
+
       # ==================== CONVERSION TRACKING ====================
       # Company default + per-location overrides for public-form ad tracking.
       scope path: 'company', controller: 'tracking_settings' do
