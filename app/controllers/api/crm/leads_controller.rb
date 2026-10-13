@@ -1143,10 +1143,17 @@ module Api
         end
 
         if filters[:search].present?
-          scope = scope.where(
-            person_name_where('leads', extra: %w[email phone status company_name]),
-            q: person_name_like(filters[:search])
-          )
+          # A search that is a phone number matches by digits, so 3035864420
+          # finds 303-586-4420 (UsPhone) and the other way round.
+          digits = filters[:search].to_s.gsub(/\D/, '')
+          scope = if digits.length >= 3 && filters[:search].to_s.match?(/\A[\d\s\-().+]+\z/)
+                    scope.where("regexp_replace(leads.phone, '[^0-9]', '', 'g') LIKE ?", "%#{digits}%")
+                  else
+                    scope.where(
+                      person_name_where('leads', extra: %w[email phone status company_name]),
+                      q: person_name_like(filters[:search])
+                    )
+                  end
         end
 
         if filters[:owner_id].present?

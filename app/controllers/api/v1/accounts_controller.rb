@@ -56,10 +56,17 @@ module Api
         # Apply search filter (searches name, email, phone, website)
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          @accounts = @accounts.where(
+          # A phone number also matches by digits (accounts store 303-586-4420).
+          digits = params[:search].to_s.gsub(/\D/, '')
+          by_text = @accounts.where(
             "name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR website ILIKE ?",
             search_term, search_term, search_term, search_term
           )
+          @accounts = if digits.length >= 3 && params[:search].to_s.match?(/\A[\d\s\-().+]+\z/)
+                        by_text.or(@accounts.where("regexp_replace(phone, '[^0-9]', '', 'g') LIKE ?", "%#{digits}%"))
+                      else
+                        by_text
+                      end
         end
         
         # Count AFTER search filter (for pagination)

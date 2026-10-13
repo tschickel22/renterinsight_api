@@ -126,6 +126,8 @@ class Lead < ApplicationRecord
   # update_columns skips this callback so we don't double-set in that path.
   # Internal/system updates that should NOT count (e.g. score recompute jobs)
   # should also use update_columns.
+  # 303-586-4420 (UsPhone). Also applies to where(phone: ...) lookups.
+  normalizes :phone, :co_applicant_phone, with: ->(value) { UsPhone.format(value) }
   before_save :touch_last_activity_at
   before_save :clear_email_invalid_on_address_change
 

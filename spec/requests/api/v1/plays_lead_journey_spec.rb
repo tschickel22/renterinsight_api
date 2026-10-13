@@ -42,7 +42,7 @@ RSpec.describe 'Api::V1::Plays lead journey', type: :request do
     get "/api/v1/plays/new_facebook_lead/leads/#{lead.id}", headers: headers
 
     expect(response).to have_http_status(:ok)
-    expect(body['lead']).to include('name' => 'Tia May', 'phone' => '3035551212', 'stage' => 'waiting_for_reply')
+    expect(body['lead']).to include('name' => 'Tia May', 'phone' => '303-555-1212', 'stage' => 'waiting_for_reply')
     expect(body['events'].first).to include('kind' => 'trigger', 'title' => 'Started the play as a new lead')
     expect(body['events'].map { |e| e['title'] }).to include('Assigned to Rita Rep', 'Waiting for the lead to reply')
   end

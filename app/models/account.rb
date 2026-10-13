@@ -8,6 +8,9 @@ class Account < ApplicationRecord
   include Reportable
   include WorkflowRunCancellable
 
+  # 303-586-4420 (UsPhone). Also applies to where(phone: ...) lookups.
+  normalizes :phone, with: ->(value) { UsPhone.format(value) }
+
   def self.reportable_config
     {
       label: "Accounts",
@@ -208,7 +211,7 @@ class Account < ApplicationRecord
       self.website = website.downcase.strip
       self.website = "https://#{self.website}" unless self.website =~ /\Ahttps?:\/\//
     end
-    self.phone = phone&.gsub(/\D/, '') if phone.present?
+    self.phone = UsPhone.format(phone) if phone.present?
   end
   
   def generate_account_number
