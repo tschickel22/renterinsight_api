@@ -3,11 +3,13 @@
 # Calendar invites for appointments (Appointments::CalendarInvite). Everything
 # here speaks for the rep the appointment is assigned to, not whoever booked
 # it.
-# - The customer's copy is organized by the rep, replies go to the rep, and it
-#   is sent from the rep's own mailbox when they have one connected
-#   (AppointmentInviteJob passes that address as from).
-# - The rep's copy is organized by the company's address so it lands on the
-#   rep's calendar (calendars ignore invites the reader organized).
+# - The customer's copy names the rep as organizer and is sent from the rep's
+#   own mailbox when they have one connected (AppointmentInviteJob passes that
+#   address as from).
+# - The rep's copy is organized in the company's name so it lands on the rep's
+#   calendar (calendars ignore invites the reader organized).
+# The organizer address and Reply-To are the appointment's tracked reply
+# address, so responses and notes come back through inbound mail to the rep.
 class AppointmentInviteMailer < ApplicationMailer
   def invite(activity_class, activity_id, email, name, method, role, company_id, from: nil, rep_id: nil)
     @company = Company.find_by(id: company_id)
@@ -27,13 +29,14 @@ class AppointmentInviteMailer < ApplicationMailer
     sender = from.presence || default_from_address ||
              (brand.from_email.present? ? "#{brand.from_name.presence || brand.name} <#{brand.from_email}>" : nil)
     rep_address = from.present? ? Mail::Address.new(from).address : rep&.email
+    tracked = invite.reply_address
     ics =
       if @role == 'customer'
-        invite.to_ics(organizer: [rep_address, @rep_name || rep_address],
+        invite.to_ics(organizer: [tracked, @rep_name || @company&.name || 'Your appointment'],
                       attendees: [[email, name], ([rep_address, @rep_name || rep_address] if rep_address.present?)].compact)
       else
-        organizer = Mail::Address.new(sender.to_s)
-        invite.to_ics(organizer: [organizer.address, organizer.display_name.presence || @company&.name || organizer.address],
+        sender_name = (Mail::Address.new(sender.to_s).display_name rescue nil)
+        invite.to_ics(organizer: [tracked, @company&.name || sender_name.presence || 'Appointments'],
                       attendees: [[email, name]])
       end
 
@@ -41,7 +44,7 @@ class AppointmentInviteMailer < ApplicationMailer
     mail(
       to: email,
       from: sender,
-      reply_to: @role == 'customer' ? rep_address : nil,
+      reply_to: @role == 'customer' ? tracked : nil,
       subject: method == 'CANCEL' ? "Cancelled: #{@subject_line} (#{@when_text})" : "Appointment: #{@subject_line} (#{@when_text})"
     )
   end

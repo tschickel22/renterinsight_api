@@ -11,13 +11,15 @@ module Appointments
   # back, so appointments are changed here.
   #
   # The appointment belongs to the rep it is assigned to, never to whoever
-  # booked it. The two copies differ on purpose:
-  # - The customer's copy is organized by the assigned rep (and sent from the
-  #   rep's own mailbox when connected), so the customer's replies and RSVPs
-  #   reach the rep.
-  # - The rep's copy is organized by the company's sending address with the
-  #   rep as the attendee. Calendars do not add an invite whose organizer is
-  #   the reader, so a rep-organized copy sent to the rep never lands.
+  # booked it.
+  # - The customer's copy names the assigned rep as organizer and is sent from
+  #   the rep's own mailbox when connected.
+  # - The rep's copy is organized in the company's name with the rep as the
+  #   attendee. Calendars do not add an invite whose organizer is the reader.
+  # Both organizers use the appointment's tracked reply address
+  # (reply+appt-lead-415@...), so accepts, declines and notes come back to
+  # DealerTide (Appointments::InviteReplyHandler) and on to the rep, instead
+  # of to a mailbox nothing reads.
   class CalendarInvite
     FIELDS = %w[start_time end_time meeting_location location subject description status assigned_to_id].freeze
 
@@ -27,6 +29,23 @@ module Appointments
       @activity = activity
       @method = method
       @sequence = sequence
+    end
+
+    KINDS = { 'LeadActivity' => 'lead', 'ContactActivity' => 'contact', 'AccountActivity' => 'account', 'DealActivity' => 'deal' }.freeze
+
+    def self.reply_token(activity) = "appt-#{KINDS.fetch(activity.class.name)}-#{activity.id}"
+
+    # The activity a reply token names, or nil.
+    def self.activity_for_token(token)
+      m = token.to_s.match(/\Aappt-(lead|contact|account|deal)-(\d+)\z/)
+      return nil unless m
+
+      KINDS.key(m[1]).constantize.find_by(id: m[2].to_i)
+    end
+
+    def reply_address
+      company = customer&.company || activity.try(:deal)&.company
+      "#{ReplyToAddressService::REPLY_PREFIX}+#{self.class.reply_token(activity)}@#{ReplyToAddressService.mail_domain(company: company)}"
     end
 
     def uid

@@ -21,7 +21,7 @@ RSpec.describe Appointments::CalendarInvite do
 
   def deliveries_to(email) = ActionMailer::Base.deliveries.select { |m| m.to.include?(email) }
 
-  def ics_of(mail) = mail.attachments.first.decoded
+  def ics_of(mail) = mail.attachments.first.decoded.gsub(/\r?\n /, "")
 
   it 'invites the assigned rep and the customer with one stable UID, never the person who booked it' do
     a = appointment
@@ -64,12 +64,14 @@ RSpec.describe Appointments::CalendarInvite do
 
     customer_mail = deliveries_to('pat@example.com').last
     expect(customer_mail.attachments.first.content_type).to start_with('text/calendar')
-    expect(customer_mail.reply_to).to eq([rep.email])
-    expect(ics_of(customer_mail)).to match(/ORGANIZER;CN=Rita Rep:mailto:#{Regexp.escape(rep.email)}/)
+    tracked = "reply+appt-lead-#{a.id}@"
+    expect(customer_mail.reply_to.first).to start_with(tracked)
+    expect(ics_of(customer_mail)).to match(/ORGANIZER;CN=Rita Rep:mailto:#{Regexp.escape(tracked)}/)
+    expect(ics_of(customer_mail)).to include("ATTENDEE;CN=Rita Rep;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:#{rep.email}")
     expect(customer_mail.body.encoded).to include('Rita Rep')
 
     rep_mail = deliveries_to(rep.email).last
-    expect(ics_of(rep_mail)).not_to match(/ORGANIZER[^\r\n]*#{Regexp.escape(rep.email)}/)
+    expect(ics_of(rep_mail)).to match(/ORGANIZER;CN=#{Regexp.escape(company.name)}:mailto:#{Regexp.escape(tracked)}/)
     expect(ics_of(rep_mail)).to include("ATTENDEE;CN=Rita Rep")
     expect(ActionMailer::Base.deliveries.map(&:to).flatten).not_to include(admin.email)
 
@@ -87,7 +89,8 @@ RSpec.describe Appointments::CalendarInvite do
     AppointmentInviteJob.perform_now('LeadActivity', a.id, 'REQUEST')
     expect(sent.to).to eq(['pat@example.com'])
     expect(sent.from).to eq(['rita@dealer.com'])
-    expect(sent.attachments.first.decoded).to include('ORGANIZER;CN=Rita Rep:mailto:rita@dealer.com')
+    expect(sent.attachments.first.decoded).to include("ORGANIZER;CN=Rita Rep:mailto:reply+appt-lead-#{a.id}@")
+    expect(sent.attachments.first.decoded).to include('mailto:rita@dealer.com')
     expect(ActionMailer::Base.deliveries.map(&:to).flatten).to eq([rep.email])
     expect(lead.communications.last.from_address).to include('rita@dealer.com')
   end

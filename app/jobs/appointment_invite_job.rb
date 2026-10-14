@@ -28,7 +28,7 @@ class AppointmentInviteJob < ApplicationJob
     rep = invite.assignee
     invite.recipients.each do |email, name, role, _user|
       from = deliver(activity_class, activity_id, email, name, method, role, company, rep)
-      log_for_customer(activity, customer, email, from, method, when_text) if role == :customer && from
+      log_for_customer(activity, customer, email, from, method, when_text, rep) if role == :customer && from
     end
   end
 
@@ -52,12 +52,13 @@ class AppointmentInviteJob < ApplicationJob
   end
 
   # The customer's invite shows on their timeline like any email to them.
-  def log_for_customer(activity, customer, email, from, method, when_text)
+  def log_for_customer(activity, customer, email, from, method, when_text, rep)
     Communication.create!(
       communicable: customer.record, channel: 'email', direction: 'outbound', status: 'sent', sent_at: Time.current,
       to_address: email, from_address: from.presence || customer.company&.email.presence || Brand.current(company: customer.company).from_email, subject: method == 'CANCEL' ? "Cancelled: #{activity.subject}" : "Calendar invite: #{activity.subject}",
       body: method == 'CANCEL' ? "Appointment cancelled: #{when_text}." : "Calendar invite sent for #{when_text}.",
-      metadata: { 'source' => 'calendar_invite', 'activity_type' => activity.class.name, 'activity_id' => activity.id }
+      metadata: { 'source' => 'calendar_invite', 'activity_type' => activity.class.name, 'activity_id' => activity.id,
+                  'sender_user_id' => rep&.id }.compact
     )
   rescue StandardError => e
     Rails.logger.warn("[AppointmentInviteJob] log for #{activity.class.name} #{activity.id}: #{e.message}")

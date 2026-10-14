@@ -33,6 +33,8 @@ module InboundEmail
               { success: false, error: 'Campaign send not found for reply token' }
             end
           end
+        elsif token[:token].to_s.start_with?('appt-')
+          Appointments::InviteReplyHandler.process(token: token[:token], parsed_email: parsed_email)
         else
           process_reply_tracking(token[:token])
         end
