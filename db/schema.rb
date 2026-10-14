@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_13_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_13_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -48,6 +48,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_13_210000) do
     t.float "actual_hours"
     t.text "outcome_notes"
     t.json "metadata"
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["account_id"], name: "index_account_activities_on_account_id"
     t.index ["activity_type"], name: "index_account_activities_on_activity_type"
     t.index ["assigned_to_id"], name: "index_account_activities_on_assigned_to_id"
@@ -2494,6 +2497,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_13_210000) do
     t.text "outcome_notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["account_id", "activity_type"], name: "index_contact_activities_on_account_id_and_activity_type"
     t.index ["account_id"], name: "index_contact_activities_on_account_id"
     t.index ["assigned_to_id", "status"], name: "index_contact_activities_on_assigned_to_id_and_status"
@@ -4164,6 +4170,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_13_210000) do
     t.text "outcome_notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["assigned_to_id", "status"], name: "index_lead_activities_on_assigned_to_id_and_status"
     t.index ["assigned_to_id"], name: "index_lead_activities_on_assigned_to_id"
     t.index ["due_date"], name: "index_lead_activities_on_due_date"

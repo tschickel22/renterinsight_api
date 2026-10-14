@@ -524,6 +524,13 @@ Rails.application.routes.draw do
         patch 'menu', action: :update
       end
 
+      # ==================== APPOINTMENT REMINDERS ====================
+      scope path: 'company', controller: 'appointment_reminder_settings' do
+        get   'appointment-reminders', action: :show
+        put   'appointment-reminders', action: :update
+        patch 'appointment-reminders', action: :update
+      end
+
       # ==================== QUICK LOG OPTIONS ====================
       scope path: 'company', controller: 'quick_log_options' do
         get   'quick-log', action: :show

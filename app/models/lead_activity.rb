@@ -4,6 +4,7 @@ class LeadActivity < ApplicationRecord
   include ActivityTrackable
   include EmitsWorkflowActivityEvents
   include NotifiesActivityAssignee
+  include SendsAppointmentInvites
   workflow_parent :lead
 
   belongs_to :lead

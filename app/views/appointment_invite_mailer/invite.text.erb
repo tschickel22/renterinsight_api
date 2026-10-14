@@ -1,0 +1,7 @@
+Hi<%= " #{@name}" if @name.present? %>,
+
+<% if @method == 'CANCEL' %>This appointment<%= " with #{@company.name}" if @company %> has been cancelled: <%= @subject_line %>, <%= @when_text %>.
+<% else %>You have an appointment<%= " with #{@company.name}" if @company %>: <%= @subject_line %>, <%= @when_text %><%= " at #{@place}" if @place.present? %>.
+
+The attached invite adds it to your calendar. If it changes, you will get an updated one.
+<% end %>
