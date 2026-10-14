@@ -697,11 +697,17 @@ module Api
         # Get all communications for contacts AND converted leads
         # Note: Communications table uses polymorphic association (communicable_type, communicable_id)
         # and 'channel' not 'communication_type'
+        # Plus the account's own and its deals', so Account > Activities can show
+        # every email and text in one timeline.
+        deal_ids = @account.deals.pluck(:id)
         communications = Communication.where(
-          "(communicable_type = 'Contact' AND communicable_id IN (?)) OR (communicable_type = 'Lead' AND communicable_id IN (?))",
+          "(communicable_type = 'Contact' AND communicable_id IN (?)) OR (communicable_type = 'Lead' AND communicable_id IN (?)) " \
+          "OR (communicable_type = 'Account' AND communicable_id = ?) OR (communicable_type = 'Deal' AND communicable_id IN (?))",
           contact_ids.any? ? contact_ids : [0],
-          lead_ids.any? ? lead_ids : [0]
-        ).order(sent_at: :desc)
+          lead_ids.any? ? lead_ids : [0],
+          @account.id,
+          deal_ids.any? ? deal_ids : [0]
+        ).order(Arel.sql('COALESCE(sent_at, created_at) DESC'))
         
         # Calculate stats using correct column name 'channel'
         total_emails = communications.where(channel: 'email').count
@@ -728,9 +734,14 @@ module Api
         # Enrich communications with contact/lead name and event data
         enriched_comms = paginated_comms.map do |comm|
           # Handle both Contact and Lead communicable types
-          if comm.communicable_type == 'Contact'
+          case comm.communicable_type
+          when 'Contact'
             entity = Contact.find_by(id: comm.communicable_id)
             entity_name = entity ? "#{entity.first_name} #{entity.last_name}" : 'Unknown Contact'
+          when 'Account'
+            entity_name = @account.name
+          when 'Deal'
+            entity_name = @account.deals.find_by(id: comm.communicable_id)&.name || 'Deal'
           else # Lead
             entity = Lead.find_by(id: comm.communicable_id)
             entity_name = entity ? "#{entity.first_name} #{entity.last_name}" : 'Unknown Lead'
@@ -747,6 +758,10 @@ module Api
             status: comm.status,
             subject: comm.subject,
             content: comm.body,
+            direction: comm.direction,
+            # 'nurture', 'campaign', 'manual'... so the timeline can say where it came from.
+            source: (comm.metadata.is_a?(Hash) ? comm.metadata['source'] : nil) || 'manual',
+            created_at: comm.created_at,
             sent_at: comm.sent_at,
             delivered_at: comm.delivered_at,
             opened_at: opened_event&.occurred_at,
