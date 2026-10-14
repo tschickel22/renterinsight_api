@@ -10,7 +10,7 @@ module Appointments
   # platform's. A reminder is sent once; an appointment made too late for the
   # earlier ones gets only the latest that is due, not a burst.
   class CustomerReminders
-    MODELS = [LeadActivity, ContactActivity, AccountActivity].freeze
+    MODELS = [LeadActivity, ContactActivity, AccountActivity, DealActivity].freeze
     LATEST_OFFSET = ReminderSettings::OFFSETS.values.max
 
     def self.run(now: Time.current)
@@ -56,29 +56,39 @@ module Appointments
       false
     end
 
+    # Sent as the assigned rep: email from their connected mailbox (falling
+    # back to the company address when it cannot send), and text replies
+    # forwarded to them. Never as whoever booked the appointment.
     def deliver(activity, customer, channel)
+      rep = activity.assigned_to || activity.user
       when_text = TimeText.for(activity, customer.company)
-      place = activity.meeting_location.presence
+      place = activity.try(:meeting_location).presence || activity.try(:location).presence
       company = customer.company.name
+      with = [rep.try(:first_name).presence, company].compact.join(' at ')
+      metadata = { 'source' => 'appointment_reminder', 'activity_type' => activity.class.name, 'activity_id' => activity.id }
       case channel
       when 'sms'
         return nil if customer.phone.blank?
 
-        body = "Reminder: your appointment with #{company} is #{when_text}#{" at #{place}" if place}. Reply here with any questions."
+        body = "Reminder: your appointment with #{with} is #{when_text}#{" at #{place}" if place}. Reply here with any questions."
         CommunicationService.send_sms(communicable: customer.record, to: customer.phone, body: body, category: 'transactional',
-                                      metadata: { 'source' => 'appointment_reminder', 'activity_type' => activity.class.name, 'activity_id' => activity.id })
+                                      sender_user_id: rep&.id, metadata: metadata)
       when 'email'
         return nil if customer.email.blank?
 
         greeting = customer.record.try(:first_name).presence || customer.name
         body = <<~HTML
           <p>Hi#{" #{ERB::Util.h(greeting)}" if greeting},</p>
-          <p>This is a reminder of your appointment with #{ERB::Util.h(company)} on <strong>#{ERB::Util.h(when_text)}</strong>#{place ? " at #{ERB::Util.h(place)}" : ''}.</p>
+          <p>This is a reminder of your appointment with #{ERB::Util.h(with)} on <strong>#{ERB::Util.h(when_text)}</strong>#{place ? " at #{ERB::Util.h(place)}" : ''}.</p>
           <p>If anything changes, just reply to this email.</p>
         HTML
-        CommunicationService.send_email(communicable: customer.record, to: customer.email, subject: "Reminder: your appointment #{when_text}",
-                                        body: body, category: 'transactional',
-                                        metadata: { 'source' => 'appointment_reminder', 'activity_type' => activity.class.name, 'activity_id' => activity.id })
+        args = { communicable: customer.record, to: customer.email, subject: "Reminder: your appointment #{when_text}",
+                 body: body, category: 'transactional', metadata: metadata }
+        if RepMailbox.connection_for(rep)
+          result = CommunicationService.send_email(**args, user: rep)
+          return result unless result.is_a?(Hash) && result[:success] == false
+        end
+        CommunicationService.send_email(**args)
       end
     end
   end

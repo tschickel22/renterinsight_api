@@ -2,6 +2,7 @@ class DealActivity < ApplicationRecord
   include ActivityTrackable
   include EmitsWorkflowActivityEvents
   include NotifiesActivityAssignee
+  include SendsAppointmentInvites
   workflow_parent :deal
 
   belongs_to :deal

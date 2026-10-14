@@ -51,4 +51,31 @@ RSpec.describe Appointments::CustomerReminders do
     described_class.run(now: now)
     expect(CommunicationService).not_to have_received(:send_sms)
   end
+
+  it 'speaks for the assigned rep, not whoever booked it' do
+    admin = User.create!(email: "a-#{SecureRandom.hex(3)}@ex.com", first_name: 'Ada', last_name: 'Admin', password: 'Pass1234!',
+                         company_id: company.id, role: 'company_admin')
+    appointment(50.minutes, user: admin)
+    described_class.run(now: now)
+    expect(CommunicationService).to have_received(:send_sms)
+      .with(hash_including(sender_user_id: rep.id, body: a_string_including("with Rita at #{company.name}")))
+  end
+
+  it "emails from the rep's mailbox and falls back to the company address if it fails" do
+    allow(Appointments::RepMailbox).to receive(:connection_for).and_return(double)
+    allow(CommunicationService).to receive(:send_email).with(hash_including(user: rep)).and_return({ success: false })
+    appointment(50.minutes)
+    described_class.run(now: now)
+    expect(CommunicationService).to have_received(:send_email).with(hash_including(user: rep)).once
+    expect(CommunicationService).to have_received(:send_email).with(hash_excluding(:user)).once
+  end
+
+  it "reminds a deal's buyer" do
+    contact = company.contacts.create!(first_name: 'Dee', last_name: 'Buyer', email: 'dee@example.com', phone: '3035550101')
+    deal = Deal.create!(company: company, contact: contact, name: 'Dee home')
+    DealActivity.create!(deal: deal, user: rep, assigned_to: rep, activity_type: 'meeting', subject: 'Delivery walk',
+                         status: 'pending', priority: 'medium', start_time: now + 50.minutes, end_time: now + 110.minutes)
+    described_class.run(now: now)
+    expect(CommunicationService).to have_received(:send_sms).with(hash_including(communicable: contact, to: '303-555-0101'))
+  end
 end

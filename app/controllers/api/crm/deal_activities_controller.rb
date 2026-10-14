@@ -158,6 +158,8 @@ module Api
           :outcome_notes,
           :reminder_time,
           :related_activity_id,
+          :remind_customer,
+          :send_calendar_invite,
           reminder_method: []
         )
       end
@@ -194,6 +196,8 @@ module Api
           reminderTime: activity.reminder_time&.iso8601,
           reminderMethod: activity.reminder_method,
           reminderSent: activity.reminder_sent,
+          remindCustomer: activity.remind_customer,
+          sendCalendarInvite: activity.send_calendar_invite,
           createdAt: activity.created_at&.iso8601,
           updatedAt: activity.updated_at&.iso8601
         }
