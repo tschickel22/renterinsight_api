@@ -759,6 +759,10 @@ module Api
             subject: comm.subject,
             content: comm.body,
             direction: comm.direction,
+            # Who it was between, so a reply from the timeline goes to the
+            # address it came from rather than whatever is on the record now.
+            from_address: comm.from_address,
+            to_address: comm.to_address,
             # 'nurture', 'campaign', 'manual'... so the timeline can say where it came from.
             source: (comm.metadata.is_a?(Hash) ? comm.metadata['source'] : nil) || 'manual',
             created_at: comm.created_at,
