@@ -167,7 +167,8 @@ class JournalEntry < ApplicationRecord
           department: line.department,
           contact_id: line.contact_id,
           deal_id: line.deal_id,
-          vehicle_id: line.vehicle_id
+          vehicle_id: line.vehicle_id,
+          project_id: line.project_id
         )
       end
 

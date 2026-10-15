@@ -7,6 +7,8 @@ class JournalEntryLine < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :deal, optional: true
   belongs_to :vehicle, optional: true
+  # The job this amount belongs to (E68). Bills carry it from their lines.
+  belongs_to :project, optional: true
 
   DEPARTMENTS = %w[new_sales used_sales service parts fi admin].freeze
 
@@ -14,6 +16,7 @@ class JournalEntryLine < ApplicationRecord
   validates :department, inclusion: { in: DEPARTMENTS }, allow_blank: true
   validate :has_amount
   validate :account_is_postable, if: -> { new_record? || will_save_change_to_chart_of_account_id? }
+  validate :links_belong_to_company
 
   before_validation :set_default_location
 
@@ -35,6 +38,23 @@ class JournalEntryLine < ApplicationRecord
       errors.add(:chart_of_account_id, 'belongs to a different company')
     elsif chart_of_account.is_header?
       errors.add(:chart_of_account_id, "#{chart_of_account.account_number} is a header account and can't be posted to")
+    end
+  end
+
+  # The manual entry form takes these ids as typed, and a line could name
+  # another company's deal or project.
+  LINKS = { project_id: Project, deal_id: Deal, contact_id: Contact, vehicle_id: Vehicle }.freeze
+
+  def links_belong_to_company
+    return unless journal_entry
+
+    LINKS.each do |column, model|
+      id = self[column]
+      next if id.blank? || !(new_record? || will_save_change_to_attribute?(column))
+      # unscoped: a merged contact is still the same company's, and a void copies it.
+      next if model.unscoped.where(id: id, company_id: journal_entry.company_id).exists?
+
+      errors.add(column, 'does not belong to your company')
     end
   end
 

@@ -34,6 +34,7 @@ class Bill < ApplicationRecord
   validates :bill_date, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
+  validate :project_belongs_to_company, if: -> { project_id.present? && will_save_change_to_project_id? }
 
   before_validation :compute_totals
   before_create :assign_bill_number
@@ -43,6 +44,9 @@ class Bill < ApplicationRecord
   after_update :auto_post_bill_je, if: -> { saved_change_to_status? && status_before_last_save == 'draft' && !%w[draft void].include?(status) }
 
   after_update :sync_project_cost_items, if: -> { saved_change_to_status? || saved_change_to_total_amount? }
+  # Declared after the posting callbacks, so the bill's entry exists by now.
+  after_save :sync_project_job_cost
+  after_update :sync_gl_project_tags, if: -> { journal_entry_id.present? && !saved_change_to_journal_entry_id? }
 
   scope :active, -> { where(is_deleted: false) }
   scope :unpaid, -> { where(status: %w[pending partially_paid]) }
@@ -210,14 +214,18 @@ class Bill < ApplicationRecord
     # the line amounts alone, so a bill with tax never balanced and never
     # posted. Purchase tax is part of what the items cost.
     tax_shares = allocate_tax_to_lines
+    deals = project_deal_ids
     bill_line_items.each do |line|
+      project = line.effective_project_id
       lines_attrs << {
         chart_of_account_id: line.chart_of_account_id,
         debit_amount: line.amount.to_d + tax_shares.fetch(line.id, 0),
         credit_amount: 0,
         memo: line.description.presence || "Bill #{bill_number}",
         location_id: line.location_id || location_id,
-        department: line.department
+        department: line.department,
+        project_id: project,
+        deal_id: project && deals[project]
       }
     end
 
@@ -275,6 +283,92 @@ class Bill < ApplicationRecord
       item_attrs[:amount] = total_amount if items.size == 1 && total_changed && total_amount.to_d.positive?
       item.update!(item_attrs) if item_attrs.any?
     end
+  end
+
+  # E68 step 3. The job a bill line is for, and that job's deal, go onto the
+  # line's ledger debit. AP stays untagged: it is owed to the vendor, not spent
+  # on the job.
+  def project_deal_ids
+    ids = bill_line_items.map(&:effective_project_id).compact.uniq
+    ids.empty? ? {} : company.projects.where(id: ids).pluck(:id, :deal_id).to_h
+  end
+
+  # A posted bill retagged to another job moves its ledger lines with it. Only
+  # the tags change, never amounts, and only while the entry still lines up
+  # with the bill one debit per bill line; a locked (closed period) entry stays
+  # as it was.
+  def sync_gl_project_tags
+    je = journal_entry
+    return if je.nil? || je.is_void? || je.locked?
+
+    debits = je.journal_entry_lines.where('debit_amount > 0').order(:id).to_a
+    lines = bill_line_items.reload.sort_by(&:id)
+    return unless debits.size == lines.size
+    return unless debits.zip(lines).all? { |d, l| d.chart_of_account_id == l.chart_of_account_id }
+
+    deals = project_deal_ids
+    debits.zip(lines).each do |debit, line|
+      project = line.effective_project_id
+      tags = { project_id: project, deal_id: project && deals[project] }
+      debit.update_columns(tags) if tags.any? { |k, v| debit[k] != v }
+    end
+  end
+
+  # A bill for a job is part of that job's cost. Contractor invoices and the
+  # drafts a cost line makes already have their cost line; any other posted
+  # bill tagged to a project gets one per project here (amount including its
+  # share of tax), kept in step when the bill is edited or retagged. Drafts
+  # count nothing yet, and a void marks its cost lines disputed through
+  # sync_project_cost_items.
+  def sync_project_job_cost
+    linked = project_cost_items.not_deleted.to_a
+    return if linked.any? { |item| item.metadata.to_h['source'] != 'bill' }
+
+    if is_deleted?
+      linked.each { |item| item.update!(is_deleted: true) }
+      return
+    end
+    return if %w[draft void].include?(status)
+
+    bill_line_items.reload
+    tax_shares = allocate_tax_to_lines
+    wanted = Hash.new(0.to_d)
+    bill_line_items.each do |line|
+      project = line.effective_project_id
+      wanted[project] += line.amount.to_d + tax_shares.fetch(line.id, 0) if project
+    end
+
+    linked.each do |item|
+      if wanted.key?(item.project_id)
+        amount = wanted.delete(item.project_id)
+        item.update!(amount: amount, vendor_id: vendor_id) if item.amount.to_d != amount || item.vendor_id != vendor_id
+      else
+        item.update!(is_deleted: true)
+      end
+    end
+
+    cost_status = COST_STATUS_FOR_BILL[status] || 'approved'
+    wanted.each do |project_id, amount|
+      next unless amount.positive?
+
+      project_cost_items.create!(
+        company_id: company_id,
+        project_id: project_id,
+        vendor_id: vendor_id,
+        cost_type: vendor&.vendor_type == 'contractor' ? 'subcontractor' : (vendor&.vendor_type == 'supplier' ? 'materials' : 'other'),
+        description: "Bill #{bill_number} from #{vendor_display_name}".truncate(250),
+        invoice_number: reference_number,
+        amount: amount,
+        date: bill_date,
+        status: cost_status,
+        paid_at: cost_status == 'paid' ? Time.current : nil,
+        metadata: { 'source' => 'bill' }
+      )
+    end
+  end
+
+  def project_belongs_to_company
+    errors.add(:project_id, 'is not one of your projects') unless company.projects.where(id: project_id).exists?
   end
 
   def resolve_ap_account

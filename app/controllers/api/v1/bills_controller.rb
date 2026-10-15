@@ -10,9 +10,15 @@ class Api::V1::BillsController < ApplicationController
     return unless authorize_action!('bills', 'read')
 
     bills = @company.bills.active
-                    .includes(:vendor, :contact, :bill_line_items, :bill_payments, :location)
+                    .includes(:vendor, :contact, :bill_line_items, :bill_payments, :location, :project)
 
     bills = bills.where(location_id: accounting_location_id) if accounting_location_filtered?
+    # Bills for one job: tagged on the bill or on any of its lines.
+    if params[:project_id].present?
+      project_id = params[:project_id].to_i
+      bills = bills.where(project_id: project_id)
+                   .or(bills.where(id: BillLineItem.where(project_id: project_id).select(:bill_id)))
+    end
 
     stats_scope = bills
     stats = {
@@ -56,6 +62,7 @@ class Api::V1::BillsController < ApplicationController
           vendor: { only: [:id, :name, :vendor_type] },
           contact: { only: [:id, :first_name, :last_name] },
           location: { only: [:id, :name] },
+          project: { only: [:id, :name, :project_number] },
           bill_line_items: {
             include: { chart_of_account: { only: [:id, :account_number, :name] } }
           },
@@ -81,6 +88,7 @@ class Api::V1::BillsController < ApplicationController
         vendor: { only: [:id, :name, :vendor_type] },
         contact: { only: [:id, :first_name, :last_name] },
         location: { only: [:id, :name] },
+        project: { only: [:id, :name, :project_number] },
         bill_line_items: {
           include: {
             chart_of_account: { only: [:id, :account_number, :name] },
@@ -368,10 +376,10 @@ class Api::V1::BillsController < ApplicationController
     permitted = params.require(:bill).permit(
       :vendor_id, :supplier_id, :contact_id, :location_id, :vendor_name,
       :bill_date, :due_date, :status, :payment_terms,
-      :tax_amount, :memo, :notes, :reference_number, :ap_account_id,
+      :tax_amount, :memo, :notes, :reference_number, :ap_account_id, :project_id,
       bill_line_items_attributes: [
         :id, :chart_of_account_id, :amount, :description,
-        :location_id, :department, :position, :_destroy
+        :location_id, :department, :project_id, :position, :_destroy
       ]
     )
 
@@ -429,6 +437,7 @@ class Api::V1::BillsController < ApplicationController
         vendor: { only: [:id, :name, :vendor_type] },
         contact: { only: [:id, :first_name, :last_name] },
         location: { only: [:id, :name] },
+        project: { only: [:id, :name, :project_number] },
         bill_line_items: {
           include: { chart_of_account: { only: [:id, :account_number, :name] } }
         },

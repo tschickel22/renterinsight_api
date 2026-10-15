@@ -947,9 +947,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_230000) do
     t.integer "position", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "project_id"
     t.index ["bill_id"], name: "index_bill_line_items_on_bill_id"
     t.index ["chart_of_account_id"], name: "index_bill_line_items_on_chart_of_account_id"
     t.index ["location_id"], name: "index_bill_line_items_on_location_id"
+    t.index ["project_id"], name: "index_bill_line_items_on_project_id"
   end
 
   create_table "bill_payments", force: :cascade do |t|
@@ -3925,12 +3927,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_230000) do
     t.integer "position", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "project_id"
     t.index ["chart_of_account_id"], name: "index_journal_entry_lines_on_chart_of_account_id"
     t.index ["contact_id"], name: "index_journal_entry_lines_on_contact_id"
     t.index ["deal_id"], name: "index_journal_entry_lines_on_deal_id"
     t.index ["department"], name: "index_journal_entry_lines_on_department"
     t.index ["journal_entry_id"], name: "index_journal_entry_lines_on_journal_entry_id"
     t.index ["location_id"], name: "index_journal_entry_lines_on_location_id"
+    t.index ["project_id"], name: "index_journal_entry_lines_on_project_id"
     t.index ["vehicle_id"], name: "index_journal_entry_lines_on_vehicle_id"
   end
 

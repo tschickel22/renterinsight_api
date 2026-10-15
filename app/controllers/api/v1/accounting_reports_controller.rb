@@ -202,6 +202,32 @@ class Api::V1::AccountingReportsController < ApplicationController
     render json: Reports::CostVisibility.apply(report, can_view_costs: can_view_costs)
   end
 
+  # GET /api/v1/accounting/reports/project_profitability
+  # GET /api/v1/accounting/reports/project_budget
+  # Job cost is what the project's Costs & Budget tab already shows, so the
+  # reports open on projects:read. The deal's gross and anything derived from
+  # it stays behind deals:read:view_cost_details, as on Deal Profitability.
+  PROJECT_GROSS_KEYS = %i[front_gross after_job_cost margin].freeze
+  PROJECT_GROSS_SUMMARY_KEYS = %i[gross_project_count total_front_gross total_after_job_cost margin].freeze
+
+  def project_profitability
+    return unless authorize_action!('projects', 'read')
+
+    report = Reports::ProjectJobCostReportService.new(@company).profitability(**project_report_filters)
+    can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
+    unless can_view_costs
+      report[:projects] = report[:projects].map { |row| row.except(*PROJECT_GROSS_KEYS) }
+      report[:summary] = report[:summary].except(*PROJECT_GROSS_SUMMARY_KEYS)
+    end
+    render json: report.merge(can_view_costs: can_view_costs)
+  end
+
+  def project_budget
+    return unless authorize_action!('projects', 'read')
+
+    render json: Reports::ProjectJobCostReportService.new(@company).budget(**project_report_filters)
+  end
+
   # GET /api/v1/accounting/locations
   # Returns the list of locations available to the accounting location bar,
   # with the Corporate location surfaced first.
@@ -255,5 +281,22 @@ class Api::V1::AccountingReportsController < ApplicationController
     return raw if %w[cash accrual].include?(raw)
 
     AccountingSettings.for_company(@company).accounting_method.presence || 'accrual'
+  end
+
+  def project_report_filters
+    {
+      status: params[:status].presence&.split(','),
+      location_id: params[:location_id].presence || accounting_location_id,
+      start_date: optional_date(params[:start_date]),
+      end_date: optional_date(params[:end_date]),
+      project_id: params[:project_id].presence
+    }
+  end
+
+  # A malformed date is ignored, never a reason to drop the other filters.
+  def optional_date(value)
+    value.present? ? Date.parse(value.to_s) : nil
+  rescue Date::Error
+    nil
   end
 end
