@@ -6,6 +6,9 @@ class ProjectTask < ApplicationRecord
   belongs_to :project_phase
   belongs_to :assigned_to, class_name: 'User', optional: true
 
+  # assigned_to_id comes from the client; it must be one of this company's users.
+  validate :assigned_to_in_company, if: -> { assigned_to_id.present? && will_save_change_to_assigned_to_id? }
+
   has_many :checklists, class_name: 'ProjectTaskChecklist', dependent: :destroy
   has_many :dependencies, class_name: 'ProjectTaskDependency', foreign_key: :task_id, dependent: :destroy
   has_many :dependents, class_name: 'ProjectTaskDependency', foreign_key: :depends_on_id, dependent: :destroy
@@ -70,5 +73,11 @@ class ProjectTask < ApplicationRecord
         task.update_column(:status, 'pending')
       end
     end
+  end
+
+  def assigned_to_in_company
+    return if User.where(id: assigned_to_id, company_id: company_id).exists?
+
+    errors.add(:assigned_to_id, 'is not a user in this company')
   end
 end

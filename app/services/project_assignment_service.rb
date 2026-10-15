@@ -25,6 +25,8 @@ class ProjectAssignmentService
     @project = project
     @company = project.company
     @actor = actor
+    @owner_notices = []
+    @task_assigned_vendor_ids = Set.new
   end
 
   # changes: { vendor: Contractor|nil, user: User|nil }; a key that is absent is left alone.
@@ -45,6 +47,7 @@ class ProjectAssignmentService
       attrs[:assigned_vendor_id] = changes[:vendor]&.id if changes.key?(:vendor)
       attrs[:assigned_to_id] = changes[:user]&.id if changes.key?(:user)
       @project.update!(attrs) if attrs.any?
+      note_owner(changes[:vendor], old_vendor_id, nil)
 
       if apply_to_phases
         @project.project_phases.where.not(status: %w[completed skipped]).ordered.each do |phase|
@@ -82,7 +85,25 @@ class ProjectAssignmentService
       # never emails a contractor.
       raise ActiveRecord::Rollback if preview
     end
+    send_owner_notices unless preview
     result
+  end
+
+  # A new project or phase owner hears about it through their task emails. One
+  # who got no tasks out of it (a phase with no tasks yet, or tasks all taken)
+  # gets one notice per change instead.
+  def note_owner(vendor, old_vendor_id, phase)
+    return if vendor.nil? || vendor.id == old_vendor_id
+
+    @owner_notices << [vendor, phase]
+  end
+
+  def send_owner_notices
+    @owner_notices.reject { |vendor, _| @task_assigned_vendor_ids.include?(vendor.id) }
+                  .uniq { |vendor, _| vendor.id }
+                  .each do |vendor, phase|
+      ProjectNotificationService.notify_contractor_owner_assigned(vendor, @project, phase: phase)
+    end
   end
 
   def assign_phase!(phase, changes, apply_to_tasks, result)
@@ -92,6 +113,7 @@ class ProjectAssignmentService
     attrs[:assigned_vendor_id] = changes[:vendor]&.id if changes.key?(:vendor)
     attrs[:assigned_to_id] = changes[:user]&.id if changes.key?(:user)
     phase.update!(attrs) if attrs.any?
+    note_owner(changes[:vendor], old_vendor_id, phase) if changes.key?(:vendor)
     return unless apply_to_tasks
 
     phase.project_phase_tasks.includes(:contractor_assignments).each do |task|
@@ -147,6 +169,7 @@ class ProjectAssignmentService
   end
 
   def assign_contractor!(task, vendor)
+    @task_assigned_vendor_ids << vendor.id
     task.contractor_assignments.create!(
       contractor: vendor,
       company: @company,

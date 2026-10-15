@@ -135,6 +135,33 @@ RSpec.describe ProjectAssignmentService do
       expect(added.reload.assigned_to_id).to eq(crew_lead.id)
     end
 
+    it 'emails a new owner who got no tasks out of it, and only once' do
+      empty = project.project_phases.create!(company: company, name: 'Final', position: 2, status: 'not_started')
+      allow(ProjectNotificationService).to receive(:notify_contractor_owner_assigned)
+
+      service.assign_phase(empty, { vendor: installer }, apply_to_tasks: true)
+      service.assign_phase(phase, { vendor: installer }, apply_to_tasks: true, preview: true)
+
+      expect(ProjectNotificationService).to have_received(:notify_contractor_owner_assigned)
+        .with(installer, project, phase: empty).once
+    end
+
+    it 'leaves the owner notice to the task email when tasks were handed over' do
+      allow(ProjectNotificationService).to receive(:notify_contractor_owner_assigned)
+
+      service.assign_phase(phase, { vendor: installer }, apply_to_tasks: true)
+
+      expect(ProjectNotificationService).not_to have_received(:notify_contractor_owner_assigned)
+    end
+
+    it "refuses another company's user as a task's employee" do
+      outsider = User.create!(email: "x-#{SecureRandom.hex(3)}@else.example", password: 'password123',
+                              first_name: 'X', last_name: 'Y', company_id: create(:company).id, status: 'active')
+
+      expect(open_task.update(assigned_to_id: outsider.id)).to be(false)
+      expect(open_task.errors[:assigned_to_id]).to include('is not a user in this company')
+    end
+
     it 'assigns a whole project through phases still following it' do
       other_phase = project.project_phases.create!(company: company, name: 'Trim', position: 1, status: 'not_started',
                                                    assigned_vendor_id: electrician.id)

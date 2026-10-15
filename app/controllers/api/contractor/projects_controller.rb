@@ -5,14 +5,7 @@ module Api
     class ProjectsController < BaseController
       # GET /api/contractor/projects
       def index
-        # Base: all project IDs where contractor has assignments
-        base_project_ids = ContractorAssignment.where(contractor_id: all_contractor_ids, assignable_type: 'ProjectPhaseTask')
-          .joins("INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id")
-          .joins("INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id")
-          .distinct
-          .pluck("project_phases.project_id")
-
-        projects = Project.where(id: base_project_ids, is_deleted: [false, nil])
+        projects = Project.where(id: visible_project_ids, is_deleted: [false, nil])
           .includes(:company, :owner)
 
         # Stats BEFORE search/status filter (for tiles)
@@ -72,34 +65,43 @@ module Api
         project = Project.where(is_deleted: [false, nil]).find_by(id: params[:id])
         return render(json: { error: 'Project not found' }, status: :not_found) unless project
 
-        # Verify contractor has ProjectPhaseTask assignments on this project
-        my_task_ids = ContractorAssignment.where(contractor_id: all_contractor_ids, assignable_type: 'ProjectPhaseTask')
-          .joins("INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id")
-          .joins("INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id")
-          .where("project_phases.project_id = ?", project.id)
-          .pluck(:assignable_id)
-
-        unless my_task_ids.any?
+        # Visible when the contractor has a task here, or owns the project or a phase (E69)
+        unless visible_project_ids.include?(project.id)
           return render(json: { error: 'Project not found' }, status: :not_found)
         end
+
+        my_task_ids = my_task_assignments.where("project_phases.project_id = ?", project.id).pluck(:assignable_id)
+        project_owner = all_contractor_ids.include?(project.assigned_vendor_id)
 
         phases = project.project_phases.ordered.includes(project_phase_tasks: { contractor_assignments: :contractor })
 
         render json: {
-          project: project_detail_json(project),
-          phases: phases.filter_map { |phase| phase_json(phase, my_task_ids) }
+          project: project_detail_json(project).merge(owned_by_me: project_owner),
+          phases: phases.filter_map { |phase| phase_json(phase, my_task_ids, project_owner) }
         }
       end
 
       private
 
+      def my_task_assignments
+        ContractorAssignment.where(contractor_id: all_contractor_ids, assignable_type: 'ProjectPhaseTask')
+          .joins("INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id")
+          .joins("INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id")
+      end
+
+      # Projects with one of my tasks, or where I own the whole project or a phase.
+      # Owner ids are this company's vendors (checked when assigned), so matching
+      # on my vendor ids stays inside the companies I work for.
+      def visible_project_ids
+        @visible_project_ids ||= (
+          my_task_assignments.distinct.pluck('project_phases.project_id') +
+          Project.where(assigned_vendor_id: all_contractor_ids).pluck(:id) +
+          ProjectPhase.where(assigned_vendor_id: all_contractor_ids).distinct.pluck(:project_id)
+        ).uniq
+      end
+
       def project_list_json(project)
-        my_assignments = ContractorAssignment.where(
-          contractor_id: all_contractor_ids,
-          assignable_type: 'ProjectPhaseTask'
-        ).joins("INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id")
-         .joins("INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id")
-         .where("project_phases.project_id = ?", project.id)
+        my_assignments = my_task_assignments.where("project_phases.project_id = ?", project.id)
 
         task_count = my_assignments.count
         completed_count = my_assignments.where(status: 'completed').count
@@ -152,15 +154,20 @@ module Api
         }
       end
 
-      def phase_json(phase, my_task_ids)
+      # A phase shows when I have a task in it, own it, or own the whole project,
+      # so a phase with no tasks yet still appears to the contractor running it.
+      def phase_json(phase, my_task_ids, project_owner)
         my_tasks = phase.project_phase_tasks.select { |t| my_task_ids.include?(t.id) }
-        return nil if my_tasks.empty?
+        phase_owner = all_contractor_ids.include?(phase.assigned_vendor_id)
+        return nil if my_tasks.empty? && !phase_owner && !project_owner
 
         {
           id: phase.id,
           name: phase.name,
+          description: phase.description,
           status: phase.status,
           position: phase.position,
+          owned_by_me: phase_owner || project_owner,
           estimated_start_date: phase.estimated_start_date,
           estimated_completion_date: phase.estimated_completion_date,
           task_count: my_tasks.size,
