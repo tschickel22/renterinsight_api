@@ -49,7 +49,7 @@ module Truebuild
         { models: models,
           totals: { models: models.size, with_photos: models.count { |m| m[:photos].positive? },
                     drawings: drawings, recuts: models.sum { |m| m[:recuts].to_i }, shared: models.sum { |m| m[:shared] },
-                    already_drawn: models.sum { |m| m[:already_drawn] }, outlines: outlines,
+                    already_drawn: models.sum { |m| m[:already_drawn] }, outlines: outlines, tints: models.sum { |m| m[:tints].to_i },
                     cost_usd: models.sum { |m| m[:cost_usd] }.round(2) },
           rates: rates }
       end
@@ -302,6 +302,8 @@ module Truebuild
         seen.merge(recut_ids)
         ids = fresh.map { |p| [p[:photo], p[:key], p[:prompt]] }
         shared = ids.count { |id| seen.include?(id) }
+        # Plain colors laid on the photo (Tint): only their check is paid.
+        tints = Tint.enabled? ? fresh.count { |p| !seen.include?([p[:photo], p[:key], p[:prompt]]) && Tint.hex_for(p[:selection], Array(p[:swatch_ids]).first) } : 0
         seen.merge(ids)
         surfaces = plan.filter_map { |p| (c = Surfaces.category(p[:selection].first['surface'])) && [p[:photo], c] }.uniq
         have = unpicked ? Set.new : TruebuildSurfaceMask.where(source_url: photos.map(&:last), version: Surfaces::VERSION).pluck(:source_url, :surface).to_set
@@ -314,8 +316,9 @@ module Truebuild
         all_drawings = plan.map { |p| [p[:photo], p[:key]] }.uniq.size
         open_drawings = unpicked ? all_drawings : missing.map { |p, _| [p[:photo], p[:key]] }.uniq.size
         { photos: photos.size, drawings: drawings, recuts: recut_ids.size, shared: shared, already_drawn: all_drawings - open_drawings,
-          outlines: new_outlines.size,
-          cost_usd: (drawings * rates[:layer] + new_outlines.size * rates[:outline] + recut_ids.size * RECUT_COST).round(2) }
+          outlines: new_outlines.size, tints: tints,
+          cost_usd: ((drawings - tints) * rates[:layer] + tints * Tint::CHECK_COST + new_outlines.size * rates[:outline] +
+                     recut_ids.size * RECUT_COST).round(2) }
       end
 
       # Average cost per drawing and per outline so far, by measurement once
@@ -336,6 +339,7 @@ module Truebuild
       def rates(batch: false)
         finished = TruebuildRender.where(purpose: 'layer', model_key: Buyer::MODEL, status: %w[done rejected]).where('cost_usd > 0')
                                   .where("(usage->>'mask_version')::int > ?", Layer::VERSION - CURRENT_VERSIONS)
+                                  .where.not("usage ? 'tinted'") # laid on the photo, not drawn (Tint)
         immediate = finished.where("usage->>'batch' IS NULL")
         batched = finished.where("usage->>'batch' = 'true'")
         immediate_rate = immediate.count >= MEASURED ? immediate.average(:cost_usd).to_f : nil

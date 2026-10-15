@@ -181,4 +181,24 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect(sent).to eq(["r#{second.id}"])
     expect(first.reload.usage).not_to have_key('batch_name')
   end
+
+  it 'lays plain colors with a factory sample on the photo instead of sending them to Google' do
+    Setting.set('platform', nil, Truebuild::Trueview::Tint::SETTING, true)
+    CatalogSwatch.create!(manufacturer: mfr, set_name: 'Standard Vinyl Siding', name: 'Clay', hex: '#8c887d', image_url: 'https://b/clay.jpg')
+    mask = TruebuildSurfaceMask.create!(source_url: front, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION,
+                                        mask_url: 'https://b/mask.png', coverage: 0.5, status: 'done')
+    allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(mask)
+    allow(Truebuild::Trueview).to receive(:mask_image).and_return((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 150, 200, fill: true).cast(:uchar))
+    allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(input: { 'score' => 5 }, input_tokens: 1000, output_tokens: 50)
+    run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+    expect(run.estimate['tints']).to eq(1)
+    TruebuildFactoryRunJob.perform_now(run.id)
+
+    sent = nil
+    allow(Truebuild::Trueview::GeminiBatch).to receive(:submit) { |_m, lines, **| sent = lines.map(&:first); 'batches/abc' }
+    expect(described_class.submit!(run)).to eq(1)
+    clay = run.renders.find_by("selection->0->>'value' = 'Clay'")
+    expect(clay).to have_attributes(status: 'done', model: 'tint')
+    expect(sent).to eq(["r#{run.renders.where.not(id: clay.id).sole.id}"]) # White has no sample: drawn
+  end
 end
