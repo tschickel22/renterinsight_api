@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_15_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1008,6 +1008,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
     t.datetime "gl_post_failed_at"
     t.bigint "accounting_import_id"
     t.string "quickbooks_id"
+    t.bigint "project_id"
+    t.string "source"
+    t.jsonb "submission", default: {}, null: false
     t.index ["accounting_import_id"], name: "index_bills_on_accounting_import_id", where: "(accounting_import_id IS NOT NULL)"
     t.index ["ap_account_id"], name: "index_bills_on_ap_account_id"
     t.index ["company_id", "bill_number"], name: "index_bills_on_company_id_and_bill_number", unique: true, where: "(bill_number IS NOT NULL)"
@@ -1019,6 +1022,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
     t.index ["journal_entry_id"], name: "index_bills_on_journal_entry_id"
     t.index ["location_id"], name: "index_bills_on_location_id"
     t.index ["payment_journal_entry_id"], name: "index_bills_on_payment_journal_entry_id"
+    t.index ["project_id"], name: "index_bills_on_project_id"
     t.index ["vendor_id"], name: "index_bills_on_vendor_id"
   end
 
@@ -5563,7 +5567,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "vendor_id"
+    t.bigint "bill_id"
     t.index ["approved_by_id"], name: "index_project_cost_items_on_approved_by_id"
+    t.index ["bill_id"], name: "index_project_cost_items_on_bill_id"
     t.index ["company_id"], name: "index_project_cost_items_on_company_id"
     t.index ["cost_type"], name: "index_project_cost_items_on_cost_type"
     t.index ["date"], name: "index_project_cost_items_on_date"
@@ -8711,6 +8717,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
   add_foreign_key "bills", "journal_entries"
   add_foreign_key "bills", "journal_entries", column: "payment_journal_entry_id"
   add_foreign_key "bills", "locations"
+  add_foreign_key "bills", "projects", on_delete: :nullify
   add_foreign_key "bills", "users", column: "created_by_id"
   add_foreign_key "bills", "vendors", on_delete: :nullify
   add_foreign_key "bins", "locations"
@@ -9082,6 +9089,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
   add_foreign_key "printed_checks", "contacts"
   add_foreign_key "printed_checks", "journal_entries"
   add_foreign_key "printed_checks", "vendors"
+  add_foreign_key "project_cost_items", "bills", on_delete: :nullify
   add_foreign_key "project_cost_items", "companies"
   add_foreign_key "project_cost_items", "inventory_transactions", on_delete: :nullify
   add_foreign_key "project_cost_items", "parts", on_delete: :nullify

@@ -19,6 +19,10 @@ class Bill < ApplicationRecord
   # Set on open bills carried over by a QuickBooks switch. The switch's
   # opening entry already holds their payable, so they never post.
   belongs_to :accounting_import, optional: true
+  # Job the bill is for (E68). A contractor's portal invoice sets it, with the
+  # project cost line it pays for.
+  belongs_to :project, optional: true
+  has_many :project_cost_items, dependent: :nullify
 
   has_many :bill_line_items, dependent: :destroy
   has_many :bill_payments, dependent: :destroy
@@ -37,6 +41,8 @@ class Bill < ApplicationRecord
   # A bill saved as a draft and approved later never posted, since posting
   # only ran on create.
   after_update :auto_post_bill_je, if: -> { saved_change_to_status? && status_before_last_save == 'draft' && !%w[draft void].include?(status) }
+
+  after_update :sync_project_cost_items, if: -> { saved_change_to_status? || saved_change_to_total_amount? }
 
   scope :active, -> { where(is_deleted: false) }
   scope :unpaid, -> { where(status: %w[pending partially_paid]) }
@@ -121,12 +127,15 @@ class Bill < ApplicationRecord
         'partially_paid'
       end
 
+    old_status = status
     update_columns(
       status: new_status,
       amount_paid: paid,
       balance_due: total_amount - paid,
       updated_at: Time.current
     )
+    # update_columns skips callbacks, so a payment reaches the cost line here.
+    apply_cost_sync(status_changed: old_status != new_status, total_changed: false)
   end
 
   alias_method :recalculate_balance!, :refresh_payment_status!
@@ -241,6 +250,31 @@ class Bill < ApplicationRecord
     largest = lines.max_by { |l| l.amount.to_d }
     shares[largest.id] += tax - shares.values.sum
     shares
+  end
+
+  # The cost line follows its bill: approving it approves the cost, paying it
+  # pays the cost, voiding it marks the cost disputed. A corrected total moves
+  # the cost line too when the bill pays for that one line alone.
+  COST_STATUS_FOR_BILL = { 'pending' => 'approved', 'partially_paid' => 'approved', 'paid' => 'paid', 'void' => 'disputed' }.freeze
+
+  def sync_project_cost_items
+    apply_cost_sync(status_changed: saved_change_to_status?, total_changed: saved_change_to_total_amount?)
+  end
+
+  def apply_cost_sync(status_changed:, total_changed:)
+    items = project_cost_items.not_deleted.to_a
+    return if items.empty?
+
+    attrs = {}
+    if status_changed && (cost_status = COST_STATUS_FOR_BILL[status])
+      attrs[:status] = cost_status
+      attrs[:paid_at] = Time.current if cost_status == 'paid'
+    end
+    items.each do |item|
+      item_attrs = attrs.dup
+      item_attrs[:amount] = total_amount if items.size == 1 && total_changed && total_amount.to_d.positive?
+      item.update!(item_attrs) if item_attrs.any?
+    end
   end
 
   def resolve_ap_account

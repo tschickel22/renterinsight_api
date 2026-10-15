@@ -3551,7 +3551,10 @@ Rails.application.routes.draw do
       get 'branding', to: 'branding#show'
 
       # Projects
-      resources :projects, only: [:index, :show]
+      resources :projects, only: [:index, :show] do
+        # Invoices sent from the portal become draft bills (E68)
+        resources :invoices, only: [:index, :create]
+      end
 
       # Tasks
       resources :tasks, only: [:index, :show] do

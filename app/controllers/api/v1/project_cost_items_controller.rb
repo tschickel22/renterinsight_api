@@ -52,7 +52,7 @@ module Api
         items = items.offset((page - 1) * per_page).limit(per_page)
 
         render json: {
-          cost_items: items.includes(:vendor).map { |item| serialize_cost_item(item) },
+          cost_items: items.includes(:vendor, :bill).map { |item| serialize_cost_item(item) },
           stats: stats,
           meta: { total_count: total_count, page: page, per_page: per_page }
         }
@@ -82,7 +82,8 @@ module Api
         end
 
         if @cost_item.save
-          render json: serialize_cost_item(@cost_item), status: :created
+          ProjectCostBillService.bill_cost_line!(@cost_item, user: current_user)
+          render json: serialize_cost_item(@cost_item.reload), status: :created
         else
           render json: { errors: @cost_item.errors.full_messages }, status: :unprocessable_entity
         end
@@ -93,6 +94,7 @@ module Api
         return unless authorize_action!('projects', 'update')
 
         if @cost_item.update(cost_item_params)
+          ProjectCostBillService.follow_cost_line!(@cost_item) if @cost_item.saved_change_to_amount?
           render json: serialize_cost_item(@cost_item)
         else
           render json: { errors: @cost_item.errors.full_messages }, status: :unprocessable_entity
@@ -168,14 +170,18 @@ module Api
       COST_ITEM_FIELDS = %i[id project_id project_phase_id project_task_id cost_type category
                             description vendor_name invoice_number amount quantity unit_price
                             date status paid_at approved_by_id notes receipt_url part_id
-                            inventory_transaction_id metadata created_at updated_at].freeze
+                            inventory_transaction_id bill_id metadata created_at updated_at].freeze
 
       # contractor_id is an alias of the vendor_id column, and as_json(only:)
       # skips aliases — so it is added by hand, or the edit form loses the vendor.
       def serialize_cost_item(item, extra: [])
         item.as_json(only: COST_ITEM_FIELDS + extra).merge(
           'contractor_id' => item.vendor_id,
-          'contractor_name' => item.vendor&.name
+          'contractor_name' => item.vendor&.name,
+          'bill' => item.bill && {
+            'id' => item.bill.id, 'bill_number' => item.bill.bill_number, 'status' => item.bill.status,
+            'source' => item.bill.source, 'total_amount' => item.bill.total_amount
+          }
         )
       end
 

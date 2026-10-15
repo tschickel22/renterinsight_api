@@ -476,6 +476,28 @@ class ProjectNotificationService
     Rails.logger.error("[ProjectNotificationService] Error announcing review: #{e.message}")
   end
 
+  # ── Contractor uploaded an invoice in the portal (E68). It is waiting as a
+  # draft bill, so tell the people who approve bills.
+  def self.announce_invoice_submitted(bill, contractor, project)
+    company = project.company
+    recipients = ([project.owner] + company.users.active.where(role: %w[admin company_admin platform_admin manager super_admin]).to_a).compact.uniq
+    amount = ActiveSupport::NumberHelper.number_to_currency(bill.total_amount)
+    recipients.each do |user|
+      create_bell_notification(
+        recipient: user,
+        company: company,
+        type: :contractor_invoice_submitted,
+        title: "Invoice from #{contractor.name}",
+        message: "#{contractor.name} submitted an invoice for #{amount} on #{project.name}. It is waiting as draft bill #{bill.bill_number}.",
+        notifiable: bill,
+        actor_type: 'Contractor',
+        actor_id: contractor.id
+      )
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] Error announcing invoice: #{e.message}")
+  end
+
   # ── BATCHED: Dealer review-submitted email (called by DealerReviewNotifierJob)
   # Sends ONE email listing all pending reviews on a project to the project owner.
   def self.notify_review_submitted_batch(project, assignments)
