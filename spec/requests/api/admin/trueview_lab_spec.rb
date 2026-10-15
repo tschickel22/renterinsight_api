@@ -342,6 +342,17 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
     end
   end
 
+  it 'turns laying plain colors on the photo on and off, for platform admins only' do
+    get '/api/admin/trueview_lab/tint', headers: admin
+    expect(JSON.parse(response.body)).to eq('enabled' => false)
+    put '/api/admin/trueview_lab/tint', params: { enabled: true }, headers: admin, as: :json
+    expect(JSON.parse(response.body)).to eq('enabled' => true)
+    expect(Truebuild::Trueview::Tint.enabled?).to be(true)
+    put '/api/admin/trueview_lab/tint', params: { enabled: false }, headers: headers_for('company_admin'), as: :json
+    expect(response).to have_http_status(:forbidden)
+    expect(Truebuild::Trueview::Tint.enabled?).to be(true)
+  end
+
   describe 'factory runs' do
     let(:book) { CatalogPriceBook.create!(manufacturer: mfr, factory: factory, name: 'Topeka 2026', status: 'published') }
     before { CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 90_000) }

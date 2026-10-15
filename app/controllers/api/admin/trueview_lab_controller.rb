@@ -213,6 +213,18 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # GET /api/admin/trueview_lab/tint
+  # Whether plain colors are laid on the photo instead of drawn (Truebuild::Trueview::Tint).
+  def tint
+    render json: { enabled: Truebuild::Trueview::Tint.enabled? }
+  end
+
+  # PUT /api/admin/trueview_lab/tint { enabled }
+  def update_tint
+    Setting.set('platform', nil, Truebuild::Trueview::Tint::SETTING, ActiveModel::Type::Boolean.new.cast(params[:enabled]) == true)
+    tint
+  end
+
   # POST /api/admin/trueview_lab/factory_runs/:id/stop
   # Drawings already started finish; the rest are cancelled.
   def stop_factory_run
