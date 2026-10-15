@@ -517,6 +517,27 @@ Rails.application.routes.draw do
         delete 'labels/:key',    action: :destroy
       end
 
+      # ==================== SIDE MENU (hidden items) ====================
+      scope path: 'company', controller: 'menu_settings' do
+        get   'menu', action: :show
+        put   'menu', action: :update
+        patch 'menu', action: :update
+      end
+
+      # ==================== APPOINTMENT REMINDERS ====================
+      scope path: 'company', controller: 'appointment_reminder_settings' do
+        get   'appointment-reminders', action: :show
+        put   'appointment-reminders', action: :update
+        patch 'appointment-reminders', action: :update
+      end
+
+      # ==================== QUICK LOG OPTIONS ====================
+      scope path: 'company', controller: 'quick_log_options' do
+        get   'quick-log', action: :show
+        put   'quick-log', action: :update
+        patch 'quick-log', action: :update
+      end
+
       # ==================== CONVERSION TRACKING ====================
       # Company default + per-location overrides for public-form ad tracking.
       scope path: 'company', controller: 'tracking_settings' do

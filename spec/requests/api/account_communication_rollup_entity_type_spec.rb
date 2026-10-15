@@ -60,4 +60,11 @@ RSpec.describe 'Account communication rollup entity type', type: :request do
     # Nothing stops that id also existing as a contact, which is the dangerous case.
     expect(row['entity_type']).to eq('Lead')
   end
+
+  it 'says who each message was between, so a reply goes to the right address' do
+    get "/api/v1/accounts/#{account.id}/communications/rollup", headers: headers
+
+    row = JSON.parse(response.body)['communications'].find { |r| r['contact_name'] == 'Kyle Dudgeon' }
+    expect(row.values_at('from_address', 'to_address')).to eq(['tom@dealertide.com', 'kyle@example.com'])
+  end
 end

@@ -80,7 +80,7 @@ RSpec.describe 'Api::Crm::Leads conversion', type: :request do
       expect(response).to have_http_status(:ok)
       existing_account.reload
       # Account normalizes phone on save; the point is it's now populated.
-      expect(existing_account.phone).to eq('5745555004')
+      expect(existing_account.phone).to eq('574-555-5004')
       expect(existing_account.email).to eq('dhughes@example.com')
       # Pre-existing address is preserved, not overwritten.
       expect(existing_account.billing_street).to eq('999 Old Rd')

@@ -32,6 +32,11 @@ module InboundEmail
       body_text = mail.text_part&.decoded || mail.body.decoded
       body_html = mail.html_part&.decoded
 
+      # A calendar response (accept, decline, a note) carries a text/calendar
+      # part; Appointments::InviteReplyHandler reads it.
+      calendar_part = mail.mime_type == 'text/calendar' ? mail : mail.all_parts.find { |p| p.mime_type == 'text/calendar' || p.filename.to_s.downcase.end_with?('.ics') }
+      calendar = (calendar_part&.decoded rescue nil)
+
       # Capture full raw headers for bounce / OOO classification.
       raw_headers = mail.header.to_s rescue ''
       content_type = mail.content_type.to_s rescue ''
@@ -46,7 +51,8 @@ module InboundEmail
         token: token,
         message_id: mail.message_id,
         headers: raw_headers,
-        content_type: content_type
+        content_type: content_type,
+        calendar: calendar
       }
     rescue => e
       Rails.logger.error "[ParserService] Error parsing email: #{e.message}"

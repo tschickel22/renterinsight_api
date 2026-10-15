@@ -128,6 +128,12 @@ default: &default
     class: SyncAllUsersSentEmailsJob
     queue: default
     schedule: every 10 minutes
+  customer_appointment_reminders:
+    # Texts and emails customers before their appointments, at the times the
+    # company set (Customize, Appointments). Appointments::CustomerReminders.
+    class: CustomerAppointmentRemindersJob
+    queue: default
+    schedule: every 5 minutes
   send_activity_reminders:
     # Fires bell/email reminders for lead/contact/account/deal activities
     # when reminder_time is coming up in the next 5 minutes. Was never

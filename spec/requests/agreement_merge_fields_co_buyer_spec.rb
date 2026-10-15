@@ -26,7 +26,7 @@ RSpec.describe 'Agreement merge fields: co-buyer', type: :request do
     fields = fields_for(deal)
     expect(fields['deal.co_buyer_name']).to eq('Pat Smuts')
     expect(fields['deal.co_buyer_email']).to eq('pat@example.com')
-    expect(fields['deal.co_buyer_phone']).to eq('2605550100')
+    expect(fields['deal.co_buyer_phone']).to eq('260-555-0100')
   end
 
   it 'leaves Buyer 2 empty on a one-buyer deal' do

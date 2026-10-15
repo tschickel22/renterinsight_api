@@ -4,7 +4,10 @@ module Truebuild
   # When a lead with saved designs is converted, the designs and the buyer's
   # portal login follow them: the login moves to the new contact (opening the
   # full portal), the designs point at the contact, account and deal, and an
-  # empty deal takes the newest design's home and price.
+  # empty deal takes the newest design's home and price. A deal with no Deal
+  # Sheet starts one from that design, so the buyer's options and colors are
+  # on it from the start rather than lost to a sheet started from the bare
+  # home.
   module ConversionCarry
     module_function
 
@@ -29,6 +32,20 @@ module Truebuild
       attrs[:value] = total if total && deal.value.to_f.zero?
       attrs[:vehicle_id] = design.vehicle_id if design.vehicle_id && deal.respond_to?(:vehicle_id) && deal.vehicle_id.nil?
       deal.update_columns(attrs.merge(updated_at: Time.current)) if attrs.any?
+      start_sheet(deal, design)
+    end
+
+    # In a savepoint: a sheet that cannot be priced (no current price book)
+    # must not undo the conversion. The rep can still start it by hand.
+    def start_sheet(deal, design)
+      return if design.variant.nil? || deal.home_builds.exists?
+
+      deal.transaction(requires_new: true) do
+        deal.fill_delivery_address_from_billing!
+        DealBuild.start(deal: deal, variant: design.variant, vehicle: design.vehicle, design: design)
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[ConversionCarry] Deal Sheet for deal #{deal.id} from design #{design.id}: #{e.message}")
     end
   end
 end

@@ -34,10 +34,12 @@ RSpec.describe 'TrueView rendering' do
       end
     end
 
+    let(:painters) { [] }
+
     def paints(image)
       allow(Truebuild::Trueview::Providers::Gemini).to receive(:edit) do |spec, _src, prompt, **|
         if prompt.include?('pure magenta')
-          expect(spec[:model]).to eq('gemini-3.1-flash-lite-image')
+          painters << spec[:model]
           { bytes: png(image), mime: 'image/png', model: 'lite', usage: { 'prompt_tokens' => 0, 'output_tokens' => 1000 } }
         else
           { bytes: png((photo + 60).cast(:uchar)), mime: 'image/png', usage: { 'prompt_tokens' => 10, 'output_tokens' => 1300 } }
@@ -51,8 +53,17 @@ RSpec.describe 'TrueView rendering' do
       expect(mask).to have_attributes(status: 'done', surface: 'cabinets', version: Truebuild::Trueview::Surfaces::VERSION)
       expect(mask.usage['attempts']).to eq([{ 'present' => true, 'fit' => 4 }])
       expect(mask.coverage.to_f).to be_within(0.01).of(0.25)
-      expect(mask.usage['cost_usd']).to eq(0.0436) # the painting, plus two questions at 2,000 in and 50 out, Sonnet rates
+      expect(mask.usage['cost_usd']).to eq(0.0736) # the painting on the larger model, plus two questions at 2,000 in and 50 out, Sonnet rates
       expect(Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Kitchen cabinets')).to eq(mask)
+    end
+
+    it 'paints outlines on the larger model twice, then on Lite' do
+      paints(painted)
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) do |tool:, **|
+        { input: tool[:name] == 'judge_presence' ? { 'present' => true } : { 'present' => true, 'fit' => 2 }, input_tokens: 2000, output_tokens: 50 }
+      end
+      Truebuild::Trueview::Surfaces.mask_for('https://x/k.jpg', photo.jpegsave_buffer, 'Cabinets')
+      expect(painters).to eq(%w[gemini-3.1-flash-image gemini-3.1-flash-image gemini-3.1-flash-lite-image])
     end
 
     it 'drops an outline Claude judges wrong, so the surface gets no layer rather than a wrong one' do

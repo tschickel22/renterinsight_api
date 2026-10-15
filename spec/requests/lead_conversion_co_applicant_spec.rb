@@ -33,13 +33,13 @@ RSpec.describe 'Lead conversion → deal co-applicant link', type: :model do
 
     expect(deal.co_applicant_contact).to eq(co_applicant)
     expect(deal.co_applicant_contact.email).to eq('dana@example.com')
-    expect(deal.co_applicant_contact.phone).to eq('3165551234')
+    expect(deal.co_applicant_contact.phone).to eq('316-555-1234')
 
     # The Contact is the source of truth: an edit there shows on the deal with
     # no backfill or sync step. This is the property the FK buys us over copying
     # co_applicant_* columns onto deals.
     co_applicant.update!(phone: '3165559999')
-    expect(deal.reload.co_applicant_contact.phone).to eq('3165559999')
+    expect(deal.reload.co_applicant_contact.phone).to eq('316-555-9999')
   end
 
   it 'leaves the link null for deals with no co-applicant' do

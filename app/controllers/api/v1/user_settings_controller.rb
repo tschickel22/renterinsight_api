@@ -3,6 +3,17 @@
 module Api
   module V1
     class UserSettingsController < ApplicationController
+      SMS_SIGNATURE_MAX = 60
+      EMAIL_SIGNATURE_TAGS = %w[p br strong b em i u a span div ul ol li img].freeze
+      EMAIL_SIGNATURE_ATTRS = %w[href src alt title style width height target rel].freeze
+
+      def self.clean_email_signature(html)
+        text = html.to_s.strip
+        return nil if text.blank? || ActionView::Base.full_sanitizer.sanitize(text).strip.blank? && !text.include?('<img')
+
+        ActionController::Base.helpers.sanitize(text, tags: EMAIL_SIGNATURE_TAGS, attributes: EMAIL_SIGNATURE_ATTRS).first(10_000)
+      end
+
       skip_before_action :authenticate
       before_action :authenticate_any_user
       before_action :set_user
@@ -23,6 +34,8 @@ module Api
           user_type: @user_type,
           landing_page: @user.respond_to?(:landing_page) ? @user.landing_page : nil,
           booking_url: @user.respond_to?(:booking_url) ? @user.booking_url : nil,
+          email_signature: @user.respond_to?(:email_signature) ? @user.email_signature : nil,
+          sms_signature: @user.respond_to?(:sms_signature) ? @user.sms_signature : nil,
           workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {},
           calendar_preferences: @user.respond_to?(:calendar_preferences) ? (@user.calendar_preferences || {}) : {}
         }, status: :ok
@@ -32,6 +45,7 @@ module Api
       def update_profile
         profile_params = params.permit(
           :first_name, :last_name, :title, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
+          :email_signature, :sms_signature,
           workqueue_preferences: {}, calendar_preferences: {}
         )
 
@@ -66,6 +80,14 @@ module Api
             updates[:email] = profile_params[:email] if profile_params[:email].present?
             updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?
             updates[:booking_url] = profile_params[:booking_url] if profile_params.key?(:booking_url)
+            # Signature Block. The email one is formatted text, kept to safe tags;
+            # the text one is a single short line.
+            if profile_params.key?(:email_signature) && @user.respond_to?(:email_signature)
+              updates[:email_signature] = self.class.clean_email_signature(profile_params[:email_signature])
+            end
+            if profile_params.key?(:sms_signature) && @user.respond_to?(:sms_signature)
+              updates[:sms_signature] = profile_params[:sms_signature].to_s.squish.first(SMS_SIGNATURE_MAX).presence
+            end
 
             if params.key?(:workqueue_preferences) && @user.respond_to?(:workqueue_preferences)
               raw = profile_params[:workqueue_preferences] || {}

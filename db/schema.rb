@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -48,6 +48,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
     t.float "actual_hours"
     t.text "outcome_notes"
     t.json "metadata"
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["account_id"], name: "index_account_activities_on_account_id"
     t.index ["activity_type"], name: "index_account_activities_on_activity_type"
     t.index ["assigned_to_id"], name: "index_account_activities_on_assigned_to_id"
@@ -2494,6 +2497,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
     t.text "outcome_notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["account_id", "activity_type"], name: "index_contact_activities_on_account_id_and_activity_type"
     t.index ["account_id"], name: "index_contact_activities_on_account_id"
     t.index ["assigned_to_id", "status"], name: "index_contact_activities_on_assigned_to_id_and_status"
@@ -2831,6 +2837,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.text "outcome_notes"
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["activity_type"], name: "index_deal_activities_on_activity_type"
     t.index ["assigned_to_id"], name: "index_deal_activities_on_assigned_to_id"
     t.index ["deal_id"], name: "index_deal_activities_on_deal_id"
@@ -4164,6 +4173,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
     t.text "outcome_notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "remind_customer", default: true, null: false
+    t.boolean "send_calendar_invite", default: true, null: false
+    t.jsonb "customer_notices", default: {}, null: false
     t.index ["assigned_to_id", "status"], name: "index_lead_activities_on_assigned_to_id_and_status"
     t.index ["assigned_to_id"], name: "index_lead_activities_on_assigned_to_id"
     t.index ["due_date"], name: "index_lead_activities_on_due_date"
@@ -7762,6 +7774,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_11_140000) do
     t.jsonb "calendar_preferences", default: {}, null: false
     t.datetime "last_active_at"
     t.string "last_active_path", limit: 255
+    t.text "email_signature"
+    t.string "sms_signature"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"

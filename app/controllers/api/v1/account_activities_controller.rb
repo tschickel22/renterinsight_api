@@ -198,6 +198,7 @@ module Api
                   :meeting_location, :meeting_link, :meeting_attendees,
                   :estimated_hours, :actual_hours, :outcome_notes, :outcome,
                   :related_activity_id, :assigned_to_id, :reminder_time,
+                  :remind_customer, :send_calendar_invite,
                   reminder_method: [], metadata: {}
                 )
               else
@@ -214,6 +215,7 @@ module Api
                   :related_activity_id, :relatedActivityId,
                   :assigned_to_id, :assignedToId,
                   :reminder_time, :reminderTime,
+                  :remind_customer, :remindCustomer, :send_calendar_invite, :sendCalendarInvite,
                   reminder_method: [], reminderMethod: [], metadata: {}
                 )
               end
@@ -244,6 +246,8 @@ module Api
           outcome: raw[:outcome],
           related_activity_id: raw[:related_activity_id] || raw[:relatedActivityId],
           assigned_to_id: raw[:assigned_to_id] || raw[:assignedToId],
+          remind_customer: (v = raw.key?(:remind_customer) ? raw[:remind_customer] : raw[:remindCustomer]).nil? ? nil : ActiveModel::Type::Boolean.new.cast(v),
+          send_calendar_invite: (v = raw.key?(:send_calendar_invite) ? raw[:send_calendar_invite] : raw[:sendCalendarInvite]).nil? ? nil : ActiveModel::Type::Boolean.new.cast(v),
           metadata: raw[:metadata] || {}
         }.compact
         
@@ -297,6 +301,9 @@ module Api
           callOutcome: activity.call_outcome,
           phoneNumber: activity.phone_number,
           meetingLocation: activity.meeting_location,
+          remindCustomer: activity.try(:remind_customer),
+          sendCalendarInvite: activity.try(:send_calendar_invite),
+          inviteResponses: activity.try(:invite_responses) || [],
           meetingLink: activity.meeting_link,
           meetingAttendees: activity.meeting_attendees,
           reminderMethod: activity.reminder_method,

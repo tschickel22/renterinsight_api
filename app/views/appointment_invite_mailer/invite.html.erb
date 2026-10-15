@@ -1,0 +1,8 @@
+<% with = @role == 'customer' ? [@rep_name, @company&.name].compact.join(' at ').presence : @customer_name %>
+<p>Hi<%= " #{@name}" if @name.present? %>,</p>
+<% if @method == 'CANCEL' %>
+  <p>This appointment<%= " with #{with}" if with %> has been cancelled: <strong><%= @subject_line %></strong>, <%= @when_text %>.</p>
+<% else %>
+  <p>You have an appointment<%= " with #{with}" if with %>: <strong><%= @subject_line %></strong>, <%= @when_text %><%= " at #{@place}" if @place.present? %>.</p>
+  <p>The attached invite adds it to your calendar. If it changes, you will get an updated one.<% if @role == 'customer' && @rep_name %> Reply to this email to reach <%= @rep_name %>.<% end %></p>
+<% end %>

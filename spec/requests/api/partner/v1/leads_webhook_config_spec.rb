@@ -324,7 +324,7 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
       lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
       expect(lead.first_name).to eq('Jacob')
       expect(lead.last_name).to eq('Andries')
-      expect(lead.phone).to eq('+13378961773')
+      expect(lead.phone).to eq('337-896-1773')
     end
 
     it 'handles a single-word full_name (first only, no last)' do
@@ -401,7 +401,7 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
     it 'fills blank fields from the inquiry without overwriting existing data' do
       post_repeat
       existing.reload
-      expect(existing.phone).to eq('3035551212')                       # was blank → filled
+      expect(existing.phone).to eq('303-555-1212')                       # was blank → filled
       expect(existing.interests_requirements).to eq('Wants a 3/2 single-wide')
       expect(existing.last_name).to eq('Prior')                        # non-blank → NOT overwritten
     end

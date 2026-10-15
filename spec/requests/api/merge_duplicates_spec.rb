@@ -138,7 +138,7 @@ RSpec.describe 'Find & merge duplicates', type: :request do
            params: { duplicate_id: dupe.id }, headers: headers
 
       expect(response).to have_http_status(:ok)
-      expect(keeper.reload.phone).to eq('7205551234')
+      expect(keeper.reload.phone).to eq('720-555-1234')
       expect(dupe.reload.merged_into_id).to eq(keeper.id)
     end
 

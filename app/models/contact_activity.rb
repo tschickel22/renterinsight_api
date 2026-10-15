@@ -3,6 +3,8 @@
 class ContactActivity < ApplicationRecord
   include ActivityTrackable
   include EmitsWorkflowActivityEvents
+  include NotifiesActivityAssignee
+  include SendsAppointmentInvites
   workflow_parent :contact
 
   belongs_to :contact

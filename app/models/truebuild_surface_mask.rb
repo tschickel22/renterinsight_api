@@ -7,6 +7,9 @@ class TruebuildSurfaceMask < ApplicationRecord
 
   # The photo shows this surface: enough of it to paint.
   def present?
-    status == 'done' && mask_url.present? && coverage.to_f >= Truebuild::Trueview::Surfaces.min_present(surface)
+    status == 'done' && mask_url.present? && coverage.to_f >= Truebuild::Trueview::Surfaces.min_present(key)
   end
+
+  # The surface without a trial outline's painter ("siding@nb2" is siding).
+  def key = surface.to_s.split('@').first
 end

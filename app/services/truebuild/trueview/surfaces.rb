@@ -27,7 +27,13 @@ module Truebuild
                         # did not change is carried over, free), 13 cabinets up to the ceiling, spill sized,
                         # thin surfaces kept, 14 the crown molding on top of cabinets is the cabinets'
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
-      PAINTER = 'nb2-lite'
+      # Who paints an outline, try by try: the larger model twice, then Lite.
+      # On 16 trial tints on staging (2026-10-15) the larger model's outlines
+      # passed 9 against Lite's 7, covering shutters with no spill onto the
+      # siding, at about $0.135 a try against $0.075; Lite is kept last because
+      # on Bay Port's front the larger model was turned down three times where
+      # Lite's outline had been accepted.
+      PAINT_ORDER = %w[nb2 nb2 nb2-lite].freeze
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
       RETRY_FAILED_AFTER = 30.minutes
@@ -206,15 +212,25 @@ module Truebuild
         end
       end
 
-      def find!(source_url, source_bytes, key, correction: nil, tries: 0)
+      # A trial outline of a surface painted by another image model, kept
+      # apart from the real one ("siding@nb2"), so a lab trial can compare the
+      # two without changing what buyers' drawings are cut by.
+      def trial_mask(source_url, source_bytes, surface, painter)
+        key = category(surface) or return nil
+        label = "#{key}@#{painter}"
+        TruebuildSurfaceMask.find_by(source_url: source_url, surface: label, version: VERSION) ||
+          find!(source_url, source_bytes, key, painter: painter, record_as: label)
+      end
+
+      def find!(source_url, source_bytes, key, correction: nil, tries: 0, painter: nil, record_as: nil)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
         aspect = image.width.to_f / image.height
-        spec = MODELS.fetch(PAINTER)
         spent = 0.0
         attempts = []
         mask = verdict = result = nil
-        OUTLINE_ATTEMPTS.times do
+        (painter ? [painter] * OUTLINE_ATTEMPTS : PAINT_ORDER).each do |painter_key|
+          spec = MODELS.fetch(painter_key)
           result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' },
                                           paint_prompt(description, attempts.last&.dig('note') || correction), aspect: aspect)
           spent += Trueview.cost(spec, result[:usage])
@@ -231,13 +247,13 @@ module Truebuild
         # layer for that surface is better. An absent surface is no layer too.
         coverage = verdict['present'] && verdict['fit'].to_i >= MIN_FIT ? (mask.avg / 255.0).round(4) : 0
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
-                                   "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
-        TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
+                                   "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{(record_as || key).parameterize}-v#{VERSION}.png")
+        TruebuildSurfaceMask.create!(source_url: source_url, surface: record_as || key, version: VERSION, mask_url: url, coverage: coverage,
                                      model: result[:model], error: verdict['note'].presence,
                                      usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') },
                                               'digest' => (digest(key) unless correction), 'tries' => (tries if tries.positive?) }.compact)
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
-        TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
+        TruebuildSurfaceMask.create!(source_url: source_url, surface: record_as || key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
 
       # Surfaces that share pixels: an appliance package changes the

@@ -80,6 +80,7 @@ class PlatformSetting
         # environment without a Platform settings row calls itself.
         platformName: ENV['PLATFORM_NAME'] || 'DealerTide',
         supportEmail: ENV['SUPPORT_EMAIL'] || 'support@dealertide.com',
+        supportPhone: ENV['SUPPORT_PHONE'] || '303-586-4420',
         salesEmail: ENV['SALES_EMAIL'] || 'sales@dealertide.com',
         fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@dealertide.com',
         fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'DealerTide',

@@ -56,6 +56,7 @@ class Notification < ApplicationRecord
     account_assigned: { category: 'crm', priority: 'normal', title: 'Account Assigned to You' },
     contact_updated: { category: 'crm', priority: 'low', title: 'Contact Information Updated' },
     task_assigned: { category: 'crm', priority: 'high', title: 'Task Assigned to You' },
+    appointment_assigned: { category: 'crm', priority: 'high', title: 'Appointment Assigned to You' },
     task_due_soon: { category: 'crm', priority: 'high', title: 'Task Due Soon' },
     task_overdue: { category: 'crm', priority: 'urgent', title: 'Task Overdue' },
     activity_reminder: { category: 'crm', priority: 'normal', title: 'Activity Reminder' },
@@ -122,6 +123,7 @@ class Notification < ApplicationRecord
   PUSH_ELIGIBLE_TYPES = %w[
     lead_assigned
     task_assigned
+    appointment_assigned
     task_due_soon
     task_overdue
     activity_reminder

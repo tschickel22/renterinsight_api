@@ -8,6 +8,9 @@ class Contact < ApplicationRecord
   include Reportable
   include WorkflowRunCancellable
 
+  # 303-586-4420 (UsPhone). Also applies to where(phone: ...) lookups.
+  normalizes :phone, with: ->(value) { UsPhone.format(value) }
+
   def self.reportable_config
     {
       label: "Contacts",
@@ -214,7 +217,7 @@ class Contact < ApplicationRecord
   end
 
   def normalize_phone
-    self.phone = phone.to_s.strip if phone.present?
+    self.phone = UsPhone.format(phone) if phone.present?
   end
 
   # email_invalid describes ONE address, so it has to be released when that address is

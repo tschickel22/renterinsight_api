@@ -425,7 +425,10 @@ module Agreements
     def record_spots(pdf)
       return @pending = [] if buyers.empty? && Array(@pending).none? { |p| p[:field] }
 
-      who = { 'initials' => buyers.cycle, 'signature' => buyers.cycle }
+      # The contract's paired blanks ("x____ x____") are Buyer 1's then
+      # Buyer 2's; with no Buyer 2 the second stays blank.
+      slots = %w[buyer_1 buyer_2]
+      who = { 'initials' => slots.cycle, 'signature' => slots.cycle }
       last = buyers.first
       Array(@pending).each do |p|
         box = p[:spot].box
@@ -435,6 +438,8 @@ module Agreements
           next if buyers.empty?
 
           signer = p[:kind] == 'date' ? last : who[p[:kind]].next
+          next unless buyers.include?(signer)
+
           last = signer
           @spots << { page: pdf.page_number, signer: signer, kind: p[:kind], box: box } if signer
         else

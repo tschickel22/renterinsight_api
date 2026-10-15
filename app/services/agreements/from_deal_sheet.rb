@@ -36,10 +36,18 @@ module Agreements
       blocking << 'The buyer needs an email address to sign' if @deal.contact && @deal.contact.email.blank?
       blocking << 'Buyer 2 needs an email address to sign' if @deal.co_applicant_contact && @deal.co_applicant_contact.email.blank?
       blocking << 'Choose the manager who accepts the agreement' if manager_required? && manager.nil?
-      blocking << 'Set up the agreement package first' if templates.empty?
+      blocking << package_missing if templates.empty?
       open = DealSaleDetails.new(@deal).missing.map { |m| "Deal Sheet: #{m}" }
       open += Truebuild::AgreementSheets.new(@deal.home_build).open_items if @deal.home_build
       { blocking: blocking, open: open }
+    end
+
+    # A package is set up by the platform (Agreements::PackageInstaller), so
+    # the dealer is told whom to ask rather than where to click.
+    def package_missing
+      brand = Brand.current(company: @company)
+      contact = [brand.support_email, brand.support_phone].compact_blank.join(' or ')
+      "Your agreement package is not set up yet. Contact #{brand.name} to set it up#{": #{contact}" if contact.present?}."
     end
 
     def create!(template:, manager: nil)
