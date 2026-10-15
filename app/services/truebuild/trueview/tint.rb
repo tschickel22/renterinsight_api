@@ -30,6 +30,10 @@ module Truebuild
       # so their samples (photographs with some noise) are not measured.
       TEXTURE_ABOVE = { 'cabinets' => 0.8, 'accent wall' => 1.5 }.freeze
       SHAKE = /\bshakes?\b/i # cedar shake is a texture, not a lap siding color ("Shaker" cabinets are not)
+      # The surface's typical brightness is laid a little under the sample's: these
+      # photos are exposed bright, and at full strength the check held light colors
+      # back as too light (7 of 19 passed; 10 of 19 at 0.85 and at 0.72).
+      EXPOSURE = 0.85
       SHADE = (0.15..2.6) # how far the photo's light and shade may scale the color, so noise in a dark photo is not blown up
 
       def enabled? = ActiveModel::Type::Boolean.new.cast(Setting.get('platform', nil, SETTING, false))
@@ -82,7 +86,7 @@ module Truebuild
       # come from the photo: each pixel keeps its brightness relative to the
       # surface's typical brightness, so the color sits where the photo was
       # lit as the sample, darker in shadow and lighter in the sun.
-      def paint(source_bytes, mask_image, hex)
+      def paint(source_bytes, mask_image, hex, exposure: EXPOSURE)
         photo = Surfaces.rgb(Vips::Image.new_from_buffer(source_bytes, ''))
         mask = Layer.fit(mask_image.bands > 1 ? mask_image.extract_band(0) : mask_image, photo.width, photo.height) > 127
         linear = photo.colourspace(:scrgb)
@@ -91,7 +95,7 @@ module Truebuild
         typical = median(inside, mask)
         return nil unless typical&.positive?
 
-        shade = (light / typical).cast(:float)
+        shade = (light * exposure / typical).cast(:float)
         shade = (shade < SHADE.min).ifthenelse(SHADE.min, shade)
         shade = (shade > SHADE.max).ifthenelse(SHADE.max, shade)
         target = target_linear(hex)

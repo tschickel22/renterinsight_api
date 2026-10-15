@@ -391,7 +391,9 @@ class Api::Admin::TrueviewLabController < ApplicationController
     attrs = { catalog_plan_variant_id: variant.id, room: room, source_url: source_url, selection: selection,
               selection_key: selection_key, model_key: key, provider: spec[:provider], model: spec[:model], purpose: purpose,
               prompt: Truebuild::Trueview.prompt(room: room, selection: selection, swatches: swatches), lab_run: run,
-              usage: { 'swatch_ids' => swatches.compact.map(&:id) } }
+              usage: { 'swatch_ids' => swatches.compact.map(&:id),
+                       # tint_only: try laying the color only, never paying for a drawing (Truebuild::Trueview::Tint)
+                       'tint_only' => (true if purpose == 'layer' && ActiveModel::Type::Boolean.new.cast(params[:tint_only])) }.compact }
     cached = !ActiveModel::Type::Boolean.new.cast(params[:fresh]) &&
              # Same prompt too: when the instructions improve, old drawings are not reused.
              TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose,

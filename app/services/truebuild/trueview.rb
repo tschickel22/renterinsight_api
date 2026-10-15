@@ -113,6 +113,8 @@ module Truebuild
       return recut!(render, source, mask, check_with) if render.usage['recut_from'] && render.image_url.present?
       # A plain color is laid on the photo, not drawn; drawn only if that fails its check.
       return if (hex = Tint.color_for(render)) && Tint.apply!(render, ctx, hex)
+      # A lab trial of the tint alone: a tint that fails is not drawn instead.
+      return render.update!(status: 'failed', error: "Tint only: #{render.usage['tint_note'] || 'not a plain color with a sample'}") if render.usage['tint_only']
 
       aspect = source_aspect(source)
       spent = render.cost_usd.to_f # a tint that failed its check was paid for

@@ -93,6 +93,14 @@ RSpec.describe Truebuild::Trueview::Tint do
       expect(render.cost_usd.to_f).to be < 0.02
     end
 
+    it 'only tints in a lab trial of the tint alone, never paying for a drawing' do
+      render.update!(usage: render.usage.merge('tint_only' => true))
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: { 'score' => 2, 'note' => 'too light' }, input_tokens: 1000, output_tokens: 50 } }
+      expect(Truebuild::Trueview::Providers::Gemini).not_to receive(:edit)
+      Truebuild::Trueview.perform!(render)
+      expect(render.reload).to have_attributes(status: 'failed', error: 'Tint only: too light')
+    end
+
     context 'when the tint fails its check' do
       let(:score) { 2 }
 
