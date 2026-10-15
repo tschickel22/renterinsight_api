@@ -6,7 +6,10 @@
 # drawn by batch needs nobody to watch it.
 class TruebuildFactoryRunTickJob < ApplicationJob
   queue_as :low
-  limits_concurrency to: 1, key: 'truebuild-factory-run-tick', duration: 30.minutes
+  # Preparing a batch of 120 drawings with their outlines can outlast half
+  # an hour; at 30 minutes the next tick started beside it and both sent
+  # Decatur's drawings (Batch.submit! now claims each drawing as well).
+  limits_concurrency to: 1, key: 'truebuild-factory-run-tick', duration: 2.hours
 
   def perform
     TruebuildFactoryRun.due.find_each { |run| Truebuild::Trueview::FactoryRun.begin!(run) }

@@ -33,7 +33,8 @@ module Truebuild
         rows = run.renders.where(status: 'running').where("usage->>'batch' = 'true'").where(updated_at: ...STUCK_AFTER.ago)
         unsent = rows.where.not("usage ? 'batch_name'").where.not("usage ? 'batch_drawn'")
         unchecked = rows.where("usage ? 'batch_drawn'").to_a
-        count = unsent.update_all(status: 'queued', updated_at: Time.current)
+        # The claim goes with it, so a send still preparing it leaves it out.
+        count = unsent.update_all([ "status = 'queued', updated_at = ?, usage = usage - 'batch_claim'", Time.current ])
         unchecked.each do |r|
           r.touch
           TruebuildBatchDrawingJob.set(queue: :low).perform_later(r.id)
@@ -42,13 +43,21 @@ module Truebuild
       end
 
       # Sends what is waiting. Returns the number sent.
+      #
+      # Each drawing is claimed for this send alone, and only those still
+      # claimed by it are sent. Preparing 120 drawings with their outlines
+      # can take over half an hour; two sends then took the same drawings,
+      # or recover! put back ones still being prepared, and production's
+      # first Decatur run sent 324 drawings for 120 (each one paid for).
       def submit!(run)
         rows = waiting(run).order(:id).limit(SIZE).to_a
         return 0 if rows.empty?
 
+        claim = SecureRandom.hex(8)
         by_model = Hash.new { |h, k| h[k] = [] }
         rows.each do |render|
-          render.update!(status: 'running', error: nil)
+          next unless claim!(render, claim)
+
           ctx = Trueview.prepare(render) or next # not in the photo, or no outline yet: settled
           if render.usage['recut_from'] && render.image_url.present?
             # Already drawn under an older cut: cut again now, no image model.
@@ -58,7 +67,7 @@ module Truebuild
           spec_key = next_model(render)
           req = Providers::Gemini.request(MODELS.fetch(spec_key), ctx[:source], asked(render, ctx[:prompt], spec_key),
                                           samples: ctx[:samples], aspect: Trueview.source_aspect(ctx[:source]))
-          render.update_columns(usage: render.usage.merge('batch_model' => spec_key, 'batch_box' => req[:box]))
+          render.update_columns(usage: render.usage.merge('batch_model' => spec_key, 'batch_box' => req[:box]), updated_at: Time.current)
           by_model[req[:model]] << ["r#{render.id}", req[:body], render]
         rescue StandardError => e
           render.update!(status: 'failed', error: "Not sent: #{e.message.to_s.first(500)}")
@@ -66,6 +75,11 @@ module Truebuild
 
         sent = 0
         by_model.each do |model, lines|
+          held = TruebuildRender.where(id: lines.map { |_, _, r| r.id }, status: 'running').where("usage->>'batch_claim' = ?", claim)
+                                .where.not("usage ? 'batch_name'").pluck(:id).to_set
+          lines = lines.select { |_, _, r| held.include?(r.id) }
+          next if lines.empty?
+
           name = GeminiBatch.submit(model, lines.map { |key, body, _| [key, body] }, display_name: "truebuild-run-#{run.id}-#{Time.now.to_i}")
           lines.each { |_, _, r| r.update_columns(usage: r.usage.merge('batch_name' => name), updated_at: Time.current) }
           run.reload # other jobs write progress (models queued, repairs)
@@ -77,6 +91,17 @@ module Truebuild
           lines.each { |_, _, r| unsent(r, e.message) }
         end
         sent
+      end
+
+      # Takes a waiting drawing for one send, if no other send took it first.
+      def claim!(render, claim)
+        taken = TruebuildRender.where(id: render.id, status: 'queued')
+                               .update_all([ "status = 'running', error = NULL, updated_at = ?, usage = usage || jsonb_build_object('batch_claim', ?::text)",
+                                             Time.current, claim ])
+        return false unless taken == 1
+
+        render.reload
+        true
       end
 
       # Collects every finished batch of the run. Returns the drawings collected.

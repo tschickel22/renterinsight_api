@@ -161,4 +161,24 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect(run.renders.pluck(:status).uniq).to eq(['failed'])
     expect(run.renders.first.error).to eq('Batch: quota')
   end
+
+  it 'sends a drawing once, even when another send or a recovery takes it while this one prepares the rest' do
+    run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+    TruebuildFactoryRunJob.perform_now(run.id)
+    first, second = run.renders.order(:id).to_a
+    expect(described_class.claim!(first.reload, 'theirs')).to be(true)
+    expect(described_class.claim!(first.reload, 'mine')).to be(false) # already taken
+    first.update_columns(status: 'queued')
+
+    # While the second is prepared, the first is put back and taken by another send.
+    allow(Truebuild::Trueview::Providers::Gemini).to receive(:request).and_wrap_original do |m, *a, **k|
+      TruebuildRender.where(id: first.id).update_all("usage = usage || '{\"batch_claim\": \"theirs\"}'::jsonb") if first.reload.usage['batch_model']
+      m.call(*a, **k)
+    end
+    sent = nil
+    allow(Truebuild::Trueview::GeminiBatch).to receive(:submit) { |_m, lines, **| sent = lines.map(&:first); 'batches/abc' }
+    expect(described_class.submit!(run)).to eq(1)
+    expect(sent).to eq(["r#{second.id}"])
+    expect(first.reload.usage).not_to have_key('batch_name')
+  end
 end
