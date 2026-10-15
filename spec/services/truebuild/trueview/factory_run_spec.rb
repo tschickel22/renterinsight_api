@@ -242,4 +242,34 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     Truebuild::Trueview::PhotoChoice.pick!(decatur_home)
     expect(decatur_home.reload.media.dig('trueview_auto', 'exterior')).to eq(second)
   end
+
+  describe 'rates' do
+    def layer(cost, version:, batch: false)
+      TruebuildRender.create!(source_url: front, selection: [], selection_key: SecureRandom.hex(3), model_key: 'nb2-lite', provider: 'gemini',
+                              model: 'lite', purpose: 'layer', status: 'done', prompt: 'x', cost_usd: cost,
+                              usage: { 'mask_version' => version, 'batch' => (true if batch) }.compact)
+    end
+
+    it 'measures only drawings of the current pipeline, so old cheap ones do not make immediate look cheaper than batch' do
+      v = Truebuild::Trueview::Layer::VERSION
+      50.times { layer(0.03, version: v - 6) }
+      50.times { layer(0.09, version: v) }
+      50.times { layer(0.057, version: v - 1, batch: true) }
+      expect(described_class.rates[:layer]).to eq(0.09)
+      expect(described_class.rates(batch: true)[:layer]).to eq(0.057)
+    end
+
+    it 'derives an unmeasured mode from the measured one' do
+      50.times { layer(0.057, version: Truebuild::Trueview::Layer::VERSION, batch: true) }
+      expect(described_class.rates[:layer]).to be > 0.057
+    end
+  end
+
+  it "does not count a drawing copied from another environment that names a run with the same id" do
+    run = described_class.start!([topeka_home], budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    TruebuildRender.create!(source_url: front, selection: [], selection_key: 'x', model_key: 'nb2-lite', provider: 'gemini', model: 'lite',
+                            purpose: 'layer', status: 'rejected', cost_usd: 3, usage: { 'factory_run_id' => run.id, 'copied_from' => 99 })
+    expect(run.renders).to be_empty
+    expect(run.spent_usd).to eq(0)
+  end
 end

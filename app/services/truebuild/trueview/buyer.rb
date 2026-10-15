@@ -64,8 +64,11 @@ module Truebuild
       #   failed        its drawing failed its check on a photo
       #   not_pictured  no photo of its room shows the surface (shutter
       #                 colors for a home photographed without shutters)
+      #   undrawable    a cabinet upgrade with no one color to draw ("Mixed
+      #                 Cabinets IPO HW"), on a model whose photos show the
+      #                 cabinets: picking it changed nothing in the picture
       def self.held_back(company, variant)
-        Rails.cache.fetch("truebuild:trueview:held:v2:#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
+        Rails.cache.fetch("truebuild:trueview:held:v3:#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
           new(company, variant).held_back
         end
       end
@@ -78,7 +81,16 @@ module Truebuild
         { failed: ids.call(plan.select { |p| failed.include?([p[:photo], p[:key], p[:prompt]]) }),
           not_pictured: ids.call(plan.group_by { |p| p[:option_id] }
                                      .select { |_, ps| ps.all? { |p| skipped.include?([p[:photo], p[:key], p[:prompt]]) } }
-                                     .values.flatten) }
+                                     .values.flatten),
+          undrawable: undrawable(plan) }
+      end
+
+      def undrawable(plan)
+        return Set.new unless plan.any? { |p| Surfaces.category(p[:selection].first&.dig('surface')) == 'cabinets' }
+
+        BuyerCatalog.finish_groups(@variant).flat_map { |g| g[:options] }
+                    .select { |o| o[:family] == 'cabinet finish' && cabinet_color(o[:name]).nil? }
+                    .to_set { |o| o[:id] }
       end
 
       # Queues every missing layer, once per PREDRAW_EVERY, within the daily

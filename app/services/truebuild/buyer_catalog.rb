@@ -80,18 +80,23 @@ module Truebuild
     # A finish whose TrueView drawing failed its check is not offered: a
     # buyer shown Destin White in the wrong color, or a note that it cannot
     # be shown, has been shown something wrong. A rep still quotes it. A set
-    # is never emptied this way; the buyer still needs a color to pick.
+    # is never emptied this way; the buyer still needs a color to pick. When
+    # every color in it failed, only the standard one is left: Aspire 082's
+    # kitchen held back both cabinet colors, and offering both let a buyer
+    # click between colors that changed nothing.
     # A color no photo shows is not offered at all: shutter colors for a
     # home photographed without shutters, and then not "None" alone either.
     # Paid upgrades stay; a kitchen photo without the fridge does not mean
-    # the fridge upgrade is not real.
+    # the fridge upgrade is not real. A cabinet upgrade TrueView cannot draw
+    # (two-tone "Mixed" cabinets) does not; a rep still quotes it.
     UNSEEN_MEANS_ABSENT = %w[shutters].freeze
 
     def without_failed_drawings(groups)
       held = Trueview::Buyer.held_back(@company, @variant)
       failed = held[:failed]
       gone = held[:not_pictured]
-      return groups if failed.empty? && gone.empty?
+      off = failed | held[:undrawable].to_a
+      return groups if off.empty? && gone.empty?
 
       groups.map do |g|
         sets = g[:color_sets].filter_map do |st|
@@ -105,9 +110,9 @@ module Truebuild
           next nil if shown.size < st[:options].size && shown.all? { |o| o[:name].to_s.match?(Trueview::Buyer::NOTHING) }
 
           kept = shown.reject { |o| failed.include?(o[:id]) }
-          st.merge(options: kept.empty? ? shown : kept)
+          st.merge(options: kept.empty? ? [shown.find { |o| o[:standard] } || shown.first].compact : kept)
         end
-        g.merge(color_sets: sets, options: g[:options].reject { |o| failed.include?(o[:id]) })
+        g.merge(color_sets: sets, options: g[:options].reject { |o| off.include?(o[:id]) })
       end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
     end
 

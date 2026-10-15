@@ -29,6 +29,7 @@ module Truebuild
     PAGE = 100
     RENDER_STATUSES = %w[done skipped rejected].freeze
     PHOTO_KEYS = %w[trueview_photos trueview_auto hidden_photos].freeze
+    FOREIGN_USAGE = %w[factory_run_id batch_name job_id].freeze # ids of the sending side's runs, batches and jobs
 
     # => { rows: [...], next_after: id or nil }
     def export(kind, after_id: 0, limit: PAGE)
@@ -138,8 +139,10 @@ module Truebuild
       attrs = row.slice('room', 'source_url', 'selection', 'selection_key', 'model_key', 'provider', 'model', 'status', 'cost_usd',
                         'latency_ms', 'prompt', 'error', 'purpose', 'mask_coverage')
       # Sample ids name the sending side's rows; the prompt already says
-      # which sample each drawing used.
-      usage = row['usage'].to_h.except('swatch_ids').merge('copied_from' => row['id'])
+      # which sample each drawing used. Run and batch ids do too: production's
+      # first two factory runs counted staging's runs 1 and 2 as their own
+      # (89 drawings and $7 they never made, and held-back ones to repair).
+      usage = row['usage'].to_h.except('swatch_ids', *FOREIGN_USAGE).merge('copied_from' => row['id'])
       TruebuildRender.create!(attrs.merge('catalog_plan_variant_id' => variant&.id, 'usage' => usage,
                                           'image_url' => rehost(row['image_url']), 'layer_url' => rehost(row['layer_url'])))
       :created

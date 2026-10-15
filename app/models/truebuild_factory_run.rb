@@ -25,8 +25,11 @@ class TruebuildFactoryRun < ApplicationRecord
 
   scope :due, -> { where(status: 'scheduled').where(scheduled_at: ..Time.current) }
 
+  # Not drawings copied from another environment (DrawingTransfer): those
+  # copied before it dropped their run ids name the other side's runs, and
+  # production's runs 1 and 2 counted staging's as their own.
   def renders
-    TruebuildRender.where(purpose: 'layer').where("usage->>'factory_run_id' = ?", id.to_s)
+    TruebuildRender.where(purpose: 'layer').where("usage->>'factory_run_id' = ?", id.to_s).where.not("usage ? 'copied_from'")
   end
 
   def batch? = mode == 'batch'

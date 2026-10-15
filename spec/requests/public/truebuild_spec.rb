@@ -556,6 +556,33 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(sets['Shutters']).to eq(['Black'])
     end
 
+    it 'offers only the standard color when every color in a set failed, not colors that change nothing' do
+      draw!
+      TruebuildRender.where("selection->0->>'surface' = 'Siding'")
+                     .update_all(status: 'rejected', layer_url: 'https://b/x.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
+      siding = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.find { |st| st['name'] == 'Siding' }
+      expect(siding['options'].size).to eq(1)
+      expect(siding['options'].first['standard']).to be(true)
+    end
+
+    it 'does not offer a cabinet upgrade TrueView cannot draw on a model whose photos show the cabinets' do
+      cabinets = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 8)
+      option(cabinets, 'Destin White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
+      option(cabinets, 'HW DestinWhite IPO Wrapped', dealer_cost: 900)
+      option(cabinets, 'Mixed Cabinets IPO HW - O/U (Pkg #3)', dealer_cost: 900)
+      names = lambda do
+        Rails.cache.clear
+        get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
+        JSON.parse(response.body)['groups'].flat_map { |g| g['options'] }.map { |o| o['name'] }
+      end
+      expect(names.call).to include('Mixed Cabinets IPO HW - O/U (Pkg #3)') # no kitchen photo: nothing pictured to change
+
+      variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
+      expect(names.call).to include('HW DestinWhite IPO Wrapped')
+      expect(names.call).not_to include('Mixed Cabinets IPO HW - O/U (Pkg #3)')
+    end
+
     it 'does not offer colors for a surface no photo shows, such as shutters on a home without them' do
       draw!
       TruebuildRender.find_by("selection->0->>'surface' = 'Shutters'")
