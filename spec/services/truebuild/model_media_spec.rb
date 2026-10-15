@@ -104,4 +104,15 @@ RSpec.describe Truebuild::ModelMedia do
     expect(media).to include(kept)
     expect(media['photos'].map { |p| p['url'] }).not_to include('https://x/stale')
   end
+
+  it "files every way Champion names a floor plan render as a floor plan, never a photo" do
+    base = 'https://s7d9.scene7.com/is/image/championhomes/'
+    %w[Main_0002_3272H32186- Main-_0000s_0012_2440H32382 Aspire_0023_2852H32172-Main Aspire_0036_2844H32169--Main
+       Aspire-1444H11023-main-image 1456H22P01-Main-Image 112-aspire-2864h32101-Main 043-prime-hickman-043-main-imgae].each do |name|
+      expect(described_class.floor_plan_url?(base + name)).to be(true), name
+    end
+    %w[112-aspire-1656H22208-VS-Living-Room-main Aspire-3272H32186-Kitchen-1 Aspire-2856H32392-Exterior-Remains].each do |name|
+      expect(described_class.floor_plan_url?(base + name)).to be(false), name
+    end
+  end
 end
