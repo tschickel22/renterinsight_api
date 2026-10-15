@@ -198,6 +198,7 @@ module Api
           reminderSent: activity.reminder_sent,
           remindCustomer: activity.remind_customer,
           sendCalendarInvite: activity.send_calendar_invite,
+          inviteResponses: activity.try(:invite_responses) || [],
           createdAt: activity.created_at&.iso8601,
           updatedAt: activity.updated_at&.iso8601
         }

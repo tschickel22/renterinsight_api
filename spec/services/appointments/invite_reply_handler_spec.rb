@@ -50,6 +50,20 @@ RSpec.describe Appointments::InviteReplyHandler do
       .with(hash_including(entity: lead, outbound_communication: having_attributes(from_address: rep.email)))
   end
 
+  it 'lists the answers for the appointment card, newest first, marking the rep' do
+    described_class.process(token: token, parsed_email: parsed(from: rep.email, calendar: calendar_reply(rep.email, 'ACCEPTED')))
+    travel 1.minute do
+      described_class.process(token: token, parsed_email: parsed(
+        from: 'pat@example.com', calendar: calendar_reply('pat@example.com', 'DECLINED', comment: 'Out of town')
+      ))
+    end
+
+    responses = appointment.reload.invite_responses
+    expect(responses.map { |r| [r[:email], r[:status], r[:rep]] })
+      .to eq([['pat@example.com', 'declined', false], [rep.email.downcase, 'accepted', true]])
+    expect(responses.first[:comment]).to eq('Out of town')
+  end
+
   it 'logs a plain reply to the invite email and relays it to the rep' do
     result = described_class.process(token: token, parsed_email: parsed(
       from: 'pat@example.com', subject: 'Re: Appointment: Walk the Bay Port', body: 'Can we make it 4 instead?'

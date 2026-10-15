@@ -14,6 +14,20 @@ module SendsAppointmentInvites
     before_destroy :cancel_invite_before_destroy
   end
 
+  # Answers to the calendar invite, newest first:
+  # [{ email:, status: 'accepted'|'declined'|'tentative', at:, comment:, rep: }]
+  # `rep` marks the assigned rep's own answer to their copy.
+  def invite_responses
+    responses = customer_notices.to_h['responses'].to_h
+    return [] if responses.empty?
+
+    rep = Appointments::CalendarInvite.new(self).assignee
+    rep_emails = rep ? [rep.email, Appointments::RepMailbox.connection_for(rep)&.email_address].compact.map(&:downcase) : []
+    responses.map do |email, r|
+      { email: email, status: r['status'], at: r['at'], comment: r['comment'], rep: rep_emails.include?(email.to_s.downcase) }
+    end.sort_by { |r| r[:at].to_s }.reverse
+  end
+
   private
 
   def appointment_invitable?

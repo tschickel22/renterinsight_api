@@ -289,6 +289,7 @@ module Api
           meetingLocation: activity.meeting_location,
           remindCustomer: activity.try(:remind_customer),
           sendCalendarInvite: activity.try(:send_calendar_invite),
+          inviteResponses: activity.try(:invite_responses) || [],
           meetingLink: activity.meeting_link,
           meetingAttendees: activity.meeting_attendees,
           reminderMethod: activity.reminder_method,
