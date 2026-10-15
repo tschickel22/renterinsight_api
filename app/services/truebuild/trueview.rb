@@ -111,9 +111,11 @@ module Truebuild
       # A layer cut by an older Layer::VERSION is cut again from its saved
       # drawing: no call to the image model, no charge.
       return recut!(render, source, mask, check_with) if render.usage['recut_from'] && render.image_url.present?
+      # A plain color is laid on the photo, not drawn; drawn only if that fails its check.
+      return if (hex = Tint.color_for(render)) && Tint.apply!(render, ctx, hex)
 
       aspect = source_aspect(source)
-      spent = 0.0
+      spent = render.cost_usd.to_f # a tint that failed its check was paid for
       result = layer = verdict = nil
       tries = draw_order(render, spec)
       notes = []

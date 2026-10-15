@@ -64,6 +64,8 @@ module Truebuild
             Trueview.recut!(render, ctx[:source], ctx[:mask], ctx[:check_with])
             next
           end
+          # A plain color is laid on the photo now, not sent; sent only if that fails its check.
+          next if (hex = Tint.color_for(render)) && Tint.apply!(render, ctx, hex)
           spec_key = next_model(render)
           req = Providers::Gemini.request(MODELS.fetch(spec_key), ctx[:source], asked(render, ctx[:prompt], spec_key),
                                           samples: ctx[:samples], aspect: Trueview.source_aspect(ctx[:source]))
