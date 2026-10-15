@@ -27,7 +27,13 @@ module Truebuild
                         # did not change is carried over, free), 13 cabinets up to the ceiling, spill sized,
                         # thin surfaces kept, 14 the crown molding on top of cabinets is the cabinets'
       MIN_FIT = 4       # Claude's 1 to 5: 4 allows a little overspill, never the wrong thing
-      PAINTER = 'nb2-lite'
+      # Who paints an outline, try by try: the larger model twice, then Lite.
+      # On 16 trial tints on staging (2026-10-15) the larger model's outlines
+      # passed 9 against Lite's 7, covering shutters with no spill onto the
+      # siding, at about $0.135 a try against $0.075; Lite is kept last because
+      # on Bay Port's front the larger model was turned down three times where
+      # Lite's outline had been accepted.
+      PAINT_ORDER = %w[nb2 nb2 nb2-lite].freeze
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
       RETRY_FAILED_AFTER = 30.minutes
@@ -216,15 +222,15 @@ module Truebuild
           find!(source_url, source_bytes, key, painter: painter, record_as: label)
       end
 
-      def find!(source_url, source_bytes, key, correction: nil, tries: 0, painter: PAINTER, record_as: nil)
+      def find!(source_url, source_bytes, key, correction: nil, tries: 0, painter: nil, record_as: nil)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
         aspect = image.width.to_f / image.height
-        spec = MODELS.fetch(painter)
         spent = 0.0
         attempts = []
         mask = verdict = result = nil
-        OUTLINE_ATTEMPTS.times do
+        (painter ? [painter] * OUTLINE_ATTEMPTS : PAINT_ORDER).each do |painter_key|
+          spec = MODELS.fetch(painter_key)
           result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' },
                                           paint_prompt(description, attempts.last&.dig('note') || correction), aspect: aspect)
           spent += Trueview.cost(spec, result[:usage])
