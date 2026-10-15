@@ -69,4 +69,26 @@ RSpec.describe Catalog::PriceBooks::OptionReview do
     expect(sent).to include('WRONG: family refrigerator for "Ice Maker Kit" (An ice maker goes with any fridge.)')
     expect(sent).not_to include("#{other.id} | ")
   end
+  it 'keeps a same finish decision without asking when both options have the same name' do
+    floors = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'counter', name: 'Countertops', position: 8)
+    a = option(floors, 'Lisola')
+    b = CatalogOption.create!(group: floors, manufacturer: mfr, key: 'counter--lisola-2', name: 'LISOLA ', kind: 'upgrade').tap do |o|
+      CatalogOptionPrice.create!(price_book: book, option: o, dealer_cost: 100)
+    end
+    inhale = option(floors, '1 Row Ceramic Inhale Gris')
+    gris = option(floors, '1 Row Inhale Gris (ceramic)')
+    allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(
+      input: { 'same_finish' => [{ 'ids' => [a.id, b.id], 'show' => 'Lisola', 'reason' => 'listed twice' },
+                                 { 'ids' => [inhale.id, gris.id], 'show' => '1 Row Inhale Gris', 'reason' => 'two spellings' }] },
+      input_tokens: 0, output_tokens: 0
+    )
+    described_class.new(book).call
+
+    same = CatalogOptionDecision.where(option_key: [a.key, b.key])
+    expect(same.pluck(:source, :status).uniq).to eq([%w[code active]])
+    expect(same.pluck(:reviewed_at)).to all(be_present)
+    spelled = CatalogOptionDecision.where(option_key: [inhale.key, gris.key])
+    expect(spelled.pluck(:source).uniq).to eq(['claude'])
+    expect(spelled.pluck(:reviewed_at).uniq).to eq([nil]) # two spellings still asked
+  end
 end

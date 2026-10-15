@@ -23,6 +23,14 @@ module Catalog
       EXAMPLES = 40
       BUYER_GROUPS = /kitchen|appliance|floor|backsplash|tile|cabinet|counter|exterior|roof|fireplace|interior|bath|package/i
 
+      # The same name, ignoring case, spaces and punctuation ("Quartz Frost"
+      # in two price lines). Such a same_finish decision is kept without
+      # asking: Topeka's book asked an admin 33 times whether "Lisola" and
+      # "Lisola" were the same color.
+      def self.same_name?(names)
+        names.map { |n| n.to_s.downcase.gsub(/[^a-z0-9]/, '') }.uniq.size == 1
+      end
+
       TOOL = {
         name: 'record_option_decisions',
         description: 'Record what the option names imply for a buyer choosing finishes and upgrades for one home.',
@@ -130,8 +138,10 @@ module Catalog
 
       # The manufacturer's reviewed decisions, newest first: what was kept and
       # what was turned down, so the same mistake is not suggested twice.
+      # Ones settled in code (a name listed twice) teach nothing.
       def examples
-        rows = CatalogOptionDecision.where(manufacturer_id: @mfr).where.not(reviewed_at: nil).order(reviewed_at: :desc).limit(EXAMPLES).to_a
+        rows = CatalogOptionDecision.where(manufacturer_id: @mfr).where.not(reviewed_at: nil).where.not(source: 'code')
+                                    .order(reviewed_at: :desc).limit(EXAMPLES).to_a
         return '' if rows.empty?
 
         names = CatalogOption.where(manufacturer_id: @mfr, key: rows.map(&:option_key)).pluck(:key, :name).to_h
@@ -149,9 +159,12 @@ module Catalog
           options = ids.filter_map { |id| by_id[id.to_i] }
           next if options.size < (%w[family same_finish].include?(kind) ? 2 : 1)
 
+          # One finish under one name, listed twice: nothing for a person to decide.
+          settled = kind == 'same_finish' && self.class.same_name?(options.map(&:name))
           options.each do |o|
-            CatalogOptionDecision.create!(manufacturer_id: @mfr, option_key: o.key, kind: kind, value: value, source: 'claude',
-                                          suggestion: suggestion, note: reason.to_s.first(500), catalog_price_book_id: @book.id)
+            CatalogOptionDecision.create!(manufacturer_id: @mfr, option_key: o.key, kind: kind, value: value, source: settled ? 'code' : 'claude',
+                                          suggestion: suggestion, note: reason.to_s.first(500), catalog_price_book_id: @book.id,
+                                          reviewed_at: (Time.current if settled))
             made += 1
           rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
             next
