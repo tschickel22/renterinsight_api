@@ -182,6 +182,71 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect(first.reload.usage).not_to have_key('batch_name')
   end
 
+  describe 'when Claude runs out of credits' do
+    let(:out) { Catalog::PriceBooks::ClaudeClient::OutOfCredits.new('You have reached your specified API usage limits.') }
+
+    around do |ex|
+      old = Rails.cache
+      Rails.cache = ActiveSupport::Cache::MemoryStore.new
+      ex.run
+    ensure
+      Rails.cache = old
+    end
+
+    it 'leaves a returned drawing waiting instead of showing it unchecked, and pauses the run' do
+      run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+      TruebuildFactoryRunJob.perform_now(run.id)
+      render = run.renders.first
+      render.update!(status: 'running', usage: render.usage.merge('batch_model' => 'nb2-lite', 'batch_drawn' => 'https://b/drawn'))
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_raise(out)
+
+      TruebuildBatchDrawingJob.perform_now(render.id)
+      expect(render.reload).to have_attributes(status: 'running', layer_url: nil)
+      expect(render.usage['batch_drawn']).to eq('https://b/drawn') # Batch.recover! checks it later
+      expect(Truebuild::Trueview::Credits.out?).to be(true)
+      expect(Notification.where(recipient: admin, notification_type: 'system_alert').sole.title).to include('Claude credits ran out')
+      expect(Truebuild::Trueview::GeminiBatch).not_to receive(:submit)
+      expect(described_class.submit!(run)).to eq(0)
+    end
+
+    it 'puts a drawing whose preparation was refused back in line, and prepares no more' do
+      run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+      TruebuildFactoryRunJob.perform_now(run.id)
+      allow(Truebuild::Trueview).to receive(:prepare).and_raise(out)
+      expect(described_class.submit!(run)).to eq(0)
+      expect(Truebuild::Trueview).to have_received(:prepare).once
+      expect(run.renders.pluck(:status).uniq).to eq(['queued'])
+      expect(run.renders.map { |r| r.usage.key?('batch_claim') }.uniq).to eq([false])
+    end
+
+    it 'once credits are back, puts failed drawings back in line and checks drawings shown unchecked' do
+      run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+      TruebuildFactoryRunJob.perform_now(run.id)
+      failed, unchecked = run.renders.order(:id).to_a
+      failed.update_columns(status: 'failed', error: 'Not sent: The AI service refused the request (400): You have reached your specified API usage limits.',
+                            usage: failed.usage.merge('batch_claim' => 'x'))
+      unchecked.update_columns(status: 'done', image_url: 'https://b/drawn-old', layer_url: 'https://b/layer-old',
+                               usage: unchecked.usage.merge('check' => { 'score' => nil, 'note' => 'Not checked: usage limits', 'ok' => true }))
+      mask = TruebuildSurfaceMask.create!(source_url: front, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION,
+                                          status: 'failed', error: 'The AI service refused the request (400): You have reached your specified API usage limits.')
+
+      Rails.cache.write(Truebuild::Trueview::Credits::FLAG, true)
+      expect(described_class.after_credits!(run)).to eq(0) # still out
+
+      Rails.cache.delete(Truebuild::Trueview::Credits::FLAG)
+      expect { expect(described_class.after_credits!(run)).to eq(2) }.to have_enqueued_job(TruebuildBatchDrawingJob).with(unchecked.id)
+      expect(failed.reload).to have_attributes(status: 'queued', error: nil)
+      expect(failed.usage).not_to have_key('batch_claim')
+      expect(unchecked.reload.status).to eq('running') # off buyers' screens until checked
+      expect(mask.reload.updated_at).to be < Truebuild::Trueview::Surfaces::RETRY_FAILED_AFTER.ago
+
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(input: { 'score' => 2, 'note' => 'Patchy.' }, input_tokens: 0, output_tokens: 0)
+      TruebuildBatchDrawingJob.perform_now(unchecked.id)
+      expect(unchecked.reload).to have_attributes(status: 'queued') # drawn again with the note
+      expect(unchecked.usage['notes']).to eq(['Patchy.'])
+    end
+  end
+
   it 'lays plain colors with a factory sample on the photo instead of sending them to Google' do
     Setting.set('platform', nil, Truebuild::Trueview::Tint::SETTING, true)
     CatalogSwatch.create!(manufacturer: mfr, set_name: 'Standard Vinyl Siding', name: 'Clay', hex: '#8c887d', image_url: 'https://b/clay.jpg')

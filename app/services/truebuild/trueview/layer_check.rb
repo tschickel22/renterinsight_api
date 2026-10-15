@@ -66,6 +66,10 @@ module Truebuild
                                   'note' => second['acceptable'] == false ? second['defect'] : verdict['note'])
         end
         reconsider(verdict, photo, composite, surface: surface, value: value, sample: sample, hex: hex)
+      rescue Catalog::PriceBooks::ClaudeClient::OutOfCredits => e
+        # Out of credits is not a blip: every check would pass unchecked.
+        # Raised, so the drawing waits for credits (Credits).
+        Credits.claude_out!(e)
       rescue Catalog::PriceBooks::ClaudeClient::Error => e
         # The check could not run: show the layer rather than hide good work,
         # and say so in review.
@@ -131,6 +135,8 @@ module Truebuild
         verdict.merge('ok' => passed, 'reconsidered' => { 'acceptable' => passed, 'other_defect' => other.first(300) },
                       'note' => passed ? verdict['note'] : (other.match?(/\Anone\b/i) ? verdict['note'] : other.first(300)),
                       'cost_usd' => (verdict['cost_usd'].to_f + cost).round(4))
+      rescue Catalog::PriceBooks::ClaudeClient::OutOfCredits => e
+        Credits.claude_out!(e)
       rescue Catalog::PriceBooks::ClaudeClient::Error
         verdict
       end
@@ -172,6 +178,8 @@ module Truebuild
         input.slice('old_finish_left', 'spilled_onto', 'added_or_changed', 'color_matches_sample', 'acceptable')
              .merge('defect' => defect&.first(300),
                     'cost_usd' => Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens]).round(4))
+      rescue Catalog::PriceBooks::ClaudeClient::OutOfCredits => e
+        Credits.claude_out!(e)
       rescue Catalog::PriceBooks::ClaudeClient::Error => e
         { 'acceptable' => nil, 'defect' => "Second look not run: #{e.message.first(120)}", 'cost_usd' => 0 }
       end

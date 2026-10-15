@@ -6,6 +6,10 @@ module Catalog
     # schema, never free text, so every value lands in a known field.
     class ClaudeClient
       class Error < StandardError; end
+      # The account's credits or its spend limit ran out: every call fails
+      # until someone adds more, so callers that run unattended stop.
+      class OutOfCredits < Error; end
+      OUT_OF_CREDITS = /credit balance|usage limits/i
 
       API_URL = 'https://api.anthropic.com/v1/messages'
       # Dollars per million tokens for the extraction model (Sonnet 4.6).
@@ -43,7 +47,10 @@ module Catalog
                      input_tokens: json.dig('usage', 'input_tokens').to_i,
                      output_tokens: json.dig('usage', 'output_tokens').to_i }
           end
-          raise Error, readable_error(code, response.body) unless RETRYABLE.include?(code)
+          unless RETRYABLE.include?(code)
+            message = readable_error(code, response.body)
+            raise(response.body.to_s.match?(OUT_OF_CREDITS) ? OutOfCredits : Error, message)
+          end
 
           sleep(backoff(attempt))
         end
