@@ -107,9 +107,15 @@ module Truebuild
       def apply!(render, ctx, hex)
         return false unless ctx[:mask]&.present?
 
-        tinted = paint(ctx[:source][:bytes], Trueview.mask_image(ctx[:mask]), hex) or return false
-        layer = Layer.build(ctx[:source][:bytes], tinted[:bytes], mask: Trueview.mask_image(ctx[:mask]),
-                                                                  blocked: Trueview.blocked_image(ctx[:mask], ctx[:source][:bytes]))
+        bytes = ctx[:source][:bytes]
+        mask = Trueview.mask_image(ctx[:mask])
+        blocked = Trueview.blocked_image(ctx[:mask], bytes)
+        if ctx[:mask].surface == 'siding'
+          accent = accent_area(render.source_url, bytes) or return false
+          mask, blocked = without(accent, mask, blocked, bytes) if accent.is_a?(Vips::Image)
+        end
+        tinted = paint(bytes, mask, hex) or return false
+        layer = Layer.build(bytes, tinted[:bytes], mask: mask, blocked: blocked)
         verdict = LayerCheck.judge(ctx[:source][:bytes], layer[:bytes], surface: render.selection.first['surface'],
                                                                          value: render.selection.first['value'], **ctx[:check_with])
         spent = render.cost_usd.to_f + verdict['cost_usd'].to_f
@@ -124,6 +130,29 @@ module Truebuild
                        usage: render.usage.merge('tinted' => true, 'tint_hex' => hex, 'mask_version' => Layer::VERSION,
                                                  'check' => verdict.except('cost_usd'), 'outlined' => true))
         true
+      end
+
+      # The siding outline takes in every wall cladding, so a gable of brown
+      # shakes over lap siding (Bay Port's front) was tinted with the siding,
+      # where the image model rightly left it. The accent is outlined once
+      # per photo and left as it was. => its mask, :none when the photo has
+      # none, nil when that could not be settled (the siding is drawn instead).
+      ACCENT = 'Gable cladding' # its own outline (Surfaces): "accent" alone is the accent wall's
+
+      def accent_area(source_url, bytes)
+        accent = Surfaces.mask_for(source_url, bytes, ACCENT)
+        return nil unless accent&.status == 'done'
+
+        accent.present? ? Trueview.mask_image(accent) : :none
+      end
+
+      def without(accent, mask, blocked, bytes)
+        size = Vips::Image.new_from_buffer(bytes, '')
+        fit = ->(img) { Layer.fit(img.bands > 1 ? img.extract_band(0) : img, size.width, size.height) }
+        held = (fit.call(accent) > 127).morph(Layer.disc(Layer::OUTLINE_GROW + 2), :dilate)
+        mask = held.ifthenelse(0, fit.call(mask)).cast(:uchar)
+        blocked = (blocked ? (fit.call(blocked) > 127) | held : held).ifthenelse(255, 0).cast(:uchar)
+        [mask, blocked]
       end
 
       def luminance(linear)

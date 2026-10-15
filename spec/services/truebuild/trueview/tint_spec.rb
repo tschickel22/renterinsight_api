@@ -80,6 +80,8 @@ RSpec.describe Truebuild::Trueview::Tint do
       enable!
       TruebuildSurfaceMask.create!(source_url: 'https://x/front.jpg', surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION,
                                    mask_url: 'https://b/mask.png', coverage: 0.5, status: 'done')
+      TruebuildSurfaceMask.create!(source_url: 'https://x/front.jpg', surface: 'gable cladding', version: Truebuild::Trueview::Surfaces::VERSION,
+                                   coverage: 0, status: 'done') # this front has none
       allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: { 'score' => score, 'note' => 'off' }, input_tokens: 1000, output_tokens: 50 } }
     end
 
@@ -101,6 +103,44 @@ RSpec.describe Truebuild::Trueview::Tint do
         expect(render.reload.usage).to include('tint_failed' => true)
         expect(render.model).not_to eq('tint')
       end
+    end
+  end
+
+  describe 'siding with a gable accent' do
+    let(:clay) { swatch('Standard Vinyl Siding', 'Clay', '#8c887d') }
+    let(:render) do
+      TruebuildRender.create!(source_url: 'https://x/front.jpg', selection: finish('Siding', 'Clay'), selection_key: 'k', model_key: 'nb2-lite',
+                              provider: 'gemini', model: 'gemini-3.1-flash-lite-image', purpose: 'layer', prompt: 'p',
+                              usage: { 'swatch_ids' => [clay.id] })
+    end
+    let(:siding) do
+      TruebuildSurfaceMask.create!(source_url: 'https://x/front.jpg', surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION,
+                                   mask_url: 'https://b/mask.png', coverage: 0.5, status: 'done')
+    end
+    let(:ctx) { { source: { bytes: photo.jpegsave_buffer }, mask: siding, check_with: {} } }
+
+    before do
+      allow(Catalog::PriceBooks::ClaudeClient).to receive(:call) { { input: { 'score' => 5 }, input_tokens: 1000, output_tokens: 50 } }
+    end
+
+    it 'leaves the accent as it was' do
+      accent = TruebuildSurfaceMask.new(surface: 'gable cladding', status: 'done', mask_url: 'https://b/accent.png', coverage: 0.25)
+      allow(accent).to receive(:present?).and_return(true)
+      allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(accent)
+      allow(Truebuild::Trueview).to receive(:mask_image) do |m|
+        m.surface == 'gable cladding' ? (Vips::Image.black(200, 100) + 0).draw_rect(255, 0, 0, 100, 50, fill: true).cast(:uchar) : mask
+      end
+      painted = nil
+      allow(described_class).to receive(:paint).and_wrap_original { |orig, b, m, h| painted = m; orig.call(b, m, h) }
+
+      expect(described_class.apply!(render, ctx, '#8c887d')).to be(true)
+      expect(painted.crop(10, 10, 80, 30).avg).to eq(0)      # the accent (top) left out
+      expect(painted.crop(10, 60, 80, 30).avg).to eq(255)    # the lap siding below tinted
+    end
+
+    it 'draws the siding instead when it could not be settled whether the photo has an accent' do
+      allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(TruebuildSurfaceMask.new(surface: 'gable cladding', status: 'failed'))
+      expect(described_class.apply!(render, ctx, '#8c887d')).to be(false)
     end
   end
 end

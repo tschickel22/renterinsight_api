@@ -187,7 +187,9 @@ RSpec.describe Truebuild::Trueview::Batch do
     CatalogSwatch.create!(manufacturer: mfr, set_name: 'Standard Vinyl Siding', name: 'Clay', hex: '#8c887d', image_url: 'https://b/clay.jpg')
     mask = TruebuildSurfaceMask.create!(source_url: front, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION,
                                         mask_url: 'https://b/mask.png', coverage: 0.5, status: 'done')
-    allow(Truebuild::Trueview::Surfaces).to receive(:mask_for).and_return(mask)
+    no_cladding = TruebuildSurfaceMask.create!(source_url: front, surface: 'gable cladding', version: Truebuild::Trueview::Surfaces::VERSION,
+                                               coverage: 0, status: 'done')
+    allow(Truebuild::Trueview::Surfaces).to receive(:mask_for) { |_u, _b, s| s == 'Gable cladding' ? no_cladding : mask }
     allow(Truebuild::Trueview).to receive(:mask_image).and_return((Vips::Image.black(300, 200) + 0).draw_rect(255, 0, 0, 150, 200, fill: true).cast(:uchar))
     allow(Catalog::PriceBooks::ClaudeClient).to receive(:call).and_return(input: { 'score' => 5 }, input_tokens: 1000, output_tokens: 50)
     run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
