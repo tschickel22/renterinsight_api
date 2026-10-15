@@ -252,6 +252,10 @@ module Truebuild
                                      model: result[:model], error: verdict['note'].presence,
                                      usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') },
                                               'digest' => (digest(key) unless correction), 'tries' => (tries if tries.positive?) }.compact)
+      rescue Credits::Out
+        raise # no outline stored: outlined once credits are back
+      rescue Catalog::PriceBooks::ClaudeClient::OutOfCredits => e
+        Credits.claude_out!(e)
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
         TruebuildSurfaceMask.create!(source_url: source_url, surface: record_as || key, version: VERSION, status: 'failed', error: e.message.first(500))
       end

@@ -9,6 +9,9 @@ class TruebuildBatchDrawingJob < ApplicationJob
     return unless render&.status == 'running' && render.usage['batch_drawn']
 
     Truebuild::Trueview::Batch.check!(render)
+  rescue Truebuild::Trueview::Credits::Out, Catalog::PriceBooks::ClaudeClient::OutOfCredits
+    # Left waiting: Batch.recover! checks it again once credits are back.
+    nil
   rescue StandardError => e
     render&.update!(status: 'failed', error: e.message.to_s.first(1000))
   ensure

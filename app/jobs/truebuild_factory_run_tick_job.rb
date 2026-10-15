@@ -26,6 +26,7 @@ class TruebuildFactoryRunTickJob < ApplicationJob
       batch = Truebuild::Trueview::Batch
       next unless run.status == 'running' || run.renders.where(status: 'running').where("usage ? 'batch_name'").exists?
 
+      batch.after_credits!(run) if run.status == 'running'
       batch.recover!(run)
       batch.poll!(run)
       next unless run.reload.status == 'running'

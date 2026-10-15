@@ -42,6 +42,32 @@ module Truebuild
         count + unchecked.size
       end
 
+      # What a credit outage left behind, once credits are back: drawings
+      # marked failed are put back in line, outlines that failed are tried
+      # again, and drawings shown without their check (from before a refused
+      # check waited for credits) are checked now. Returns the drawings taken up.
+      OUT_OF_CREDITS = "error ~* '(usage limits|credit balance|out of credits|Gemini 402)'"
+      RECHECK_EACH_TICK = 60
+
+      def after_credits!(run)
+        return 0 if Credits.out? || !run.batch?
+
+        TruebuildSurfaceMask.where(status: 'failed', version: Surfaces::VERSION).where(OUT_OF_CREDITS)
+                            .find_each { |mask| Surfaces.make_due!(mask) }
+        failed = run.renders.where(status: 'failed').where(OUT_OF_CREDITS)
+                    .update_all([ "status = 'queued', error = NULL, updated_at = ?, " \
+                                  "usage = (usage - 'batch_claim' - 'batch_name') || '{\"batch\": true}'::jsonb", Time.current ])
+        unchecked = run.renders.done.where("usage->'check'->>'note' LIKE 'Not checked%'").where.not(image_url: nil)
+                       .limit(RECHECK_EACH_TICK).to_a
+        unchecked.each do |render|
+          # Taken back from buyers and checked as a returned batch drawing is.
+          render.update_columns(status: 'running', updated_at: Time.current,
+                                usage: render.usage.merge('batch' => true, 'batch_drawn' => render.image_url))
+          TruebuildBatchDrawingJob.set(queue: :low).perform_later(render.id)
+        end
+        failed + unchecked.size
+      end
+
       # Sends what is waiting. Returns the number sent.
       #
       # Each drawing is claimed for this send alone, and only those still
@@ -50,6 +76,7 @@ module Truebuild
       # or recover! put back ones still being prepared, and production's
       # first Decatur run sent 324 drawings for 120 (each one paid for).
       def submit!(run)
+        return 0 if Credits.out? # each would fail at once
         rows = waiting(run).order(:id).limit(SIZE).to_a
         return 0 if rows.empty?
 
@@ -72,6 +99,11 @@ module Truebuild
           render.update_columns(usage: render.usage.merge('batch_model' => spec_key, 'batch_box' => req[:box]), updated_at: Time.current)
           by_model[req[:model]] << ["r#{render.id}", req[:body], render]
         rescue StandardError => e
+          # Out of credits: back in line, and nothing more prepared until they are back.
+          if Credits.error?(e)
+            TruebuildRender.where(id: render.id).update_all([ "status = 'queued', updated_at = ?, usage = usage - 'batch_claim'", Time.current ])
+            break
+          end
           render.update!(status: 'failed', error: "Not sent: #{e.message.to_s.first(500)}")
         end
 
