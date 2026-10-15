@@ -111,13 +111,21 @@ class ContractorInvoiceService
   # An open cost line already entered for this contractor on this phase is the
   # one the invoice pays for. Only an unambiguous match is used; otherwise the
   # invoice gets a cost line of its own.
+  #
+  # "Open" includes a line whose only bill is the unposted draft the
+  # cost-lines-post-via-bills setting made for it: the contractor's invoice
+  # replaces that draft, or the cost would be billed twice.
   def link_cost_item!(amount, invoice_number, receipt_ref)
     open_lines = @project.project_cost_items.not_deleted
-                         .where(vendor_id: @contractor.id, bill_id: nil, status: 'pending', project_phase_id: @phase&.id)
-                         .limit(2).to_a
+                         .where(vendor_id: @contractor.id, status: 'pending', project_phase_id: @phase&.id)
+                         .where.not(id: @bill.project_cost_items.select(:id))
+                         .includes(:bill).to_a
+                         .select { |l| l.bill.nil? || replaceable_draft?(l.bill) }
+                         .first(2)
 
     if open_lines.size == 1
       line = open_lines.first
+      placeholder = line.bill
       line.update!(
         bill_id: @bill.id,
         invoice_number: invoice_number.presence || line.invoice_number,
@@ -125,6 +133,7 @@ class ContractorInvoiceService
         metadata: (line.metadata || {}).merge('amount_before_invoice' => line.amount.to_s).deep_stringify_keys,
         amount: amount
       )
+      placeholder&.destroy!
       return line
     end
 
@@ -142,6 +151,13 @@ class ContractorInvoiceService
       bill_id: @bill.id,
       metadata: { 'source' => 'contractor_portal' }
     )
+  end
+
+  # A draft made from a cost line has never posted and carries nothing but
+  # that line's amount, so it can go.
+  def replaceable_draft?(bill)
+    bill.status == 'draft' && bill.source == 'project_cost_line' && bill.journal_entry_id.nil? &&
+      bill.bill_payments.none?
   end
 
   def parse_date(value)

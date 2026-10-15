@@ -123,6 +123,21 @@ RSpec.describe 'Contractor portal invoices', type: :request do
       expect(company.bills.last.total_amount).to eq(1350)
     end
 
+    it "replaces the cost line's own draft bill instead of billing the work twice" do
+      patch '/api/v1/company_settings/project_management', headers: dealer_headers,
+            params: { project_management: { cost_lines_post_via_bills: true } }.to_json
+      add_cost
+      placeholder_id = body['bill']['id']
+
+      post path, headers: headers, params: { file: pdf, amount: '1250', invoice_number: 'INV-77', phase_id: phase.id }
+
+      expect(response).to have_http_status(:created)
+      expect(Bill.exists?(placeholder_id)).to be(false)
+      expect(project.project_cost_items.not_deleted.count).to eq(1)
+      expect(project.project_cost_items.first.bill.source).to eq('contractor_portal')
+      expect(company.bills.count).to eq(1)
+    end
+
     it "refuses a phase from another project on a cost line" do
       other = company.projects.create!(name: 'Other', status: 'active')
       other_phase = other.project_phases.create!(company: company, name: 'Set', position: 0, status: 'not_started')
