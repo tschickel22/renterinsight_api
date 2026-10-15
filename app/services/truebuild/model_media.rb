@@ -175,9 +175,19 @@ module Truebuild
       }.compact
     end
 
+    # Champion names the floor plan render "Main" several ways:
+    # "Main_0003_3268H32396-", "Main-_0000s_0012_2440H32382",
+    # "Aspire_0023_2852H32172-Main", "043-prime-crest-043-main-image" (and
+    # "-main-imgae"). Filed as photos, 40 Aspire and 17 Prime models looked
+    # photographed with nothing to draw on. A room photo can say main too
+    # ("1656H22208-VS-Living-Room-main"), so only one naming no room.
+    MAIN_IMAGE = /(?:\A|[-_])main(?:[-_]|\z)/i
+
     def floor_plan_url?(url)
       name = url.to_s.split('/').last.to_s
-      name.match?(/\AMain_\d/i) || name.downcase.include?('-standard') || name.downcase.include?('floorplan')
+      return true if name.match?(/\AMain_\d/i) || name.downcase.include?('-standard') || name.downcase.include?('floorplan')
+
+      name.match?(MAIN_IMAGE) && room_for(url).nil?
     end
 
     def room_for(url)
