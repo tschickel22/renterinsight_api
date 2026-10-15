@@ -326,20 +326,33 @@ module Truebuild
       # larger model's retries, which are not discounted.
       BATCH_CHECK_SHARE = 0.3 # of an immediate layer's cost that batch does not halve, until measured
 
+      # Measured on the current pipeline's drawings only. Averaged over every
+      # drawing ever made, immediate came to $0.047 on production while
+      # version 21 drawings (a check, and a second look at a 4) cost $0.09,
+      # so batch at $0.057 looked dearer than immediate when it was cheaper.
+      MEASURED = 50
+      CURRENT_VERSIONS = 2 # this layer version and the one before
+
       def rates(batch: false)
         finished = TruebuildRender.where(purpose: 'layer', model_key: Buyer::MODEL, status: %w[done rejected]).where('cost_usd > 0')
+                                  .where("(usage->>'mask_version')::int > ?", Layer::VERSION - CURRENT_VERSIONS)
         immediate = finished.where("usage->>'batch' IS NULL")
         batched = finished.where("usage->>'batch' = 'true'")
-        outlines = TruebuildSurfaceMask.where("usage ? 'cost_usd'")
-        layer = immediate.count >= 50 ? immediate.average(:cost_usd).to_f : LAYER_COST
-        if batch
-          layer = if batched.count >= 50 then batched.average(:cost_usd).to_f
-                  else layer * (BATCH_CHECK_SHARE + (1 - BATCH_CHECK_SHARE) * GeminiBatch::DISCOUNT)
-                  end
-        end
-        outline = outlines.count >= 50 ? outlines.average(Arel.sql("(usage->>'cost_usd')::numeric")).to_f : OUTLINE_COST
+        immediate_rate = immediate.count >= MEASURED ? immediate.average(:cost_usd).to_f : nil
+        batch_rate = batched.count >= MEASURED ? batched.average(:cost_usd).to_f : nil
+        # Either mode stands in for the other until it has been measured.
+        layer = if batch then batch_rate || (immediate_rate || LAYER_COST) * discounted_share
+                else immediate_rate || (batch_rate ? batch_rate / discounted_share : LAYER_COST)
+                end
+        outlines = TruebuildSurfaceMask.where("usage ? 'cost_usd'").where(version: Surfaces::VERSION)
+        outlines = TruebuildSurfaceMask.where("usage ? 'cost_usd'") if outlines.count < MEASURED
+        outline = outlines.count >= MEASURED ? outlines.average(Arel.sql("(usage->>'cost_usd')::numeric")).to_f : OUTLINE_COST
         { layer: layer.round(4), outline: outline.round(4) }
       end
+
+      # A batch drawing's cost against an immediate one: the drawing is
+      # halved, its checks are not.
+      def discounted_share = BATCH_CHECK_SHARE + (1 - BATCH_CHECK_SHARE) * GeminiBatch::DISCOUNT
 
       def name(variant)
         variant.media.to_h['name'].presence || [variant.catalog_plan&.series, variant.catalog_plan&.name].compact.join(' ')

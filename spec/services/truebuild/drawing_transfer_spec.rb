@@ -23,7 +23,7 @@ RSpec.describe Truebuild::DrawingTransfer do
                             selection: [{ 'surface' => 'Cabinets', 'value' => 'Destin White' }], selection_key: 'k1',
                             model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', cost_usd: 0.04,
                             image_url: "#{staging}/trueview/k1.jpg", layer_url: "#{staging}/trueview/k1-layer.webp",
-                            usage: { 'mask_version' => 21, 'swatch_ids' => [7] })
+                            usage: { 'mask_version' => 21, 'swatch_ids' => [7], 'factory_run_id' => 2, 'batch_name' => 'batches/x' })
     TruebuildRender.create!(source_url: photo, purpose: 'layer', status: 'done', lab_run: 'lab', selection: [], selection_key: 'lab',
                             model_key: 'nb2-lite', provider: 'gemini', model: 'lite')
     # The receiving side's own bucket.
@@ -49,7 +49,7 @@ RSpec.describe Truebuild::DrawingTransfer do
     expect(TruebuildSurfaceMask.sole).to have_attributes(surface: 'cabinets', version: 14, mask_url: include('website-assets.s3'))
     render = TruebuildRender.sole
     expect(render).to have_attributes(catalog_plan_variant_id: variant.id, prompt: 'p', layer_url: include('website-assets.s3.'))
-    expect(render.usage).not_to have_key('swatch_ids')
+    expect(render.usage).not_to include('swatch_ids', 'factory_run_id', 'batch_name')
 
     again = exported.to_h { |k, rows| [k, described_class.import!(k, rows)] }
     expect(again.values.sum { |r| r[:created] }).to eq(0)
