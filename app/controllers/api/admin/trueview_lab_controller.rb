@@ -393,7 +393,9 @@ class Api::Admin::TrueviewLabController < ApplicationController
               prompt: Truebuild::Trueview.prompt(room: room, selection: selection, swatches: swatches), lab_run: run,
               usage: { 'swatch_ids' => swatches.compact.map(&:id),
                        # tint_only: try laying the color only, never paying for a drawing (Truebuild::Trueview::Tint)
-                       'tint_only' => (true if purpose == 'layer' && ActiveModel::Type::Boolean.new.cast(params[:tint_only])) }.compact }
+                       'tint_only' => (true if purpose == 'layer' && ActiveModel::Type::Boolean.new.cast(params[:tint_only])),
+                       # outline_with: a trial outline by another image model, kept apart from the real one
+                       'outline_with' => (params[:outline_with].to_s if purpose == 'layer' && Truebuild::Trueview::MODELS.key?(params[:outline_with].to_s)) }.compact }
     cached = !ActiveModel::Type::Boolean.new.cast(params[:fresh]) &&
              # Same prompt too: when the instructions improve, old drawings are not reused.
              TruebuildRender.done.where(source_url: source_url, selection_key: selection_key, model_key: key, purpose: purpose,

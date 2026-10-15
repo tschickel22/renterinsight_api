@@ -114,7 +114,7 @@ module Truebuild
         bytes = ctx[:source][:bytes]
         mask = Trueview.mask_image(ctx[:mask])
         blocked = Trueview.blocked_image(ctx[:mask], bytes)
-        if ctx[:mask].surface == 'siding'
+        if ctx[:mask].key == 'siding'
           accent = accent_area(render.source_url, bytes) or return false
           mask, blocked = without(accent, mask, blocked, bytes) if accent.is_a?(Vips::Image)
         end

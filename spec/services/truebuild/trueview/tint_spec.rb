@@ -101,6 +101,17 @@ RSpec.describe Truebuild::Trueview::Tint do
       expect(render.reload).to have_attributes(status: 'failed', error: 'Tint only: too light')
     end
 
+    it 'can lay the color on a trial outline by another image model, leaving the real outline alone' do
+      render.update!(usage: render.usage.merge('tint_only' => true, 'outline_with' => 'nb2'))
+      trial = TruebuildSurfaceMask.create!(source_url: 'https://x/front.jpg', surface: 'siding@nb2', version: Truebuild::Trueview::Surfaces::VERSION,
+                                           mask_url: 'https://b/mask-trial.png', coverage: 0.5, status: 'done')
+      expect(trial.key).to eq('siding')
+      expect(Truebuild::Trueview::Surfaces.trial_mask('https://x/front.jpg', '', 'Siding', 'nb2')).to eq(trial)
+      Truebuild::Trueview.perform!(render)
+      expect(render.reload).to have_attributes(status: 'done', model: 'tint')
+      expect(TruebuildSurfaceMask.where(surface: 'siding').count).to eq(1)
+    end
+
     context 'when the tint fails its check' do
       let(:score) { 2 }
 

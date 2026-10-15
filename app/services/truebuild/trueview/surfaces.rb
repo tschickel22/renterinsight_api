@@ -206,11 +206,21 @@ module Truebuild
         end
       end
 
-      def find!(source_url, source_bytes, key, correction: nil, tries: 0)
+      # A trial outline of a surface painted by another image model, kept
+      # apart from the real one ("siding@nb2"), so a lab trial can compare the
+      # two without changing what buyers' drawings are cut by.
+      def trial_mask(source_url, source_bytes, surface, painter)
+        key = category(surface) or return nil
+        label = "#{key}@#{painter}"
+        TruebuildSurfaceMask.find_by(source_url: source_url, surface: label, version: VERSION) ||
+          find!(source_url, source_bytes, key, painter: painter, record_as: label)
+      end
+
+      def find!(source_url, source_bytes, key, correction: nil, tries: 0, painter: PAINTER, record_as: nil)
         description = CATEGORIES.find { |k, _, _| k == key }.last
         image = rgb(Vips::Image.new_from_buffer(source_bytes, ''))
         aspect = image.width.to_f / image.height
-        spec = MODELS.fetch(PAINTER)
+        spec = MODELS.fetch(painter)
         spent = 0.0
         attempts = []
         mask = verdict = result = nil
@@ -231,13 +241,13 @@ module Truebuild
         # layer for that surface is better. An absent surface is no layer too.
         coverage = verdict['present'] && verdict['fit'].to_i >= MIN_FIT ? (mask.avg / 255.0).round(4) : 0
         url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
-                                   "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{key.parameterize}-v#{VERSION}.png")
-        TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, mask_url: url, coverage: coverage,
+                                   "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{(record_as || key).parameterize}-v#{VERSION}.png")
+        TruebuildSurfaceMask.create!(source_url: source_url, surface: record_as || key, version: VERSION, mask_url: url, coverage: coverage,
                                      model: result[:model], error: verdict['note'].presence,
                                      usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') },
                                               'digest' => (digest(key) unless correction), 'tries' => (tries if tries.positive?) }.compact)
       rescue Trueview::Error, Vips::Error, Catalog::PriceBooks::ClaudeClient::Error => e
-        TruebuildSurfaceMask.create!(source_url: source_url, surface: key, version: VERSION, status: 'failed', error: e.message.first(500))
+        TruebuildSurfaceMask.create!(source_url: source_url, surface: record_as || key, version: VERSION, status: 'failed', error: e.message.first(500))
       end
 
       # Surfaces that share pixels: an appliance package changes the

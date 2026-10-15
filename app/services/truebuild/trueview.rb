@@ -111,6 +111,12 @@ module Truebuild
       # A layer cut by an older Layer::VERSION is cut again from its saved
       # drawing: no call to the image model, no charge.
       return recut!(render, source, mask, check_with) if render.usage['recut_from'] && render.image_url.present?
+      # A lab trial can have the surface outlined by another image model, kept apart (Surfaces.trial_mask).
+      if render.usage['outline_with'] && ctx[:mask]
+        trial = Surfaces.trial_mask(render.source_url, source[:bytes], render.selection.first['surface'], render.usage['outline_with'])
+        ctx = ctx.merge(mask: trial)
+        return render.update!(status: 'skipped', error: 'Not in this photo (trial outline)') unless trial&.present?
+      end
       # A plain color is laid on the photo, not drawn; drawn only if that fails its check.
       return if (hex = Tint.color_for(render)) && Tint.apply!(render, ctx, hex)
       # A lab trial of the tint alone: a tint that fails is not drawn instead.
@@ -272,7 +278,7 @@ module Truebuild
       return nil unless mask&.present?
 
       size = Vips::Image.new_from_buffer(source_bytes, '')
-      Surfaces.claimed_above(mask.source_url, mask.surface, size.width, size.height)
+      Surfaces.claimed_above(mask.source_url, mask.key, size.width, size.height)
     end
 
     def store_bytes(bytes, mime, key)
