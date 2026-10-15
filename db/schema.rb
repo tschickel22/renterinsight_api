@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_15_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5718,6 +5718,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
     t.datetime "updated_at", null: false
     t.decimal "estimated_budget", precision: 12, scale: 2
     t.decimal "actual_cost", precision: 12, scale: 2, default: "0.0"
+    t.bigint "assigned_vendor_id"
+    t.bigint "assigned_to_id"
+    t.index ["assigned_to_id"], name: "index_project_phases_on_assigned_to_id"
+    t.index ["assigned_vendor_id"], name: "index_project_phases_on_assigned_vendor_id"
     t.index ["company_id", "status"], name: "idx_project_phases_company_status"
     t.index ["company_id"], name: "index_project_phases_on_company_id"
     t.index ["project_id", "position"], name: "idx_project_phases_project_position"
@@ -5802,6 +5806,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
     t.boolean "visible_to_client", default: false, null: false
     t.boolean "client_actionable", default: false, null: false
     t.integer "estimated_days"
+    t.bigint "default_vendor_id"
+    t.bigint "default_assigned_to_id"
+    t.index ["default_assigned_to_id"], name: "index_project_template_phase_tasks_on_default_assigned_to_id"
+    t.index ["default_vendor_id"], name: "index_project_template_phase_tasks_on_default_vendor_id"
     t.index ["project_template_phase_id", "position"], name: "idx_template_phase_tasks_phase_position"
     t.index ["project_template_phase_id"], name: "idx_on_project_template_phase_id_9658b0b17b"
   end
@@ -5821,6 +5829,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "default_tasks", default: []
+    t.bigint "default_vendor_id"
+    t.bigint "default_assigned_to_id"
+    t.index ["default_assigned_to_id"], name: "index_project_template_phases_on_default_assigned_to_id"
+    t.index ["default_vendor_id"], name: "index_project_template_phases_on_default_vendor_id"
     t.index ["project_template_id", "position"], name: "idx_template_phases_template_position"
     t.index ["project_template_id"], name: "index_project_template_phases_on_project_template_id"
   end
@@ -5838,10 +5850,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
     t.bigint "created_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "default_vendor_id"
+    t.bigint "default_assigned_to_id"
     t.index ["company_id", "is_active"], name: "idx_project_templates_company_active"
     t.index ["company_id", "is_default"], name: "idx_project_templates_company_default"
     t.index ["company_id", "template_type"], name: "idx_project_templates_company_type"
     t.index ["company_id"], name: "index_project_templates_on_company_id"
+    t.index ["default_assigned_to_id"], name: "index_project_templates_on_default_assigned_to_id"
+    t.index ["default_vendor_id"], name: "index_project_templates_on_default_vendor_id"
     t.index ["location_id"], name: "index_project_templates_on_location_id"
   end
 
@@ -5887,6 +5903,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
     t.decimal "subcontractor_cost", precision: 12, scale: 2, default: "0.0"
     t.decimal "other_cost", precision: 12, scale: 2, default: "0.0"
     t.bigint "land_parcel_id"
+    t.bigint "assigned_vendor_id"
+    t.bigint "assigned_to_id"
+    t.jsonb "assignment_issues", default: [], null: false
+    t.index ["assigned_to_id"], name: "index_projects_on_assigned_to_id"
+    t.index ["assigned_vendor_id"], name: "index_projects_on_assigned_vendor_id"
     t.index ["client_access_token"], name: "idx_projects_client_token", unique: true
     t.index ["company_id", "location_id"], name: "idx_projects_company_location"
     t.index ["company_id", "project_number"], name: "idx_projects_company_number", unique: true
@@ -9090,6 +9111,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
   add_foreign_key "project_phase_tasks", "users", column: "completed_by_id"
   add_foreign_key "project_phases", "companies"
   add_foreign_key "project_phases", "projects"
+  add_foreign_key "project_phases", "users", column: "assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_phases", "vendors", column: "assigned_vendor_id", on_delete: :nullify
   add_foreign_key "project_task_checklist_items", "project_task_checklists"
   add_foreign_key "project_task_checklist_items", "users", column: "completed_by_id"
   add_foreign_key "project_task_checklists", "project_tasks"
@@ -9100,14 +9123,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_150000) do
   add_foreign_key "project_tasks", "projects"
   add_foreign_key "project_tasks", "users", column: "assigned_to_id"
   add_foreign_key "project_template_phase_tasks", "project_template_phases"
+  add_foreign_key "project_template_phase_tasks", "users", column: "default_assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_template_phase_tasks", "vendors", column: "default_vendor_id", on_delete: :nullify
   add_foreign_key "project_template_phases", "project_templates"
+  add_foreign_key "project_template_phases", "users", column: "default_assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_template_phases", "vendors", column: "default_vendor_id", on_delete: :nullify
   add_foreign_key "project_templates", "companies"
   add_foreign_key "project_templates", "locations"
+  add_foreign_key "project_templates", "users", column: "default_assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_templates", "vendors", column: "default_vendor_id", on_delete: :nullify
   add_foreign_key "projects", "companies"
   add_foreign_key "projects", "deals"
   add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
+  add_foreign_key "projects", "users", column: "assigned_to_id", on_delete: :nullify
+  add_foreign_key "projects", "vendors", column: "assigned_vendor_id", on_delete: :nullify
   add_foreign_key "purchase_order_change_orders", "companies"
   add_foreign_key "purchase_order_change_orders", "deal_home_builds", on_delete: :nullify
   add_foreign_key "purchase_order_change_orders", "deals"

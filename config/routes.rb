@@ -698,6 +698,9 @@ Rails.application.routes.draw do
           delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
           post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
           delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
+          post :assign_phase                      # POST body: { phase_id:, assigned_vendor_id?, assigned_to_id?, apply_to_tasks, preview }
+          post :assign_project                    # POST body: { assigned_vendor_id?, assigned_to_id?, apply_to_phases, preview }
+          delete :assignment_issues, action: :dismiss_assignment_issues
           get :export_pdf
           post :flush_assignment_notifications
           post :pause_assignment_notifications

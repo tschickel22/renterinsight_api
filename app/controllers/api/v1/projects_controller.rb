@@ -4,7 +4,7 @@ module Api
   module V1
     class ProjectsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user export_pdf flush_assignment_notifications pause_assignment_notifications resume_assignment_notifications skip_assignment_notification unskip_assignment_notification]
+      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user export_pdf flush_assignment_notifications pause_assignment_notifications resume_assignment_notifications skip_assignment_notification unskip_assignment_notification assign_phase assign_project dismiss_assignment_issues]
 
       # GET /api/v1/projects
       def index
@@ -98,18 +98,26 @@ module Api
                      started_at estimated_completion_date actual_completion_date
                      owner_id deal_id vehicle_id location_id current_phase_id project_template_id
                      budget_amount actual_cost labor_cost materials_cost subcontractor_cost other_cost land_parcel_id
-                     client_visible client_access_token custom_field_values created_at updated_at],
-            methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display]
+                     client_visible client_access_token custom_field_values created_at updated_at
+                     assigned_vendor_id assigned_to_id assignment_issues],
+            methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display],
+            include: {
+              assigned_vendor: { only: %i[id name contact_name trade_type] },
+              assigned_to: { only: %i[id first_name last_name email] }
+            }
           ),
-          phases: @project.project_phases.ordered.includes(project_phase_tasks: [:assigned_to, { contractor_assignments: :contractor }]).as_json(
+          phases: @project.project_phases.ordered.includes(:assigned_vendor, :assigned_to, project_phase_tasks: [:assigned_to, { contractor_assignments: :contractor }]).as_json(
             only: %i[id name description position status is_required
                      started_at completed_at estimated_start_date estimated_completion_date estimated_days
                      estimated_budget actual_cost
                      visible_to_client notify_client_on_start notify_client_on_complete client_notified_complete
-                     notes client_notes icon color completed_by_id created_at updated_at],
+                     notes client_notes icon color completed_by_id created_at updated_at
+                     assigned_vendor_id assigned_to_id],
             methods: [:status_display, :overdue?, :duration_days, :task_progress_percent, :tasks_summary,
                       :computed_estimated_days, :computed_start_date, :computed_completion_date],
             include: {
+              assigned_vendor: { only: %i[id name contact_name trade_type] },
+              assigned_to: { only: %i[id first_name last_name email] },
               project_phase_tasks: {
                 only: %i[id name position status is_required completed_at completed_by_id
                          assigned_to_id visible_to_client client_actionable client_acknowledged_at client_acknowledged_by
@@ -546,6 +554,47 @@ module Api
         head :no_content
       end
 
+      # POST /api/v1/projects/:id/assign_phase
+      # Body: { phase_id:, assigned_vendor_id?:, assigned_to_id?:, apply_to_tasks:, preview: }
+      # A key left out is left alone; null clears it. apply_to_tasks hands the
+      # phase's unstarted tasks to the new owner (ProjectAssignmentService).
+      # preview reports what applying would change and writes nothing.
+      def assign_phase
+        return unless authorize_action!('deals', 'update')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        changes = assignment_changes
+        return if performed?
+
+        result = ProjectAssignmentService.new(@project, actor: current_user)
+          .assign_phase(phase, changes, apply_to_tasks: truthy?(params[:apply_to_tasks]), preview: truthy?(params[:preview]))
+        render json: { result: result, phase: phase.reload.as_json(only: %i[id assigned_vendor_id assigned_to_id]) }
+      end
+
+      # POST /api/v1/projects/:id/assign_project
+      # Body: { assigned_vendor_id?:, assigned_to_id?:, apply_to_phases:, preview: }
+      def assign_project
+        return unless authorize_action!('deals', 'update')
+
+        changes = assignment_changes
+        return if performed?
+
+        result = ProjectAssignmentService.new(@project, actor: current_user)
+          .assign_project(changes, apply_to_phases: truthy?(params[:apply_to_phases]), preview: truthy?(params[:preview]))
+        render json: { result: result, project: @project.reload.as_json(only: %i[id assigned_vendor_id assigned_to_id]) }
+      end
+
+      # DELETE /api/v1/projects/:id/assignment_issues
+      # The dealer has seen the "left unassigned" notice from the template build.
+      def dismiss_assignment_issues
+        return unless authorize_action!('deals', 'update')
+
+        @project.update!(assignment_issues: [])
+        head :no_content
+      end
+
       # GET /api/v1/projects/grid
       # Template-aware grid for the Project Summary page
       def grid
@@ -713,6 +762,35 @@ module Api
       # 2. Deal's account.owner (sales rep that owns the account)
       # 3. Deal's owner
       # 4. current_user
+      # Contractor and employee from params, scoped to this company. Assigning
+      # needs an active one; clearing (null) is always allowed.
+      def assignment_changes
+        changes = {}
+        if params.key?(:assigned_vendor_id)
+          if params[:assigned_vendor_id].present?
+            vendor = @company.contractors.active.find_by(id: params[:assigned_vendor_id])
+            return render(json: { error: 'Contractor not found or not active' }, status: :unprocessable_entity) unless vendor
+            changes[:vendor] = vendor
+          else
+            changes[:vendor] = nil
+          end
+        end
+        if params.key?(:assigned_to_id)
+          if params[:assigned_to_id].present?
+            user = @company.users.active.find_by(id: params[:assigned_to_id])
+            return render(json: { error: 'Employee not found or not active' }, status: :unprocessable_entity) unless user
+            changes[:user] = user
+          else
+            changes[:user] = nil
+          end
+        end
+        changes
+      end
+
+      def truthy?(value)
+        ActiveModel::Type::Boolean.new.cast(value) || false
+      end
+
       def resolve_default_project_owner(deal = nil)
         if params[:owner_id].present?
           explicit = @company.users.find_by(id: params[:owner_id])

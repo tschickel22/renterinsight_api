@@ -4,6 +4,8 @@ class ProjectTemplate < ApplicationRecord
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :created_by, class_name: 'User', optional: true
+  belongs_to :default_vendor, class_name: 'Vendor', optional: true
+  belongs_to :default_assigned_to, class_name: 'User', optional: true
 
   has_many :project_template_phases, -> { order(:position) }, dependent: :destroy
   has_many :projects, dependent: :nullify
@@ -55,6 +57,9 @@ class ProjectTemplate < ApplicationRecord
       created_by_id: created_by&.id,
       client_visible: true
     )
+    assignments = ProjectTemplateAssignmentResolver.new(self, company)
+    project.assigned_vendor_id = assignments.vendor_id(:template)
+    project.assigned_to_id = assignments.user_id(:template)
 
     # Denormalize customer info from deal
     if deal
@@ -93,7 +98,9 @@ class ProjectTemplate < ApplicationRecord
         notify_client_on_complete: template_phase.notify_client_on_complete,
         estimated_days: template_phase.estimated_days,
         icon: template_phase.icon,
-        color: template_phase.color
+        color: template_phase.color,
+        assigned_vendor_id: assignments.vendor_id(:phase, template_phase),
+        assigned_to_id: assignments.user_id(:phase, template_phase)
       )
       # Copy tasks from template phase
       # If default_tasks JSON exists, use it (creates both simple + rich tasks)
@@ -103,7 +110,7 @@ class ProjectTemplate < ApplicationRecord
       unless has_default_tasks
         # Legacy path: copy simple tasks from template phase records
         template_phase.project_template_phase_tasks.ordered.each do |task|
-          phase.project_phase_tasks.create!(
+          phase_task = phase.project_phase_tasks.create!(
             company: company,
             name: task.name,
             position: task.position,
@@ -111,8 +118,10 @@ class ProjectTemplate < ApplicationRecord
             visible_to_client: task.visible_to_client,
             client_actionable: task.client_actionable,
             estimated_days: task.estimated_days,
-            status: 'pending'
+            status: 'pending',
+            assigned_to_id: assignments.user_id(:task, template_phase, task)
           )
+          assignments.assign_contractor!(phase_task, assignments.vendor_id(:task, template_phase, task), assigned_by: created_by)
         end
       end
 
@@ -125,8 +134,11 @@ class ProjectTemplate < ApplicationRecord
         task_title = task_data[:title] || task_data[:name]
         next if task_title.blank?
 
+        task_user_id = assignments.user_id(:task, template_phase, task_data)
+        task_vendor_id = assignments.vendor_id(:task, template_phase, task_data)
+
         # Create simple ProjectPhaseTask (shown in ProjectProgressTracker)
-        phase.project_phase_tasks.create!(
+        phase_task = phase.project_phase_tasks.create!(
           company: company,
           name: task_title,
           position: simple_task_position + task_idx,
@@ -134,8 +146,10 @@ class ProjectTemplate < ApplicationRecord
           visible_to_client: task_data[:visible_to_client] || false,
           client_actionable: task_data[:client_actionable] || false,
           estimated_days: task_data[:estimated_days],
-          status: 'pending'
+          status: 'pending',
+          assigned_to_id: task_user_id
         )
+        assignments.assign_contractor!(phase_task, task_vendor_id, assigned_by: created_by)
 
         # Create rich ProjectTask (with checklists, task type, hours)
         rich_task = phase.tasks.create!(
@@ -147,7 +161,8 @@ class ProjectTemplate < ApplicationRecord
           estimated_hours: task_data[:estimated_hours],
           position: task_data[:position] || task_idx,
           status: 'pending',
-          priority: 'medium'
+          priority: 'medium',
+          assigned_to_id: task_user_id
         )
 
         checklist_items = task_data[:checklist] || task_data[:checklist_items] || []
@@ -159,6 +174,8 @@ class ProjectTemplate < ApplicationRecord
         end
       end
     end
+
+    project.update_column(:assignment_issues, assignments.issues) if assignments.issues.any?
 
     # Update cached counts and set first phase
     project.reload

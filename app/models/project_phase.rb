@@ -6,6 +6,9 @@ class ProjectPhase < ApplicationRecord
   belongs_to :project
   belongs_to :company
   belongs_to :completed_by, class_name: 'User', foreign_key: 'completed_by_id', optional: true
+  # Whole-phase owners (E69); tasks inherit them. See ProjectAssignmentService.
+  belongs_to :assigned_vendor, class_name: 'Vendor', optional: true
+  belongs_to :assigned_to, class_name: 'User', optional: true
   has_many :project_phase_tasks, -> { order(:position) }, dependent: :destroy
   has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
   has_many :project_cost_items, dependent: :destroy
