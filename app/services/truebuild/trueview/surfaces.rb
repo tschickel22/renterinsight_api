@@ -73,7 +73,13 @@ module Truebuild
          'The triangular gable wall under the roof peak (often covered in shakes or siding) is a wall, not roof: leave it ' \
          'as it is, along with the trim, fascia and gutters'],
         ['corner posts', /corner post/i,
-         "the narrow vertical trim boards at the outside corners of the main house's walls. Not porch posts, columns or downspouts"]
+         "the narrow vertical trim boards at the outside corners of the main house's walls. Not porch posts, columns or downspouts"],
+        # Outlined only so a tinted siding color leaves it as it was (Tint):
+        # no option is named this, and it claims nothing from the siding.
+        ['gable cladding', /gable cladding/i,
+         'wall cladding of the main house that differs from its main siding: shakes, scallops, board and batten or ' \
+         'vertical siding, usually in the triangular gable under the roof peak or above the porch. Not the main lap ' \
+         'siding, trim, roof, windows, doors or vents']
       ].freeze
 
       def category(surface)
