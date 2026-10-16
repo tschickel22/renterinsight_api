@@ -41,9 +41,23 @@ class DealPaymentService
 
     bank = @company.bank_accounts.find_by(id: attrs[:bank_account_id]) if attrs[:bank_account_id].present?
     raise Error, 'Pick the bank account the money went into' unless bank
+    raise Error, self.class.bank_problem(@company, bank) if self.class.bank_problem(@company, bank)
 
     Entry.new(amount: amount.round(2), date: date, payment_method: method, bank_account: bank,
               reference_number: attrs[:reference_number].presence, memo: attrs[:memo].presence)
+  end
+
+  # Why money can't be deposited to this bank account, or nil. One linked to
+  # receivables (staging's Summit Park "Chase" points at 1110) would post
+  # Dr AR / Cr AR: the customer's payment would never show as received.
+  def self.bank_problem(company, bank)
+    gl = bank.chart_of_account
+    return "#{bank.bank_name} isn't linked to a ledger account. Link it under Accounting > Bank Accounts." unless gl
+
+    ar_id = AccountingSettings.for_company(company).default_ar_account_id
+    if gl.sub_type == 'accounts_receivable' || gl.id == ar_id
+      "#{bank.bank_name} is linked to #{gl.account_number} #{gl.name}, a receivables account, so the money would never show as received. Link it to its cash account first."
+    end
   end
 
   # Records the entry on the deal. Returns the cash receipt.

@@ -117,7 +117,10 @@ class Api::V1::DealPaymentsController < ApplicationController
     return render(json: { error: 'This deal has no invoice' }, status: :unprocessable_entity) unless invoice
 
     bank = @company.bank_accounts.find_by(id: params[:bank_account_id])
-    return render(json: { error: 'Pick the bank account the money went into' }, status: :unprocessable_entity) unless bank&.chart_of_account
+    return render(json: { error: 'Pick the bank account the money went into' }, status: :unprocessable_entity) unless bank
+    if (problem = DealPaymentService.bank_problem(@company, bank))
+      return render(json: { error: problem }, status: :unprocessable_entity)
+    end
 
     posted_ids = @company.journal_entries.where(source_entity_type: 'Payment', is_void: false).select(:source_entity_id)
     payments = @company.payments.where(status: 'completed', id: PaymentApplication.where(applicable_type: 'Invoice', applicable_id: invoice.id).select(:payment_id))

@@ -172,4 +172,12 @@ RSpec.describe 'Deal funding at approval', type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
   end
+
+  it 'refuses a bank account linked to receivables' do
+    linked_to_ar = company.bank_accounts.create!(bank_name: 'Chase', account_type: 'checking', account_purpose: 'sync_only', chart_of_account: ar)
+    post "/api/v1/deals/#{deal.id}/record_payment", headers: headers, params: { amount: 500, bank_account_id: linked_to_ar.id }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(body['error']).to match(/receivables account/)
+    expect(company.cash_receipts.where(deal_id: deal.id)).to be_empty
+  end
 end
