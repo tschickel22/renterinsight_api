@@ -47,16 +47,36 @@ module Truebuild
 
       # The results: { key => response hash } and { key => error message }.
       def results(responses_file)
-        res = HTTParty.get("#{DOWNLOAD}/#{responses_file}:download?alt=media", headers: headers, timeout: 300)
-        raise Error, "Gemini batch results #{res.code}: #{error(res)}" unless res.code == 200
+        each_result(responses_file).with_object([{}, {}]) do |(key, response, error), (ok, bad)|
+          if response then ok[key] = response
+          else bad[key] = error
+          end
+        end
+      end
 
-        res.body.to_s.each_line.each_with_object([{}, {}]) do |line, (ok, bad)|
-          next if line.strip.empty?
+      # One drawing at a time: key, response (nil when it failed) and error.
+      # The file goes to disk first and is read a line at a time. A finished
+      # batch of a hundred drawings is hundreds of megabytes of images, and
+      # holding it whole ran the server out of memory: it restarted on every
+      # tick that tried to collect it (2026-10-15 and 16).
+      def each_result(responses_file)
+        return enum_for(:each_result, responses_file) unless block_given?
 
-          row = JSON.parse(line)
-          key = row['key'] || row.dig('metadata', 'key')
-          if row['response'] then ok[key] = row['response']
-          else bad[key] = row.dig('error', 'message') || row['status']&.to_s || 'no response'
+        Tempfile.create(['gemini-batch', '.jsonl'], binmode: true) do |file|
+          res = HTTParty.get("#{DOWNLOAD}/#{responses_file}:download?alt=media", headers: headers, timeout: 300,
+                                                                                  stream_body: true) do |fragment|
+            file.write(fragment) if fragment.code == 200
+          end
+          raise Error, "Gemini batch results #{res.code}" unless res.code == 200
+
+          file.write(res.body.to_s) if file.size.zero? # a reply that came whole
+          file.rewind
+          file.each_line do |line|
+            next if line.strip.empty?
+
+            row = JSON.parse(line)
+            key = row['key'] || row.dig('metadata', 'key')
+            yield key, row['response'], (row.dig('error', 'message') || row['status']&.to_s || 'no response' unless row['response'])
           end
         end
       end

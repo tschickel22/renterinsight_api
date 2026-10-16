@@ -72,8 +72,9 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect(run_api.progress(run.reload)[:phase]).to eq('waiting_on_google')
 
     allow(Truebuild::Trueview::GeminiBatch).to receive(:status).and_return(done: true, failed: false, state: 'JOB_STATE_SUCCEEDED', responses_file: 'files/out')
-    allow(Truebuild::Trueview::GeminiBatch).to receive(:results)
-      .and_return([run.renders.to_h { |r| ["r#{r.id}", response_for((photo + 50).cast(:uchar))] }, {}])
+    run.renders.reduce(allow(Truebuild::Trueview::GeminiBatch).to(receive(:each_result))) do |stub, r|
+      stub.and_yield("r#{r.id}", response_for((photo + 50).cast(:uchar)), nil)
+    end
     expect { described_class.poll!(run) }.to have_enqueued_job(TruebuildBatchDrawingJob).twice
     full = Truebuild::Trueview.cost(Truebuild::Trueview::MODELS['nb2-lite'], 'prompt_tokens' => 0, 'output_tokens' => 1000)
     expect(run.renders.pluck(:cost_usd).map(&:to_f).uniq).to eq([(full / 2).round(4)])
@@ -131,8 +132,9 @@ RSpec.describe Truebuild::Trueview::Batch do
     expect(run.renders.pluck(:status).uniq).to eq(['running']) # paid for: not cancelled
 
     allow(Truebuild::Trueview::GeminiBatch).to receive(:status).and_return(done: true, failed: false, state: 'JOB_STATE_SUCCEEDED', responses_file: 'files/out')
-    allow(Truebuild::Trueview::GeminiBatch).to receive(:results)
-      .and_return([run.renders.to_h { |r| ["r#{r.id}", response_for((photo + 50).cast(:uchar))] }, {}])
+    run.renders.reduce(allow(Truebuild::Trueview::GeminiBatch).to(receive(:each_result))) do |stub, r|
+      stub.and_yield("r#{r.id}", response_for((photo + 50).cast(:uchar)), nil)
+    end
     expect(described_class).not_to receive(:submit!)
     expect { TruebuildFactoryRunTickJob.perform_now }.to have_enqueued_job(TruebuildBatchDrawingJob).twice
   end

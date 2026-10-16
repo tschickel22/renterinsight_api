@@ -159,24 +159,29 @@ module Truebuild
       end
 
       def collect(rows, responses_file)
-        drawn, errors = GeminiBatch.results(responses_file)
-        rows.each do |render|
-          key = "r#{render.id}"
-          if (response = drawn[key])
-            spec_key = render.usage['batch_model']
-            result = Providers::Gemini.read(response, MODELS.fetch(spec_key)[:model], render.usage['batch_box'])
-            cost = (Trueview.cost(MODELS.fetch(spec_key), result[:usage]) * GeminiBatch::DISCOUNT).round(4)
-            url = Trueview.store(render, result[:bytes], result[:mime], suffix: "batch-#{render.usage['tries'].to_i}")
-            render.update!(image_url: url, cost_usd: render.cost_usd.to_f + cost, model: result[:model] || render.model,
-                           usage: render.usage.except('batch_name').merge(result[:usage]).merge('batch_drawn' => url))
-            TruebuildBatchDrawingJob.set(queue: :low).perform_later(render.id)
-          else
-            unsent(render, errors[key] || 'No drawing came back')
-          end
-        rescue StandardError => e
-          unsent(render, e.message)
+        waiting = rows.index_by { |r| "r#{r.id}" }
+        GeminiBatch.each_result(responses_file) do |key, response, error|
+          render = waiting.delete(key) or next
+          collect_one(render, response, error)
         end
+        waiting.each_value { |render| unsent(render, 'No drawing came back') }
         rows.size
+      end
+
+      def collect_one(render, response, error)
+        if response
+          spec_key = render.usage['batch_model']
+          result = Providers::Gemini.read(response, MODELS.fetch(spec_key)[:model], render.usage['batch_box'])
+          cost = (Trueview.cost(MODELS.fetch(spec_key), result[:usage]) * GeminiBatch::DISCOUNT).round(4)
+          url = Trueview.store(render, result[:bytes], result[:mime], suffix: "batch-#{render.usage['tries'].to_i}")
+          render.update!(image_url: url, cost_usd: render.cost_usd.to_f + cost, model: result[:model] || render.model,
+                         usage: render.usage.except('batch_name').merge(result[:usage]).merge('batch_drawn' => url))
+          TruebuildBatchDrawingJob.set(queue: :low).perform_later(render.id)
+        else
+          unsent(render, error || 'No drawing came back')
+        end
+      rescue StandardError => e
+        unsent(render, e.message)
       end
 
       # Cuts and checks a drawing a batch returned, as perform! does. A
