@@ -167,6 +167,9 @@ module Truebuild
         # colors is redone and its drawings cut again, not each one redrawn.
         recutting = (round == 1 ? Patterns.review!(run) : []).select { |p| p['cause'] == 'outline' }
                                                              .to_set { |p| [p['photo'], p['surface']] }
+        # Outlines a drawing's touch-up found at fault are being redone, and their redo cuts these again.
+        recutting += TruebuildSurfaceMask.where(source_url: photos, version: Surfaces::VERSION).where("usage ? 'redo_pending'")
+                                         .pluck(:source_url, :surface)
 
         queued = 0
         held = run.renders.where(status: 'rejected').to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
