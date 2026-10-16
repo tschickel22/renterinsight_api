@@ -81,6 +81,58 @@ RSpec.describe 'Projects on bills, journal lines and job cost reports', type: :r
       expect(other_project.project_cost_items.not_deleted.sum(:amount)).to eq(4000)
     end
 
+    it 'rewrites the ledger entry when a posted bill is edited' do
+      bill = create_bill
+      line = bill.bill_line_items.first
+      je_id = bill.journal_entry_id
+
+      patch "/api/v1/bills/#{bill.id}", headers: headers, params: {
+        bill: { tax_amount: 50, bill_line_items_attributes: [
+          { id: line.id, amount: 4500 },
+          { chart_of_account_id: expense.id, amount: 500, description: 'Steps', project_id: other_project.id }
+        ] }
+      }.to_json
+      expect(response).to have_http_status(:ok), response.body
+
+      je = bill.reload.journal_entry
+      expect(je.id).to eq(je_id)
+      expect(je.journal_entry_lines.sum(:credit_amount)).to eq(5050)
+      expect(je.journal_entry_lines.where(project_id: project.id).sum(:debit_amount)).to eq(4545)
+      expect(je.journal_entry_lines.where(project_id: other_project.id).sum(:debit_amount)).to eq(505)
+      expect(project.project_cost_items.not_deleted.sum(:amount)).to eq(4545)
+
+      patch "/api/v1/bills/#{bill.id}", headers: headers, params: {
+        bill: { tax_amount: 0, bill_line_items_attributes: [{ id: bill.bill_line_items.order(:id).last.id, _destroy: true }] }
+      }.to_json
+      expect(je.reload.journal_entry_lines.count).to eq(2)
+      expect(je.journal_entry_lines.sum(:debit_amount)).to eq(4500)
+      expect(other_project.project_cost_items.not_deleted.count).to eq(0)
+    end
+
+    it 'refuses a money change to a bill posted in a closed period' do
+      bill = create_bill
+      bill.journal_entry.update_column(:locked, true)
+
+      patch "/api/v1/bills/#{bill.id}", headers: headers, params: {
+        bill: { bill_line_items_attributes: [{ id: bill.bill_line_items.first.id, amount: 3000 }] }
+      }.to_json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(bill.reload.total_amount).to eq(4000)
+      expect(bill.journal_entry.journal_entry_lines.sum(:debit_amount)).to eq(4000)
+    end
+
+    it 'refuses a total below what was already paid' do
+      bill = create_bill
+      bank = company.chart_of_accounts.where(account_type: 'asset', is_header: false).order(:account_number).first
+      bill.record_payment!(amount: 3000, payment_date: Date.current, chart_of_account_id: bank.id)
+
+      patch "/api/v1/bills/#{bill.id}", headers: headers, params: {
+        bill: { bill_line_items_attributes: [{ id: bill.bill_line_items.first.id, amount: 2000 }] }
+      }.to_json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(bill.reload.total_amount).to eq(4000)
+    end
+
     it 'leaves a bill that already has its cost line alone' do
       item = project.project_cost_items.create!(company_id: company.id, description: 'Set', amount: 4000, cost_type: 'subcontractor',
                                                 vendor_id: installer.id, status: 'pending')
@@ -128,12 +180,70 @@ RSpec.describe 'Projects on bills, journal lines and job cost reports', type: :r
       expect(JournalEntryLine.where(project_id: project.id).sum(:debit_amount)).to eq(50)
     end
 
+    it 'makes the expense job cost, and follows the entry when edited or voided' do
+      post_entry(project_id: project.id)
+      je = company.journal_entries.find(body['id'])
+      expect(project.project_cost_items.not_deleted.pluck(:amount, :status, :journal_entry_id)).to eq([[50, 'approved', je.id]])
+
+      line = je.journal_entry_lines.find_by(project_id: project.id)
+      je.update!(journal_entry_lines_attributes: [{ id: line.id, debit_amount: 80 },
+                                                  { id: je.journal_entry_lines.where.not(id: line.id).first.id, credit_amount: 80 }])
+      expect(project.project_cost_items.not_deleted.sum(:amount)).to eq(80)
+
+      je.void!(dealer)
+      expect(project.project_cost_items.not_deleted.count).to eq(0)
+      expect(project.reload.actual_cost).to eq(0)
+    end
+
     it "refuses another company's project or deal" do
       other = create(:company)
       post_entry(project_id: other.projects.create!(name: 'X', status: 'active').id)
       expect(response).to have_http_status(:unprocessable_entity)
 
       post_entry(deal_id: other.deals.create!(name: 'X', account: other.accounts.create!(name: 'Y')).id)
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
+  describe 'Record Expense and Record Income' do
+    let(:bank) { company.chart_of_accounts.where(account_type: 'asset', is_header: false).order(:account_number).first }
+    let(:revenue) { company.chart_of_accounts.where(account_type: 'revenue', is_header: false).order(:account_number).first }
+    let(:customer) { company.contacts.create!(first_name: 'Ana', last_name: 'Diaz', email: "ana-#{SecureRandom.hex(3)}@example.com") }
+
+    def record(type, **extra)
+      post '/api/v1/record-transactions', headers: headers, params: {
+        type: type, amount: 240, payment_account_id: bank.id,
+        category_account_id: (type == 'expense' ? expense : revenue).id
+      }.merge(extra).to_json
+    end
+
+    it 'puts an expense on the project as paid job cost' do
+      record('expense', project_id: project.id, vendor_name: 'Lowes')
+      expect(response).to have_http_status(:created), response.body
+
+      debit = JournalEntryLine.find_by(project_id: project.id)
+      expect(debit).to have_attributes(debit_amount: 240, deal_id: deal.id)
+      expect(project.project_cost_items.not_deleted.pluck(:amount, :status)).to eq([[240, 'paid']])
+    end
+
+    it "names the customer from the list, or from the project's deal" do
+      record('income', contact_id: customer.id)
+      credit = JournalEntryLine.where(chart_of_account_id: revenue.id).last
+      expect(credit.contact_id).to eq(customer.id)
+      expect(credit.journal_entry.memo).to eq('Income: Ana Diaz')
+
+      deal.update!(contact: customer)
+      record('income', project_id: project.id)
+      credit = JournalEntryLine.where(chart_of_account_id: revenue.id).order(:id).last
+      expect(credit).to have_attributes(contact_id: customer.id, project_id: project.id, deal_id: deal.id)
+      expect(project.project_cost_items.count).to eq(0)
+    end
+
+    it "refuses another company's project or customer" do
+      other = create(:company)
+      record('expense', project_id: other.projects.create!(name: 'X', status: 'active').id)
+      expect(response).to have_http_status(:unprocessable_entity)
+      record('income', contact_id: other.contacts.create!(first_name: 'Z', email: "z-#{SecureRandom.hex(3)}@example.com").id)
       expect(response).to have_http_status(:unprocessable_entity)
     end
   end

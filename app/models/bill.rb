@@ -35,6 +35,7 @@ class Bill < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
   validate :project_belongs_to_company, if: -> { project_id.present? && will_save_change_to_project_id? }
+  validate :total_covers_payments, if: -> { will_save_change_to_total_amount? && persisted? }
 
   before_validation :compute_totals
   before_create :assign_bill_number
@@ -46,7 +47,7 @@ class Bill < ApplicationRecord
   after_update :sync_project_cost_items, if: -> { saved_change_to_status? || saved_change_to_total_amount? }
   # Declared after the posting callbacks, so the bill's entry exists by now.
   after_save :sync_project_job_cost
-  after_update :sync_gl_project_tags, if: -> { journal_entry_id.present? && !saved_change_to_journal_entry_id? }
+  after_update :refresh_posted_je, if: -> { journal_entry_id.present? && !saved_change_to_journal_entry_id? && status != 'void' }
 
   scope :active, -> { where(is_deleted: false) }
   scope :unpaid, -> { where(status: %w[pending partially_paid]) }
@@ -198,26 +199,48 @@ class Bill < ApplicationRecord
     return if bill_line_items.empty?
     return if total_amount.to_d <= 0
 
-    lines_attrs = []
+    je = company.journal_entries.create!(
+      entry_date: bill_date,
+      memo: bill_je_memo,
+      source_type: 'auto',
+      source_entity: self,
+      posted_by: created_by,
+      journal_entry_lines_attributes: bill_je_lines(ap)
+    )
 
-    # Credit AP for the full amount
-    lines_attrs << {
+    update_column(:journal_entry_id, je.id)
+    clear_gl_post_failure!
+    je
+  rescue => e
+    record_gl_post_failure!(e.is_a?(ActiveRecord::RecordInvalid) ? e.record.errors.full_messages.join(', ') : e.message)
+    nil
+  end
+
+  def bill_je_memo
+    "Bill #{bill_number} — #{vendor_display_name}"
+  end
+
+  # AP credited the full total; each line debited with its share of the
+  # bill's tax. AP used to be credited the total while the debits were the
+  # line amounts alone, so a bill with tax never balanced and never posted.
+  # Purchase tax is part of what the items cost.
+  def bill_je_lines(ap)
+    lines = [{
       chart_of_account_id: ap.id,
       debit_amount: 0,
-      credit_amount: total_amount,
+      credit_amount: total_amount.to_d,
       memo: "AP — #{vendor_display_name}",
-      location_id: location_id
-    }
+      location_id: location_id,
+      department: nil,
+      project_id: nil,
+      deal_id: nil
+    }]
 
-    # Debit each expense line item, with the bill's tax spread across them.
-    # AP is credited the full total including tax, but the debits used to be
-    # the line amounts alone, so a bill with tax never balanced and never
-    # posted. Purchase tax is part of what the items cost.
     tax_shares = allocate_tax_to_lines
     deals = project_deal_ids
-    bill_line_items.each do |line|
+    bill_line_items.sort_by { |l| l.id || 0 }.each do |line|
       project = line.effective_project_id
-      lines_attrs << {
+      lines << {
         chart_of_account_id: line.chart_of_account_id,
         debit_amount: line.amount.to_d + tax_shares.fetch(line.id, 0),
         credit_amount: 0,
@@ -228,22 +251,7 @@ class Bill < ApplicationRecord
         deal_id: project && deals[project]
       }
     end
-
-    je = company.journal_entries.create!(
-      entry_date: bill_date,
-      memo: "Bill #{bill_number} — #{vendor_display_name}",
-      source_type: 'auto',
-      source_entity: self,
-      posted_by: created_by,
-      journal_entry_lines_attributes: lines_attrs
-    )
-
-    update_column(:journal_entry_id, je.id)
-    clear_gl_post_failure!
-    je
-  rescue => e
-    record_gl_post_failure!(e.is_a?(ActiveRecord::RecordInvalid) ? e.record.errors.full_messages.join(', ') : e.message)
-    nil
+    lines
   end
 
   # { line_id => share of tax_amount }, proportional to line amounts, rounded
@@ -293,25 +301,53 @@ class Bill < ApplicationRecord
     ids.empty? ? {} : company.projects.where(id: ids).pluck(:id, :deal_id).to_h
   end
 
-  # A posted bill retagged to another job moves its ledger lines with it. Only
-  # the tags change, never amounts, and only while the entry still lines up
-  # with the bill one debit per bill line; a locked (closed period) entry stays
-  # as it was.
-  def sync_gl_project_tags
+  JE_LINE_FIELDS = %i[chart_of_account_id debit_amount credit_amount memo location_id department project_id deal_id].freeze
+  JE_MONEY_FIELDS = %i[chart_of_account_id debit_amount credit_amount].freeze
+
+  # A posted bill that is edited (amounts, accounts, tax, lines, date, job)
+  # rewrites its ledger entry to match. It used to keep the amounts it was
+  # posted with, so the books and the job cost drifted apart. Lines are
+  # updated in place where they pair up, so their ids survive. A closed
+  # period's entry cannot change: a money change there is refused, and a
+  # change of tags alone leaves the entry as it was.
+  def refresh_posted_je
     je = journal_entry
-    return if je.nil? || je.is_void? || je.locked?
+    return if je.nil? || je.is_void? || accounting_import_id.present?
 
-    debits = je.journal_entry_lines.where('debit_amount > 0').order(:id).to_a
-    lines = bill_line_items.reload.sort_by(&:id)
-    return unless debits.size == lines.size
-    return unless debits.zip(lines).all? { |d, l| d.chart_of_account_id == l.chart_of_account_id }
+    ap = je.journal_entry_lines.where('credit_amount > 0').order(:id).first&.chart_of_account || resolve_ap_account
+    return unless ap
 
-    deals = project_deal_ids
-    debits.zip(lines).each do |debit, line|
-      project = line.effective_project_id
-      tags = { project_id: project, deal_id: project && deals[project] }
-      debit.update_columns(tags) if tags.any? { |k, v| debit[k] != v }
+    bill_line_items.reload
+    wanted = bill_je_lines(ap)
+    current = je.journal_entry_lines.order(:id).to_a
+    row = ->(attrs, fields) { fields.map { |f| v = attrs[f]; v.is_a?(Numeric) ? v.to_d : v.presence } }
+    same = ->(fields) { current.size == wanted.size && current.zip(wanted).all? { |c, w| row.(c, fields) == row.(w, fields) } }
+
+    date_same = je.entry_date == bill_date
+    return if same.(JE_LINE_FIELDS) && date_same && je.memo == bill_je_memo
+
+    if je.locked?
+      return if same.(JE_MONEY_FIELDS) && date_same
+
+      errors.add(:base, "Bill #{bill_number} is posted in a closed period. Reopen the period, or void the bill and enter it again.")
+      raise ActiveRecord::RecordInvalid, self
     end
+
+    attrs = current.zip(wanted).filter_map { |c, w| c && w ? w.merge(id: c.id) : nil }
+    attrs += current.drop(wanted.size).map { |c| { id: c.id, _destroy: true } }
+    attrs += wanted.drop(current.size)
+    je.update!(entry_date: bill_date, memo: bill_je_memo, journal_entry_lines_attributes: attrs)
+  rescue ActiveRecord::RecordInvalid => e
+    raise if e.record.equal?(self)
+
+    e.record.errors.full_messages.each { |m| errors.add(:base, "Ledger entry: #{m}") }
+    raise ActiveRecord::RecordInvalid, self
+  end
+
+  def total_covers_payments
+    return if amount_paid.to_d <= total_amount.to_d
+
+    errors.add(:base, "Total can't be less than the #{format('%.2f', amount_paid.to_d)} already paid")
   end
 
   # A bill for a job is part of that job's cost. Contractor invoices and the

@@ -25,6 +25,8 @@ class ProjectCostItem < ApplicationRecord
   belongs_to :vendor, optional: true
   # The bill this cost is paid through (E68), e.g. a contractor's portal invoice.
   belongs_to :bill, optional: true
+  # The Record Expense or manual journal entry this cost came from (E68).
+  belongs_to :journal_entry, optional: true
 
   validates :description, presence: true
   validates :amount, presence: true, numericality: true

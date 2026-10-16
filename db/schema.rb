@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_15_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_16_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5572,12 +5572,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_15_230000) do
     t.datetime "updated_at", null: false
     t.bigint "vendor_id"
     t.bigint "bill_id"
+    t.bigint "journal_entry_id"
     t.index ["approved_by_id"], name: "index_project_cost_items_on_approved_by_id"
     t.index ["bill_id"], name: "index_project_cost_items_on_bill_id"
     t.index ["company_id"], name: "index_project_cost_items_on_company_id"
     t.index ["cost_type"], name: "index_project_cost_items_on_cost_type"
     t.index ["date"], name: "index_project_cost_items_on_date"
     t.index ["inventory_transaction_id"], name: "index_project_cost_items_on_inventory_transaction_id"
+    t.index ["journal_entry_id"], name: "index_project_cost_items_on_journal_entry_id"
     t.index ["part_id"], name: "index_project_cost_items_on_part_id"
     t.index ["project_id"], name: "index_project_cost_items_on_project_id"
     t.index ["project_phase_id"], name: "index_project_cost_items_on_project_phase_id"

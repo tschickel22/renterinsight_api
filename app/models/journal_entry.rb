@@ -30,6 +30,12 @@ class JournalEntry < ApplicationRecord
 
   before_create :assign_entry_number
   before_save :set_fiscal_period
+  # E68: expense on a project from Record Expense or a manual entry is job
+  # cost. Bills keep their own cost lines and reversals are 'auto', so only
+  # these two sources are counted here.
+  JOB_COST_SOURCES = %w[manual quick_entry].freeze
+  after_save :sync_project_job_cost, if: -> { JOB_COST_SOURCES.include?(source_type) }
+  before_destroy :drop_project_job_cost
 
   scope :posted, -> { where(is_void: false) }
   # Entries that count toward balances. Voiding keeps the original in its own
@@ -181,6 +187,50 @@ class JournalEntry < ApplicationRecord
         reversed_by: reversing
       )
     end
+  end
+
+  # One cost line per project for the expense this entry puts on it: paid when
+  # it came out of the bank through Record Expense, otherwise on the books
+  # (billed). A void or a removed tag takes the cost line away.
+  def sync_project_job_cost
+    linked = ProjectCostItem.not_deleted.where(company_id: company_id, journal_entry_id: id).to_a
+    wanted = if is_void?
+               {}
+             else
+               journal_entry_lines.reload.joins(:chart_of_account)
+                                  .where(chart_of_accounts: { account_type: 'expense' })
+                                  .where.not(project_id: nil)
+                                  .group(:project_id)
+                                  .sum('journal_entry_lines.debit_amount - journal_entry_lines.credit_amount')
+                                  .transform_values(&:to_d)
+             end
+
+    status = source_type == 'quick_entry' ? 'paid' : 'approved'
+    description = (memo.presence || "Journal entry #{entry_number}").truncate(250)
+    linked.each do |item|
+      amount = wanted.delete(item.project_id)
+      if amount&.positive?
+        attrs = { amount: amount, date: entry_date, description: description }
+        item.update!(attrs) if attrs.any? { |k, v| item[k] != v }
+      else
+        item.update!(is_deleted: true)
+      end
+    end
+
+    wanted.each do |project_id, amount|
+      next unless amount.positive?
+
+      ProjectCostItem.create!(
+        company_id: company_id, project_id: project_id, journal_entry_id: id,
+        cost_type: 'other', description: description, amount: amount, date: entry_date,
+        status: status, paid_at: status == 'paid' ? Time.current : nil,
+        metadata: { 'source' => source_type }
+      )
+    end
+  end
+
+  def drop_project_job_cost
+    ProjectCostItem.not_deleted.where(company_id: company_id, journal_entry_id: id).find_each { |item| item.update!(is_deleted: true) }
   end
 
   def total_debits

@@ -15,7 +15,9 @@ class Api::V1::RecordTransactionsController < ApplicationController
   #   category_account_id: ID of expense or revenue GL account
   #   payment_account_id: ID of cash/bank GL account
   #   vendor_name / customer_name: optional
-  #   contact_id: optional
+  #   contact_id: optional (the customer on income, picked from contacts)
+  #   project_id: optional (the job it was spent on or received for; its deal
+  #               rides along, and its deal's customer when no contact is given)
   #   memo: optional
   #   location_id: optional (defaults to Current.location_id)
   #   reference_number: optional (check #, receipt #, etc.)
@@ -40,7 +42,21 @@ class Api::V1::RecordTransactionsController < ApplicationController
     end
 
     location_id = params[:location_id].presence || Current.location_id
-    party_name = type == 'expense' ? params[:vendor_name] : params[:customer_name]
+
+    project = nil
+    if params[:project_id].present?
+      project = @company.projects.not_deleted.find_by(id: params[:project_id])
+      return render json: { error: 'Project not found' }, status: :unprocessable_entity unless project
+    end
+    contact = nil
+    if params[:contact_id].present?
+      contact = @company.contacts.find_by(id: params[:contact_id])
+      return render json: { error: 'Customer not found' }, status: :unprocessable_entity unless contact
+    end
+    contact ||= project&.deal&.contact if type == 'income'
+    tags = { contact_id: contact&.id, project_id: project&.id, deal_id: project&.deal_id }
+
+    party_name = type == 'expense' ? params[:vendor_name] : (params[:customer_name].presence || contact&.full_name)
     memo_prefix = type == 'expense' ? 'Expense' : 'Income'
 
     # Build memo: always include party name for list display
@@ -71,7 +87,7 @@ class Api::V1::RecordTransactionsController < ApplicationController
         credit_amount: 0,
         memo: memo,
         location_id: location_id,
-        contact_id: params[:contact_id].presence
+        **tags
       )
       je.journal_entry_lines.build(
         chart_of_account: payment_account,
@@ -95,7 +111,7 @@ class Api::V1::RecordTransactionsController < ApplicationController
         credit_amount: amount,
         memo: memo,
         location_id: location_id,
-        contact_id: params[:contact_id].presence
+        **tags
       )
     end
 

@@ -19,6 +19,7 @@ class JournalEntryLine < ApplicationRecord
   validate :links_belong_to_company
 
   before_validation :set_default_location
+  before_validation :follow_project_deal, if: -> { will_save_change_to_project_id? }
 
   def has_amount
     if (debit_amount.blank? || debit_amount.zero?) && (credit_amount.blank? || credit_amount.zero?)
@@ -39,6 +40,18 @@ class JournalEntryLine < ApplicationRecord
     elsif chart_of_account.is_header?
       errors.add(:chart_of_account_id, "#{chart_of_account.account_number} is a header account and can't be posted to")
     end
+  end
+
+  # A line moved onto a project carries that project's deal, unless the line
+  # names a deal of its own; moved off, it drops the deal the project gave it.
+  def follow_project_deal
+    company_id = journal_entry&.company_id
+    return unless company_id
+
+    old_deal = project_id_was && Project.unscoped.where(id: project_id_was, company_id: company_id).pick(:deal_id)
+    return unless deal_id.blank? || deal_id == old_deal
+
+    self.deal_id = project_id && Project.unscoped.where(id: project_id, company_id: company_id).pick(:deal_id)
   end
 
   # The manual entry form takes these ids as typed, and a line could name
