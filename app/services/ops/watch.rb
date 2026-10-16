@@ -34,8 +34,9 @@ module Ops
       recent = ServerBoot.where(service: service, commit: commit).where(booted_at: 1.hour.ago..).count
       Alert.notify!('restart', 'the server restarted without a release',
                     "The web server restarted on the same code (#{commit.first(8)}) at #{Time.current.utc.strftime('%H:%M')} UTC, " \
-                    "#{recent} #{'start'.pluralize(recent)} in the last hour. Usually it ran out of memory. Customers may have " \
-                    'seen "server unavailable" for a few minutes.', every: 15.minutes)
+                    "#{recent} #{'start'.pluralize(recent)} in the last hour. If nobody restarted it or changed its settings, it " \
+                    'crashed, usually from running out of memory, and customers may have seen "server unavailable" for a ' \
+                    'few minutes.', every: 15.minutes)
     rescue StandardError => e
       Rails.logger.error("[Ops::Watch] booted!: #{e.message}")
     end

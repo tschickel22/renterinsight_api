@@ -7,7 +7,8 @@
 #
 #   WATCH_URL      the server's address, e.g. https://api.dealertide.com
 #
-# Two misses 30 seconds apart count as down (one can be a blip). While down it
+# Three misses over a minute count as down (one can be a blip, and a release
+# still has a short gap until the web server's disk is gone). While down it
 # keeps checking and says when it is back, up to ~25 minutes, then exits so the
 # next run reports again. Background jobs are checked the same way (/up/jobs).
 require_relative '../config/environment'
@@ -23,10 +24,10 @@ rescue StandardError
 end
 
 down = lambda do |path|
-  next false if ok.(path)
-
-  sleep 30
-  !ok.(path)
+  3.times.all? do |i|
+    sleep 30 if i.positive?
+    !ok.(path)
+  end
 end
 
 [['/up', 'the server is not answering', 'the server is answering again', 'Customers cannot use the app.'],
@@ -36,7 +37,7 @@ end
   next unless down.(path)
 
   started = Time.now
-  Ops::Alert.deliver(what, "#{url}#{path} has not answered for over 30 seconds (#{started.utc.strftime('%H:%M')} UTC). #{effect}")
+  Ops::Alert.deliver(what, "#{url}#{path} has not answered for over a minute (#{started.utc.strftime('%H:%M')} UTC). #{effect}")
   back = false
   50.times do
     sleep 30
