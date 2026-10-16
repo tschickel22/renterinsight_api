@@ -17,7 +17,9 @@ Rails.application.configure do
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
   # Using :local for staging environment (disk-based storage)
-  config.active_storage.service = :local
+  # :amazon once `bin/rails active_storage:to_s3` has copied the files over
+  # (config/storage.yml). Until then, :local, the web server's disk.
+  config.active_storage.service = ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local').to_sym
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   config.assume_ssl = true
