@@ -243,7 +243,8 @@ class Api::V1::AccountingReportsController < ApplicationController
       status: params[:status].presence&.split(','),
       start_date: optional_date(params[:start_date]),
       end_date: optional_date(params[:end_date]),
-      payment_type: params[:payment_type].presence
+      payment_type: params[:payment_type].presence,
+      lender: params[:lender].presence
     )
     can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
     can_view_books = current_user&.has_permission?('financial_reports', 'read') || false

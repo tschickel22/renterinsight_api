@@ -180,4 +180,26 @@ RSpec.describe 'Deal funding at approval', type: :request do
     expect(body['error']).to match(/receivables account/)
     expect(company.cash_receipts.where(deal_id: deal.id)).to be_empty
   end
+
+  it 'ages each draw by its own date and totals what lenders owe' do
+    approve(plan: { type: 'financed', lender_amount: 80_000, lender_due_date: (Date.current + 20).to_s },
+            receipts: [{ amount: 5000, payment_date: Date.current.to_s, bank_account_id: bank.id }])
+    expect(response).to have_http_status(:ok), response.body
+    invoice = company.invoices.find(deal.reload.deal_invoice_id)
+    # The customer's share was due 45 days ago; the lender's is due in 20.
+    schedule = invoice.draw_schedule.deep_dup
+    schedule['draws'][0]['due_date'] = (Date.current - 45).to_s
+    invoice.update_column(:draw_schedule, schedule)
+
+    aging = Reports::ArAgingReportService.new(company).generate
+    rows = aging[:buckets].flat_map { |k, b| b[:items].select { |i| i[:id] == invoice.id }.map { |i| [k, i[:draw], i[:balance_due].to_f] } }
+    expect(rows).to contain_exactly([:days_31_60, 'Down payment', 15_000.0], [:current, 'Lender funding, Triad', 80_000.0])
+
+    get '/api/v1/accounting/reports/deal_funding', headers: headers
+    expect(body['summary']).to include('lender_pending' => 80_000.0, 'lender_pending_deals' => 1, 'lender_overdue' => 0.0)
+    expect(body['summary']['lenders']).to eq([{ 'name' => 'Triad', 'pending' => 80_000.0, 'deals' => 1 }])
+
+    get '/api/v1/accounting/reports/deal_funding', headers: headers, params: { lender: 'Someone else' }
+    expect(body['deals']).to be_empty
+  end
 end

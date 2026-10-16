@@ -27,7 +27,7 @@ module Reports
       @today = today
     end
 
-    def generate(location_id: nil, status: nil, start_date: nil, end_date: nil, payment_type: nil)
+    def generate(location_id: nil, status: nil, start_date: nil, end_date: nil, payment_type: nil, lender: nil)
       deals = scoped_deals(location_id: location_id, start_date: start_date, end_date: end_date, payment_type: payment_type).to_a
       invoices = @company.invoices.where(id: deals.map(&:deal_invoice_id).compact, is_deleted: [false, nil]).index_by(&:id)
       ledger_ar = ledger_ar_by_deal(deals.map(&:id))
@@ -40,6 +40,7 @@ module Reports
       end
       statuses = Array(status).map(&:to_s) & STATUSES
       rows = rows.select { |r| statuses.include?(r[:status]) } if statuses.any?
+      rows = rows.select { |r| (r[:lender_name].presence || 'Lender not named') == lender } if lender.present?
 
       { deals: rows, summary: summary(rows).merge(deposits_held(location_id)) }
     end
@@ -63,7 +64,7 @@ module Reports
       paid = invoice ? invoice.amount_paid.to_d : 0.to_d
       credited = invoice ? invoice.amount_credited.to_d : 0.to_d
       owed = invoice ? [invoice.amount_due.to_d, 0.to_d].max : total
-      draws = invoice ? draw_progress(invoice, paid + credited) : []
+      draws = invoice ? DrawProgress.call(invoice, paid + credited) : []
       unpaid = draws.reject { |d| d[:status] == 'paid' }
       overdue = unpaid.select { |d| d[:due_date] && d[:due_date] < @today }
       overdue_amount = overdue.sum { |d| d[:balance] }
@@ -71,6 +72,7 @@ module Reports
       if draws.empty? && invoice&.due_date && invoice.due_date < @today && owed.positive?
         overdue_amount = owed
       end
+      lender_unpaid = unpaid.select { |d| d[:lender] }
       next_draw = unpaid.min_by { |d| [d[:due_date] || Date.new(9999), d[:position].to_i] }
       closed_on = deal.actual_close_date || deal.won_at&.to_date
 
@@ -100,6 +102,8 @@ module Reports
         owed: owed.to_f,
         overdue_amount: overdue_amount.to_f,
         overdue_draws: overdue.size,
+        lender_pending: lender_unpaid.sum { |d| d[:balance] }.to_f,
+        lender_overdue: lender_unpaid.select { |d| d[:due_date] && d[:due_date] < @today }.sum { |d| d[:balance] }.to_f,
         draw_count: draws.size,
         draws: draws.map { |d| d.merge(amount: d[:amount].to_f, paid: d[:paid].to_f, balance: d[:balance].to_f) },
         next_draw: next_draw && { description: next_draw[:description], due_date: next_draw[:due_date], balance: next_draw[:balance].to_f },
@@ -124,33 +128,6 @@ module Reports
       return 'no_invoice' unless invoice
       return 'not_posted' if ledger_ar.nil?
       difference.abs <= TOLERANCE ? 'ok' : 'differs'
-    end
-
-    # The invoice's draws, filled in order with what was paid or credited.
-    def draw_progress(invoice, applied)
-      schedule = invoice.draw_schedule
-      draws = schedule.is_a?(Hash) ? schedule['draws'] : nil
-      return [] unless draws.is_a?(Array)
-
-      left = applied
-      draws.sort_by { |d| d['position'].to_i }.map do |d|
-        amount = d['amount'].to_d
-        paid = [left, amount].min
-        left -= paid
-        balance = amount - paid
-        {
-          position: d['position'],
-          description: d['description'],
-          due_date: (Date.parse(d['due_date'].to_s) rescue nil),
-          amount: amount,
-          paid: paid,
-          balance: balance,
-          status: if balance <= TOLERANCE then 'paid'
-                  elsif paid.positive? then 'partial'
-                  else 'pending'
-                  end
-        }
-      end
     end
 
     # Money applied to each invoice whose entry is on the ledger: posted
@@ -210,6 +187,13 @@ module Reports
         open_count: rows.count { |r| r[:status] == 'open' },
         paid_count: rows.count { |r| r[:status] == 'paid' },
         books_issue_count: rows.count { |r| r[:books_check] != 'ok' },
+        lender_pending: rows.sum { |r| r[:lender_pending] },
+        lender_pending_deals: rows.count { |r| r[:lender_pending].positive? },
+        lender_overdue: rows.sum { |r| r[:lender_overdue] },
+        lenders: rows.select { |r| r[:lender_pending].positive? }
+                     .group_by { |r| r[:lender_name].presence || 'Lender not named' }
+                     .map { |name, rs| { name: name, pending: rs.sum { |r| r[:lender_pending] }, deals: rs.size } }
+                     .sort_by { |l| -l[:pending] },
         no_invoice_count: no_invoice.size,
         no_invoice_amount: no_invoice.sum { |r| r[:deal_amount] },
         received_this_month: received_since(rows.map { |r| r[:invoice_id] }.compact, this_month)

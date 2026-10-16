@@ -198,8 +198,8 @@ class DealInvoiceService
       down = (total.to_d - lender).round(2)
       lender_name = @deal.try(:lender_name).presence
       draws = []
-      draws << plan_draw(1, 'Down payment', down, total, base_date) if down.positive?
-      draws << plan_draw(draws.size + 1, ['Lender funding', lender_name].compact.join(', '), lender, total, lender_due)
+      draws << plan_draw(1, 'Down payment', down, total, base_date).merge('kind' => 'down_payment') if down.positive?
+      draws << plan_draw(draws.size + 1, ['Lender funding', lender_name].compact.join(', '), lender, total, lender_due).merge('kind' => 'lender')
       { 'plan' => 'financed', 'total_amount' => total.to_f, 'base_date' => base_date.iso8601, 'draws' => draws }
     else
       nil
