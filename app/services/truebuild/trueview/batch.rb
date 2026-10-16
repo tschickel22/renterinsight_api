@@ -204,6 +204,10 @@ module Truebuild
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **ctx_check)
         spent = render.cost_usd.to_f + verdict['cost_usd'].to_f
+        drawn, layer, verdict, matched = ColorMatch.settle(source[:bytes], drawn, layer, verdict, mask, ctx_check,
+                                                           surface: render.selection.first&.dig('surface'),
+                                                           value: render.selection.first&.dig('value'))
+        spent += matched
         notes << verdict['note'] if verdict['note'].present?
         return again(render, tries, notes, spent) if !verdict['ok'] && tries < limit(render)
 
@@ -212,6 +216,7 @@ module Truebuild
                   usage: render.usage.except('batch_drawn').merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'),
                                                                   'outlined' => mask.present?, 'tries' => tries, 'notes' => notes) }
         attrs[:usage]['escalated'] = true if render.usage['batch_model'] == ESCALATE_TO
+        attrs[:image_url] = Trueview.store(render, drawn[:bytes], drawn[:mime], suffix: 'matched') if verdict['color_matched']
         attrs.merge!(status: 'rejected', error: "Hidden: #{verdict['note'] || 'failed its check'}") unless verdict['ok']
         render.update!(attrs)
       end
