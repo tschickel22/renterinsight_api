@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_16_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -137,6 +137,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.bigint "city_tax_account_id"
     t.jsonb "tax_rates_by_state", default: {}, null: false
     t.boolean "auto_post_deals", default: false, null: false
+    t.bigint "customer_deposits_account_id"
     t.index ["city_tax_account_id"], name: "index_accounting_settings_on_city_tax_account_id"
     t.index ["company_id"], name: "index_accounting_settings_on_company_id", unique: true
     t.index ["county_tax_account_id"], name: "index_accounting_settings_on_county_tax_account_id"
@@ -1473,9 +1474,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.decimal "amount_applied", precision: 12, scale: 2, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "journal_entry_id"
     t.index ["cash_receipt_id", "invoice_id"], name: "idx_cra_unique_receipt_invoice", unique: true
     t.index ["cash_receipt_id"], name: "index_cash_receipt_applications_on_cash_receipt_id"
     t.index ["invoice_id"], name: "index_cash_receipt_applications_on_invoice_id"
+    t.index ["journal_entry_id"], name: "index_cash_receipt_applications_on_journal_entry_id"
   end
 
   create_table "cash_receipts", force: :cascade do |t|
@@ -1500,6 +1503,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.boolean "is_deleted", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "deal_id"
+    t.bigint "project_id"
     t.index ["account_id"], name: "index_cash_receipts_on_account_id"
     t.index ["bank_account_id"], name: "index_cash_receipts_on_bank_account_id"
     t.index ["company_id", "receipt_number"], name: "index_cash_receipts_on_company_id_and_receipt_number", unique: true, where: "(receipt_number IS NOT NULL)"
@@ -1507,8 +1512,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.index ["company_id"], name: "index_cash_receipts_on_company_id"
     t.index ["contact_id"], name: "index_cash_receipts_on_contact_id"
     t.index ["created_by_id"], name: "index_cash_receipts_on_created_by_id"
+    t.index ["deal_id"], name: "index_cash_receipts_on_deal_id"
     t.index ["journal_entry_id"], name: "index_cash_receipts_on_journal_entry_id"
     t.index ["location_id"], name: "index_cash_receipts_on_location_id"
+    t.index ["project_id"], name: "index_cash_receipts_on_project_id"
     t.index ["receipt_date"], name: "index_cash_receipts_on_receipt_date"
   end
 

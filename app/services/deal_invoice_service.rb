@@ -18,16 +18,28 @@ class DealInvoiceService
     @company = deal.company
   end
 
+  PLAN_TYPES = %w[single draws financed].freeze
+
   # Returns the existing invoice if already created; otherwise builds one.
   # Idempotent: safe to call repeatedly from the approve action.
-  def create_invoice!
+  #
+  # plan (from the approval screen; nil keeps the default: the location's or
+  # company's default draw template, none for a cash deal):
+  #   { type: 'single', due_date: }                    one payment, no draws
+  #   { type: 'draws', template_id: }                  that draw template
+  #   { type: 'financed', lender_amount:, lender_due_date: }
+  #       the customer's share due at close, then the lender's funding as its
+  #       own draw on the same invoice
+  #
+  # Deposits already taken on the deal are applied to the new invoice.
+  def create_invoice!(plan: nil)
     existing = existing_invoice
     return existing if existing
 
-    template = resolve_template
     base_date = resolve_base_date
     total = calculate_total
-    schedule = build_schedule(template, total, base_date)
+    schedule = plan.present? ? schedule_for_plan(plan, total, base_date) : build_schedule(resolve_template, total, base_date)
+    single_due = plan.present? && plan[:type].to_s == 'single' ? (parse_date(plan[:due_date]) || base_date) : nil
 
     invoice = nil
 
@@ -38,7 +50,7 @@ class DealInvoiceService
         deal: @deal,
         location: @deal.location,
         invoice_date: base_date,
-        due_date: schedule_last_due_date(schedule) || (base_date + 30.days),
+        due_date: schedule_last_due_date(schedule) || single_due || (base_date + 30.days),
         status: 'sent',
         source_type: 'deal_close',
         source: @deal,
@@ -61,7 +73,72 @@ class DealInvoiceService
       @deal.update_columns(deal_invoice_id: invoice.id)
     end
 
+    apply_deposits!(invoice)
     invoice
+  end
+
+  # Money taken on the deal before it had an invoice, applied to it oldest
+  # first. Returns the total applied.
+  def apply_deposits!(invoice)
+    applied = 0.to_d
+    @company.cash_receipts.posted.not_deleted.where(deal_id: @deal.id).where('amount_unapplied > 0')
+            .order(:receipt_date, :id).each do |receipt|
+      break unless invoice.reload.amount_due.to_d.positive?
+
+      app = receipt.apply_deposit_to!(invoice, receipt.amount_unapplied, user: @user)
+      applied += app.amount_applied.to_d if app
+    end
+    applied
+  end
+
+  # Fills an invoice's draws in order with everything paid or credited on it,
+  # so the stored schedule matches the invoice whichever way the money came in
+  # (deal payment, deposit, portal, card).
+  def self.refresh_draws!(invoice)
+    schedule = invoice.draw_schedule
+    return unless schedule.is_a?(Hash) && schedule['draws'].is_a?(Array) && schedule['draws'].any?
+
+    schedule = schedule.deep_dup
+    left = invoice.amount_paid.to_d + invoice.amount_credited.to_d
+    schedule['draws'].sort_by { |d| d['position'].to_i }.each do |draw|
+      amount = draw['amount'].to_d
+      paid = [left, amount].min
+      left -= paid
+      draw['paid_amount'] = paid.round(2).to_f
+      draw['status'] = if amount - paid <= BigDecimal('0.001') then 'paid'
+                       elsif paid.positive? then 'partial'
+                       else 'pending'
+                       end
+    end
+    invoice.update_column(:draw_schedule, schedule) if schedule != invoice.draw_schedule
+  end
+
+  # The pieces the invoice will bill, for the approval screen to show the
+  # total with the tax it is about to post.
+  def total_parts
+    base = (@deal.try(:selling_price) || 0).to_d
+    used_products_total = base.zero?
+    base = (@deal.try(:calculated_value) || @deal.try(:value) || 0).to_d if used_products_total
+    fees = used_products_total ? 0.to_d : ADDON_FEE_METHODS.sum { |m| (@deal.try(m) || 0).to_d }
+    tax = calculate_total - base - fees
+    # Before approval nothing is posted yet: show the tax approval will post.
+    unless tax.positive? || @deal.gl_posted_at.present?
+      tax = Accounting::DealAccountingService.new(@deal).sales_tax_lines.sum { |l| l[:credit_amount].to_d }
+    end
+    { base: base.round(2).to_f, fees: fees.round(2).to_f, tax: tax.round(2).to_f }
+  end
+
+  # The plan the approval screen starts from.
+  def default_plan
+    type = @deal.try(:payment_type).to_s
+    financed = (@deal.try(:financed_amount) || 0).to_d
+    if %w[financed cash_and_finance].include?(type) && financed.positive?
+      { type: 'financed', lender_amount: financed.to_f, lender_due_date: (resolve_base_date + 30.days).iso8601 }
+    elsif type != 'cash' && (template = resolve_template)
+      { type: 'draws', template_id: template.id }
+    else
+      { type: 'single', due_date: resolve_base_date.iso8601 }
+    end
   end
 
   # Recalculate totals and refresh unpaid draw amounts. Already-paid draws keep
@@ -96,6 +173,43 @@ class DealInvoiceService
   end
 
   private
+
+  def parse_date(value)
+    value.is_a?(Date) ? value : Date.parse(value.to_s)
+  rescue ArgumentError, TypeError
+    nil
+  end
+
+  def schedule_for_plan(plan, total, base_date)
+    case plan[:type].to_s
+    when 'draws'
+      template = @company.draw_schedule_templates.active.find_by(id: plan[:template_id])
+      raise ArgumentError, 'Pick a draw schedule' unless template
+
+      build_schedule(template, total, base_date, force: true)
+    when 'financed'
+      lender = [plan[:lender_amount].to_d, total.to_d].min.round(2)
+      raise ArgumentError, 'Enter what the lender is funding' unless lender.positive?
+
+      lender_due = parse_date(plan[:lender_due_date]) || (base_date + 30.days)
+      down = (total.to_d - lender).round(2)
+      lender_name = @deal.try(:lender_name).presence
+      draws = []
+      draws << plan_draw(1, 'Down payment', down, total, base_date) if down.positive?
+      draws << plan_draw(draws.size + 1, ['Lender funding', lender_name].compact.join(', '), lender, total, lender_due)
+      { 'plan' => 'financed', 'total_amount' => total.to_f, 'base_date' => base_date.iso8601, 'draws' => draws }
+    else
+      nil
+    end
+  end
+
+  def plan_draw(position, description, amount, total, due)
+    {
+      'position' => position, 'description' => description, 'amount' => amount.to_f,
+      'percentage' => total.to_d.positive? ? (amount / total.to_d * 100).round(4).to_f : 0,
+      'due_date' => due.iso8601, 'days_after_close' => 0, 'status' => 'pending', 'paid_amount' => 0.0
+    }
+  end
 
   def existing_invoice
     return nil if @deal.deal_invoice_id.blank?
@@ -138,9 +252,9 @@ class DealInvoiceService
     (base + tax_amount + addons).round(2)
   end
 
-  def build_schedule(template, total, base_date)
+  def build_schedule(template, total, base_date, force: false)
     return nil unless template
-    return nil if @deal.try(:payment_type).to_s == 'cash'
+    return nil if !force && @deal.try(:payment_type).to_s == 'cash'
 
     # Mirror calculate_total's fallback — without it, the schedule applies percentages
     # against $0 when the deal has no typed home line item.

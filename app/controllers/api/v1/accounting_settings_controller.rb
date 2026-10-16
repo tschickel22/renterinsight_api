@@ -84,14 +84,17 @@ class Api::V1::AccountingSettingsController < ApplicationController
         default_sales_tax_payable_account: { only: [:id, :account_number, :name] },
         state_tax_account: { only: [:id, :account_number, :name] },
         county_tax_account: { only: [:id, :account_number, :name] },
-        city_tax_account: { only: [:id, :account_number, :name] }
+        city_tax_account: { only: [:id, :account_number, :name] },
+        customer_deposits_account: { only: [:id, :account_number, :name] }
       }
     ).merge(
       allowed_form_states: @company.allowed_form_states || [],
       effective_tax_accounts: effective_tax_accounts_payload(settings),
       # How each state taxes a home sale before the dealer changes anything
       # (Tax::DealTax), so the editor can show the defaults and what differs.
-      home_sale_tax_defaults: home_sale_tax_defaults(settings)
+      home_sale_tax_defaults: home_sale_tax_defaults(settings),
+      # The account deposits actually go to when none is set (E78).
+      effective_deposits_account: settings.deposits_account&.slice(:id, :account_number, :name)
     )
   end
 
@@ -135,6 +138,7 @@ class Api::V1::AccountingSettingsController < ApplicationController
       :default_cogs_account_id,
       :default_sales_tax_payable_account_id,
       :default_bank_account_id,
+      :customer_deposits_account_id,
       :auto_post_invoices,
       :auto_post_payments,
       :auto_post_purchases,

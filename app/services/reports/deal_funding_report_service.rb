@@ -39,7 +39,7 @@ module Reports
       statuses = Array(status).map(&:to_s) & STATUSES
       rows = rows.select { |r| statuses.include?(r[:status]) } if statuses.any?
 
-      { deals: rows, summary: summary(rows) }
+      { deals: rows, summary: summary(rows).merge(deposits_held(location_id)) }
     end
 
     private
@@ -183,6 +183,15 @@ module Reports
         no_invoice_amount: no_invoice.sum { |r| r[:deal_amount] },
         received_this_month: received_since(rows.map { |r| r[:invoice_id] }.compact, this_month)
       }
+    end
+
+    # Deposits taken on deals that have no invoice yet (not approved), which
+    # the deal's invoice will absorb at approval.
+    def deposits_held(location_id)
+      receipts = @company.cash_receipts.posted.not_deleted.where.not(deal_id: nil).where('amount_unapplied > 0')
+                         .joins(:deal).where(deals: { deleted_at: nil, deal_invoice_id: nil })
+      receipts = receipts.where(deals: { location_id: location_id }) if location_id.present?
+      { deposits_held: receipts.sum(:amount_unapplied).to_f, deposits_held_deals: receipts.distinct.count(:deal_id) }
     end
 
     # Money applied to these deals' invoices since the first of the month, from

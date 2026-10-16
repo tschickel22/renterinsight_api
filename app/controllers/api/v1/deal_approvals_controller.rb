@@ -95,7 +95,8 @@ class Api::V1::DealApprovalsController < ApplicationController
       commission: @deal.try(:commission_amount),
       state_tax_rate: @deal.try(:state_tax_rate),
       county_tax_rate: @deal.try(:county_tax_rate),
-      city_tax_rate: @deal.try(:city_tax_rate)
+      city_tax_rate: @deal.try(:city_tax_rate),
+      funding: funding_payload
     )
   end
 
@@ -147,10 +148,34 @@ class Api::V1::DealApprovalsController < ApplicationController
   end
 
   # POST /api/v1/deal_approvals/:id/approve
+  # Optional funding (E78): { plan: { type: single|draws|financed, ... },
+  # receipts: [{ amount, payment_date, payment_method, bank_account_id,
+  # reference_number }] }. The plan shapes the deal's invoice; each receipt is
+  # money taken at closing, recorded against that invoice. Deposits already
+  # taken on the deal apply on their own. Everything is checked before the
+  # deal posts, so a bad row never leaves a half-approved deal.
   def approve
     if @deal.gl_posted?
       render json: { error: 'Deal already posted to GL' }, status: :unprocessable_entity
       return
+    end
+
+    funding = params[:funding].present? ? params.require(:funding).permit(
+      plan: %i[type due_date template_id lender_amount lender_due_date],
+      receipts: %i[amount payment_date payment_method bank_account_id reference_number memo]
+    ) : {}
+    plan = funding[:plan].presence&.to_h&.symbolize_keys
+    payments = DealPaymentService.new(@deal, user: current_user)
+    begin
+      plan_error = plan_problem(plan)
+      return render(json: { error: plan_error }, status: :unprocessable_entity) if plan_error
+
+      entries = Array(funding[:receipts]).map { |r| payments.build_entry(r) }
+    rescue DealPaymentService::Error => e
+      return render(json: { error: e.message }, status: :unprocessable_entity)
+    end
+    if entries.any? && !current_user.has_permission?('accounting', 'create')
+      return render(json: { error: 'Recording payments needs permission to create accounting entries' }, status: :forbidden)
     end
 
     service = Accounting::DealAccountingService.new(@deal)
@@ -173,12 +198,26 @@ class Api::V1::DealApprovalsController < ApplicationController
       # Auto-create invoice with draw schedule. GL posting succeeded; treat invoice
       # creation as best-effort so a failure here never reverts the approval.
       invoice_id = nil
+      invoice = nil
+      funding_errors = []
       begin
-        invoice = DealInvoiceService.new(@deal, user: current_user).create_invoice!
+        invoice = DealInvoiceService.new(@deal, user: current_user).create_invoice!(plan: plan)
         invoice_id = invoice&.id
         Rails.logger.info("[DealApprovals] Auto-created invoice #{invoice_id} for deal #{@deal.id}") if invoice_id
       rescue => e
         Rails.logger.error("[DealApprovals] Invoice creation failed for deal #{@deal.id}: #{e.message}")
+        funding_errors << "The deal's invoice could not be made (#{e.message}), so no payments were recorded. Use Create invoice on the Deal Funding report."
+      end
+
+      receipts = []
+      if invoice
+        entries.each do |entry|
+          receipts << payments.record!(entry, invoice: invoice.reload)
+        rescue => e
+          Rails.logger.error("[DealApprovals] Receipt failed for deal #{@deal.id}: #{e.message}")
+          funding_errors << "A payment of #{entry.amount.to_s('F')} was not recorded: #{e.message}"
+        end
+        invoice.reload
       end
 
       render json: {
@@ -186,6 +225,14 @@ class Api::V1::DealApprovalsController < ApplicationController
         gl_posted: @deal.gl_posted?,
         gl_journal_entry_id: @deal.gl_journal_entry_id,
         deal_invoice_id: invoice_id || @deal.deal_invoice_id,
+        funding: invoice && {
+          total: invoice.total.to_f,
+          received: invoice.amount_paid.to_f,
+          owed: invoice.amount_due.to_f,
+          receipts_recorded: receipts.size,
+          errors: funding_errors
+        },
+        funding_errors: funding_errors,
         tax: result[:tax],
         lines_count: result[:lines_count],
         message: result[:message]
@@ -273,6 +320,39 @@ class Api::V1::DealApprovalsController < ApplicationController
   end
 
   private
+
+  # What the approval screen needs to record the payment plan and money
+  # received: the invoice's parts, deposits already held, the plans on offer.
+  def funding_payload
+    invoices = DealInvoiceService.new(@deal)
+    payments = DealPaymentService.new(@deal)
+    held = payments.held_deposits.to_a
+    templates = @company.draw_schedule_templates.active.where(location_id: [nil, @deal.location_id]).order(:name)
+    {
+      parts: invoices.total_parts,
+      default_plan: invoices.default_plan,
+      payment_type: @deal.payment_type,
+      lender_name: @deal.lender_name,
+      financed_amount: @deal.financed_amount&.to_f,
+      close_date: (@deal.actual_close_date || @deal.expected_close_date || Date.current).iso8601,
+      deposits: held.map { |r| { id: r.id, receipt_number: r.receipt_number, receipt_date: r.receipt_date, amount: r.amount_unapplied.to_f, payment_method: r.payment_method } },
+      deposits_total: held.sum { |r| r.amount_unapplied.to_d }.to_f,
+      draw_templates: templates.map { |t| { id: t.id, name: t.name, is_default: t.is_default, location_id: t.location_id } },
+      can_record_payments: current_user.has_permission?('accounting', 'create')
+    }
+  end
+
+  def plan_problem(plan)
+    return nil if plan.blank?
+    return 'Pick a payment plan' unless DealInvoiceService::PLAN_TYPES.include?(plan[:type].to_s)
+
+    case plan[:type].to_s
+    when 'draws'
+      'Pick a draw schedule' unless @company.draw_schedule_templates.active.exists?(id: plan[:template_id])
+    when 'financed'
+      'Enter what the lender is funding' unless plan[:lender_amount].to_d.positive?
+    end
+  end
 
   def authorize_accounting_update!
     authorize_action!('accounting', 'update') || throw(:abort)

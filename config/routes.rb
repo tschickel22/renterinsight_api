@@ -2404,6 +2404,7 @@ Rails.application.routes.draw do
         member do
           post :record_payment, to: 'deal_payments#record_payment'
           post :create_invoice, to: 'deal_payments#create_invoice'
+          get :funding, to: 'deal_payments#funding'
         end
         resource :accounting, controller: 'deal_accounting', only: [:show] do
           post :calculate

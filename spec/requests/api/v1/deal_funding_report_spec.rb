@@ -22,6 +22,9 @@ RSpec.describe 'Deal Funding report', type: :request do
     company.chart_of_accounts.create!(account_number: '4090', name: 'Sales Revenue', account_type: 'revenue', normal_balance: 'credit')
   end
 
+  let(:bank_gl) { company.chart_of_accounts.where(account_type: 'asset', is_header: false).order(:account_number).first }
+  let(:bank) { company.bank_accounts.create!(bank_name: 'Chase', account_type: 'checking', account_purpose: 'sync_only', chart_of_account: bank_gl) }
+
   before do
     AccountingSettings.for_company(company).update!(default_ar_account: ar, default_sales_revenue_account: revenue, auto_post_deals: false)
   end
@@ -50,7 +53,8 @@ RSpec.describe 'Deal Funding report', type: :request do
       { 'position' => 2, 'description' => 'At delivery', 'amount' => 90_000, 'due_date' => (Date.current + 30).to_s, 'status' => 'pending', 'paid_amount' => 0 }
     ] })
 
-    post "/api/v1/deals/#{deal.id}/record_payment", headers: headers, params: { amount: 4000, payment_date: Date.current.to_s }.to_json
+    post "/api/v1/deals/#{deal.id}/record_payment", headers: headers,
+                                                   params: { amount: 4000, payment_date: Date.current.to_s, bank_account_id: bank.id }.to_json
     expect(response).to have_http_status(:ok), response.body
 
     row = report['deals'].find { |r| r['id'] == deal.id }
