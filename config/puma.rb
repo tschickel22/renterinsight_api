@@ -81,4 +81,13 @@ if ENV.fetch("RAILS_ENV", "development") != "development"
   rescue LoadError
     # puma_worker_killer not available (dev environment)
   end
+
+  # Server watch (backlog E79): record this start (a start on the same code is
+  # a crash, and is reported) and watch the container's memory.
+  after_booted do
+    Thread.new do
+      Rails.application.executor.wrap { Ops::Watch.booted! }
+    end
+    Ops::Watch.start_memory_watch
+  end
 end

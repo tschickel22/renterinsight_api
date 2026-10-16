@@ -183,6 +183,13 @@ default: &default
     queue: default
     schedule: every day at 1pm
 
+  # Server watch (backlog E79): error spikes, failing jobs, and the jobs
+  # heartbeat the outside watcher reads. Tells Tom, not customers.
+  ops_check:
+    class: OpsCheckJob
+    queue: default
+    schedule: every 5 minutes
+
 production:
   <<: *default
 
