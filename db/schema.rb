@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_16_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5144,6 +5144,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_150000) do
     t.index ["user_id"], name: "index_offline_sync_logs_on_user_id"
   end
 
+  create_table "ops_marks", force: :cascade do |t|
+    t.string "key", null: false
+    t.datetime "at", null: false
+    t.string "note"
+    t.index ["key"], name: "index_ops_marks_on_key", unique: true
+  end
+
   create_table "package_templates", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -6501,6 +6508,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_150000) do
     t.datetime "updated_at", null: false
     t.index ["catalog_source_id", "created_at"], name: "index_scrape_runs_on_catalog_source_id_and_created_at"
     t.index ["catalog_source_id"], name: "index_scrape_runs_on_catalog_source_id"
+  end
+
+  create_table "server_boots", force: :cascade do |t|
+    t.string "service", null: false
+    t.string "commit"
+    t.string "instance"
+    t.datetime "booted_at", null: false
+    t.index ["service", "booted_at"], name: "index_server_boots_on_service_and_booted_at"
+  end
+
+  create_table "server_errors", force: :cascade do |t|
+    t.datetime "occurred_at", null: false
+    t.string "request_method"
+    t.string "path"
+    t.integer "status"
+    t.string "error_class"
+    t.text "message"
+    t.string "request_id"
+    t.index ["occurred_at"], name: "index_server_errors_on_occurred_at"
   end
 
   create_table "service_issue_templates", force: :cascade do |t|

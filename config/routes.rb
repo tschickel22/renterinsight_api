@@ -29,6 +29,7 @@ Rails.application.routes.draw do
 
   # Health check
   get 'up', to: 'rails/health#show', as: :rails_health_check
+  get 'up/jobs', to: 'jobs_health#show'
 
   # MCP connector for Claude and ChatGPT (backlog E53): OAuth 2.1 authorization
   # server, its discovery documents, and the MCP endpoint itself. Root level

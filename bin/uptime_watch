@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The outside watcher (backlog E79), run every few minutes by a Render cron
+# job, apart from the web server. A server that is down cannot report itself,
+# so this checks it from outside and emails and texts Ops::Alert's recipients.
+#
+#   WATCH_URL      the server's address, e.g. https://api.dealertide.com
+#
+# Two misses 30 seconds apart count as down (one can be a blip). While down it
+# keeps checking and says when it is back, up to ~25 minutes, then exits so the
+# next run reports again. Background jobs are checked the same way (/up/jobs).
+require_relative '../config/environment'
+require 'net/http'
+
+url = ENV.fetch('WATCH_URL').chomp('/')
+
+ok = lambda do |path|
+  res = Net::HTTP.get_response(URI("#{url}#{path}"))
+  res.code == '200'
+rescue StandardError
+  false
+end
+
+down = lambda do |path|
+  next false if ok.(path)
+
+  sleep 30
+  !ok.(path)
+end
+
+[['/up', 'the server is not answering', 'the server is answering again', 'Customers cannot use the app.'],
+ ['/up/jobs', 'background jobs have stopped', 'background jobs are running again',
+  'Reminders, syncs and scheduled work are not running. The app itself still answers.']]
+  .each do |path, what, again, effect|
+  next unless down.(path)
+
+  started = Time.now
+  Ops::Alert.deliver(what, "#{url}#{path} has not answered for over 30 seconds (#{started.utc.strftime('%H:%M')} UTC). #{effect}")
+  back = false
+  50.times do
+    sleep 30
+    break back = true if ok.(path)
+  end
+  minutes = ((Time.now - started) / 60).ceil
+  Ops::Alert.deliver(back ? again : "still down: #{what}",
+                     back ? "Back after about #{minutes} #{'minute'.pluralize(minutes)}." : "Down for #{minutes} minutes and counting.")
+end
