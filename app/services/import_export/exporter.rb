@@ -4,8 +4,10 @@ require 'csv'
 require 'caxlsx'
 
 module ImportExport
-  # Generates CSV/XLSX/JSON files from a company-scoped query.
-  # The S3 upload step is wired in Chunk C; for now files land in tmp/exports.
+  # Generates CSV/XLSX/JSON files from a company-scoped query. The file is
+  # built in tmp and then kept in the private bucket (PrivateFiles): the job
+  # runs on the background worker, which does not share a disk with the web
+  # server that serves the download.
   class Exporter
     # Raised when an export would exceed the tenant's row cap. Refusing beats
     # truncating: a silently short file reads as a complete one.
@@ -61,7 +63,7 @@ module ImportExport
         status: 'completed',
         completed_at: Time.current,
         row_count: records.size,
-        file_url: path
+        file_url: store!(path)
       )
 
       alert_platform_if_large!(records.size)
@@ -180,6 +182,21 @@ module ImportExport
       ExportAlertMailer.large_export(@job.id).deliver_later
     rescue StandardError => e
       Rails.logger.warn "[ImportExport::Exporter] Failed to send large-export alert for job ##{@job.id}: #{e.message}"
+    end
+
+    CONTENT_TYPES = {
+      'csv' => 'text/csv',
+      'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'json' => 'application/json'
+    }.freeze
+
+    # => the file's reference in the private bucket. The local copy goes.
+    def store!(path)
+      ext = File.extname(path).delete('.')
+      PrivateFiles.put(File.binread(path), key: "exports/#{@job.company_id}/#{File.basename(path)}",
+                                           content_type: CONTENT_TYPES.fetch(ext, 'application/octet-stream'))
+    ensure
+      FileUtils.rm_f(path)
     end
 
     def output_path(ext)
