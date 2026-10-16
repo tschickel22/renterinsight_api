@@ -147,12 +147,14 @@ module Truebuild
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **check_with)
         spent += verdict['cost_usd'].to_f
-        result, layer, verdict, matched = ColorMatch.settle(source[:bytes], result, layer, verdict, mask, check_with,
-                                                            surface: render.selection.first&.dig('surface'),
-                                                            value: render.selection.first&.dig('value'))
-        spent += matched
+        result, layer, verdict, touched, outline_redone = Touchup.settle(source[:bytes], result, layer, verdict, mask, check_with,
+                                                                         surface: render.selection.first&.dig('surface'),
+                                                                         value: render.selection.first&.dig('value'),
+                                                                         key: render.selection_key, photo: render.source_url)
+        spent += touched
         notes << verdict['note'] if verdict['note'].present?
-        break if verdict['ok'] || attempt == tries.size - 1
+        # The outline is at fault and is being redone; its redo cuts this drawing again.
+        break if verdict['ok'] || outline_redone || attempt == tries.size - 1
       end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
@@ -259,13 +261,14 @@ module Truebuild
       layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask), blocked: blocked_image(mask, source[:bytes]))
       verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: surface, value: value, **check_with)
       spent = verdict['cost_usd'].to_f
-      drawn, layer, verdict, matched = ColorMatch.settle(source[:bytes], drawn, layer, verdict, mask, check_with, surface: surface, value: value)
-      spent += matched
+      drawn, layer, verdict, touched = Touchup.settle(source[:bytes], drawn, layer, verdict, mask, check_with, surface: surface, value: value,
+                                                                                                    key: render.selection_key, photo: render.source_url)
+      spent += touched
       attrs = { status: verdict['ok'] ? 'done' : 'rejected', cost_usd: (render.cost_usd.to_f + spent).round(4), latency_ms: 0,
                 mask_coverage: layer[:coverage], error: (verdict['ok'] ? nil : "Hidden: #{verdict['note'] || 'failed its check'}"),
                 layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
                 usage: render.usage.merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'), 'outlined' => mask.present?) }
-      attrs[:image_url] = store(render, drawn[:bytes], drawn[:mime], suffix: 'matched') if verdict['color_matched']
+      attrs[:image_url] = store(render, drawn[:bytes], drawn[:mime], suffix: 'touched') if verdict['touched']
       render.update!(attrs)
     end
 

@@ -31,19 +31,8 @@ RSpec.describe Truebuild::Trueview::ColorMatch do
     expect(described_class.correct(photo.jpegsave_buffer, black.pngsave_buffer, mask, '#eff0e5')).to be_nil
   end
 
-  it 'keeps a corrected drawing only when its check passes' do
-    result = { bytes: 'drawn', mime: 'image/jpeg' }
-    held = { 'ok' => false, 'note' => 'too dark' }
-    mask_row = instance_double(TruebuildSurfaceMask, present?: true)
-
-    allow(described_class).to receive(:attempt)
-      .and_return({ drawn: { bytes: 'fixed', mime: 'image/png' }, layer: { bytes: 'L' }, verdict: { 'ok' => true, 'cost_usd' => 0.01, 'color_matched' => true } })
-    got, _layer, verdict, cost = described_class.settle('src', result, { bytes: 'old' }, held, mask_row, { hex: '#686155' }, surface: 'Cabinets', value: 'Timberwolf')
-    expect([got[:bytes], verdict['ok'], cost]).to eq(['fixed', true, 0.01])
-
-    allow(described_class).to receive(:attempt)
-      .and_return({ drawn: { bytes: 'fixed' }, layer: {}, verdict: { 'ok' => false, 'cost_usd' => 0.01 } })
-    got, _layer, verdict, cost = described_class.settle('src', result, { bytes: 'old' }, held, mask_row, { hex: '#686155' }, surface: 'Cabinets', value: 'Timberwolf')
-    expect([got[:bytes], verdict, cost]).to eq(['drawn', held, 0.01])
+  it 'writes a learned linear color back as a hex a sample would have' do
+    linear = Truebuild::Trueview::Tint.target_linear('#686155')
+    expect(described_class.to_hex(linear)).to eq('#686155')
   end
 end

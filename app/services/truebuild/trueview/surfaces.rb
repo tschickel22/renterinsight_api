@@ -155,11 +155,12 @@ module Truebuild
       # then cut every drawing of that surface in the photo again (free).
       def redo!(mask, note)
         source = Trueview.fetch_source(mask.source_url)
-        pattern = mask.usage['pattern_redo']
+        once = mask.usage.slice('pattern_redo', 'coverage_redo')
         mask.destroy!
         fresh = find!(mask.source_url, source[:bytes], mask.surface, correction: note)
-        # Redone for a pattern (Patterns): never again for one, or it could loop.
-        fresh.update_columns(usage: fresh.usage.merge('pattern_redo' => true)) if pattern && fresh.persisted?
+        # Redone for a pattern (Patterns) or a missed part (Touchup): never
+        # again for the same reason, or it could loop.
+        fresh.update_columns(usage: fresh.usage.merge(once)) if once.any? && fresh.persisted?
         # Held-back drawings too: a wrong outline is often why they were held.
         TruebuildRender.where(source_url: mask.source_url, purpose: 'layer', status: %w[done rejected]).where.not(image_url: nil)
                        .select { |r| category(r.selection.first&.dig('surface')) == mask.surface }.each do |old|
