@@ -119,7 +119,7 @@ module Api
       # nightly run or an admin), whether or not tours are paused.
       def for_check
         tours = Tour.active.ordered.includes(:steps)
-        render json: { tours: tours.map { |t| { id: t.id, key: t.key, name: t.name, steps: t.steps.map { |s|
+        render json: { tours: tours.map { |t| { id: t.id, key: t.key, name: t.name, menu_paths: t.menu_paths, steps: t.steps.map { |s|
           { position: s.position, route: s.route, selector: s.selector, click_required: s.click_required }
         } } } }
       end
@@ -296,6 +296,7 @@ module Api
           module:        tour.knowledge_module&.key,
           category:      tour.knowledge_module&.category,
           step_count:   tour.steps.size,
+          menu_paths:   tour.menu_paths,
           approved:     tour.approved_at.present?,
           completed:    !!completion&.completed_at,
           dismissed:    !!completion&.dismissed_at,
