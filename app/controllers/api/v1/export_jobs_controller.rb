@@ -115,11 +115,13 @@ module Api
                        "(#{@job.row_count} rows)"
         )
 
-        if File.exist?(@job.file_url.to_s)
+        if @job.file_url.to_s.start_with?(PrivateFiles::SCHEME)
+          send_data PrivateFiles.read(@job.file_url, company_id: @company.id),
+                    filename: File.basename(PrivateFiles.locate(@job.file_url).last), disposition: 'attachment'
+        elsif File.exist?(@job.file_url.to_s)
+          # Exports made before they were kept in the private bucket.
           send_file @job.file_url, disposition: 'attachment'
         else
-          # Exports are written to the instance's local disk, which a deploy or
-          # restart clears. There is no S3 copy to fall back to.
           render json: { error: 'This export file is no longer available. Run the export again.' }, status: :gone
         end
       end
