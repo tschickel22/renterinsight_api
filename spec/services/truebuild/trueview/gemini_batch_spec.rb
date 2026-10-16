@@ -42,4 +42,12 @@ RSpec.describe Truebuild::Trueview::GeminiBatch do
     expect(ok.keys).to eq(['r1'])
     expect(bad).to eq('r2' => 'blocked')
   end
+
+  it 'reads a streamed results file a drawing at a time' do
+    text = [{ key: 'r1', response: { 'candidates' => [] } }.to_json, { key: 'r2', error: { message: 'blocked' } }.to_json].join("\n")
+    pieces = text.scan(/.{1,7}/m).map { |part| part.dup.tap { |p| p.define_singleton_method(:code) { 200 } } }
+    stub = allow(HTTParty).to receive(:get).with(%r{files/out:download}, hash_including(stream_body: true))
+    pieces.reduce(stub) { |s, part| s.and_yield(part) }.and_return(reply(200, ''))
+    expect(described_class.each_result('files/out').to_a).to eq([['r1', { 'candidates' => [] }, nil], ['r2', nil, 'blocked']])
+  end
 end
