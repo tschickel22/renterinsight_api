@@ -104,4 +104,19 @@ RSpec.describe 'Deal Funding report', type: :request do
     expect(deal.reload.gl_posted_at).to be_present
     expect(company.invoices.find(deal.deal_invoice_id).total).to eq(70_000)
   end
+
+  it "lists a deal's invoice on its Invoices tab whatever location is picked" do
+    deal = approved_deal
+    invoice = DealInvoiceService.new(deal).create_invoice!
+    other = company.locations.create!(name: 'Other lot')
+    company.invoices.create!(location: other, contact: company.contacts.create!(first_name: 'Z', email: "z-#{SecureRandom.hex(3)}@example.com"),
+                             invoice_number: "INV-X-#{SecureRandom.hex(2)}", invoice_date: Date.current, due_date: Date.current, status: 'sent')
+
+    get '/api/v1/invoices', headers: headers.merge('X-Location-ID' => other.id.to_s), params: { deal_id: deal.id }
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body).map { |i| i['id'] }).to eq([invoice.id])
+
+    get '/api/v1/invoices', headers: headers.merge('X-Location-ID' => other.id.to_s)
+    expect(JSON.parse(response.body).map { |i| i['id'] }).not_to include(invoice.id)
+  end
 end

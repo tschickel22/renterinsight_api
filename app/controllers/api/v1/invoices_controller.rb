@@ -10,7 +10,10 @@ class Api::V1::InvoicesController < ApplicationController
     # Apply location selector filter (if user selected a specific location)
     # Note: For invoices, we don't enforce strict RBAC location filtering
     # because invoices may not always have a location_id assigned
-    invoices = invoices.for_current_location
+    # A deal's own invoices (its Invoices tab) show whatever location is picked
+    # in the header: the deal opens either way, and hiding its invoice made the
+    # tab read "0" for a deal at another location.
+    invoices = invoices.for_current_location unless params[:deal_id].present?
     
     # IMPORTANT: Exclude future loan invoices by default (unless explicitly requested)
     # This prevents loan payment schedules from cluttering the invoice list
