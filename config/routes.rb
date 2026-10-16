@@ -2401,6 +2401,9 @@ Rails.application.routes.draw do
       get 'inventory/reports/salesperson_gp_pipeline', to: 'inventory_reports#salesperson_gp_pipeline'
 
       resources :deals, only: [] do
+        collection do
+          get :open_balances, to: 'deal_payments#open_balances'
+        end
         member do
           post :record_payment, to: 'deal_payments#record_payment'
           post :create_invoice, to: 'deal_payments#create_invoice'

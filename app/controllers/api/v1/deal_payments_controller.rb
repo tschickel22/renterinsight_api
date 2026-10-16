@@ -2,7 +2,7 @@
 
 class Api::V1::DealPaymentsController < ApplicationController
   before_action :set_company_scope
-  before_action :load_deal
+  before_action :load_deal, except: [:open_balances]
 
   # POST /api/v1/deals/:id/record_payment
   # Money received from the customer on this deal. Before the deal has an
@@ -47,6 +47,14 @@ class Api::V1::DealPaymentsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/deals/open_balances?contact_id=&project_id=
+  # Deals a customer payment could go toward, for Record Income.
+  def open_balances
+    return unless authorize_action!('accounting', 'read')
+
+    render json: { deals: DealPaymentService.open_deals_for(@company, contact_id: params[:contact_id], project_id: params[:project_id]) }
   end
 
   # GET /api/v1/deals/:id/funding

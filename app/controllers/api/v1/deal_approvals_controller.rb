@@ -96,6 +96,7 @@ class Api::V1::DealApprovalsController < ApplicationController
       state_tax_rate: @deal.try(:state_tax_rate),
       county_tax_rate: @deal.try(:county_tax_rate),
       city_tax_rate: @deal.try(:city_tax_rate),
+      tax_preview: tax_preview,
       funding: funding_payload
     )
   end
@@ -140,7 +141,9 @@ class Api::V1::DealApprovalsController < ApplicationController
         pack_amount: @deal.try(:pack_amount),
         selling_price: @deal.try(:selling_price),
         gl_posted: @deal.try(:gl_posted) || false,
-        commission_posted: @deal.try(:commission_posted) || false
+        commission_posted: @deal.try(:commission_posted) || false,
+        tax_preview: tax_preview,
+        funding: funding_payload
       )
     else
       render json: { errors: @deal.errors }, status: :unprocessable_entity
@@ -340,6 +343,15 @@ class Api::V1::DealApprovalsController < ApplicationController
       draw_templates: templates.map { |t| { id: t.id, name: t.name, is_default: t.is_default, location_id: t.location_id } },
       can_record_payments: current_user.has_permission?('accounting', 'create')
     }
+  end
+
+  # What approval will post as sales tax, by the taxing state's rules, so the
+  # screen previews the same figure instead of price times the typed rates.
+  def tax_preview
+    Accounting::DealAccountingService.new(@deal).sales_tax_preview
+  rescue => e
+    Rails.logger.warn("[DealApprovals] Tax preview failed for deal #{@deal.id}: #{e.message}")
+    nil
   end
 
   def plan_problem(plan)

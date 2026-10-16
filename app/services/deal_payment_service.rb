@@ -97,6 +97,47 @@ class DealPaymentService
     AccountingSettings.for_company(@company).deposits_account
   end
 
+  # Deals a customer payment could belong to (Record Income, step 5): the
+  # project's deal, or deals where the contact is the buyer or co-buyer.
+  # An approved deal counts while its invoice still owes money; a deal not yet
+  # approved and not lost can take a deposit.
+  def self.open_deals_for(company, contact_id: nil, project_id: nil)
+    scope = company.deals.where(deleted_at: nil)
+    project = company.projects.not_deleted.find_by(id: project_id) if project_id.present?
+    if project
+      scope = scope.where(id: project.deal_id)
+    elsif contact_id.present?
+      scope = scope.where(contact_id: contact_id).or(scope.where(co_applicant_contact_id: contact_id))
+    else
+      return []
+    end
+
+    deals = scope.includes(:contact, :account).order(updated_at: :desc).limit(25).to_a
+    invoices = company.invoices.where(id: deals.map(&:deal_invoice_id).compact).index_by(&:id)
+    deals.filter_map do |deal|
+      next if deal.stage_is_lost?
+
+      invoice = invoices[deal.deal_invoice_id]
+      approved = deal.gl_posted_at.present?
+      owed = invoice&.amount_due&.to_d
+      next if approved && invoice && !owed.positive?
+
+      next_draw = nil
+      if invoice
+        draw = Array(invoice.draw_schedule.is_a?(Hash) ? invoice.draw_schedule['draws'] : nil)
+               .sort_by { |d| d['position'].to_i }.find { |d| d['status'].to_s != 'paid' }
+        next_draw = draw && { description: draw['description'], due_date: draw['due_date'],
+                              balance: (draw['amount'].to_d - draw['paid_amount'].to_d).to_f }
+      end
+      {
+        id: deal.id, deal_number: deal.deal_number, name: deal.name, customer_name: deal.customer_display_name,
+        approved: approved, owed: owed&.to_f, next_draw: next_draw,
+        # What a payment recorded now becomes on this deal.
+        takes: approved ? 'payment' : 'deposit'
+      }
+    end.first(10)
+  end
+
   private
 
   def default_memo(invoice)

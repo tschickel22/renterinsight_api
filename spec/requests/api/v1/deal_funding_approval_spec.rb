@@ -131,4 +131,45 @@ RSpec.describe 'Deal funding at approval', type: :request do
     expect(settings.update(customer_deposits_account_id: header.id)).to be(false)
     expect(settings.update(customer_deposits_account_id: deposits.id)).to be(true)
   end
+
+  describe 'Record Income for a customer with a deal' do
+    let(:contact) { company.contacts.create!(first_name: 'Ana', last_name: 'Diaz', email: "ana-#{SecureRandom.hex(3)}@example.com") }
+
+    def record_income(**extra)
+      post '/api/v1/record-transactions', headers: headers, params: {
+        type: 'income', amount: 3000, payment_account_id: bank_gl.id, category_account_id: revenue.id
+      }.merge(extra).to_json
+    end
+
+    before { bank && deal.update!(contact: contact) }
+
+    it 'lists the deal and records the money on it instead of as revenue' do
+      get '/api/v1/deals/open_balances', headers: headers, params: { contact_id: contact.id }
+      expect(body['deals'].map { |d| [d['id'], d['takes']] }).to eq([[deal.id, 'deposit']])
+
+      record_income(apply_to_deal_id: deal.id, category_account_id: nil)
+      expect(response).to have_http_status(:created), response.body
+      expect(body['deal_payment']).to include('held' => 3000.0)
+      expect(balance(revenue.id)).to eq(0)
+      expect(balance(deposits.id, deal_id: deal.id)).to eq(-3000)
+
+      approve(plan: { type: 'single' })
+      get '/api/v1/deals/open_balances', headers: headers, params: { contact_id: contact.id }
+      expect(body['deals'].first).to include('takes' => 'payment', 'owed' => 97_000.0)
+
+      record_income(apply_to_deal_id: deal.id)
+      expect(body['deal_payment']).to include('applied' => 3000.0, 'owed' => 94_000.0)
+      expect(balance(revenue.id)).to eq(-100_000) # only the sale, nothing from the payments
+    end
+
+    it 'refuses a deposit account that is not a bank account, and another company\'s deal' do
+      record_income(apply_to_deal_id: deal.id, payment_account_id: revenue.id)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(body['error']).to match(/bank account/)
+
+      other = create(:company)
+      record_income(apply_to_deal_id: other.deals.create!(name: 'X', account: other.accounts.create!(name: 'Y')).id)
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
 end

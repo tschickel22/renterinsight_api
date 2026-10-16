@@ -37,11 +37,19 @@ class Api::V1::RecordTransactionsController < ApplicationController
     category_account = @company.chart_of_accounts.find_by(id: params[:category_account_id])
     payment_account = @company.chart_of_accounts.find_by(id: params[:payment_account_id])
 
-    unless category_account && payment_account
+    applying = type == 'income' && params[:apply_to_deal_id].present?
+    unless (category_account || applying) && payment_account
       return render json: { error: 'Both category_account_id and payment_account_id are required' }, status: :bad_request
     end
 
     location_id = params[:location_id].presence || Current.location_id
+
+    # Money a customer paid toward a deal is not new revenue: approval already
+    # booked the sale. Record it on the deal instead (a payment on its
+    # invoice, or a deposit if the deal is not approved yet).
+    if type == 'income' && params[:apply_to_deal_id].present?
+      return record_deal_payment(amount, payment_account)
+    end
 
     project = nil
     if params[:project_id].present?
@@ -138,5 +146,36 @@ class Api::V1::RecordTransactionsController < ApplicationController
     else
       render json: { errors: je.errors }, status: :unprocessable_entity
     end
+  end
+
+  private
+
+  def record_deal_payment(amount, payment_account)
+    deal = @company.deals.where(deleted_at: nil).find_by(id: params[:apply_to_deal_id])
+    return render(json: { error: 'Deal not found' }, status: :unprocessable_entity) unless deal
+    return unless authorize_action!('accounting', 'create')
+
+    bank = @company.bank_accounts.find_by(chart_of_account_id: payment_account.id)
+    unless bank
+      return render json: { error: "#{payment_account.name} isn't linked to a bank account, so it can't take a deal payment. Pick a bank account." },
+                    status: :unprocessable_entity
+    end
+
+    service = DealPaymentService.new(deal, user: current_user)
+    entry = service.build_entry(
+      amount: amount, payment_date: params[:date].presence || Date.current, payment_method: params[:payment_method].presence || 'check',
+      bank_account_id: bank.id, reference_number: params[:reference_number], memo: params[:memo]
+    )
+    receipt = service.record!(entry)
+    invoice = @company.invoices.find_by(id: deal.reload.deal_invoice_id) if deal.deal_invoice_id
+    render json: {
+      message: receipt.amount_applied.to_d.positive? ? 'Payment recorded on the deal' : 'Deposit recorded on the deal',
+      deal_payment: {
+        deal_id: deal.id, deal_number: deal.deal_number, receipt_id: receipt.id, receipt_number: receipt.receipt_number,
+        applied: receipt.amount_applied.to_f, held: receipt.amount_unapplied.to_f, owed: invoice&.amount_due&.to_f
+      }
+    }, status: :created
+  rescue DealPaymentService::Error, ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 end
