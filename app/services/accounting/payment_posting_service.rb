@@ -14,6 +14,7 @@ module Accounting
     def post!(force: false)
       return unless force || should_post?
       return if already_posted?
+      return unless receivable_on_books?
 
       settings = AccountingSettings.for_company(@company)
       ar_account = settings.default_ar_account
@@ -151,6 +152,46 @@ module Accounting
     end
 
     private
+
+    # A payment credits AR, so what it pays must already be in AR, or AR goes
+    # negative. Most dealers had invoice and payment posting off until
+    # 2026-10-16; an invoice from before then that gets paid now is posted
+    # first. A deal's invoice is in AR from approval, and one carried over from
+    # QuickBooks from its opening entry. A payment that pays no invoice (a loan
+    # payment) is left alone: loans keep their own balance, not AR.
+    def receivable_on_books?
+      invoices = paid_invoices
+      if invoices.empty?
+        Rails.logger.info("[Accounting] Payment #{@payment.id} pays no invoice; not posted")
+        return false
+      end
+
+      if invoices.any? { |i| i.loan_id.present? }
+        Rails.logger.info("[Accounting] Payment #{@payment.id} pays a loan installment; not posted")
+        return false
+      end
+
+      invoices.all? do |invoice|
+        next true if invoice_in_ar?(invoice)
+
+        Accounting::InvoicePostingService.new(invoice).post!
+        invoice_in_ar?(invoice).tap do |ok|
+          Rails.logger.warn("[Accounting] Payment #{@payment.id} not posted: invoice #{invoice.id} could not be posted") unless ok
+        end
+      end
+    end
+
+    def paid_invoices
+      ids = PaymentApplication.where(payment_id: @payment.id, applicable_type: 'Invoice').pluck(:applicable_id)
+      ids << @payment.payable_id if @payment.payable_type == 'Invoice'
+      @company.invoices.where(id: ids.compact.uniq).to_a
+    end
+
+    def invoice_in_ar?(invoice)
+      invoice.accounting_import_id.present? ||
+        @company.deals.where(deal_invoice_id: invoice.id).exists? ||
+        @company.journal_entries.where(source_entity_type: 'Invoice', source_entity_id: invoice.id, is_void: false).exists?
+    end
 
     def should_post?
       settings = AccountingSettings.for_company(@company)
