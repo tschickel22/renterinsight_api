@@ -12,9 +12,10 @@ module Reports
   # stored draw schedule.
   #
   # The books check compares the invoice with the ledger: accounts receivable
-  # tagged to the deal (closing entry, sales tax, later adjustments) less what
-  # has been paid on the invoice. Payments never carry the deal on their AR
-  # line, so they are taken from the invoice instead. A difference means the
+  # tagged to the deal (closing entry, sales tax, later adjustments) less the
+  # payments on the invoice that posted to the ledger. Payments never carry
+  # the deal on their AR line, so they are matched through the invoice; one
+  # saved on the invoice without posting shows up as a difference. A difference means the
   # invoice and the books disagree (fees billed but never posted, a credit memo,
   # a change after approval that only one side picked up).
   class DealFundingReportService
@@ -30,6 +31,7 @@ module Reports
       deals = scoped_deals(location_id: location_id, start_date: start_date, end_date: end_date, payment_type: payment_type).to_a
       invoices = @company.invoices.where(id: deals.map(&:deal_invoice_id).compact, is_deleted: [false, nil]).index_by(&:id)
       ledger_ar = ledger_ar_by_deal(deals.map(&:id))
+      @posted_paid = posted_paid_by_invoice(invoices.keys)
       projects = @company.projects.not_deleted.where(deal_id: deals.map(&:id)).index_by(&:deal_id)
       job_costs = ProjectJobCostReportService.new(@company).job_cost_by_project(projects.values.map(&:id))
 
@@ -72,7 +74,11 @@ module Reports
       next_draw = unpaid.min_by { |d| [d[:due_date] || Date.new(9999), d[:position].to_i] }
       closed_on = deal.actual_close_date || deal.won_at&.to_date
 
-      books_owed = ledger_ar && (ledger_ar - paid)
+      # Only money that reached the ledger lowers what the books say is owed:
+      # a payment saved on the invoice but never posted leaves the books owed.
+      posted_paid = invoice ? @posted_paid.fetch(invoice.id, 0.to_d) : 0.to_d
+      unposted = invoice ? [paid - posted_paid, 0.to_d].max : 0.to_d
+      books_owed = ledger_ar && (ledger_ar - posted_paid)
       difference = books_owed && (books_owed - owed)
 
       {
@@ -104,7 +110,8 @@ module Reports
         job_cost: project && job_costs.fetch(project.id, 0.to_d).to_f,
         books_owed: books_owed&.to_f,
         books_difference: difference&.to_f,
-        books_check: books_check(invoice, ledger_ar, difference)
+        unposted_payments: unposted.to_f,
+        books_check: unposted > TOLERANCE ? 'unposted_payment' : books_check(invoice, ledger_ar, difference)
       }
     end
 
@@ -144,6 +151,30 @@ module Reports
                   end
         }
       end
+    end
+
+    # Money applied to each invoice whose entry is on the ledger: posted
+    # receipts (and a deposit applied, which moves deposits to AR) and
+    # completed payments that posted. Their AR credits never name the deal,
+    # so they are matched through the invoice.
+    def posted_paid_by_invoice(invoice_ids)
+      return {} if invoice_ids.empty?
+
+      out = Hash.new(0.to_d)
+      CashReceiptApplication.joins(:cash_receipt)
+                            .where(invoice_id: invoice_ids)
+                            .where(cash_receipts: { company_id: @company.id, status: CashReceipt::STATUS_POSTED, is_deleted: [false, nil] })
+                            .where.not(cash_receipts: { journal_entry_id: nil })
+                            .group(:invoice_id).sum(:amount_applied)
+                            .each { |id, amt| out[id] += amt.to_d }
+      posted_payment_ids = JournalEntry.where(company_id: @company.id, source_entity_type: 'Payment', is_void: false)
+                                       .where.not("memo LIKE 'REFUND:%'").select(:source_entity_id)
+      PaymentApplication.joins(:payment)
+                        .where(applicable_type: 'Invoice', applicable_id: invoice_ids)
+                        .where(payments: { company_id: @company.id, status: 'completed', id: posted_payment_ids })
+                        .group(:applicable_id).sum(:amount)
+                        .each { |id, amt| out[id] += amt.to_d }
+      out
     end
 
     # Receivable on the ledger tagged to each deal. Nil for a deal with no

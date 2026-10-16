@@ -106,6 +106,34 @@ class Api::V1::DealPaymentsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # POST /api/v1/deals/:id/post_invoice_payments  { bank_account_id }
+  # Payments saved on the deal's invoice that never reached the ledger (the
+  # invoice page used to save them without posting when "auto-post payments"
+  # is off). Posts each into the bank account given: Dr bank, Cr AR.
+  def post_invoice_payments
+    return unless authorize_action!('accounting', 'create')
+
+    invoice = @company.invoices.find_by(id: @deal.deal_invoice_id) if @deal.deal_invoice_id
+    return render(json: { error: 'This deal has no invoice' }, status: :unprocessable_entity) unless invoice
+
+    bank = @company.bank_accounts.find_by(id: params[:bank_account_id])
+    return render(json: { error: 'Pick the bank account the money went into' }, status: :unprocessable_entity) unless bank&.chart_of_account
+
+    posted_ids = @company.journal_entries.where(source_entity_type: 'Payment', is_void: false).select(:source_entity_id)
+    payments = @company.payments.where(status: 'completed', id: PaymentApplication.where(applicable_type: 'Invoice', applicable_id: invoice.id).select(:payment_id))
+                       .where.not(id: posted_ids)
+    posted = payments.filter_map do |payment|
+      payment.update_column(:bank_account_id, bank.id) if payment.bank_account_id.blank?
+      Accounting::PaymentPostingService.new(payment.reload).post!(force: true)
+    end
+    if posted.size < payments.size
+      return render json: { error: "#{payments.size - posted.size} of #{payments.size} payments could not be posted. Check that the default AR account is set." },
+                    status: :unprocessable_entity
+    end
+
+    render json: { success: true, posted: posted.size, journal_entry_ids: posted.map(&:id) }
+  end
+
   private
 
   def load_deal

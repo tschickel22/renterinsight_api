@@ -140,4 +140,38 @@ RSpec.describe 'Deal Funding report', type: :request do
     expect(invoice.reload).to have_attributes(total: 55_000, amount_due: 55_000)
     expect(report['deals'].find { |r| r['id'] == deal.id }['books_check']).to eq('ok')
   end
+
+  describe 'a payment recorded on the invoice page' do
+    let(:deal) { approved_deal(price: 40_000, name: 'Invoice page') }
+    let!(:invoice) { DealInvoiceService.new(deal).create_invoice! }
+
+    it 'posts to the books for a deal invoice, and fills its draws' do
+      post "/api/v1/invoices/#{invoice.id}/mark_paid", headers: headers,
+                                                      params: { amount: 5000, bank_account_id: bank.id, payment_method: 'check', reference_number: '1201' }.to_json
+      expect(response).to have_http_status(:ok), response.body
+      receipt = company.cash_receipts.find_by!(deal_id: deal.id)
+      expect(receipt.journal_entry).to be_present
+      expect(invoice.reload.amount_due).to eq(35_000)
+      expect(report['deals'].find { |r| r['id'] == deal.id }).to include('received' => 5000.0, 'books_check' => 'ok')
+
+      get "/api/v1/invoices/#{invoice.id}", headers: headers
+      expect(JSON.parse(response.body).dig('invoice', 'is_deal_invoice') || JSON.parse(response.body)['is_deal_invoice']).to be(true)
+    end
+
+    it 'flags a payment that never posted, and posts it into the bank picked' do
+      AccountingSettings.for_company(company).update!(auto_post_payments: false)
+      invoice.update_columns(contact_id: company.contacts.create!(first_name: 'Ana', email: "ana-#{SecureRandom.hex(3)}@example.com").id)
+      # What the invoice page's Record Payment did before: a payment record only.
+      expect(invoice.record_payment!(5000, 'manual', { notes: 'check 1201' })).to be_truthy
+      expect(invoice.reload.amount_paid).to eq(5000)
+
+      row = report['deals'].find { |r| r['id'] == deal.id }
+      expect(row).to include('books_check' => 'unposted_payment', 'unposted_payments' => 5000.0)
+
+      post "/api/v1/deals/#{deal.id}/post_invoice_payments", headers: headers, params: { bank_account_id: bank.id }.to_json
+      expect(response).to have_http_status(:ok), response.body
+      expect(body['posted']).to eq(1)
+      expect(report['deals'].find { |r| r['id'] == deal.id }).to include('books_check' => 'ok', 'unposted_payments' => 0.0)
+    end
+  end
 end

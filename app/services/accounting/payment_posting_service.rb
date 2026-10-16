@@ -9,8 +9,10 @@ module Accounting
       @company = payment.company
     end
 
-    def post!
-      return unless should_post?
+    # force: post even with "auto-post payments" off (a deal invoice's payment,
+    # whose receivable approval already booked; see DealPaymentsController).
+    def post!(force: false)
+      return unless force || should_post?
       return if already_posted?
 
       settings = AccountingSettings.for_company(@company)
@@ -236,7 +238,8 @@ module Accounting
     # loan/etc it applies to. Never Current.location_id — that reflects the
     # actor's UI selection, not where the money actually belongs.
     def resolve_location_id
-      @payment.location_id.presence || @payment.payable&.try(:location_id)
+      @payment.location_id.presence || @payment.payable&.try(:location_id) ||
+        PaymentApplication.where(payment_id: @payment.id, applicable_type: 'Invoice').first&.applicable&.try(:location_id)
     end
 
     def payment_contact_name

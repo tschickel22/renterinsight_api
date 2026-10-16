@@ -254,7 +254,15 @@ class Api::V1::InvoicesController < ApplicationController
   
   def mark_paid
     return unless authorize_action!('finance', 'update')
-    
+
+    # A deal's invoice: approval booked what it bills as owed, so a payment on
+    # it must reach the books. It used to save only a payment record, which
+    # posts nothing unless "auto-post payments" is on (off for most dealers),
+    # leaving the invoice paid and the ledger still owed.
+    if (deal = deal_for_invoice(@invoice))
+      return record_deal_invoice_payment(deal)
+    end
+
     amount = params[:amount]&.to_f || @invoice.amount_due
     
     if @invoice.record_payment!(amount, 'manual', { notes: params[:notes] })
@@ -458,6 +466,34 @@ class Api::V1::InvoicesController < ApplicationController
     )
   end
   
+  def deal_for_invoice(invoice)
+    @deal_for_invoice ||= {}
+    return @deal_for_invoice[invoice.id] if @deal_for_invoice.key?(invoice.id)
+
+    @deal_for_invoice[invoice.id] = @company.deals.where(deleted_at: nil).find_by(deal_invoice_id: invoice.id)
+  end
+
+  def record_deal_invoice_payment(deal)
+    service = DealPaymentService.new(deal, user: current_user)
+    bank_id = params[:bank_account_id].presence ||
+              AccountingSettings.for_company(@company).default_bank_account_id
+    method = { 'money_order' => 'other' }.fetch(params[:payment_method].to_s, params[:payment_method].presence)
+    entry = service.build_entry(
+      amount: params[:amount].presence || @invoice.amount_due, payment_date: params[:payment_date],
+      payment_method: method, bank_account_id: bank_id, reference_number: params[:reference_number], memo: params[:notes]
+    )
+    if entry.amount > @invoice.amount_due.to_d + 0.001
+      return render(json: { error: 'Amount exceeds invoice balance due' }, status: :unprocessable_entity)
+    end
+
+    receipt = service.record!(entry, invoice: @invoice)
+    render json: { message: 'Payment recorded', receipt_number: receipt.receipt_number, invoice: @invoice.reload }
+  rescue DealPaymentService::Error, ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def serialize_invoice(invoice)
     Rails.logger.info "🔍 [serialize_invoice] Starting serialization for invoice #{invoice.id}"
     
@@ -538,6 +574,9 @@ class Api::V1::InvoicesController < ApplicationController
       sales_rep_id: invoice.sales_rep_id,  # CRITICAL: Include sales_rep_id so it persists on edit
       deal_id: invoice.deal_id,
       deal: invoice.deal_id.present? ? serialize_deal_reference(invoice) : nil,
+      # The invoice approval made for its deal: payments on it post to the
+      # books and fill its draws (Record Payment asks for the bank account).
+      is_deal_invoice: deal_for_invoice(invoice).present?,
       quote_id: invoice.quote_id,
       draw_schedule: invoice.draw_schedule,
       invoice_items: begin

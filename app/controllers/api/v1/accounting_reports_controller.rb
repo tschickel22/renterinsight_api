@@ -233,7 +233,7 @@ class Api::V1::AccountingReportsController < ApplicationController
   # Opens on sales_reports:read like Deal Profitability. The books check is
   # accounting's view of the ledger (financial_reports:read) and job cost is a
   # cost figure (deals:read:view_cost_details).
-  DEAL_FUNDING_BOOKS_KEYS = %i[books_owed books_difference books_check].freeze
+  DEAL_FUNDING_BOOKS_KEYS = %i[books_owed books_difference books_check unposted_payments].freeze
 
   def deal_funding
     return unless authorize_action!('sales_reports', 'read')
