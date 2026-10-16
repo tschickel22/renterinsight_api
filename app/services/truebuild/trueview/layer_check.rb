@@ -86,13 +86,27 @@ module Truebuild
         if (look = OptionLook.checked(surface, value))
           text += " The option is #{value}: it must show #{look}. A different finish is clearly wrong: score 2."
         end
-        if OptionLook.fridge?(surface, value) && surface.to_s.match?(OptionLook::APPLIANCES)
-          text += ' The refrigerator keeps the door layout it has in the photo (side-by-side, French door or top-freezer); ' \
-                  'a door layout unlike the option name is correct, not a defect.'
-        end
+        text += fridge_layout(OptionLook.style(value.to_s)) if OptionLook.fridge?(surface, value) && surface.to_s.match?(OptionLook::APPLIANCES)
         "#{text} If the photo already showed this finish, little or no change is correct (score 4 or 5). An appliance " \
           'package may leave the range hood as it was. Anything added or doubled (a second pull or knob on a door, new ' \
           'hardware, a new object) is clearly wrong: score 2.'
+      end
+
+      # French door and side-by-side are the same full-width box and Tom is
+      # fine showing one for the other: the image model seldom redraws the
+      # doors of the photo's own refrigerator. A top-freezer is a narrower,
+      # cheaper refrigerator, so it is never shown for a full-width one or
+      # the other way round.
+      def fridge_layout(style)
+        case style
+        when 'top-freezer'
+          ' It must be a top-freezer refrigerator (a freezer door on top of a larger fresh food door); a full-width ' \
+            'side-by-side or French door refrigerator is clearly wrong: score 2.'
+        when 'French door', 'side-by-side'
+          ' A French door and a side-by-side refrigerator are both correct here, whichever the photo has; a narrow ' \
+            'top-freezer refrigerator is clearly wrong: score 2.'
+        else ''
+        end
       end
 
       # Held back for a reason that is not a defect: Summit Park's Bay Port
