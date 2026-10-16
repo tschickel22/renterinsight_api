@@ -377,11 +377,13 @@ RSpec.describe 'TrueView rendering' do
       expect(calls).to eq('judge_layer' => 3, 'reconsider' => 2)
     end
 
-    it "tells the drawing and the check what an abbreviated fridge looks like" do
+    it "tells the drawing what an abbreviated fridge looks like, and checks only its finish" do
       prompt = Truebuild::Trueview.prompt(room: 'kitchen', selection: [{ 'surface' => 'Refrigerator', 'value' => '21 CF Stnls SxS Refer w/ice IPO 18.2CF' }])
       expect(prompt).to include('which is stainless steel side-by-side refrigerator')
-      expect(Truebuild::Trueview::LayerCheck.scope('Refrigerator', '20.5CF O/U Refer w/o Ice IPO 18.2'))
-        .to include('it must show top-freezer refrigerator', 'A different style or finish is clearly wrong: score 2.')
+      # The layer repaints the photo's own refrigerator, so its door layout cannot follow the option.
+      expect(Truebuild::Trueview::LayerCheck.scope('Refrigerator', '21 CF Stnls SxS Refer w/ice IPO 18.2CF'))
+        .to include('it must show stainless steel refrigerator', 'A different finish is clearly wrong: score 2.',
+                    'a door layout unlike the option name is correct')
     end
 
     it 'shows the layer when the check itself cannot run' do

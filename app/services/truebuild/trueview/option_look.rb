@@ -20,7 +20,7 @@ module Truebuild
         return nil unless surface.to_s.match?(APPLIANCES)
 
         text = value.to_s
-        fridge = surface.to_s.match?(/refrigerator|\brefer\b|fridge/i) || text.match?(/\b(refer|ref|refrigerator)\b|frenchdo?o?r?ref/i)
+        fridge = fridge?(surface, text)
         parts = [finish(text), (style(text) if fridge)].compact
         return nil if parts.empty?
 
@@ -31,6 +31,22 @@ module Truebuild
         # the door: only side-by-side and French door models show one.
         dispenser = (dispenser(text) if fridge && style(text) != 'top-freezer') || ''
         "#{look}#{dispenser}"
+      end
+
+      # What a layer's check holds it to: the finish, never the door layout.
+      # A layer repaints the refrigerator inside its outline in the photo, so
+      # a photo's side-by-side stays a side-by-side whatever the option says.
+      # Checked for the layout, 178 drawings on two factories were held back
+      # and the larger model fixed 5 of 63 on a redraw.
+      def checked(surface, value)
+        return nil unless surface.to_s.match?(APPLIANCES)
+
+        look = finish(value.to_s) or return nil
+        "#{look} #{fridge?(surface, value) ? 'refrigerator' : 'appliances'}"
+      end
+
+      def fridge?(surface, value)
+        surface.to_s.match?(/refrigerator|\brefer\b|fridge/i) || value.to_s.match?(/\b(refer|ref|refrigerator)\b|frenchdo?o?r?ref/i)
       end
 
       def finish(text)

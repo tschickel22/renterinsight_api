@@ -147,6 +147,10 @@ module Truebuild
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **check_with)
         spent += verdict['cost_usd'].to_f
+        result, layer, verdict, matched = ColorMatch.settle(source[:bytes], result, layer, verdict, mask, check_with,
+                                                            surface: render.selection.first&.dig('surface'),
+                                                            value: render.selection.first&.dig('value'))
+        spent += matched
         notes << verdict['note'] if verdict['note'].present?
         break if verdict['ok'] || attempt == tries.size - 1
       end
@@ -239,20 +243,30 @@ module Truebuild
       [nil, spent]
     end
 
-    def recut!(render, source, mask = nil, check_with = {})
+    # redraw: false (Recheck) leaves a reframed drawing as it is rather than
+    # paying for a new one.
+    def recut!(render, source, mask = nil, check_with = {}, redraw: true)
       drawn = fetch_source(render.image_url)
       if reframed_by({ bytes: drawn[:bytes] }, source_aspect(source)) > FRAMING_TOLERANCE
+        return unless redraw
+
         # Drawn reframed before the check existed: draw it again instead.
         render.update!(status: 'queued', image_url: nil, usage: render.usage.except('recut_from'))
         return perform!(render)
       end
+      surface = render.selection.first&.dig('surface')
+      value = render.selection.first&.dig('value')
       layer = Layer.build(source[:bytes], drawn[:bytes], mask: mask_image(mask), blocked: blocked_image(mask, source[:bytes]))
-      verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
-                                                                 value: render.selection.first&.dig('value'), **check_with)
-      render.update!(status: verdict['ok'] ? 'done' : 'rejected', cost_usd: verdict['cost_usd'], latency_ms: 0,
-                     mask_coverage: layer[:coverage], error: (verdict['ok'] ? nil : "Hidden: #{verdict['note'] || 'failed its check'}"),
-                     layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
-                     usage: render.usage.merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'), 'outlined' => mask.present?))
+      verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: surface, value: value, **check_with)
+      spent = verdict['cost_usd'].to_f
+      drawn, layer, verdict, matched = ColorMatch.settle(source[:bytes], drawn, layer, verdict, mask, check_with, surface: surface, value: value)
+      spent += matched
+      attrs = { status: verdict['ok'] ? 'done' : 'rejected', cost_usd: (render.cost_usd.to_f + spent).round(4), latency_ms: 0,
+                mask_coverage: layer[:coverage], error: (verdict['ok'] ? nil : "Hidden: #{verdict['note'] || 'failed its check'}"),
+                layer_url: store(render, layer[:bytes], layer[:mime], suffix: "layer-v#{Layer::VERSION}"),
+                usage: render.usage.merge('mask_version' => Layer::VERSION, 'check' => verdict.except('cost_usd'), 'outlined' => mask.present?) }
+      attrs[:image_url] = store(render, drawn[:bytes], drawn[:mime], suffix: 'matched') if verdict['color_matched']
+      render.update!(attrs)
     end
 
     def source_aspect(source)

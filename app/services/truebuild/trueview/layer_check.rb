@@ -83,8 +83,12 @@ module Truebuild
       def scope(surface, value = nil)
         described = Surfaces.describe(surface)
         text = described ? " The #{surface} here means #{described}; anything else keeping its finish is correct." : ''
-        if (look = OptionLook.describe(surface, value))
-          text += " The option is #{value}: it must show #{look}. A different style or finish is clearly wrong: score 2."
+        if (look = OptionLook.checked(surface, value))
+          text += " The option is #{value}: it must show #{look}. A different finish is clearly wrong: score 2."
+        end
+        if OptionLook.fridge?(surface, value) && surface.to_s.match?(OptionLook::APPLIANCES)
+          text += ' The refrigerator keeps the door layout it has in the photo (side-by-side, French door or top-freezer); ' \
+                  'a door layout unlike the option name is correct, not a defect.'
         end
         "#{text} If the photo already showed this finish, little or no change is correct (score 4 or 5). An appliance " \
           'package may leave the range hood as it was. Anything added or doubled (a second pull or knob on a door, new ' \
