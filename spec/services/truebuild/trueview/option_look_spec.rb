@@ -21,14 +21,16 @@ RSpec.describe Truebuild::Trueview::OptionLook do
     expect(described_class.describe('Appliances', 'Ultimate Kitchen 2 - Package 1')).to be_nil
   end
 
-  it 'checks a refrigerator for its finish only, since a layer cannot change the door layout in the photo' do
+  it 'checks a refrigerator for its finish and full width or top-freezer, taking French door and side-by-side alike' do
     expect(described_class.checked('Refrigerator', '24.7CF SS FrenchDoorRef IPO 18.2')).to eq('stainless steel refrigerator')
     expect(described_class.checked('Refrigerator', '20.5CF O/U Refer w/o Ice IPO 18.2')).to be_nil
     expect(described_class.checked('Appliances', 'Black Stainless Steel Package - Electric')).to eq('black stainless steel appliances')
 
     scope = Truebuild::Trueview::LayerCheck.scope('Refrigerator', '24.7CF SS FrenchDoorRef IPO 18.2')
-    expect(scope).to include('stainless steel refrigerator', 'door layout unlike the option name is correct')
+    expect(scope).to include('stainless steel refrigerator', 'A French door and a side-by-side refrigerator are both correct')
     expect(scope).not_to include('two doors on top', 'must show stainless steel French door')
-    expect(Truebuild::Trueview::LayerCheck.scope('Cabinets', 'Destin White')).not_to include('door layout')
+    expect(Truebuild::Trueview::LayerCheck.scope('Refrigerator', '20.5CF O/U Refer w/o Ice IPO 18.2'))
+      .to include('It must be a top-freezer refrigerator')
+    expect(Truebuild::Trueview::LayerCheck.scope('Cabinets', 'Destin White')).not_to include('refrigerator are both')
   end
 end

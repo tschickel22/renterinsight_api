@@ -33,11 +33,10 @@ module Truebuild
         "#{look}#{dispenser}"
       end
 
-      # What a layer's check holds it to: the finish, never the door layout.
-      # A layer repaints the refrigerator inside its outline in the photo, so
-      # a photo's side-by-side stays a side-by-side whatever the option says.
-      # Checked for the layout, 178 drawings on two factories were held back
-      # and the larger model fixed 5 of 63 on a redraw.
+      # What a layer's check holds it to for the finish; the door layout is
+      # LayerCheck.fridge_layout. Checked for the exact layout, 178 drawings
+      # on two factories were held back and the larger model fixed 5 of 63
+      # on a redraw: it keeps the doors of the photo's own refrigerator.
       def checked(surface, value)
         return nil unless surface.to_s.match?(APPLIANCES)
 
