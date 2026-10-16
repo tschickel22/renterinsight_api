@@ -1,9 +1,15 @@
-# Updated at 2025-12-22 to fix production popups
+# Live updates go through Postgres (LISTEN/NOTIFY on the main database), so a
+# broadcast from any process reaches every browser: background jobs (which
+# send reminders and lead pop-ups, and run apart from the web workers) and
+# every web server. The async adapter used until 2026-10-16 only reached
+# browsers on the same process, so pop-ups sent from jobs went nowhere.
+# solid_cable was tried in 2025 and crashed because it pointed at a "cable"
+# database that does not exist; this needs no extra database.
 development:
   adapter: async
 test:
   adapter: test
 staging:
-  adapter: async
+  adapter: postgresql
 production:
-  adapter: async
+  adapter: postgresql
