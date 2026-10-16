@@ -228,6 +228,35 @@ class Api::V1::AccountingReportsController < ApplicationController
     render json: Reports::ProjectJobCostReportService.new(@company).budget(**project_report_filters)
   end
 
+  # GET /api/v1/accounting/reports/deal_funding
+  # What each approved deal sold for, has received and still owes, by draw.
+  # Opens on sales_reports:read like Deal Profitability. The books check is
+  # accounting's view of the ledger (financial_reports:read) and job cost is a
+  # cost figure (deals:read:view_cost_details).
+  DEAL_FUNDING_BOOKS_KEYS = %i[books_owed books_difference books_check].freeze
+
+  def deal_funding
+    return unless authorize_action!('sales_reports', 'read')
+
+    report = Reports::DealFundingReportService.new(@company).generate(
+      location_id: params[:location_id].presence || accounting_location_id,
+      status: params[:status].presence&.split(','),
+      start_date: optional_date(params[:start_date]),
+      end_date: optional_date(params[:end_date]),
+      payment_type: params[:payment_type].presence
+    )
+    can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
+    can_view_books = current_user&.has_permission?('financial_reports', 'read') || false
+    hidden = []
+    hidden << :job_cost unless can_view_costs
+    hidden.concat(DEAL_FUNDING_BOOKS_KEYS) unless can_view_books
+    if hidden.any?
+      report[:deals] = report[:deals].map { |row| row.except(*hidden) }
+      report[:summary] = report[:summary].except(:books_issue_count) unless can_view_books
+    end
+    render json: report.merge(can_view_costs: can_view_costs, can_view_books: can_view_books)
+  end
+
   # GET /api/v1/accounting/locations
   # Returns the list of locations available to the accounting location bar,
   # with the Corporate location surfaced first.

@@ -1008,6 +1008,9 @@ module Api
           # accounting gate.
           glPosted: deal.gl_posted || false,
           glPostedAt: deal.gl_posted_at&.iso8601,
+          # The invoice approval made for the deal. Record Payment on the deal
+          # page needs it and never appeared without it.
+          dealInvoiceId: deal.deal_invoice_id,
           commissionPosted: deal.commission_posted || false,
           commissionPostedAt: deal.commission_posted_at&.iso8601
         }

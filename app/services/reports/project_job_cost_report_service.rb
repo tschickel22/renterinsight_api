@@ -100,6 +100,12 @@ module Reports
       }
     end
 
+    # Job cost per project (committed, billed and paid; disputed left out), for
+    # other reports that show it beside their own figures.
+    def job_cost_by_project(project_ids)
+      cost_buckets(project_ids).transform_values { |c| c[:committed] + c[:billed] + c[:paid] }
+    end
+
     private
 
     def scoped_projects(status: nil, location_id: nil, start_date: nil, end_date: nil, project_id: nil)

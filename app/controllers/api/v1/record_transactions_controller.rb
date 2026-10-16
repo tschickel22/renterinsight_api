@@ -53,10 +53,19 @@ class Api::V1::RecordTransactionsController < ApplicationController
       contact = @company.contacts.find_by(id: params[:contact_id])
       return render json: { error: 'Customer not found' }, status: :unprocessable_entity unless contact
     end
+    picked_contact = contact
     contact ||= project&.deal&.contact if type == 'income'
     tags = { contact_id: contact&.id, project_id: project&.id, deal_id: project&.deal_id }
 
-    party_name = type == 'expense' ? params[:vendor_name] : (params[:customer_name].presence || contact&.full_name)
+    # Name the customer the way the project and its deal show them. A deal can
+    # carry a typed customer name that differs from its linked contact.
+    party_name = if type == 'expense'
+                   params[:vendor_name]
+                 else
+                   params[:customer_name].presence || picked_contact&.full_name ||
+                     project&.customer_display_name.presence&.then { |n| n == 'Unknown' ? nil : n } ||
+                     contact&.full_name
+                 end
     memo_prefix = type == 'expense' ? 'Expense' : 'Income'
 
     # Build memo: always include party name for list display

@@ -239,6 +239,13 @@ RSpec.describe 'Projects on bills, journal lines and job cost reports', type: :r
       expect(project.project_cost_items.count).to eq(0)
     end
 
+    it 'names the customer the way the project shows them when the deal has a typed name' do
+      deal.update!(contact: customer)
+      project.update!(customer_name: 'Michael Thompson')
+      record('income', project_id: project.id)
+      expect(JournalEntry.order(:id).last.memo).to eq('Income: Michael Thompson')
+    end
+
     it "refuses another company's project or customer" do
       other = create(:company)
       record('expense', project_id: other.projects.create!(name: 'X', status: 'active').id)

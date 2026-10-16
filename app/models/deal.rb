@@ -235,6 +235,13 @@ class Deal < ApplicationRecord
     # the gate consistent: commissions are generated on GL post, never merely on close.
     reload
     generate_commission_payments! if gl_posted?
+    # The approve action makes the deal's invoice; an auto-posted deal skips
+    # that action, so it never got one and could not take a deal payment.
+    begin
+      DealInvoiceService.new(self, user: try(:owner) || try(:user)).create_invoice! if gl_posted?
+    rescue => e
+      Rails.logger.error("[AutoPost] Deal #{id} invoice creation failed: #{e.message}")
+    end
   rescue => e
     Rails.logger.error("[AutoPost] Deal #{id} closing entries failed: #{e.message}")
   end

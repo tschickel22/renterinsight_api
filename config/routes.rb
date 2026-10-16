@@ -2388,6 +2388,7 @@ Rails.application.routes.draw do
       get 'accounting/reports/departmental_pnl', to: 'accounting_reports#departmental_pnl'
       get 'accounting/reports/project_profitability', to: 'accounting_reports#project_profitability'
       get 'accounting/reports/project_budget', to: 'accounting_reports#project_budget'
+      get 'accounting/reports/deal_funding', to: 'accounting_reports#deal_funding'
       get 'accounting/reports/sales_tax_summary', to: 'accounting_reports#sales_tax_summary'
       get 'accounting/reports/cash_flow_statement', to: 'accounting_reports#cash_flow_statement'
       get 'accounting/reports/cash_flow_forecast', to: 'accounting_reports#cash_flow_forecast'
@@ -2402,6 +2403,7 @@ Rails.application.routes.draw do
       resources :deals, only: [] do
         member do
           post :record_payment, to: 'deal_payments#record_payment'
+          post :create_invoice, to: 'deal_payments#create_invoice'
         end
         resource :accounting, controller: 'deal_accounting', only: [:show] do
           post :calculate

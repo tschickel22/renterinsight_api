@@ -72,6 +72,20 @@ class Api::V1::DealPaymentsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # POST /api/v1/deals/:id/create_invoice
+  # The invoice a deal normally gets at approval, for an approved deal that
+  # never got one (posted before auto-posted deals made theirs, or the step
+  # failed). It bills AR the closing entry already booked, so it posts nothing.
+  def create_invoice
+    return unless authorize_action!('accounting', 'create')
+    return render(json: { error: 'Approve the deal before invoicing it' }, status: :unprocessable_entity) unless @deal.gl_posted_at.present?
+
+    invoice = DealInvoiceService.new(@deal, user: current_user).create_invoice!
+    render json: { success: true, invoice: invoice.as_json(only: %i[id invoice_number total amount_due status due_date]) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
 
   def load_deal

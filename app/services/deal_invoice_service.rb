@@ -89,6 +89,12 @@ class DealInvoiceService
     invoice
   end
 
+  # What the deal's invoice bills (price, posted tax and fees), for a deal
+  # that has no invoice yet.
+  def deal_total
+    calculate_total
+  end
+
   private
 
   def existing_invoice
@@ -120,7 +126,11 @@ class DealInvoiceService
     base = (@deal.try(:selling_price) || 0).to_d
     used_products_total = base.zero?
     base = (@deal.try(:calculated_value) || @deal.try(:value) || 0).to_d if used_products_total
-    tax_amount = (@deal.try(:tax_amount) || @deal.try(:total_tax_amount) || 0).to_d
+    # Sales tax posted at approval lands in total_tax_amount; tax_amount is the
+    # deal sheet's figure and is often 0, not nil, which used to leave the
+    # posted tax off the invoice while the ledger billed it.
+    posted_tax = (@deal.try(:total_tax_amount) || 0).to_d
+    tax_amount = posted_tax.positive? ? posted_tax : (@deal.try(:tax_amount) || 0).to_d
     # Add fees ONLY when base is the home price. When we fell back to calculated_value
     # (= sum of ALL deal_products, which already includes the category:fee line items),
     # adding them again would double-count the fees.
