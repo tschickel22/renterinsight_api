@@ -120,6 +120,9 @@ class DealInvoiceService
     used_products_total = base.zero?
     base = (@deal.try(:calculated_value) || @deal.try(:value) || 0).to_d if used_products_total
     fees = used_products_total ? 0.to_d : ADDON_FEE_METHODS.sum { |m| (@deal.try(m) || 0).to_d }
+    # Everything billed besides the price: other line items when the books
+    # carry them, else the fee types.
+    fees = booked_receivable - base if booked_receivable
     tax = calculate_total - base - fees
     # Before approval nothing is posted yet: show the tax approval will post.
     unless tax.positive? || @deal.gl_posted_at.present?
@@ -245,11 +248,35 @@ class DealInvoiceService
     # posted tax off the invoice while the ledger billed it.
     posted_tax = (@deal.try(:total_tax_amount) || 0).to_d
     tax_amount = posted_tax.positive? ? posted_tax : (@deal.try(:tax_amount) || 0).to_d
+    # The invoice bills what approval books as owed: the price and every other
+    # line item on the deal (accessories, fees, F&I products), so the invoice
+    # and the books agree. It used to add only four fee types, and a $5,000 F&I
+    # product on staging's D-000042 was owed on the books but not invoiced.
+    booked = booked_receivable
+    return (booked + tax_amount).round(2) if booked
+
     # Add fees ONLY when base is the home price. When we fell back to calculated_value
     # (= sum of ALL deal_products, which already includes the category:fee line items),
     # adding them again would double-count the fees.
     addons = used_products_total ? 0.to_d : ADDON_FEE_METHODS.sum { |m| (@deal.try(m) || 0).to_d }
     (base + tax_amount + addons).round(2)
+  end
+
+  # What the closing entry debits to receivables (before sales tax, which
+  # posts separately), or nil when it books none (no AR account set up).
+  def booked_receivable
+    return @booked_receivable if defined?(@booked_receivable)
+
+    ar = AccountingSettings.for_company(@company).default_ar_account
+    @booked_receivable = if ar
+                           lines = Accounting::DealAccountingService.new(@deal).closing_lines
+                           sum = lines.select { |l| l[:chart_of_account_id] == ar.id }
+                                      .sum { |l| l[:debit_amount].to_d - l[:credit_amount].to_d }
+                           sum.positive? ? sum : nil
+                         end
+  rescue => e
+    Rails.logger.warn("[DealInvoiceService] Booked receivable failed for deal #{@deal.id}: #{e.message}")
+    @booked_receivable = nil
   end
 
   def build_schedule(template, total, base_date, force: false)

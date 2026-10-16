@@ -88,6 +88,24 @@ class Api::V1::DealPaymentsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # POST /api/v1/deals/:id/sync_invoice
+  # Resets the deal invoice's total to what the books show owed (what
+  # approval booked plus the sales tax it posted), spreading any difference
+  # over the unpaid draws. For an invoice the Deal Funding books check flags.
+  def sync_invoice
+    return unless authorize_action!('accounting', 'update')
+
+    invoice = @company.invoices.find_by(id: @deal.deal_invoice_id) if @deal.deal_invoice_id
+    return render(json: { error: 'This deal has no invoice' }, status: :unprocessable_entity) unless invoice
+
+    DealInvoiceService.new(@deal, user: current_user).sync_invoice!(invoice)
+    invoice.reload.update_status_based_on_payments
+    DealInvoiceService.refresh_draws!(invoice.reload)
+    render json: { success: true, invoice: invoice.reload.slice(:id, :invoice_number, :total, :amount_paid, :amount_due, :status) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
 
   def load_deal

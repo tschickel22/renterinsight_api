@@ -119,4 +119,25 @@ RSpec.describe 'Deal Funding report', type: :request do
     get '/api/v1/invoices', headers: headers.merge('X-Location-ID' => other.id.to_s)
     expect(JSON.parse(response.body).map { |i| i['id'] }).not_to include(invoice.id)
   end
+
+  it 'bills every line item approval books, and matches an older invoice to the books' do
+    deal = company.deals.create!(location: location, name: 'With F&I', account: account, selling_price: 50_000,
+                                 actual_close_date: Date.current)
+    deal.deal_products.create!(product_name: 'Installation', quantity: 1, unit_price: 5000, discount: 0, total: 5000, notes: 'category:fi')
+    deal.update!(stage: 'closed_won')
+    expect(Accounting::DealAccountingService.new(deal).post_closing_entries!(user: dealer)).to include(success: true)
+
+    invoice = DealInvoiceService.new(deal.reload).create_invoice!
+    expect(invoice.total).to eq(55_000)
+    expect(report['deals'].find { |r| r['id'] == deal.id }['books_check']).to eq('ok')
+
+    # An invoice made before the fix left the product off.
+    invoice.update_columns(total: 50_000, amount_due: 50_000)
+    expect(report['deals'].find { |r| r['id'] == deal.id }).to include('books_check' => 'differs', 'books_difference' => 5000.0)
+
+    post "/api/v1/deals/#{deal.id}/sync_invoice", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    expect(invoice.reload).to have_attributes(total: 55_000, amount_due: 55_000)
+    expect(report['deals'].find { |r| r['id'] == deal.id }['books_check']).to eq('ok')
+  end
 end
