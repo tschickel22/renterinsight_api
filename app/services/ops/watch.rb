@@ -26,17 +26,21 @@ module Ops
     end
 
     def booted!
-      commit = ENV['RENDER_GIT_COMMIT'].presence
-      last = ServerBoot.where(service: service).order(booted_at: :desc).first
-      ServerBoot.create!(service: service, commit: commit, instance: ENV['RENDER_INSTANCE_ID'], booted_at: Time.current)
-      return unless last && commit && last.commit == commit
+      instance = ENV['RENDER_INSTANCE_ID'].presence
+      ServerBoot.create!(service: service, commit: ENV['RENDER_GIT_COMMIT'].presence, instance: instance, booted_at: Time.current)
+      # A release, a settings change or adding a server starts a server with
+      # a new name. The same server starting again means it crashed in place
+      # (on 2026-10-16 every out-of-memory restart kept its name).
+      return unless instance
 
-      recent = ServerBoot.where(service: service, commit: commit).where(booted_at: 1.hour.ago..).count
-      Alert.notify!('restart', 'the server restarted without a release',
-                    "The web server restarted on the same code (#{commit.first(8)}) at #{Time.current.utc.strftime('%H:%M')} UTC, " \
-                    "#{recent} #{'start'.pluralize(recent)} in the last hour. If nobody restarted it or changed its settings, it " \
-                    'crashed, usually from running out of memory, and customers may have seen "server unavailable" for a ' \
-                    'few minutes.', every: 15.minutes)
+      starts = ServerBoot.where(service: service, instance: instance)
+      return unless starts.count > 1
+
+      recent = starts.where(booted_at: 1.hour.ago..).count
+      Alert.notify!('restart', 'a web server crashed and restarted',
+                    "#{instance} restarted on its own at #{Time.current.utc.strftime('%H:%M')} UTC, " \
+                    "#{recent} #{'time'.pluralize(recent)} in the last hour, usually from running out of memory. " \
+                    'Customers on that server may have seen "server unavailable" for a few minutes.', every: 15.minutes)
     rescue StandardError => e
       Rails.logger.error("[Ops::Watch] booted!: #{e.message}")
     end
@@ -56,7 +60,7 @@ module Ops
       share = m[:used].to_f / m[:max]
       return if share < MEMORY_WARN
 
-      Alert.notify!('memory', "the server is at #{(share * 100).round}% of its memory",
+      Alert.notify!("memory:#{service}", "#{service} is at #{(share * 100).round}% of its memory",
                     "#{m[:used] / 1.megabyte} MB of #{m[:max] / 1.megabyte} MB in use. At 100% it restarts and customers " \
                     'lose it for a few minutes.')
     end
@@ -88,6 +92,7 @@ module Ops
 
     def check!
       OpsMark.stamp!('heartbeat:jobs')
+      check_memory! # the background worker's own container; web servers watch theirs every minute
       errors = ServerError.where(occurred_at: CHECK_WINDOW.ago..)
       if (count = errors.count) >= ERROR_SPIKE
         top = errors.group(:error_class, :path).order(Arel.sql('count(*) desc')).limit(3).count

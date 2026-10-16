@@ -7,11 +7,11 @@ require 'rails_helper'
 # per kind of alert however many server processes notice it.
 RSpec.describe Ops::Watch do
   around do |ex|
-    old = ENV.to_h.slice('OPS_ALERT_EMAIL', 'OPS_ALERT_PHONE', 'RENDER_GIT_COMMIT', 'RENDER_SERVICE_NAME')
+    old = ENV.to_h.slice('OPS_ALERT_EMAIL', 'OPS_ALERT_PHONE', 'RENDER_GIT_COMMIT', 'RENDER_SERVICE_NAME', 'RENDER_INSTANCE_ID')
     ENV.update('OPS_ALERT_EMAIL' => 'ops@example.com', 'OPS_ALERT_PHONE' => '+13035550100', 'RENDER_SERVICE_NAME' => 'api-prod')
     ex.run
   ensure
-    %w[OPS_ALERT_EMAIL OPS_ALERT_PHONE RENDER_GIT_COMMIT RENDER_SERVICE_NAME].each { |k| ENV.delete(k) }
+    %w[OPS_ALERT_EMAIL OPS_ALERT_PHONE RENDER_GIT_COMMIT RENDER_SERVICE_NAME RENDER_INSTANCE_ID].each { |k| ENV.delete(k) }
     ENV.update(old)
   end
 
@@ -22,17 +22,17 @@ RSpec.describe Ops::Watch do
     ActionMailer::Base.deliveries.clear
   end
 
-  it 'says nothing when a start is a release, and reports a start on the same code' do
-    ENV['RENDER_GIT_COMMIT'] = 'aaaa1111'
+  it 'says nothing when a release or scaling starts new servers, and reports a server that starts again' do
+    ENV['RENDER_INSTANCE_ID'] = 'web-aaa'
     described_class.booted!
-    ENV['RENDER_GIT_COMMIT'] = 'bbbb2222'
+    ENV['RENDER_INSTANCE_ID'] = 'web-bbb'
     described_class.booted!
     expect(texts).to be_empty
 
     described_class.booted!
     expect(texts.size).to eq(1)
-    expect(texts.first).to eq(['+13035550100', texts.first.last])
-    expect(texts.first.last).to start_with('Production: the server restarted without a release')
+    expect(texts.first.first).to eq('+13035550100')
+    expect(texts.first.last).to start_with('Production: a web server crashed and restarted')
     expect(ActionMailer::Base.deliveries.map(&:to)).to eq([['ops@example.com']])
   end
 
@@ -54,7 +54,7 @@ RSpec.describe Ops::Watch do
   it 'warns before memory runs out' do
     allow(described_class).to receive(:memory).and_return(used: 1800.megabytes, max: 2048.megabytes)
     described_class.check_memory!
-    expect(texts.last.last).to include('88% of its memory')
+    expect(texts.last.last).to include('api-prod is at 88% of its memory')
 
     allow(described_class).to receive(:memory).and_return(used: 1000.megabytes, max: 2048.megabytes)
     texts.clear
