@@ -6,6 +6,19 @@ local:
   service: Disk
   root: <%= Rails.root.join("storage") %>
 
+# Uploaded files on staging and production (attachments on communications,
+# service tickets, portal documents, templates). They used to sit on the web
+# server's own disk, which kept production to one instance and made every
+# deploy a short outage. The bucket is the private one (Block Public Access
+# on); files are only handed out through signed links. Keys are random
+# tokens at the top of the bucket, apart from PrivateFiles' "<area>/" folders.
+amazon:
+  service: S3
+  access_key_id: <%= ENV['AWS_ACCESS_KEY_ID'] %>
+  secret_access_key: <%= ENV['AWS_SECRET_ACCESS_KEY'] %>
+  region: <%= ENV['AWS_REGION'] || 'us-west-2' %>
+  bucket: <%= ENV['PRIVATE_DOCUMENTS_BUCKET'] %>
+
 # Use bin/rails credentials:edit to set the AWS secrets (as aws:access_key_id|secret_access_key)
 # amazon:
 #   service: S3
