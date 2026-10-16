@@ -202,4 +202,45 @@ RSpec.describe 'Deal funding at approval', type: :request do
     get '/api/v1/accounting/reports/deal_funding', headers: headers, params: { lender: 'Someone else' }
     expect(body['deals']).to be_empty
   end
+
+  describe 'an approved deal edited afterwards' do
+    before do
+      approve(plan: { type: 'single' })
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    let(:invoice) { company.invoices.find(deal.reload.deal_invoice_id) }
+
+    it 'posts the difference and bills it when a product is added' do
+      expect(invoice.total).to eq(100_000)
+      post "/api/crm/deals/#{deal.id}/products", headers: headers,
+                                                 params: { product: { product_name: 'Skirting', quantity: 1, unit_price: 3000, notes: 'category:accessory' } }.to_json
+      expect(response).to have_http_status(:created), response.body
+
+      expect(invoice.reload.total).to eq(103_000)
+      expect(balance(ar.id)).to eq(103_000)
+      get '/api/v1/accounting/reports/deal_funding', headers: headers
+      expect(body['deals'].find { |r| r['id'] == deal.id }).to include('owed' => 103_000.0, 'books_check' => 'ok')
+    end
+
+    it 'posts one entry when Edit Deal replaces the lines, none when they are the same' do
+      lines = [{ product_name: 'Skirting', quantity: 1, unit_price: 3000, notes: 'category:accessory' }]
+      post "/api/crm/deals/#{deal.id}/products/bulk_create", headers: headers, params: { products: lines, replace: true }.to_json
+      expect(response).to have_http_status(:created), response.body
+      entries = company.journal_entries.count
+
+      post "/api/crm/deals/#{deal.id}/products/bulk_create", headers: headers, params: { products: lines, replace: true }.to_json
+      expect(company.journal_entries.count).to eq(entries)
+      expect(deal.reload.deal_products.count).to eq(1)
+      expect(invoice.reload.total).to eq(103_000)
+    end
+
+    it 'leaves the books and invoice alone when nothing about money changed' do
+      entries = company.journal_entries.count
+      patch "/api/crm/deals/#{deal.id}", headers: headers, params: { deal: { notes: 'Called the buyer' } }.to_json
+      expect(response).to have_http_status(:ok), response.body
+      expect(company.journal_entries.count).to eq(entries)
+      expect(invoice.reload.total).to eq(100_000)
+    end
+  end
 end

@@ -3,6 +3,9 @@ module Api
     class DealsController < ApplicationController
       before_action :set_company_scope
       before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
+      include PostedDealChanges
+      # An edit to an approved deal posts the difference and updates its invoice.
+      around_action :keep_posted_deal_in_step, only: [:update]
 
       # GET /api/crm/deals
       def index
@@ -625,6 +628,8 @@ module Api
       end
 
       private
+
+      def posted_deal = @deal
 
       # Sorting used to be client-side over the loaded page only, so on a
       # multi-page list the "sorted" order was really just the current 50 rows
