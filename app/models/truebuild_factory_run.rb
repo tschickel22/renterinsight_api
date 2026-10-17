@@ -88,11 +88,18 @@ class TruebuildFactoryRun < ApplicationRecord
       recipient: created_by, notification_type: :truebuild_factory_run,
       title: "TrueView factory run #{what}",
       message: "#{manufacturer&.name} #{series}".squish + " #{what}: #{counts['done'].to_i} drawn, #{counts['rejected'].to_i} held back, " \
-               "#{format('$%.2f', spent)} of #{format('$%.2f', budget_usd)} spent.#{pattern_note}",
+               "#{format('$%.2f', spent)} of #{format('$%.2f', budget_usd)} spent.#{held_note(counts)}#{pattern_note}",
       action_url: '/settings?tab=integrations', action_text: 'Open the runs', company_id: created_by.company_id
     )
   rescue StandardError => e
     Rails.logger.warn("TruebuildFactoryRun #{id} notify_end: #{e.message}")
+  end
+
+  # What the held back drawings have wrong, by group (Truebuild::Trueview::HeldSummary).
+  def held_note(counts)
+    return '' unless counts['rejected'].to_i.positive?
+
+    " Held back: #{Truebuild::Trueview::HeldSummary.line(self)}."
   end
 
   # Causes the run could not fix by redrawing (Truebuild::Trueview::Patterns).

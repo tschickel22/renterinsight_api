@@ -272,6 +272,27 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { items: items.sort_by { |i| -(i[:held_back] * 2 + i[:failed] + i[:outlines_not_used]) } }
   end
 
+  # GET /api/admin/trueview_lab/held?factory_run_id=
+  # Everything still held back (or one run's), grouped by what its check
+  # found, largest group first, with a few drawings of each.
+  def held
+    run = held_run
+    return if performed?
+
+    render json: { groups: Truebuild::Trueview::HeldSummary.call(run) }
+  end
+
+  # POST /api/admin/trueview_lab/held/:key/show { factory_run_id }
+  # Shows a group's drawings that scored 3 or better, as approving each would.
+  def show_held
+    run = held_run
+    return if performed?
+
+    render json: { shown: Truebuild::Trueview::HeldSummary.show!(params[:key].to_s, by: current_user, run: run) }
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # POST /api/admin/trueview_lab/layers/:id/flag { note }
   # Buyers stop seeing the layer at once; it is drawn again with the note.
   def flag_layer
@@ -435,6 +456,13 @@ class Api::Admin::TrueviewLabController < ApplicationController
   rescue ArgumentError
     render json: { error: 'Choose a start time' }, status: :unprocessable_entity
     nil
+  end
+
+  # nil for everything; a run that does not exist is not everything.
+  def held_run
+    return nil if params[:factory_run_id].blank?
+
+    TruebuildFactoryRun.find_by(id: params[:factory_run_id]) || (render(json: { error: 'Not found' }, status: :not_found) && nil)
   end
 
   def factory_run_variants

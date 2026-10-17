@@ -3190,6 +3190,8 @@ Rails.application.routes.draw do
       post 'trueview_lab/factory_runs/:id/continue', to: 'trueview_lab#continue_factory_run'
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
+      get  'trueview_lab/held', to: 'trueview_lab#held'
+      post 'trueview_lab/held/:key/show', to: 'trueview_lab#show_held'
       get    'trueview_transfer', to: 'trueview_transfer#export'
       post   'trueview_transfer', to: 'trueview_transfer#import'
       # Dealer agreement packages (Agreements::PackageInstaller): which exist, and installing one for a company.

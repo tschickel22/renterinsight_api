@@ -340,6 +340,34 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(row.reload).to have_attributes(status: 'done', error: nil)
       expect(row.usage['approved']).to be_present
     end
+
+    it 'groups held back layers by what the check found, and shows a group from its 3s up, never one that changed nothing' do
+      held = lambda do |key, score, note|
+        TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
+                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Destin White' }], selection_key: key,
+                                model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
+                                error: "Hidden: #{note}", layer_url: 'https://b/l.webp', usage: { 'check' => { 'score' => score, 'note' => note } })
+      end
+      creamy = held.call('a', 3, 'The cabinets are a warmer cream than the bright near-white (#eff0e5) of the sample.')
+      too_far = held.call('b', 2, 'The cabinets read as a dark tan, not the near-white of the sample.')
+      trim = held.call('c', 4, 'The window trim beside the sink retains the original brown wood finish.')
+      same = held.call('d', 3, 'The cabinets appear virtually identical to the original oak.')
+
+      get '/api/admin/trueview_lab/held', headers: admin
+      groups = JSON.parse(response.body)['groups'].index_by { |g| g['key'] }
+      expect(groups.transform_values { |g| [g['count'], g['showable']] })
+        .to eq('shade' => [2, 1], 'missed_part' => [1, 1], 'unchanged' => [1, 0])
+      expect(groups['shade']['examples'].first).to include('id' => creamy.id, 'model' => 'Aspire Bay Port', 'score' => 3)
+
+      post '/api/admin/trueview_lab/held/shade/show', headers: admin
+      expect(JSON.parse(response.body)).to eq('shown' => 1)
+      expect([creamy, too_far, trim].map { |r| r.reload.status }).to eq(%w[done rejected rejected])
+      expect(creamy.usage['approved']).to include('group' => 'shade')
+
+      post '/api/admin/trueview_lab/held/unchanged/show', headers: admin
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(same.reload.status).to eq('rejected')
+    end
   end
 
   it 'turns laying plain colors on the photo on and off, for platform admins only' do
@@ -391,6 +419,7 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
     end
 
     it 'schedules a batch run for tonight, and cancels it before it starts' do
+      admin # signed in now: a token made on the travelled date has long expired after it
       travel_to Time.zone.parse('2026-10-03 18:00 UTC') do # noon in Denver
         post '/api/admin/trueview_lab/factory_runs', headers: admin,
              params: { manufacturer_id: mfr.id, factory_id: factory.id, budget_usd: 20, start_at: 'tonight', batch: true }.to_json
