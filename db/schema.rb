@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_17_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -113,8 +113,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
     t.bigint "default_cogs_account_id"
     t.bigint "default_sales_tax_payable_account_id"
     t.bigint "default_bank_account_id"
-    t.boolean "auto_post_invoices", default: false
-    t.boolean "auto_post_payments", default: false
+    t.boolean "auto_post_invoices", default: true
+    t.boolean "auto_post_payments", default: true
     t.boolean "auto_post_purchases", default: false
     t.boolean "lock_period_on_close", default: true
     t.integer "check_number_sequence", default: 1
@@ -2455,6 +2455,49 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
     t.index ["company_id", "role_id"], name: "index_company_hidden_roles_on_company_and_role", unique: true
     t.index ["company_id"], name: "index_company_hidden_roles_on_company_id"
     t.index ["role_id"], name: "index_company_hidden_roles_on_role_id"
+  end
+
+  create_table "company_link_events", force: :cascade do |t|
+    t.bigint "company_link_id", null: false
+    t.bigint "project_link_id"
+    t.bigint "company_id"
+    t.bigint "user_id"
+    t.string "kind", null: false
+    t.string "summary", null: false
+    t.jsonb "data", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.index ["company_id"], name: "index_company_link_events_on_company_id"
+    t.index ["company_link_id"], name: "index_company_link_events_on_company_link_id"
+    t.index ["project_link_id"], name: "index_company_link_events_on_project_link_id"
+    t.index ["user_id"], name: "index_company_link_events_on_user_id"
+  end
+
+  create_table "company_links", force: :cascade do |t|
+    t.bigint "dealer_company_id", null: false
+    t.bigint "installer_company_id"
+    t.bigint "dealer_vendor_id", null: false
+    t.string "status", default: "invited", null: false
+    t.string "invite_email", null: false
+    t.bigint "invited_by_id"
+    t.bigint "accepted_by_id"
+    t.datetime "accepted_at"
+    t.string "agreement_version"
+    t.datetime "dealer_agreed_at"
+    t.datetime "installer_agreed_at"
+    t.bigint "installer_dealer_account_id"
+    t.datetime "ended_at"
+    t.bigint "ended_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["accepted_by_id"], name: "index_company_links_on_accepted_by_id"
+    t.index ["dealer_company_id", "installer_company_id"], name: "index_company_links_on_pair", unique: true, where: "(installer_company_id IS NOT NULL)"
+    t.index ["dealer_company_id"], name: "index_company_links_on_dealer_company_id"
+    t.index ["dealer_vendor_id"], name: "index_company_links_on_dealer_vendor_id"
+    t.index ["dealer_vendor_id"], name: "index_company_links_on_open_vendor", unique: true, where: "((status)::text <> 'ended'::text)"
+    t.index ["ended_by_id"], name: "index_company_links_on_ended_by_id"
+    t.index ["installer_company_id"], name: "index_company_links_on_installer_company_id"
+    t.index ["installer_dealer_account_id"], name: "index_company_links_on_installer_dealer_account_id"
+    t.index ["invited_by_id"], name: "index_company_links_on_invited_by_id"
   end
 
   create_table "company_manufacturers", force: :cascade do |t|
@@ -5669,6 +5712,51 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
     t.index ["documentable_type", "documentable_id"], name: "index_project_documents_on_documentable"
     t.index ["project_id"], name: "index_project_documents_on_project_id"
     t.index ["uploaded_by_id"], name: "index_project_documents_on_uploaded_by_id"
+  end
+
+  create_table "project_link_phases", force: :cascade do |t|
+    t.bigint "project_link_id", null: false
+    t.bigint "dealer_phase_id", null: false
+    t.bigint "installer_phase_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["dealer_phase_id"], name: "index_project_link_phases_on_dealer_phase_id", unique: true
+    t.index ["installer_phase_id"], name: "index_project_link_phases_on_installer_phase_id", unique: true
+    t.index ["project_link_id"], name: "index_project_link_phases_on_project_link_id"
+  end
+
+  create_table "project_links", force: :cascade do |t|
+    t.bigint "company_link_id", null: false
+    t.bigint "dealer_company_id", null: false
+    t.bigint "installer_company_id", null: false
+    t.bigint "dealer_project_id", null: false
+    t.bigint "dealer_phase_id"
+    t.bigint "installer_project_id"
+    t.string "status", default: "offered", null: false
+    t.decimal "fee_amount", precision: 12, scale: 2
+    t.text "note"
+    t.bigint "offered_by_id"
+    t.datetime "offered_at"
+    t.bigint "responded_by_id"
+    t.datetime "responded_at"
+    t.text "decline_reason"
+    t.bigint "dealer_cost_item_id"
+    t.bigint "installer_invoice_id"
+    t.bigint "dealer_bill_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_link_id"], name: "index_project_links_on_company_link_id"
+    t.index ["dealer_bill_id"], name: "index_project_links_on_dealer_bill_id"
+    t.index ["dealer_company_id"], name: "index_project_links_on_dealer_company_id"
+    t.index ["dealer_cost_item_id"], name: "index_project_links_on_dealer_cost_item_id"
+    t.index ["dealer_phase_id"], name: "index_project_links_on_dealer_phase_id"
+    t.index ["dealer_project_id"], name: "index_project_links_on_dealer_project_id"
+    t.index ["installer_company_id", "status"], name: "index_project_links_on_installer_company_id_and_status"
+    t.index ["installer_company_id"], name: "index_project_links_on_installer_company_id"
+    t.index ["installer_invoice_id"], name: "index_project_links_on_installer_invoice_id"
+    t.index ["installer_project_id"], name: "index_project_links_on_installer_project_id"
+    t.index ["offered_by_id"], name: "index_project_links_on_offered_by_id"
+    t.index ["responded_by_id"], name: "index_project_links_on_responded_by_id"
   end
 
   create_table "project_material_usages", force: :cascade do |t|
@@ -8923,6 +9011,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
   add_foreign_key "company_domains", "websites"
   add_foreign_key "company_hidden_roles", "companies"
   add_foreign_key "company_hidden_roles", "roles"
+  add_foreign_key "company_link_events", "companies"
+  add_foreign_key "company_link_events", "company_links"
+  add_foreign_key "company_link_events", "project_links"
+  add_foreign_key "company_link_events", "users"
+  add_foreign_key "company_links", "accounts", column: "installer_dealer_account_id"
+  add_foreign_key "company_links", "companies", column: "dealer_company_id"
+  add_foreign_key "company_links", "companies", column: "installer_company_id"
+  add_foreign_key "company_links", "users", column: "accepted_by_id"
+  add_foreign_key "company_links", "users", column: "ended_by_id"
+  add_foreign_key "company_links", "users", column: "invited_by_id"
+  add_foreign_key "company_links", "vendors", column: "dealer_vendor_id"
   add_foreign_key "company_manufacturers", "companies"
   add_foreign_key "company_manufacturers", "manufacturers"
   add_foreign_key "contact_activities", "accounts"
@@ -9186,6 +9285,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
   add_foreign_key "project_documents", "companies"
   add_foreign_key "project_documents", "projects"
   add_foreign_key "project_documents", "users", column: "uploaded_by_id", on_delete: :nullify
+  add_foreign_key "project_link_phases", "project_links"
+  add_foreign_key "project_link_phases", "project_phases", column: "dealer_phase_id"
+  add_foreign_key "project_link_phases", "project_phases", column: "installer_phase_id"
+  add_foreign_key "project_links", "bills", column: "dealer_bill_id"
+  add_foreign_key "project_links", "companies", column: "dealer_company_id"
+  add_foreign_key "project_links", "companies", column: "installer_company_id"
+  add_foreign_key "project_links", "company_links"
+  add_foreign_key "project_links", "invoices", column: "installer_invoice_id"
+  add_foreign_key "project_links", "project_cost_items", column: "dealer_cost_item_id"
+  add_foreign_key "project_links", "project_phases", column: "dealer_phase_id"
+  add_foreign_key "project_links", "projects", column: "dealer_project_id"
+  add_foreign_key "project_links", "projects", column: "installer_project_id"
+  add_foreign_key "project_links", "users", column: "offered_by_id"
+  add_foreign_key "project_links", "users", column: "responded_by_id"
   add_foreign_key "project_material_usages", "bins", on_delete: :nullify
   add_foreign_key "project_material_usages", "companies"
   add_foreign_key "project_material_usages", "locations"

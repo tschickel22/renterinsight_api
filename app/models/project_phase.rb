@@ -136,8 +136,31 @@ class ProjectPhase < ApplicationRecord
   end
 
   after_save :notify_status_change, if: :saved_change_to_status?
+  # A phase handed to or from a linked installer company follows the other
+  # side (E68 step 5d). The job decides which fields cross in which direction.
+  after_commit :sync_linked_phase, on: :update, if: :linked_sync_change?
+
+  SYNCED_FIELDS = %w[status started_at completed_at estimated_start_date estimated_completion_date].freeze
+
+  # The installer company running this dealer phase, while the hand-off is
+  # live. Its status comes from them.
+  def linked_installer_name
+    link = ProjectLinkPhase.joins(:project_link).where(dealer_phase_id: id, project_links: { status: 'accepted' }).first&.project_link
+    link&.installer_company&.name
+  end
 
   private
+
+  def linked_sync_change?
+    return false if Current.project_link_sync
+
+    (saved_changes.keys & SYNCED_FIELDS).any? &&
+      ProjectLinkPhase.where(dealer_phase_id: id).or(ProjectLinkPhase.where(installer_phase_id: id)).exists?
+  end
+
+  def sync_linked_phase
+    ProjectLinkSyncJob.perform_later(id)
+  end
 
   def notify_status_change
     ProjectNotificationService.notify_phase_change(self, status_before_last_save, status)

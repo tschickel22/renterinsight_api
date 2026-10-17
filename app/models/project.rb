@@ -57,6 +57,7 @@ class Project < ApplicationRecord
     current = current_phase
     return { error: 'No current phase set' } unless current
     return { error: 'Current phase is already completed' } if current.status == 'completed'
+    return linked_phase_error(current) if linked_phase_error(current)
 
     # Complete the current phase
     current.mark_complete!(completed_by: completed_by)
@@ -87,6 +88,7 @@ class Project < ApplicationRecord
   def set_phase_status!(phase, new_status, changed_by: nil)
     return { error: 'Phase not found in this project' } unless phase.project_id == id
     return { error: 'Invalid status' } unless ProjectPhase::STATUSES.include?(new_status)
+    return linked_phase_error(phase) if linked_phase_error(phase)
 
     old_status = phase.status
 
@@ -158,6 +160,7 @@ class Project < ApplicationRecord
     # Find the most recently completed phase
     last_completed = phases.where(status: 'completed').order(completed_at: :desc).first
     return { error: 'No completed phases to undo' } unless last_completed
+    return linked_phase_error(last_completed) if linked_phase_error(last_completed)
 
     # Find the current in-progress phase (the one that was started after the completion)
     current_in_progress = phases.find_by(status: 'in_progress')
@@ -196,6 +199,7 @@ class Project < ApplicationRecord
   def skip_phase!(phase, skipped_by: nil)
     return { error: 'Phase not found in this project' } unless phase.project_id == id
     return { error: 'Cannot skip a required phase' } if phase.is_required?
+    return linked_phase_error(phase) if linked_phase_error(phase)
     return { error: 'Phase is already completed' } if phase.status == 'completed'
 
     phase.update!(
@@ -265,6 +269,15 @@ class Project < ApplicationRecord
 
   def progress_display
     "#{completed_phase_count}/#{phase_count}"
+  end
+
+  # A phase a linked installer company is running takes its status from them
+  # (E68 step 5d); only the sync may change it here.
+  def linked_phase_error(phase)
+    return nil if Current.project_link_sync
+
+    name = phase.linked_installer_name
+    name && { error: "#{phase.name} is run by #{name}. Its status comes from them." }
   end
 
   def customer_display_name

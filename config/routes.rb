@@ -684,6 +684,23 @@ Rails.application.routes.draw do
       get 'workflow_field_options', to: 'workflow_field_options#index'
 
       # ==================== PROJECTS ====================
+      # Dealer and installer company links, and the jobs handed across (E68 step 5)
+      resources :company_links, only: %i[index create] do
+        member do
+          post :accept
+          post :end, action: :end_link
+          get :events
+        end
+      end
+      resources :project_links, only: [] do
+        member do
+          post :cancel
+          post :accept
+          post :decline
+          post :bill
+        end
+      end
+
       resources :projects do
         collection do
           get :summary
@@ -758,6 +775,9 @@ Rails.application.routes.draw do
             post :auto_setup
           end
         end
+
+        # Hand the project or a phase to a linked installer company (E68 step 5)
+        resources :project_links, only: %i[index create]
 
         # Bids on a phase or the whole project (E68 step 4)
         resources :bid_requests, controller: 'project_bid_requests', only: %i[index create] do
