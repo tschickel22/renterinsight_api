@@ -61,7 +61,7 @@ module Truebuild
         Rails.cache.fetch("truebuild:colormatch:learned:v1:#{selection_key}:#{photo}", expires_in: 6.hours, skip_nil: true) do
           donors = TruebuildRender.where(selection_key: selection_key, purpose: 'layer', status: 'done')
                                   .where.not(source_url: photo).where.not(image_url: nil).limit(DONORS * 3).to_a
-          colors = donors.filter_map { |r| measured(r, key) }.first(DONORS)
+          colors = donors.lazy.filter_map { |r| measured(r, key) }.first(DONORS) # each opens a full-size drawing
           next nil if colors.empty?
 
           mean = (0..2).map { |i| colors.sum { |c| c[i] } / colors.size }
