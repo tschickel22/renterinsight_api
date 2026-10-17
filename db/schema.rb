@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_17_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_17_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7886,6 +7886,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_120000) do
     t.string "last_active_path", limit: 255
     t.text "email_signature"
     t.string "sms_signature"
+    t.bigint "primary_user_id"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
@@ -7901,6 +7902,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_120000) do
     t.index ["notification_settings"], name: "index_users_on_notification_settings", using: :gin
     t.index ["phone"], name: "index_users_on_phone"
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
+    t.index ["primary_user_id"], name: "index_users_on_primary_user_id"
   end
 
   create_table "vehicle_documents", force: :cascade do |t|
@@ -9375,6 +9377,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_120000) do
   add_foreign_key "user_view_preferences", "users"
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
+  add_foreign_key "users", "users", column: "primary_user_id"
   add_foreign_key "vehicle_documents", "users", column: "uploaded_by_user_id"
   add_foreign_key "vehicle_documents", "vehicles"
   add_foreign_key "vehicle_invoices", "companies"

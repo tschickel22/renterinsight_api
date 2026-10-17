@@ -100,7 +100,7 @@ module Api
 
       def find_user_by_email(email)
         # Try admin/staff users first
-        user = User.find_by(email: email)
+        user = User.sign_in_accounts.find_by(email: email)
         return { type: 'User', record: user } if user
 
         # Try client portal users

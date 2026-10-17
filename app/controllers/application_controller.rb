@@ -221,6 +221,8 @@ class ApplicationController < ActionController::API
         @current_user_id = decoded[:user_id]
         @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i
 
+        return if refused_inactive_user?
+
         # Check for impersonation header (platform admins only)
         resolve_impersonation
 
@@ -236,6 +238,17 @@ class ApplicationController < ActionController::API
     # No valid token - return unauthorized
     Rails.logger.warn "[ApplicationController] No authorization header present"
     render json: { error: 'Unauthorized - Missing authorization header' }, status: :unauthorized
+  end
+
+  # A deactivated user used to keep working until their token expired, up to
+  # 7 days. Removing someone from a company (including a linked account,
+  # E68 5a) has to take effect on their next click. Renders and returns true
+  # when the token's user is deactivated.
+  def refused_inactive_user?
+    return false unless @current_user_id && User.where(id: @current_user_id, status: %w[inactive suspended]).exists?
+
+    render json: { error: 'This account has been deactivated. Please contact your administrator.', code: 'user_inactive' }, status: :unauthorized
+    true
   end
 
   def current_company_id

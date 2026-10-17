@@ -149,8 +149,11 @@ module Api
           return
         end
 
+        # The password belongs to the sign-in account; a linked account has none.
+        account = @user.sign_in_account
+
         # Verify current password
-        unless @user.authenticate(current_password)
+        unless account.authenticate(current_password)
           render json: {
             success: false,
             error: 'Current password is incorrect'
@@ -160,7 +163,7 @@ module Api
 
         # Update password
         begin
-          @user.update!(password: new_password)
+          account.update!(password: new_password)
 
           # Log the password change
           log_password_change
@@ -525,6 +528,7 @@ module Api
         if decoded[:user_id]
           @current_user_id = decoded[:user_id]
           @current_company_id = decoded[:company_id]
+          return if refused_inactive_user?
 
           # Check for impersonation header (platform admins only)
           resolve_impersonation

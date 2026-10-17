@@ -2602,6 +2602,9 @@ Rails.application.routes.draw do
       get 'me', to: 'login#me'
       # Re-verify the signed-in user's own password (e.g. Deal Desk "Employee View" reveal).
       post 'verify_password', to: 'login#verify_password'
+      # One sign-in for several companies (E68 5a)
+      get 'accounts', to: 'login#accounts'
+      post 'switch_account', to: 'login#switch_account'
 
       # Password Reset
       post 'request_password_reset', to: 'password_reset#request_reset'

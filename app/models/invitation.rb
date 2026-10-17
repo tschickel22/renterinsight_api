@@ -11,7 +11,9 @@ class Invitation < ApplicationRecord
   # Associations
   belongs_to :invited_by, class_name: 'User'
   belongs_to :company, optional: true
-  has_many :invitation_locations, dependent: :destroy
+  # (An invitation_locations association pointed at a table and model that
+  # don't exist, so destroying any invitation, or a company that had one,
+  # raised. Locations live in the location_ids column.)
   
   # Validations
   validates :invitation_type, inclusion: { in: INVITATION_TYPES }
@@ -94,6 +96,16 @@ class Invitation < ApplicationRecord
   end
   
   # Check if invitation is expired
+  # The invited linked account (E68 5a) when the email already signs in to
+  # another company: they accept with that password instead of making one.
+  def existing_account?
+    return false unless invitation_type == 'company_user'
+
+    scope = User.where('LOWER(email) = ?', email.to_s.downcase)
+    scope.where(company_id: company_id).where.not(primary_user_id: nil).exists? ||
+      (scope.where(company_id: company_id).none? && scope.sign_in_accounts.where.not(company_id: company_id).exists?)
+  end
+
   def expired?
     status == 'expired' || expires_at < Time.current
   end

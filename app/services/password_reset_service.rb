@@ -148,7 +148,7 @@ class PasswordResetService
     if user_type == 'auto'
       # Check both tables by email or phone
       if email
-        user = User.find_by(email: email.downcase)
+        user = User.sign_in_accounts.find_by(email: email.downcase)
         user ||= BuyerPortalAccess.find_by(email: email.downcase)
       elsif phone
         # Try User model first (ALL company users: admin, staff, manager, etc.)
@@ -162,7 +162,7 @@ class PasswordResetService
     elsif user_type == 'admin'
       # Admin user_type means company users (User model) - ALL roles accepted
       if email
-        User.find_by(email: email.downcase)
+        User.sign_in_accounts.find_by(email: email.downcase)
       elsif phone
         find_user_by_phone(phone, nil)
       end

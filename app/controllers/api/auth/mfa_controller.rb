@@ -26,7 +26,7 @@ module Api
           user = BuyerPortalAccess.find_by(email: email.downcase)
           actual_user_type = 'BuyerPortalAccess'
         else
-          user = User.find_by(email: email.downcase)
+          user = User.sign_in_accounts.find_by(email: email.downcase)
           actual_user_type = 'User'
         end
         
