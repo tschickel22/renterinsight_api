@@ -3192,6 +3192,7 @@ Rails.application.routes.draw do
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
       get  'trueview_lab/held', to: 'trueview_lab#held'
       post 'trueview_lab/held/:key/show', to: 'trueview_lab#show_held'
+      get  'trueview_lab/held/:key', to: 'trueview_lab#held_group'
       get    'trueview_transfer', to: 'trueview_transfer#export'
       post   'trueview_transfer', to: 'trueview_transfer#import'
       # Dealer agreement packages (Agreements::PackageInstaller): which exist, and installing one for a company.
