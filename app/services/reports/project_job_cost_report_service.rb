@@ -24,6 +24,7 @@ module Reports
       projects = scoped_projects(**filters).includes(:deal, :location).to_a
       costs = cost_buckets(projects.map(&:id))
       on_books = ledger_cost(projects.map(&:id))
+      funding = DealFundingReportService.new(@company).rows_for(projects.map(&:deal_id).compact)
 
       rows = projects.map do |project|
         c = costs.fetch(project.id, empty_bucket)
@@ -43,6 +44,10 @@ module Reports
           disputed: c[:disputed].to_f,
           budget_variance: budget && (budget - job_cost).to_f,
           on_books: on_books.fetch(project.id, 0).to_f,
+          # What the customer has paid and still owes on the deal (nil until
+          # the deal is approved and invoiced).
+          received: funding[project.deal_id]&.dig(:received),
+          owed: funding[project.deal_id] && (funding[project.deal_id][:invoice_id] ? funding[project.deal_id][:owed] : nil),
           after_job_cost: after&.to_f,
           margin: after && sale_price&.positive? ? (after / sale_price * 100).round(1).to_f : nil
         )
@@ -60,6 +65,8 @@ module Reports
           total_job_cost: rows.sum { |r| r[:job_cost] },
           total_disputed: rows.sum { |r| r[:disputed] },
           total_on_books: rows.sum { |r| r[:on_books] },
+          total_received: rows.sum { |r| r[:received].to_f },
+          total_owed: rows.sum { |r| r[:owed].to_f },
           # After job cost and margin cover only projects whose deal has a
           # cost entered (Deal#front_gross is nil otherwise).
           gross_project_count: with_front.size,

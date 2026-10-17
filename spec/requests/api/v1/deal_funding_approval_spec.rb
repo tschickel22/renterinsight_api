@@ -243,4 +243,18 @@ RSpec.describe 'Deal funding at approval', type: :request do
       expect(invoice.reload.total).to eq(100_000)
     end
   end
+
+  it "shows the customer's payments on the project and in Project Profitability" do
+    project = company.projects.create!(name: 'Diaz set', status: 'active', deal: deal)
+    approve(plan: { type: 'single' }, receipts: [{ amount: 25_000, payment_date: Date.current.to_s, bank_account_id: bank.id }])
+    expect(response).to have_http_status(:ok), response.body
+
+    get "/api/v1/projects/#{project.id}/cost_items/summary", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    expect(body['customer_payments']).to include('deal_amount' => 100_000.0, 'received' => 25_000.0, 'owed' => 75_000.0)
+
+    get '/api/v1/accounting/reports/project_profitability', headers: headers
+    row = body['projects'].find { |r| r['id'] == project.id }
+    expect(row).to include('received' => 25_000.0, 'owed' => 75_000.0)
+  end
 end

@@ -153,11 +153,22 @@ module Api
           },
           by_type: items.group(:cost_type).sum(:amount),
           by_status: items.group(:status).sum(:amount),
-          by_category: items.where.not(category: [nil, '']).group(:category).sum(:amount)
+          by_category: items.where.not(category: [nil, '']).group(:category).sum(:amount),
+          customer_payments: customer_payments
         }
       end
 
       private
+
+      # What the customer has paid on the project's deal (E78 step 8), from
+      # the Deal Funding figures. Nil until the deal is approved.
+      def customer_payments
+        return nil unless @project.deal_id
+
+        row = Reports::DealFundingReportService.new(@company).rows_for([@project.deal_id])[@project.deal_id]
+        row&.slice(:deal_amount, :received, :owed, :overdue_amount, :next_draw, :status, :invoice_id, :invoice_number,
+                   :lender_pending, :draws, :due_date)
+      end
 
       def set_project
         @project = @company.projects.not_deleted.find(params[:project_id])

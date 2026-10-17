@@ -27,8 +27,9 @@ module Reports
       @today = today
     end
 
-    def generate(location_id: nil, status: nil, start_date: nil, end_date: nil, payment_type: nil, lender: nil)
+    def generate(location_id: nil, status: nil, start_date: nil, end_date: nil, payment_type: nil, lender: nil, deal_ids: nil)
       deals = scoped_deals(location_id: location_id, start_date: start_date, end_date: end_date, payment_type: payment_type).to_a
+      deals = deals.select { |d| deal_ids.include?(d.id) } if deal_ids
       invoices = @company.invoices.where(id: deals.map(&:deal_invoice_id).compact, is_deleted: [false, nil]).index_by(&:id)
       ledger_ar = ledger_ar_by_deal(deals.map(&:id))
       @posted_paid = posted_paid_by_invoice(invoices.keys)
@@ -43,6 +44,14 @@ module Reports
       rows = rows.select { |r| (r[:lender_name].presence || 'Lender not named') == lender } if lender.present?
 
       { deals: rows, summary: summary(rows).merge(deposits_held(location_id)) }
+    end
+
+    # The same figures for a few deals (a project page, Project Profitability),
+    # keyed by deal id. Only approved deals appear.
+    def rows_for(deal_ids)
+      return {} if deal_ids.blank?
+
+      generate(deal_ids: deal_ids)[:deals].index_by { |r| r[:id] }
     end
 
     private
