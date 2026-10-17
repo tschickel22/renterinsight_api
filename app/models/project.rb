@@ -21,6 +21,7 @@ class Project < ApplicationRecord
   has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
   has_many :notification_preferences, class_name: 'ProjectNotificationPreference', dependent: :destroy
   has_many :project_cost_items, dependent: :destroy
+  has_many :project_bid_requests, dependent: :destroy
   has_many :project_material_usages, dependent: :destroy
   has_many :project_documents, dependent: :destroy
 

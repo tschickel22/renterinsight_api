@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_16_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_17_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5556,6 +5556,50 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_190000) do
     t.index ["contact_id"], name: "index_printed_checks_on_contact_id"
     t.index ["journal_entry_id"], name: "index_printed_checks_on_journal_entry_id"
     t.index ["vendor_id"], name: "index_printed_checks_on_vendor_id"
+  end
+
+  create_table "project_bid_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_id", null: false
+    t.bigint "project_phase_id"
+    t.string "title", null: false
+    t.text "scope"
+    t.date "bids_due_on"
+    t.date "start_wanted_on"
+    t.string "status", default: "open", null: false
+    t.bigint "awarded_bid_id"
+    t.bigint "awarded_by_id"
+    t.datetime "awarded_at"
+    t.bigint "previous_vendor_id"
+    t.datetime "cancelled_at"
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_project_bid_requests_on_company_id_and_status"
+    t.index ["company_id"], name: "index_project_bid_requests_on_company_id"
+    t.index ["project_id"], name: "index_project_bid_requests_on_project_id"
+    t.index ["project_phase_id"], name: "index_project_bid_requests_on_project_phase_id"
+  end
+
+  create_table "project_bids", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_bid_request_id", null: false
+    t.bigint "vendor_id", null: false
+    t.string "status", default: "invited", null: false
+    t.decimal "amount", precision: 12, scale: 2
+    t.date "can_start_on"
+    t.integer "duration_days"
+    t.text "notes"
+    t.datetime "invited_at"
+    t.datetime "submitted_at"
+    t.bigint "entered_by_id"
+    t.bigint "project_cost_item_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_project_bids_on_company_id"
+    t.index ["project_bid_request_id", "vendor_id"], name: "index_project_bids_on_project_bid_request_id_and_vendor_id", unique: true
+    t.index ["project_bid_request_id"], name: "index_project_bids_on_project_bid_request_id"
+    t.index ["vendor_id"], name: "index_project_bids_on_vendor_id"
   end
 
   create_table "project_cost_items", force: :cascade do |t|

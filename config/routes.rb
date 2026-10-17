@@ -759,6 +759,17 @@ Rails.application.routes.draw do
           end
         end
 
+        # Bids on a phase or the whole project (E68 step 4)
+        resources :bid_requests, controller: 'project_bid_requests', only: %i[index create] do
+          member do
+            post :invite
+            post :record_bid
+            post :award
+            post :undo_award
+            post :cancel
+          end
+        end
+
         # Phase 2D: Cost tracking, materials, documents
         resources :cost_items, controller: 'project_cost_items' do
           collection do
@@ -3565,6 +3576,14 @@ Rails.application.routes.draw do
       resources :projects, only: [:index, :show] do
         # Invoices sent from the portal become draft bills (E68)
         resources :invoices, only: [:index, :create]
+      end
+
+      # Bid requests sent to me, and my answers (E68 step 4)
+      resources :bids, only: [:index, :show] do
+        member do
+          post :submit
+          post :decline
+        end
       end
 
       # Tasks

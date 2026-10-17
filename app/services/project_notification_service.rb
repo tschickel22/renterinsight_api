@@ -498,6 +498,115 @@ class ProjectNotificationService
     Rails.logger.error("[ProjectNotificationService] Error announcing invoice: #{e.message}")
   end
 
+  # ── Bids (E68 step 4) ──────────────────────────────────────────────────────
+
+  # A contractor asked to bid. Email with the one-tap sign-in, and a text when
+  # they opted in.
+  def self.notify_bid_requested(bid)
+    contractor = bid.vendor
+    request = bid.project_bid_request
+    company = request.company
+    return unless contractor&.email.present? || (contractor&.sms_opt_in && contractor.phone.present?)
+
+    esc = ->(v) { ERB::Util.html_escape(v.to_s) }
+    project = request.project
+    where = [project.delivery_city, project.delivery_state].compact_blank.join(', ')
+    details = []
+    details << "<li><strong>Location:</strong> #{esc.(where)}</li>" if where.present?
+    details << "<li><strong>Bids due:</strong> #{esc.(request.bids_due_on.strftime('%b %-d, %Y'))}</li>" if request.bids_due_on
+    details << "<li><strong>Work to start:</strong> #{esc.(request.start_wanted_on.strftime('%b %-d, %Y'))}</li>" if request.start_wanted_on
+    scope_html = request.scope.present? ? "<p style=\"white-space: pre-line;\">#{esc.(request.scope)}</p>" : ''
+
+    subject = "Bid request: #{request.bidder_label}"
+    sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
+    if contractor.email.present?
+      body = <<~HTML
+        <p>Hello #{esc.(contractor.contact_name.presence || contractor.name)},</p>
+        <p>#{esc.(company.name)} would like your bid on #{esc.(request.bidder_label)}.</p>
+        #{details.any? ? "<ul>#{details.join}</ul>" : ''}
+        #{scope_html}
+        <p>Open Bid requests in the Contractor Portal to send your price or let them know you'll pass.</p>
+        #{sign_in_note}
+        <p>Thank you,<br>#{esc.(company.name)}</p>
+      HTML
+      CommunicationService.send_email(
+        company: company, to: contractor.email, subject: subject,
+        body: wrap_html(body, subject, audience: :contractor, login_url: sign_in_url),
+        category: 'project_notification', communicable: bid
+      )
+    end
+
+    if contractor.sms_opt_in && contractor.phone.present?
+      begin
+        CommunicationService.send_sms(
+          company: company, location: project.deal&.location, to: contractor.phone,
+          body: "#{company.name} asks for your bid on #{request.bidder_label}. #{sign_in_url}",
+          category: 'project_notification', communicable: bid
+        )
+      rescue => e
+        Rails.logger.error("[ProjectNotificationService] bid request SMS failed for bid #{bid.id}: #{e.message}")
+      end
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] bid request notice failed for bid #{bid&.id}: #{e.class}: #{e.message}")
+    nil
+  end
+
+  # A contractor bid, revised or declined in the portal. Rings the bell for the
+  # project owner and whoever sent the request.
+  def self.announce_bid_submitted(bid, revised: false)
+    request = bid.project_bid_request
+    project = request.project
+    company = request.company
+    recipients = [project.owner, company.users.find_by(id: request.created_by_id)].compact.uniq
+    name = bid.vendor.name
+    title, message = if bid.status == 'declined'
+      ["#{name} passed", "#{name} won't bid on #{request.work_label}."]
+    else
+      amount = ActiveSupport::NumberHelper.number_to_currency(bid.amount)
+      [revised ? "Revised bid from #{name}" : "Bid from #{name}",
+       "#{name} bid #{amount} on #{request.work_label}."]
+    end
+    recipients.each do |user|
+      create_bell_notification(
+        recipient: user, company: company, type: :project_bid_submitted,
+        title: title, message: message, notifiable: bid,
+        actor_type: 'Contractor', actor_id: bid.vendor_id
+      )
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] Error announcing bid: #{e.message}")
+  end
+
+  # The request went to someone else (awarded: true) or was closed.
+  def self.notify_bid_closed(bid, awarded:)
+    contractor = bid.vendor
+    return unless contractor&.email.present?
+
+    request = bid.project_bid_request
+    company = request.company
+    esc = ->(v) { ERB::Util.html_escape(v.to_s) }
+    subject = "Bid update: #{request.bidder_label}"
+    news = if awarded
+      "#{esc.(company.name)} has awarded #{esc.(request.bidder_label)} to another contractor."
+    else
+      "#{esc.(company.name)} has closed the bid request for #{esc.(request.bidder_label)}."
+    end
+    body = <<~HTML
+      <p>Hello #{esc.(contractor.contact_name.presence || contractor.name)},</p>
+      <p>#{news} Thank you for your time, and we hope to work with you on the next one.</p>
+      <p>#{esc.(company.name)}</p>
+    HTML
+    CommunicationService.send_email(
+      company: company, to: contractor.email, subject: subject,
+      body: wrap_html(body, subject, audience: :contractor),
+      category: 'project_notification', communicable: bid
+    )
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] bid closed notice failed for bid #{bid&.id}: #{e.message}")
+    nil
+  end
+
   # ── BATCHED: Dealer review-submitted email (called by DealerReviewNotifierJob)
   # Sends ONE email listing all pending reviews on a project to the project owner.
   def self.notify_review_submitted_batch(project, assignments)
