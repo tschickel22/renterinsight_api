@@ -14,10 +14,25 @@ class AccountingSettings < ApplicationRecord
   belongs_to :state_tax_account, class_name: 'ChartOfAccount', optional: true
   belongs_to :county_tax_account, class_name: 'ChartOfAccount', optional: true
   belongs_to :city_tax_account, class_name: 'ChartOfAccount', optional: true
+  belongs_to :customer_deposits_account, class_name: 'ChartOfAccount', optional: true
 
   validates :company_id, uniqueness: true
   validates :fiscal_year_start_month, inclusion: { in: 1..12 }
   validates :accounting_method, inclusion: { in: %w[accrual cash] }, allow_nil: true
+  validate :customer_deposits_account_is_a_liability
+
+  # Where money taken before a deal has an invoice waits (a customer deposit),
+  # and where a receipt's unapplied remainder goes. The setting wins; without
+  # it, the seeded Earnest Money Deposits (2410), then any posting liability
+  # account with "deposit" in its name. The seeded "Customer Deposits" (2400)
+  # is a header and cannot take postings.
+  def deposits_account
+    return customer_deposits_account if customer_deposits_account
+
+    liabilities = company.chart_of_accounts.where(account_type: 'liability', is_header: [false, nil], is_active: [true, nil])
+    liabilities.find_by(account_number: '2410', name: 'Earnest Money Deposits') ||
+      liabilities.where('name ILIKE ?', '%deposit%').order(:account_number).first
+  end
 
   # New companies should have auto-posting enabled by default
   after_initialize :set_auto_post_defaults, if: :new_record?
@@ -89,5 +104,16 @@ class AccountingSettings < ApplicationRecord
     BigDecimal(value.to_s)
   rescue ArgumentError, TypeError
     BigDecimal('0')
+  end
+
+  def customer_deposits_account_is_a_liability
+    return if customer_deposits_account_id.blank?
+
+    account = company&.chart_of_accounts&.find_by(id: customer_deposits_account_id)
+    if account.nil?
+      errors.add(:customer_deposits_account_id, 'must be one of your accounts')
+    elsif account.account_type != 'liability' || account.is_header
+      errors.add(:customer_deposits_account_id, 'must be a liability account that takes postings')
+    end
   end
 end

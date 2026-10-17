@@ -281,6 +281,36 @@ class ProjectNotificationService
     pending.size
   end
 
+  # ── Contractor given a whole project or phase that has no tasks for them yet
+  # (E69). Task assignments email through the batch below; this covers the owner
+  # who would otherwise only find the job by opening the portal.
+  def self.notify_contractor_owner_assigned(contractor, project, phase: nil)
+    return unless contractor&.email.present?
+
+    company = project.company
+    what = phase ? "the #{phase.name} phase of #{project.name}" : project.name
+    subject = phase ? "New Assignment: #{phase.name} (#{project.name})" : "New Assignment: #{project.name}"
+    sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
+    body = <<~HTML
+      <p>Hello #{ERB::Util.html_escape(contractor.contact_name.presence || contractor.name)},</p>
+      <p>#{ERB::Util.html_escape(company.name)} has assigned you #{ERB::Util.html_escape(what)}.</p>
+      #{sign_in_note}
+      <p>Thank you,<br>#{ERB::Util.html_escape(company.name)}</p>
+    HTML
+
+    CommunicationService.send_email(
+      company: company,
+      to: contractor.email,
+      subject: subject,
+      body: wrap_html(body, subject, audience: :contractor, login_url: sign_in_url),
+      category: 'project_notification',
+      communicable: phase || project
+    )
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] owner notice failed for contractor #{contractor&.id}: #{e.class}: #{e.message}")
+    nil
+  end
+
   # ── BATCHED: Contractor assigned email (called by ContractorAssignmentNotifierJob)
   # Sends ONE email listing all pending assignments for a contractor within a company.
   def self.notify_contractor_assigned_batch(contractor, assignments)
@@ -444,6 +474,28 @@ class ProjectNotificationService
     end
   rescue => e
     Rails.logger.error("[ProjectNotificationService] Error announcing review: #{e.message}")
+  end
+
+  # ── Contractor uploaded an invoice in the portal (E68). It is waiting as a
+  # draft bill, so tell the people who approve bills.
+  def self.announce_invoice_submitted(bill, contractor, project)
+    company = project.company
+    recipients = ([project.owner] + company.users.active.where(role: %w[admin company_admin platform_admin manager super_admin]).to_a).compact.uniq
+    amount = ActiveSupport::NumberHelper.number_to_currency(bill.total_amount)
+    recipients.each do |user|
+      create_bell_notification(
+        recipient: user,
+        company: company,
+        type: :contractor_invoice_submitted,
+        title: "Invoice from #{contractor.name}",
+        message: "#{contractor.name} submitted an invoice for #{amount} on #{project.name}. It is waiting as draft bill #{bill.bill_number}.",
+        notifiable: bill,
+        actor_type: 'Contractor',
+        actor_id: contractor.id
+      )
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] Error announcing invoice: #{e.message}")
   end
 
   # ── BATCHED: Dealer review-submitted email (called by DealerReviewNotifierJob)

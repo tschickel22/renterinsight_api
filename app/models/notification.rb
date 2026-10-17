@@ -106,6 +106,7 @@ class Notification < ApplicationRecord
     contractor_task_assigned: { category: 'service', priority: 'high', title: 'New Task Assignment' },
     project_phase_completed: { category: 'service', priority: 'normal', title: 'Project Phase Completed' },
     contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' },
+    contractor_invoice_submitted: { category: 'finance', priority: 'high', title: 'Contractor Invoice Submitted' },
 
     # AI connector oversight (backlog E53): an AI app hit the daily record
     # limit, or kept being refused. In-app only; not push eligible.

@@ -70,6 +70,23 @@ module Api
         @contractor_ids
       end
 
+      def my_task_assignments
+        ContractorAssignment.where(contractor_id: all_contractor_ids, assignable_type: 'ProjectPhaseTask')
+          .joins("INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id")
+          .joins("INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id")
+      end
+
+      # Projects with one of my tasks, or where I own the whole project or a phase.
+      # Owner ids are this company's vendors (checked when assigned), so matching
+      # on my vendor ids stays inside the companies I work for.
+      def visible_project_ids
+        @visible_project_ids ||= (
+          my_task_assignments.distinct.pluck('project_phases.project_id') +
+          Project.where(assigned_vendor_id: all_contractor_ids).pluck(:id) +
+          ProjectPhase.where(assigned_vendor_id: all_contractor_ids).distinct.pluck(:project_id)
+        ).uniq
+      end
+
       def parse_photos(raw)
         return [] unless raw.present?
 

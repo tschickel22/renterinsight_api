@@ -699,6 +699,9 @@ Rails.application.routes.draw do
           delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
           post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
           delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
+          post :assign_phase                      # POST body: { phase_id:, assigned_vendor_id?, assigned_to_id?, apply_to_tasks, preview }
+          post :assign_project                    # POST body: { assigned_vendor_id?, assigned_to_id?, apply_to_phases, preview }
+          delete :assignment_issues, action: :dismiss_assignment_issues
           get :export_pdf
           post :flush_assignment_notifications
           post :pause_assignment_notifications
@@ -2383,6 +2386,9 @@ Rails.application.routes.draw do
       get 'accounting/reports/deal_profitability', to: 'accounting_reports#deal_profitability'
       get 'accounting/reports/floor_plan', to: 'accounting_reports#floor_plan'
       get 'accounting/reports/departmental_pnl', to: 'accounting_reports#departmental_pnl'
+      get 'accounting/reports/project_profitability', to: 'accounting_reports#project_profitability'
+      get 'accounting/reports/project_budget', to: 'accounting_reports#project_budget'
+      get 'accounting/reports/deal_funding', to: 'accounting_reports#deal_funding'
       get 'accounting/reports/sales_tax_summary', to: 'accounting_reports#sales_tax_summary'
       get 'accounting/reports/cash_flow_statement', to: 'accounting_reports#cash_flow_statement'
       get 'accounting/reports/cash_flow_forecast', to: 'accounting_reports#cash_flow_forecast'
@@ -2395,8 +2401,15 @@ Rails.application.routes.draw do
       get 'inventory/reports/salesperson_gp_pipeline', to: 'inventory_reports#salesperson_gp_pipeline'
 
       resources :deals, only: [] do
+        collection do
+          get :open_balances, to: 'deal_payments#open_balances'
+        end
         member do
           post :record_payment, to: 'deal_payments#record_payment'
+          post :create_invoice, to: 'deal_payments#create_invoice'
+          get :funding, to: 'deal_payments#funding'
+          post :sync_invoice, to: 'deal_payments#sync_invoice'
+          post :post_invoice_payments, to: 'deal_payments#post_invoice_payments'
         end
         resource :accounting, controller: 'deal_accounting', only: [:show] do
           post :calculate
@@ -3549,7 +3562,10 @@ Rails.application.routes.draw do
       get 'branding', to: 'branding#show'
 
       # Projects
-      resources :projects, only: [:index, :show]
+      resources :projects, only: [:index, :show] do
+        # Invoices sent from the portal become draft bills (E68)
+        resources :invoices, only: [:index, :create]
+      end
 
       # Tasks
       resources :tasks, only: [:index, :show] do

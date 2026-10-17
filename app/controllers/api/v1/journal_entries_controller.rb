@@ -243,7 +243,7 @@ class Api::V1::JournalEntriesController < ApplicationController
       journal_entry_lines_attributes: [
         :id, :chart_of_account_id, :debit_amount, :credit_amount,
         :memo, :location_id, :department, :contact_id, :deal_id,
-        :vehicle_id, :position, :_destroy
+        :vehicle_id, :project_id, :position, :_destroy
       ]
     )
   end

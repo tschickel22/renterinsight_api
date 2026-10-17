@@ -27,6 +27,7 @@ module Api
         task.company = @company
         task.position = @phase.project_phase_tasks.count
         if task.save
+          ProjectAssignmentService.new(@project, actor: current_user).inherit_for_new_task!(task)
           render json: task.as_json(
             only: %i[id name position status is_required assigned_to_id visible_to_client client_actionable completed_at created_at],
             include: { assigned_to: { only: %i[id first_name last_name email] } }

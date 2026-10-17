@@ -3,6 +3,9 @@ module Api
     class DealsController < ApplicationController
       before_action :set_company_scope
       before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
+      include PostedDealChanges
+      # An edit to an approved deal posts the difference and updates its invoice.
+      around_action :keep_posted_deal_in_step, only: [:update]
 
       # GET /api/crm/deals
       def index
@@ -626,6 +629,8 @@ module Api
 
       private
 
+      def posted_deal = @deal
+
       # Sorting used to be client-side over the loaded page only, so on a
       # multi-page list the "sorted" order was really just the current 50 rows
       # rearranged. Whitelisted columns keep this injection-safe; anything
@@ -1008,6 +1013,9 @@ module Api
           # accounting gate.
           glPosted: deal.gl_posted || false,
           glPostedAt: deal.gl_posted_at&.iso8601,
+          # The invoice approval made for the deal. Record Payment on the deal
+          # page needs it and never appeared without it.
+          dealInvoiceId: deal.deal_invoice_id,
           commissionPosted: deal.commission_posted || false,
           commissionPostedAt: deal.commission_posted_at&.iso8601
         }

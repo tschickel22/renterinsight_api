@@ -13,6 +13,9 @@ class Project < ApplicationRecord
   belongs_to :land_parcel, optional: true
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   belongs_to :created_by, class_name: 'User', foreign_key: 'created_by_id', optional: true
+  # Whole-project owners (E69); phases and tasks inherit them. See ProjectAssignmentService.
+  belongs_to :assigned_vendor, class_name: 'Vendor', optional: true
+  belongs_to :assigned_to, class_name: 'User', optional: true
 
   has_many :project_phases, -> { order(:position) }, dependent: :destroy
   has_many :tasks, class_name: 'ProjectTask', dependent: :destroy

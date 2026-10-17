@@ -13,6 +13,8 @@ module Api
       before_action :set_deal
       before_action :set_deal_product, only: [:show, :update, :destroy]
       before_action :refuse_when_sheet_signed, only: [:create, :update, :destroy, :bulk_create]
+      include PostedDealChanges
+      around_action :keep_posted_deal_in_step, only: [:create, :update, :destroy, :bulk_create]
 
       # GET /api/crm/deals/:deal_id/products
       def index
@@ -78,6 +80,11 @@ module Api
         vehicle_ids_in_batch = []
 
         ActiveRecord::Base.transaction do
+          # replace: the Edit Deal form's save. It used to delete every line
+          # with separate requests and then add them back, which on an
+          # approved deal posted an entry per line; one request posts at most
+          # one entry, for what actually changed.
+          @deal.deal_products.reload.each(&:destroy!) if ActiveModel::Type::Boolean.new.cast(params[:replace])
           products_data.each_with_index do |product_params, index|
             transformed = transform_unified_item(product_params)
             vehicle_id = extract_vehicle_id_from_item(product_params, transformed)
@@ -125,6 +132,9 @@ module Api
       end
 
       private
+
+      def posted_deal = @deal
+
 
       def deal_sheet_json
         live = @deal.home_build

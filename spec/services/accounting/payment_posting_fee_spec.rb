@@ -22,11 +22,22 @@ RSpec.describe Accounting::PaymentPostingService, 'processing fees' do
 
   before do
     skip 'seed has no AR account' unless settings.default_ar_account
-    settings.update!(auto_post_payments: true)
+    settings.update!(auto_post_payments: true, auto_post_invoices: true)
+  end
+
+  # What the payment pays: a payment credits AR, so it posts only against an
+  # invoice that is in AR.
+  let(:invoice) do
+    inv = company.invoices.create!(location: location, contact: contact, invoice_number: "INV-F-#{SecureRandom.hex(3)}",
+                                   invoice_date: Date.current, due_date: Date.current, status: 'draft')
+    inv.invoice_items.create!(description: 'Service', quantity: 1, rate: 100, amount: 100)
+    inv.update!(status: 'sent')
+    inv
   end
 
   def pay(fee:, responsibility:)
     company.payments.create!(
+      payable: invoice,
       amount: 100, payment_type: 'one_time', status: 'completed', payer: contact,
       payment_date: Date.current, gateway_name: 'manual', location: location, bank_account: bank,
       processing_fee: fee, fee_responsibility: responsibility

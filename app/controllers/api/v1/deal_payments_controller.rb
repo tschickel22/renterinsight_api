@@ -2,53 +2,28 @@
 
 class Api::V1::DealPaymentsController < ApplicationController
   before_action :set_company_scope
-  before_action :load_deal
+  before_action :load_deal, except: [:open_balances]
 
   # POST /api/v1/deals/:id/record_payment
-  # Records a cash receipt applied to the deal's linked invoice and refreshes
-  # invoice balance/draw schedule status.
+  # Money received from the customer on this deal. Before the deal has an
+  # invoice it is a deposit, held in the deposits account until approval
+  # applies it. An approved deal that never got its invoice gets one first.
+  # Otherwise it is applied to the deal's invoice, filling draws in order.
   def record_payment
     return unless authorize_action!('accounting', 'create')
 
-    invoice = @company.invoices.find_by(id: @deal.deal_invoice_id)
-    return render(json: { error: 'Deal has no linked invoice' }, status: :unprocessable_entity) if invoice.nil?
-
-    amount = params[:amount].to_d
-    return render(json: { error: 'Amount must be greater than 0' }, status: :unprocessable_entity) if amount <= 0
-
-    if amount > invoice.amount_due.to_d + 0.001
+    service = DealPaymentService.new(@deal, user: current_user)
+    entry = service.build_entry(params.permit(:amount, :payment_date, :payment_method, :bank_account_id, :reference_number, :memo))
+    invoice = service.current_invoice
+    if invoice && entry.amount > invoice.amount_due.to_d + 0.001
       return render(json: { error: 'Amount exceeds invoice balance due' }, status: :unprocessable_entity)
     end
 
-    payment_date = parse_date(params[:payment_date]) || Date.current
-    bank_account = @company.bank_accounts.find_by(id: params[:bank_account_id]) if params[:bank_account_id].present?
-
-    cr = nil
-    ActiveRecord::Base.transaction do
-      cr = @company.cash_receipts.build(
-        contact_id: invoice.contact_id,
-        account_id: invoice.recipient_type == 'Account' ? invoice.recipient_id : nil,
-        bank_account_id: bank_account&.id,
-        receipt_date: payment_date,
-        amount: amount,
-        payment_method: params[:payment_method].presence || 'check',
-        reference_number: params[:reference_number],
-        memo: params[:memo].presence || "Payment for deal #{@deal.deal_number || @deal.id}",
-        location_id: @deal.location_id || Current.location_id,
-        customer_name: @deal.try(:customer_name)
-      )
-      cr.created_by_id = current_user&.id
-      cr.cash_receipt_applications.build(invoice_id: invoice.id, amount_applied: amount)
-      cr.amount_applied = amount
-      cr.amount_unapplied = 0
-      cr.save!
-
-      update_draw_schedule_payment!(invoice, amount)
-    end
-
-    invoice.reload
+    cr = service.record!(entry, invoice: invoice)
+    invoice&.reload
     render json: {
       success: true,
+      deposit: invoice.nil?,
       cash_receipt: {
         id: cr.id,
         receipt_number: cr.receipt_number,
@@ -58,7 +33,7 @@ class Api::V1::DealPaymentsController < ApplicationController
         reference_number: cr.reference_number,
         journal_entry_id: cr.journal_entry_id
       },
-      invoice: {
+      invoice: invoice && {
         id: invoice.id,
         invoice_number: invoice.invoice_number,
         total: invoice.total,
@@ -68,8 +43,98 @@ class Api::V1::DealPaymentsController < ApplicationController
         draw_schedule: invoice.draw_schedule
       }
     }
+  rescue DealPaymentService::Error, ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/deals/open_balances?contact_id=&project_id=
+  # Deals a customer payment could go toward, for Record Income.
+  def open_balances
+    return unless authorize_action!('accounting', 'read')
+
+    render json: { deals: DealPaymentService.open_deals_for(@company, contact_id: params[:contact_id], project_id: params[:project_id]) }
+  end
+
+  # GET /api/v1/deals/:id/funding
+  # What the deal has received: deposits still held, and its invoice.
+  def funding
+    return unless authorize_action!('accounting', 'read')
+
+    service = DealPaymentService.new(@deal, user: current_user)
+    invoice = @company.invoices.find_by(id: @deal.deal_invoice_id) if @deal.deal_invoice_id
+    receipts = @company.cash_receipts.posted.not_deleted.where(deal_id: @deal.id).order(:receipt_date, :id)
+    render json: {
+      approved: @deal.gl_posted_at.present?,
+      deposits_account: service.deposits_account&.slice(:id, :account_number, :name),
+      deposits_held: service.held_deposits.sum(:amount_unapplied).to_f,
+      receipts: receipts.map { |r| receipt_json(r) },
+      invoice: invoice && invoice.slice(:id, :invoice_number, :total, :amount_paid, :amount_due, :status, :due_date, :draw_schedule)
+    }
+  end
+
+  # POST /api/v1/deals/:id/create_invoice
+  # The invoice a deal normally gets at approval, for an approved deal that
+  # never got one (posted before auto-posted deals made theirs, or the step
+  # failed). It bills AR the closing entry already booked, so it posts nothing.
+  def create_invoice
+    return unless authorize_action!('accounting', 'create')
+    return render(json: { error: 'Approve the deal before invoicing it' }, status: :unprocessable_entity) unless @deal.gl_posted_at.present?
+
+    invoice = DealInvoiceService.new(@deal, user: current_user).create_invoice!
+    render json: { success: true, invoice: invoice.as_json(only: %i[id invoice_number total amount_due status due_date]) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/deals/:id/sync_invoice
+  # Resets the deal invoice's total to what the books show owed (what
+  # approval booked plus the sales tax it posted), spreading any difference
+  # over the unpaid draws. For an invoice the Deal Funding books check flags.
+  def sync_invoice
+    return unless authorize_action!('accounting', 'update')
+
+    invoice = @company.invoices.find_by(id: @deal.deal_invoice_id) if @deal.deal_invoice_id
+    return render(json: { error: 'This deal has no invoice' }, status: :unprocessable_entity) unless invoice
+
+    DealInvoiceService.new(@deal, user: current_user).sync_invoice!(invoice)
+    invoice.reload.update_status_based_on_payments
+    DealInvoiceService.refresh_draws!(invoice.reload)
+    render json: { success: true, invoice: invoice.reload.slice(:id, :invoice_number, :total, :amount_paid, :amount_due, :status) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/deals/:id/post_invoice_payments  { bank_account_id }
+  # Payments saved on the deal's invoice that never reached the ledger (the
+  # invoice page used to save them without posting when "auto-post payments"
+  # is off). Posts each into the bank account given: Dr bank, Cr AR.
+  def post_invoice_payments
+    return unless authorize_action!('accounting', 'create')
+
+    invoice = @company.invoices.find_by(id: @deal.deal_invoice_id) if @deal.deal_invoice_id
+    return render(json: { error: 'This deal has no invoice' }, status: :unprocessable_entity) unless invoice
+
+    bank = @company.bank_accounts.find_by(id: params[:bank_account_id])
+    return render(json: { error: 'Pick the bank account the money went into' }, status: :unprocessable_entity) unless bank
+    if (problem = DealPaymentService.bank_problem(@company, bank))
+      return render(json: { error: problem }, status: :unprocessable_entity)
+    end
+
+    posted_ids = @company.journal_entries.where(source_entity_type: 'Payment', is_void: false).select(:source_entity_id)
+    payments = @company.payments.where(status: 'completed', id: PaymentApplication.where(applicable_type: 'Invoice', applicable_id: invoice.id).select(:payment_id))
+                       .where.not(id: posted_ids)
+    posted = payments.filter_map do |payment|
+      payment.update_column(:bank_account_id, bank.id) if payment.bank_account_id.blank?
+      Accounting::PaymentPostingService.new(payment.reload).post!(force: true)
+    end
+    if posted.size < payments.size
+      return render json: { error: "#{payments.size - posted.size} of #{payments.size} payments could not be posted. Check that the default AR account is set." },
+                    status: :unprocessable_entity
+    end
+
+    render json: { success: true, posted: posted.size, journal_entry_ids: posted.map(&:id) }
   end
 
   private
@@ -79,37 +144,10 @@ class Api::V1::DealPaymentsController < ApplicationController
     render json: { error: 'Deal not found' }, status: :not_found unless @deal
   end
 
-  def parse_date(value)
-    return nil if value.blank?
-    Date.parse(value.to_s)
-  rescue ArgumentError, TypeError
-    nil
-  end
-
-  # Apply the payment against unpaid draws in order, marking them paid/partial.
-  def update_draw_schedule_payment!(invoice, amount)
-    schedule = invoice.draw_schedule
-    return if schedule.blank? || !schedule.is_a?(Hash)
-
-    draws = schedule['draws']
-    return unless draws.is_a?(Array) && draws.any?
-
-    remaining = amount.to_f
-    draws.each do |draw|
-      break if remaining <= 0
-      next if draw['status'].to_s == 'paid'
-
-      draw_amount = (draw['amount'] || 0).to_f
-      paid = (draw['paid_amount'] || 0).to_f
-      draw_balance = (draw_amount - paid).round(2)
-      next if draw_balance <= 0
-
-      apply = [remaining, draw_balance].min.round(2)
-      draw['paid_amount'] = (paid + apply).round(2)
-      draw['status'] = (draw['paid_amount'].to_f + 0.001 >= draw_amount) ? 'paid' : 'partial'
-      remaining = (remaining - apply).round(2)
-    end
-
-    invoice.update_column(:draw_schedule, schedule)
+  def receipt_json(r)
+    {
+      id: r.id, receipt_number: r.receipt_number, receipt_date: r.receipt_date, amount: r.amount.to_f,
+      amount_unapplied: r.amount_unapplied.to_f, payment_method: r.payment_method, reference_number: r.reference_number
+    }
   end
 end

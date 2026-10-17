@@ -217,6 +217,17 @@ module Accounting
     end
 
     # The sales tax lines post_sales_tax_entries! posts, as closing_lines gives them.
+    # The sales tax approval will post, for the approval screen's preview: the
+    # state it is taxed in, each slot's rate and amount, or why none posts.
+    def sales_tax_preview
+      plan = sales_tax_plan
+      return { skipped: plan[:skipped], state_code: deal_state_code, slots: [], total: 0.0 } if plan[:skipped]
+
+      slots = plan[:slots].map { |s| { slot: s[:slot], rate: s[:rate].to_f, amount: s[:amount].to_f } }
+      { skipped: nil, state_code: plan[:state_code], rates: plan[:rates].transform_values(&:to_f),
+        slots: slots, total: slots.sum { |s| s[:amount] }.round(2) }
+    end
+
     def sales_tax_lines
       plan = sales_tax_plan
       return [] if plan[:skipped]

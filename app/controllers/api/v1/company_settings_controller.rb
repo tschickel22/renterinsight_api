@@ -171,12 +171,9 @@ module Api
         settings = Setting.get('company', @company.id, 'project_management') || {}
         settings = settings.stringify_keys if settings.respond_to?(:stringify_keys)
 
-        render json: {
-          project_management: {
-            'require_client_approval' => settings['require_client_approval'] == true
-          }
-        }
+        render json: { project_management: project_management_json(settings) }
       end
+
 
       # PATCH /api/v1/company_settings/project_management
       def update_project_management
@@ -184,19 +181,19 @@ module Api
         raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
         raw = raw.stringify_keys if raw.respond_to?(:stringify_keys)
 
-        require_client_approval = ActiveModel::Type::Boolean.new.cast(raw['require_client_approval'])
-
         # Merge onto any existing project_management settings so future keys aren't wiped.
+        # Only keys sent are changed: saving one toggle used to reset the other to off.
         existing = Setting.get('company', @company.id, 'project_management') || {}
         existing = existing.stringify_keys if existing.respond_to?(:stringify_keys)
-        merged = existing.merge('require_client_approval' => require_client_approval == true)
+        merged = existing.dup
+        ['require_client_approval', ProjectCostBillService::SETTING_KEY].each do |key|
+          merged[key] = ActiveModel::Type::Boolean.new.cast(raw[key]) == true if raw.key?(key)
+        end
 
         Setting.set('company', @company.id, 'project_management', merged)
 
         render json: {
-          project_management: {
-            'require_client_approval' => require_client_approval == true
-          },
+          project_management: project_management_json(merged),
           message: 'Project management settings updated successfully'
         }
       rescue => e
@@ -741,6 +738,14 @@ module Api
       end
 
       private
+      def project_management_json(settings)
+        {
+          'require_client_approval' => settings['require_client_approval'] == true,
+          # E68: cost lines entered with a vendor become draft bills (off: track only)
+          ProjectCostBillService::SETTING_KEY => settings[ProjectCostBillService::SETTING_KEY] == true
+        }
+      end
+
 
       # RBAC Authorization Methods for company_settings resource
       def authorize_settings_read!

@@ -7,13 +7,15 @@ module Api
       before_action :set_template, only: %i[show update destroy duplicate]
 
       PHASE_ONLY_FIELDS = %i[id name position visible_to_client is_required estimated_days icon color].freeze
-      PHASE_TASK_FIELDS = %i[id name position is_required visible_to_client client_actionable estimated_days].freeze
+      PHASE_TASK_FIELDS = %i[id name position is_required visible_to_client client_actionable estimated_days
+                             default_vendor_id default_assigned_to_id].freeze
 
       def phases_json(phases)
         phases.includes(:project_template_phase_tasks).map do |phase|
           phase.as_json(
             only: %i[id name description position visible_to_client is_required
-                     notify_client_on_start notify_client_on_complete estimated_days icon color],
+                     notify_client_on_start notify_client_on_complete estimated_days icon color
+                     default_vendor_id default_assigned_to_id],
             include: {
               project_template_phase_tasks: { only: PHASE_TASK_FIELDS }
             }
@@ -38,7 +40,7 @@ module Api
 
         render json: {
           items: templates.map do |t|
-            t.as_json(only: %i[id name description template_type is_default is_active phase_count location_id created_at updated_at])
+            t.as_json(only: %i[id name description template_type is_default is_active phase_count default_vendor_id default_assigned_to_id location_id created_at updated_at])
               .merge('project_template_phases' => phases_json(t.project_template_phases.ordered))
           end
         }
@@ -50,7 +52,7 @@ module Api
 
         render json: {
           template: @template.as_json(
-            only: %i[id name description template_type is_default is_active phase_count location_id created_at updated_at]
+            only: %i[id name description template_type is_default is_active phase_count default_vendor_id default_assigned_to_id location_id created_at updated_at]
           ).merge('project_template_phases' => phases_json(@template.project_template_phases.ordered))
         }
       end
@@ -58,6 +60,7 @@ module Api
       # POST /api/v1/project_templates
       def create
         return unless authorize_action!('deals', 'create')
+        return unless valid_assignment_defaults?
 
         template = @company.project_templates.build(template_params)
         template.created_by_id = current_user.id
@@ -70,7 +73,7 @@ module Api
         end
 
         render json: {
-          template: template.as_json(only: %i[id name description template_type is_default is_active phase_count created_at])
+          template: template.as_json(only: %i[id name description template_type is_default is_active phase_count default_vendor_id default_assigned_to_id created_at])
             .merge('project_template_phases' => phases_json(template.project_template_phases.ordered))
         }, status: :created
 
@@ -81,6 +84,7 @@ module Api
       # PATCH /api/v1/project_templates/:id
       def update
         return unless authorize_action!('deals', 'update')
+        return unless valid_assignment_defaults?
 
         ActiveRecord::Base.transaction do
           @template.update!(template_params)
@@ -94,7 +98,7 @@ module Api
         end
 
         render json: {
-          template: @template.as_json(only: %i[id name description template_type is_default is_active phase_count updated_at])
+          template: @template.as_json(only: %i[id name description template_type is_default is_active phase_count default_vendor_id default_assigned_to_id updated_at])
             .merge('project_template_phases' => phases_json(@template.project_template_phases.ordered))
         }
 
@@ -118,7 +122,7 @@ module Api
         new_template.update!(created_by_id: current_user.id)
 
         render json: {
-          template: new_template.as_json(only: %i[id name description template_type is_default is_active phase_count created_at])
+          template: new_template.as_json(only: %i[id name description template_type is_default is_active phase_count default_vendor_id default_assigned_to_id created_at])
             .merge('project_template_phases' => phases_json(new_template.project_template_phases.ordered))
         }, status: :created
       end
@@ -133,8 +137,39 @@ module Api
 
       def template_params
         params.require(:project_template).permit(
-          :name, :description, :template_type, :is_default, :is_active, :location_id
+          :name, :description, :template_type, :is_default, :is_active, :location_id,
+          :default_vendor_id, :default_assigned_to_id
         )
+      end
+
+      # A template may only name this company's own contractors and users. An
+      # inactive one is allowed (a template saved before they left keeps saving);
+      # the project build leaves those items unassigned and flags them.
+      def valid_assignment_defaults?
+        vendor_ids = []
+        user_ids = []
+        collect = lambda do |h|
+          next unless h.respond_to?(:[])
+          vendor_ids << h[:default_vendor_id] if h[:default_vendor_id].present?
+          user_ids << h[:default_assigned_to_id] if h[:default_assigned_to_id].present?
+        end
+        collect.call(params[:project_template]) if params[:project_template].present?
+        Array(params[:phases]).each do |phase|
+          collect.call(phase)
+          Array(phase[:tasks]).each { |task| collect.call(task) }
+        end
+
+        vendor_ids = vendor_ids.map(&:to_i).uniq
+        user_ids = user_ids.map(&:to_i).uniq
+        bad_vendors = vendor_ids - @company.contractors.not_deleted.where(id: vendor_ids).pluck(:id)
+        bad_users = user_ids - @company.users.where(id: user_ids).pluck(:id)
+        return true if bad_vendors.empty? && bad_users.empty?
+
+        errors = []
+        errors << 'Default contractor must be one of your own contractors' if bad_vendors.any?
+        errors << 'Default employee must be one of your own users' if bad_users.any?
+        render json: { errors: errors }, status: :unprocessable_entity
+        false
       end
 
       # Build phases (and their tasks) from params array
@@ -153,7 +188,9 @@ module Api
                 'task_type' => task_data[:task_type] || 'task',
                 'position' => task_data[:position] || tidx,
                 'estimated_hours' => task_data[:estimated_hours],
-                'checklist_items' => task_data[:checklist_items] || []
+                'checklist_items' => task_data[:checklist_items] || [],
+                'default_vendor_id' => task_data[:default_vendor_id].presence&.to_i,
+                'default_assigned_to_id' => task_data[:default_assigned_to_id].presence&.to_i
               }
             end
           end
@@ -169,7 +206,9 @@ module Api
             estimated_days:            phase_data[:estimated_days],
             icon:                      phase_data[:icon],
             color:                     phase_data[:color],
-            default_tasks:             rich_tasks
+            default_tasks:             rich_tasks,
+            default_vendor_id:         phase_data[:default_vendor_id].presence,
+            default_assigned_to_id:    phase_data[:default_assigned_to_id].presence
           )
 
           # Also create Phase 1 simple tasks for backward compat
@@ -182,7 +221,9 @@ module Api
               is_required:       task_data[:is_required] || false,
               visible_to_client: task_data[:visible_to_client] || false,
               client_actionable: task_data[:client_actionable] || false,
-              estimated_days:    task_data[:estimated_days]
+              estimated_days:    task_data[:estimated_days],
+              default_vendor_id: task_data[:default_vendor_id].presence,
+              default_assigned_to_id: task_data[:default_assigned_to_id].presence
             )
           end
         end

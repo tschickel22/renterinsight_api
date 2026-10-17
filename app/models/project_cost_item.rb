@@ -23,6 +23,10 @@ class ProjectCostItem < ApplicationRecord
   # Any vendor type (contractor, supplier, ...) — the cost picker lists them all,
   # while :contractor only resolves vendor_type='contractor'.
   belongs_to :vendor, optional: true
+  # The bill this cost is paid through (E68), e.g. a contractor's portal invoice.
+  belongs_to :bill, optional: true
+  # The Record Expense or manual journal entry this cost came from (E68).
+  belongs_to :journal_entry, optional: true
 
   validates :description, presence: true
   validates :amount, presence: true, numericality: true
@@ -30,6 +34,7 @@ class ProjectCostItem < ApplicationRecord
   validates :category, inclusion: { in: CATEGORIES }, allow_nil: true, allow_blank: true
   validates :status, inclusion: { in: STATUSES }
   validate :vendor_belongs_to_company
+  validate :links_belong_to_project
 
   scope :not_deleted, -> { where(is_deleted: [false, nil]) }
   scope :by_type, ->(type) { where(cost_type: type) if type.present? }
@@ -61,6 +66,22 @@ class ProjectCostItem < ApplicationRecord
     return if Vendor.where(company_id: company_id, id: vendor_id).exists?
 
     errors.add(:contractor_id, 'is not a vendor in this company')
+  end
+
+  # Phase, task and part ids also arrive from the client. A phase or task from
+  # another project would also have its costs recalculated with this item in them.
+  def links_belong_to_project
+    if project_phase_id.present? && will_save_change_to_project_phase_id? &&
+       !ProjectPhase.where(id: project_phase_id, project_id: project_id).exists?
+      errors.add(:project_phase_id, 'is not a phase of this project')
+    end
+    if project_task_id.present? && will_save_change_to_project_task_id? &&
+       !ProjectTask.where(id: project_task_id, project_id: project_id).exists?
+      errors.add(:project_task_id, 'is not a task of this project')
+    end
+    if part_id.present? && will_save_change_to_part_id? && !Part.where(id: part_id, company_id: company_id).exists?
+      errors.add(:part_id, 'is not a part in this company')
+    end
   end
 
   def recalculate_parent_costs

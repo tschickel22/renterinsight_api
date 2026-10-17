@@ -2,6 +2,8 @@
 
 class ProjectTemplatePhase < ApplicationRecord
   belongs_to :project_template, counter_cache: :phase_count
+  belongs_to :default_vendor, class_name: 'Vendor', optional: true
+  belongs_to :default_assigned_to, class_name: 'User', optional: true
   has_many :project_template_phase_tasks, -> { order(:position) }, dependent: :destroy
 
   # Validations

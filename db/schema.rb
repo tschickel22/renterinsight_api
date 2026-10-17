@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_16_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -137,6 +137,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.bigint "city_tax_account_id"
     t.jsonb "tax_rates_by_state", default: {}, null: false
     t.boolean "auto_post_deals", default: false, null: false
+    t.bigint "customer_deposits_account_id"
     t.index ["city_tax_account_id"], name: "index_accounting_settings_on_city_tax_account_id"
     t.index ["company_id"], name: "index_accounting_settings_on_company_id", unique: true
     t.index ["county_tax_account_id"], name: "index_accounting_settings_on_county_tax_account_id"
@@ -947,9 +948,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.integer "position", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "project_id"
     t.index ["bill_id"], name: "index_bill_line_items_on_bill_id"
     t.index ["chart_of_account_id"], name: "index_bill_line_items_on_chart_of_account_id"
     t.index ["location_id"], name: "index_bill_line_items_on_location_id"
+    t.index ["project_id"], name: "index_bill_line_items_on_project_id"
   end
 
   create_table "bill_payments", force: :cascade do |t|
@@ -1008,6 +1011,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.datetime "gl_post_failed_at"
     t.bigint "accounting_import_id"
     t.string "quickbooks_id"
+    t.bigint "project_id"
+    t.string "source"
+    t.jsonb "submission", default: {}, null: false
     t.index ["accounting_import_id"], name: "index_bills_on_accounting_import_id", where: "(accounting_import_id IS NOT NULL)"
     t.index ["ap_account_id"], name: "index_bills_on_ap_account_id"
     t.index ["company_id", "bill_number"], name: "index_bills_on_company_id_and_bill_number", unique: true, where: "(bill_number IS NOT NULL)"
@@ -1019,6 +1025,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.index ["journal_entry_id"], name: "index_bills_on_journal_entry_id"
     t.index ["location_id"], name: "index_bills_on_location_id"
     t.index ["payment_journal_entry_id"], name: "index_bills_on_payment_journal_entry_id"
+    t.index ["project_id"], name: "index_bills_on_project_id"
     t.index ["vendor_id"], name: "index_bills_on_vendor_id"
   end
 
@@ -1467,9 +1474,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.decimal "amount_applied", precision: 12, scale: 2, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "journal_entry_id"
     t.index ["cash_receipt_id", "invoice_id"], name: "idx_cra_unique_receipt_invoice", unique: true
     t.index ["cash_receipt_id"], name: "index_cash_receipt_applications_on_cash_receipt_id"
     t.index ["invoice_id"], name: "index_cash_receipt_applications_on_invoice_id"
+    t.index ["journal_entry_id"], name: "index_cash_receipt_applications_on_journal_entry_id"
   end
 
   create_table "cash_receipts", force: :cascade do |t|
@@ -1494,6 +1503,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.boolean "is_deleted", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "deal_id"
+    t.bigint "project_id"
     t.index ["account_id"], name: "index_cash_receipts_on_account_id"
     t.index ["bank_account_id"], name: "index_cash_receipts_on_bank_account_id"
     t.index ["company_id", "receipt_number"], name: "index_cash_receipts_on_company_id_and_receipt_number", unique: true, where: "(receipt_number IS NOT NULL)"
@@ -1501,8 +1512,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.index ["company_id"], name: "index_cash_receipts_on_company_id"
     t.index ["contact_id"], name: "index_cash_receipts_on_contact_id"
     t.index ["created_by_id"], name: "index_cash_receipts_on_created_by_id"
+    t.index ["deal_id"], name: "index_cash_receipts_on_deal_id"
     t.index ["journal_entry_id"], name: "index_cash_receipts_on_journal_entry_id"
     t.index ["location_id"], name: "index_cash_receipts_on_location_id"
+    t.index ["project_id"], name: "index_cash_receipts_on_project_id"
     t.index ["receipt_date"], name: "index_cash_receipts_on_receipt_date"
   end
 
@@ -3921,12 +3934,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.integer "position", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "project_id"
     t.index ["chart_of_account_id"], name: "index_journal_entry_lines_on_chart_of_account_id"
     t.index ["contact_id"], name: "index_journal_entry_lines_on_contact_id"
     t.index ["deal_id"], name: "index_journal_entry_lines_on_deal_id"
     t.index ["department"], name: "index_journal_entry_lines_on_department"
     t.index ["journal_entry_id"], name: "index_journal_entry_lines_on_journal_entry_id"
     t.index ["location_id"], name: "index_journal_entry_lines_on_location_id"
+    t.index ["project_id"], name: "index_journal_entry_lines_on_project_id"
     t.index ["vehicle_id"], name: "index_journal_entry_lines_on_vehicle_id"
   end
 
@@ -5570,11 +5585,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "vendor_id"
+    t.bigint "bill_id"
+    t.bigint "journal_entry_id"
     t.index ["approved_by_id"], name: "index_project_cost_items_on_approved_by_id"
+    t.index ["bill_id"], name: "index_project_cost_items_on_bill_id"
     t.index ["company_id"], name: "index_project_cost_items_on_company_id"
     t.index ["cost_type"], name: "index_project_cost_items_on_cost_type"
     t.index ["date"], name: "index_project_cost_items_on_date"
     t.index ["inventory_transaction_id"], name: "index_project_cost_items_on_inventory_transaction_id"
+    t.index ["journal_entry_id"], name: "index_project_cost_items_on_journal_entry_id"
     t.index ["part_id"], name: "index_project_cost_items_on_part_id"
     t.index ["project_id"], name: "index_project_cost_items_on_project_id"
     t.index ["project_phase_id"], name: "index_project_cost_items_on_project_phase_id"
@@ -5725,6 +5744,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.datetime "updated_at", null: false
     t.decimal "estimated_budget", precision: 12, scale: 2
     t.decimal "actual_cost", precision: 12, scale: 2, default: "0.0"
+    t.bigint "assigned_vendor_id"
+    t.bigint "assigned_to_id"
+    t.index ["assigned_to_id"], name: "index_project_phases_on_assigned_to_id"
+    t.index ["assigned_vendor_id"], name: "index_project_phases_on_assigned_vendor_id"
     t.index ["company_id", "status"], name: "idx_project_phases_company_status"
     t.index ["company_id"], name: "index_project_phases_on_company_id"
     t.index ["project_id", "position"], name: "idx_project_phases_project_position"
@@ -5809,6 +5832,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.boolean "visible_to_client", default: false, null: false
     t.boolean "client_actionable", default: false, null: false
     t.integer "estimated_days"
+    t.bigint "default_vendor_id"
+    t.bigint "default_assigned_to_id"
+    t.index ["default_assigned_to_id"], name: "index_project_template_phase_tasks_on_default_assigned_to_id"
+    t.index ["default_vendor_id"], name: "index_project_template_phase_tasks_on_default_vendor_id"
     t.index ["project_template_phase_id", "position"], name: "idx_template_phase_tasks_phase_position"
     t.index ["project_template_phase_id"], name: "idx_on_project_template_phase_id_9658b0b17b"
   end
@@ -5828,6 +5855,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "default_tasks", default: []
+    t.bigint "default_vendor_id"
+    t.bigint "default_assigned_to_id"
+    t.index ["default_assigned_to_id"], name: "index_project_template_phases_on_default_assigned_to_id"
+    t.index ["default_vendor_id"], name: "index_project_template_phases_on_default_vendor_id"
     t.index ["project_template_id", "position"], name: "idx_template_phases_template_position"
     t.index ["project_template_id"], name: "index_project_template_phases_on_project_template_id"
   end
@@ -5845,10 +5876,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.bigint "created_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "default_vendor_id"
+    t.bigint "default_assigned_to_id"
     t.index ["company_id", "is_active"], name: "idx_project_templates_company_active"
     t.index ["company_id", "is_default"], name: "idx_project_templates_company_default"
     t.index ["company_id", "template_type"], name: "idx_project_templates_company_type"
     t.index ["company_id"], name: "index_project_templates_on_company_id"
+    t.index ["default_assigned_to_id"], name: "index_project_templates_on_default_assigned_to_id"
+    t.index ["default_vendor_id"], name: "index_project_templates_on_default_vendor_id"
     t.index ["location_id"], name: "index_project_templates_on_location_id"
   end
 
@@ -5894,6 +5929,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
     t.decimal "subcontractor_cost", precision: 12, scale: 2, default: "0.0"
     t.decimal "other_cost", precision: 12, scale: 2, default: "0.0"
     t.bigint "land_parcel_id"
+    t.bigint "assigned_vendor_id"
+    t.bigint "assigned_to_id"
+    t.jsonb "assignment_issues", default: [], null: false
+    t.index ["assigned_to_id"], name: "index_projects_on_assigned_to_id"
+    t.index ["assigned_vendor_id"], name: "index_projects_on_assigned_vendor_id"
     t.index ["client_access_token"], name: "idx_projects_client_token", unique: true
     t.index ["company_id", "location_id"], name: "idx_projects_company_location"
     t.index ["company_id", "project_number"], name: "idx_projects_company_number", unique: true
@@ -8716,6 +8756,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
   add_foreign_key "bills", "journal_entries"
   add_foreign_key "bills", "journal_entries", column: "payment_journal_entry_id"
   add_foreign_key "bills", "locations"
+  add_foreign_key "bills", "projects", on_delete: :nullify
   add_foreign_key "bills", "users", column: "created_by_id"
   add_foreign_key "bills", "vendors", on_delete: :nullify
   add_foreign_key "bins", "locations"
@@ -9087,6 +9128,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
   add_foreign_key "printed_checks", "contacts"
   add_foreign_key "printed_checks", "journal_entries"
   add_foreign_key "printed_checks", "vendors"
+  add_foreign_key "project_cost_items", "bills", on_delete: :nullify
   add_foreign_key "project_cost_items", "companies"
   add_foreign_key "project_cost_items", "inventory_transactions", on_delete: :nullify
   add_foreign_key "project_cost_items", "parts", on_delete: :nullify
@@ -9116,6 +9158,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
   add_foreign_key "project_phase_tasks", "users", column: "completed_by_id"
   add_foreign_key "project_phases", "companies"
   add_foreign_key "project_phases", "projects"
+  add_foreign_key "project_phases", "users", column: "assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_phases", "vendors", column: "assigned_vendor_id", on_delete: :nullify
   add_foreign_key "project_task_checklist_items", "project_task_checklists"
   add_foreign_key "project_task_checklist_items", "users", column: "completed_by_id"
   add_foreign_key "project_task_checklists", "project_tasks"
@@ -9126,14 +9170,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_16_170000) do
   add_foreign_key "project_tasks", "projects"
   add_foreign_key "project_tasks", "users", column: "assigned_to_id"
   add_foreign_key "project_template_phase_tasks", "project_template_phases"
+  add_foreign_key "project_template_phase_tasks", "users", column: "default_assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_template_phase_tasks", "vendors", column: "default_vendor_id", on_delete: :nullify
   add_foreign_key "project_template_phases", "project_templates"
+  add_foreign_key "project_template_phases", "users", column: "default_assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_template_phases", "vendors", column: "default_vendor_id", on_delete: :nullify
   add_foreign_key "project_templates", "companies"
   add_foreign_key "project_templates", "locations"
+  add_foreign_key "project_templates", "users", column: "default_assigned_to_id", on_delete: :nullify
+  add_foreign_key "project_templates", "vendors", column: "default_vendor_id", on_delete: :nullify
   add_foreign_key "projects", "companies"
   add_foreign_key "projects", "deals"
   add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
+  add_foreign_key "projects", "users", column: "assigned_to_id", on_delete: :nullify
+  add_foreign_key "projects", "vendors", column: "assigned_vendor_id", on_delete: :nullify
   add_foreign_key "purchase_order_change_orders", "companies"
   add_foreign_key "purchase_order_change_orders", "deal_home_builds", on_delete: :nullify
   add_foreign_key "purchase_order_change_orders", "deals"

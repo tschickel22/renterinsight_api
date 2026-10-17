@@ -7,6 +7,8 @@ class JournalEntryLine < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :deal, optional: true
   belongs_to :vehicle, optional: true
+  # The job this amount belongs to (E68). Bills carry it from their lines.
+  belongs_to :project, optional: true
 
   DEPARTMENTS = %w[new_sales used_sales service parts fi admin].freeze
 
@@ -14,8 +16,10 @@ class JournalEntryLine < ApplicationRecord
   validates :department, inclusion: { in: DEPARTMENTS }, allow_blank: true
   validate :has_amount
   validate :account_is_postable, if: -> { new_record? || will_save_change_to_chart_of_account_id? }
+  validate :links_belong_to_company
 
   before_validation :set_default_location
+  before_validation :follow_project_deal, if: -> { will_save_change_to_project_id? }
 
   def has_amount
     if (debit_amount.blank? || debit_amount.zero?) && (credit_amount.blank? || credit_amount.zero?)
@@ -35,6 +39,35 @@ class JournalEntryLine < ApplicationRecord
       errors.add(:chart_of_account_id, 'belongs to a different company')
     elsif chart_of_account.is_header?
       errors.add(:chart_of_account_id, "#{chart_of_account.account_number} is a header account and can't be posted to")
+    end
+  end
+
+  # A line moved onto a project carries that project's deal, unless the line
+  # names a deal of its own; moved off, it drops the deal the project gave it.
+  def follow_project_deal
+    company_id = journal_entry&.company_id
+    return unless company_id
+
+    old_deal = project_id_was && Project.unscoped.where(id: project_id_was, company_id: company_id).pick(:deal_id)
+    return unless deal_id.blank? || deal_id == old_deal
+
+    self.deal_id = project_id && Project.unscoped.where(id: project_id, company_id: company_id).pick(:deal_id)
+  end
+
+  # The manual entry form takes these ids as typed, and a line could name
+  # another company's deal or project.
+  LINKS = { project_id: Project, deal_id: Deal, contact_id: Contact, vehicle_id: Vehicle }.freeze
+
+  def links_belong_to_company
+    return unless journal_entry
+
+    LINKS.each do |column, model|
+      id = self[column]
+      next if id.blank? || !(new_record? || will_save_change_to_attribute?(column))
+      # unscoped: a merged contact is still the same company's, and a void copies it.
+      next if model.unscoped.where(id: id, company_id: journal_entry.company_id).exists?
+
+      errors.add(column, 'does not belong to your company')
     end
   end
 

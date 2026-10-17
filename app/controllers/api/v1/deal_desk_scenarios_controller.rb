@@ -14,6 +14,10 @@ module Api
       before_action :set_company_scope
       require_module! 'sales.deal_desk'
       before_action :set_scenario, only: %i[show update destroy select apply apply_unit_swap revert_unit_swap generate_quote transfer_unit summary]
+      include PostedDealChanges
+      # Apply merges line items onto the deal; on an approved deal that posts
+      # the difference and updates its invoice, like any other edit.
+      around_action :keep_posted_deal_in_step, only: %i[apply]
 
       RESOURCE = 'deal_desk'
 
@@ -341,6 +345,8 @@ module Api
       end
 
       private
+
+      def posted_deal = @scenario&.deal
 
       # A signed Deal Sheet (or one out for signature) owns the deal's lines:
       # they change only by a change order on the sheet.
