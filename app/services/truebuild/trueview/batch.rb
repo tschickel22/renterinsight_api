@@ -204,14 +204,13 @@ module Truebuild
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **ctx_check)
         spent = render.cost_usd.to_f + verdict['cost_usd'].to_f
-        drawn, layer, verdict, touched, outline_redone = Touchup.settle(source[:bytes], drawn, layer, verdict, mask, ctx_check,
-                                                                        surface: render.selection.first&.dig('surface'),
-                                                                        value: render.selection.first&.dig('value'),
-                                                                        key: render.selection_key, photo: render.source_url)
+        drawn, layer, verdict, touched = Touchup.settle(source[:bytes], drawn, layer, verdict, mask, ctx_check,
+                                                        surface: render.selection.first&.dig('surface'),
+                                                        value: render.selection.first&.dig('value'),
+                                                        key: render.selection_key, photo: render.source_url)
         spent += touched
         notes << verdict['note'] if verdict['note'].present?
-        # An outline being redone cuts this drawing again; drawing it again would not help.
-        return again(render, tries, notes, spent) if !verdict['ok'] && !outline_redone && tries < limit(render)
+        return again(render, tries, notes, spent) if !verdict['ok'] && tries < limit(render)
 
         attrs = { status: 'done', cost_usd: spent.round(4), layer_url: Trueview.store(render, layer[:bytes], layer[:mime], suffix: 'layer'),
                   mask_coverage: layer[:coverage],

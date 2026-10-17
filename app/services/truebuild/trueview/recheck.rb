@@ -5,15 +5,14 @@ module Truebuild
     # Held-back drawings worked again from the drawing already paid for,
     # nothing drawn again. A refrigerator is judged again under the check that
     # takes French door and side-by-side for each other. Everything else goes
-    # through Touchup with the verdict it already has: an outline that missed
-    # part of the surface is redone, a part the drawing skipped is filled, a
-    # known color is matched, and the result gets one check.
+    # through Touchup with the verdict it already has: a part the drawing
+    # skipped is filled, a known color is matched, and the result gets one check.
     module Recheck
       module_function
 
       PER_ROW = 0.03 # a check, a second look at a 4 and a touched-up check, at most
 
-      # => { 'checked', 'passed', 'outlines_redone', 'skipped', 'spent_usd' }
+      # => { 'checked', 'passed', 'nothing_to_touch', 'skipped', 'spent_usd' }
       def call(renders, budget_usd:)
         tally = Hash.new(0)
         spent = 0.0
@@ -56,10 +55,9 @@ module Truebuild
         verdict = render.usage['check'].to_h.merge('ok' => false)
         verdict['note'] ||= render.error.to_s.delete_prefix('Hidden: ')
         drawn = Trueview.fetch_source(render.image_url)
-        drawn, layer, verdict, cost, outline_redone = Touchup.settle(source[:bytes], drawn, nil, verdict, mask, check_with,
-                                                                     surface: surface, value: value,
-                                                                     key: render.selection_key, photo: render.source_url)
-        return 'outlines_redone' if outline_redone
+        drawn, layer, verdict, cost = Touchup.settle(source[:bytes], drawn, nil, verdict, mask, check_with,
+                                                     surface: surface, value: value,
+                                                     key: render.selection_key, photo: render.source_url)
 
         attrs = { cost_usd: (render.cost_usd.to_f + cost).round(4) }
         if verdict['ok']

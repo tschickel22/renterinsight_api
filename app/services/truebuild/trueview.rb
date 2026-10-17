@@ -147,14 +147,13 @@ module Truebuild
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **check_with)
         spent += verdict['cost_usd'].to_f
-        result, layer, verdict, touched, outline_redone = Touchup.settle(source[:bytes], result, layer, verdict, mask, check_with,
-                                                                         surface: render.selection.first&.dig('surface'),
-                                                                         value: render.selection.first&.dig('value'),
-                                                                         key: render.selection_key, photo: render.source_url)
+        result, layer, verdict, touched = Touchup.settle(source[:bytes], result, layer, verdict, mask, check_with,
+                                                         surface: render.selection.first&.dig('surface'),
+                                                         value: render.selection.first&.dig('value'),
+                                                         key: render.selection_key, photo: render.source_url)
         spent += touched
         notes << verdict['note'] if verdict['note'].present?
-        # The outline is at fault and is being redone; its redo cuts this drawing again.
-        break if verdict['ok'] || outline_redone || attempt == tries.size - 1
+        break if verdict['ok'] || attempt == tries.size - 1
       end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])

@@ -28,7 +28,7 @@ RSpec.describe Truebuild::Trueview::Touchup do
     drawn = drawn.insert(((photo.crop(0, 0, 100, 60).cast(:float) * [0.9, 0.6, 0.35]).cast(:uchar)), 0, 0)
     allow(Truebuild::Trueview::LayerCheck).to receive(:judge).and_return('ok' => true, 'score' => 5, 'cost_usd' => 0.01)
 
-    result, _layer, verdict, cost, redone = described_class.settle(
+    result, _layer, verdict, cost = described_class.settle(
       photo.jpegsave_buffer, { bytes: drawn.pngsave_buffer, mime: 'image/png' }, { bytes: 'old' },
       { 'ok' => false, 'note' => 'The lower cabinets remain in the original grey.' }, mask, {}, surface: 'Cabinets', value: 'Ozark Shadow'
     )
@@ -37,22 +37,7 @@ RSpec.describe Truebuild::Trueview::Touchup do
     bottom = (0..2).map { |i| out.crop(10, 65, 80, 30).extract_band(i).avg }
     bottom.zip(top).each { |b, t| expect(b).to be_within(8).of(t) }
     expect(means(out, 110, 80)).to all(be_within(2).of(235)) # the wall is left alone
-    expect([verdict['touched'], cost, redone]).to eq([['filled'], 0.01, false])
-  end
-
-  it 'redoes the outline once, and draws nothing, when the drawing changed all of it and old finish was still found' do
-    drawn = photo.insert((photo.crop(0, 0, 100, 100).cast(:float) * [0.9, 0.6, 0.35]).cast(:uchar), 0, 0)
-    row = TruebuildSurfaceMask.new(usage: {}, surface: 'cabinets')
-    allow(row).to receive(:present?).and_return(true)
-    allow(row).to receive(:update_columns) { |attrs| row.usage = attrs[:usage] }
-    allow(row).to receive(:id).and_return(7)
-    expect(TruebuildOutlineRedoJob).to receive(:perform_later).once.with(7, /left out part of the cabinets.*crown molding/)
-    expect(Truebuild::Trueview::LayerCheck).not_to receive(:judge)
-
-    held = { 'ok' => false, 'note' => 'The crown molding above the range retains the original oak.' }
-    args = [photo.jpegsave_buffer, { bytes: drawn.pngsave_buffer }, { bytes: 'old' }, held, row, {}]
-    expect(described_class.settle(*args, surface: 'Cabinets', value: 'Ozark Shadow').last).to be(true)
-    expect(described_class.settle(*args, surface: 'Cabinets', value: 'Ozark Shadow').last).to be(false) # once only
+    expect([verdict['touched'], cost]).to eq([['filled'], 0.01])
   end
 
   it 'keeps the drawing as it was when the touched one fails its check too, charging the check' do
