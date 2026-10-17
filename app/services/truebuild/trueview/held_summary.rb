@@ -60,17 +60,35 @@ module Truebuild
             .where.not("usage ? 'kept_hidden'")
       end
 
-      # => [{ key, label, advice, count, keep_hidden, showable, scores, examples }], largest first.
+      # => [{ key, label, advice, count, keep_hidden, showable, scores, examples, reviewed }],
+      # largest first. reviewed: what a reviewer already decided in the group
+      # ({ shown, kept_hidden }), so a group gone through says so, and stays
+      # listed when nothing is left in it.
       def call(run = nil)
         groups = rows(run).group_by { |r| reason(note(r), surface(r)) }
         names = names_for(groups.values.flatten)
+        decided = reviewed(run)
         REASONS.filter_map do |r|
-          list = groups[r[:key]] or next
+          list = groups[r[:key]] || []
+          next if list.empty? && !decided.key?(r[:key])
+
           scores = list.map { |x| score(x) }.tally.transform_keys(&:to_s)
           { key: r[:key], label: r[:label], advice: r[:advice], count: list.size, keep_hidden: r[:keep_hidden] == true,
             showable: r[:keep_hidden] ? 0 : list.count { |x| score(x) >= SHOW_FROM }, scores: scores,
-            examples: list.sort_by { |x| -score(x) }.first(EXAMPLES).map { |x| example(x, names) } }
+            examples: list.sort_by { |x| -score(x) }.first(EXAMPLES).map { |x| example(x, names) },
+            reviewed: decided[r[:key]] || { shown: 0, kept_hidden: 0 } }
         end.sort_by { |g| -g[:count] }
+      end
+
+      # { group key => { shown:, kept_hidden: } } from the stamps show! leaves.
+      def reviewed(run = nil)
+        rows = run ? run.renders : TruebuildRender.where(purpose: 'layer')
+        out = Hash.new { |h, k| h[k] = { shown: 0, kept_hidden: 0 } }
+        rows.where("usage->'approved' ? 'group'").group(Arel.sql("usage->'approved'->>'group'")).count
+            .each { |k, n| out[k][:shown] += n }
+        rows.where("usage->'kept_hidden' ? 'group'").group(Arel.sql("usage->'kept_hidden'->>'group'")).count
+            .each { |k, n| out[k][:kept_hidden] += n }
+        out.to_h
       end
 
       # Every drawing in a group, best score first, each saying whether it
@@ -123,7 +141,7 @@ module Truebuild
 
       # One line for the end-of-run notice: "12 a shade off, 8 part left as it was".
       def line(run)
-        call(run).first(4).map { |g| "#{g[:count]} #{g[:label].downcase}" }.join(', ')
+        call(run).select { |g| g[:count].positive? }.first(4).map { |g| "#{g[:count]} #{g[:label].downcase}" }.join(', ')
       end
 
       def note(r) = r.usage.dig('check', 'note').presence || r.error.to_s

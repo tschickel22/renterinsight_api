@@ -387,7 +387,8 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(rows[1].usage['kept_hidden']).to be_present
 
       get '/api/admin/trueview_lab/held', headers: admin
-      expect(JSON.parse(response.body)['groups']).to eq([])
+      expect(JSON.parse(response.body)['groups'].map { |g| g.slice('key', 'count', 'reviewed') })
+        .to eq([{ 'key' => 'shade', 'count' => 0, 'reviewed' => { 'shown' => 2, 'kept_hidden' => 1 } }])
     end
   end
 
