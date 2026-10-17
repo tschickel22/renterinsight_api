@@ -360,13 +360,34 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(groups['shade']['examples'].first).to include('id' => creamy.id, 'model' => 'Aspire Bay Port', 'score' => 3)
 
       post '/api/admin/trueview_lab/held/shade/show', headers: admin
-      expect(JSON.parse(response.body)).to eq('shown' => 1)
+      expect(JSON.parse(response.body)).to eq('shown' => 1, 'kept_hidden' => 0)
       expect([creamy, too_far, trim].map { |r| r.reload.status }).to eq(%w[done rejected rejected])
       expect(creamy.usage['approved']).to include('group' => 'shade')
 
       post '/api/admin/trueview_lab/held/unchanged/show', headers: admin
       expect(response).to have_http_status(:unprocessable_entity)
       expect(same.reload.status).to eq('rejected')
+    end
+
+    it 'lists every drawing in a group, shows the ones picked and keeps the rest hidden for good' do
+      rows = [4, 3, 3].each_with_index.map do |score, i|
+        TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
+                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Destin White' }], selection_key: "s#{i}",
+                                model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
+                                error: 'Hidden: a warmer cream than the sample', layer_url: 'https://b/l.webp',
+                                usage: { 'check' => { 'score' => score, 'note' => 'A warmer cream than the sample.' } })
+      end
+      get '/api/admin/trueview_lab/held/shade', headers: admin
+      expect(JSON.parse(response.body)['items'].map { |x| [x['id'], x['showable']] }).to eq(rows.map { |r| [r.id, true] })
+
+      post '/api/admin/trueview_lab/held/shade/show', headers: admin,
+           params: { ids: [rows[0].id, rows[2].id], hide_ids: [rows[1].id] }.to_json
+      expect(JSON.parse(response.body)).to eq('shown' => 2, 'kept_hidden' => 1)
+      expect(rows.map { |r| r.reload.status }).to eq(%w[done rejected done])
+      expect(rows[1].usage['kept_hidden']).to be_present
+
+      get '/api/admin/trueview_lab/held', headers: admin
+      expect(JSON.parse(response.body)['groups']).to eq([])
     end
   end
 

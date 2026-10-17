@@ -282,13 +282,28 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { groups: Truebuild::Trueview::HeldSummary.call(run) }
   end
 
-  # POST /api/admin/trueview_lab/held/:key/show { factory_run_id }
-  # Shows a group's drawings that scored 3 or better, as approving each would.
+  # GET /api/admin/trueview_lab/held/:key?factory_run_id=
+  # Every drawing in one group, to go through before showing the rest.
+  def held_group
+    run = held_run
+    return if performed?
+
+    render json: { items: Truebuild::Trueview::HeldSummary.items(params[:key].to_s, run) }
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/admin/trueview_lab/held/:key/show { ids, hide_ids, factory_run_id }
+  # Shows the drawings in ids that scored 3 or better, as approving each
+  # would, and keeps the ones in hide_ids hidden for good. Without ids,
+  # every one in the group that can be shown.
   def show_held
     run = held_run
     return if performed?
 
-    render json: { shown: Truebuild::Trueview::HeldSummary.show!(params[:key].to_s, by: current_user, run: run) }
+    ids = params.key?(:ids) ? Array(params[:ids]) : nil
+    render json: Truebuild::Trueview::HeldSummary.show!(params[:key].to_s, by: current_user, run: run, ids: ids,
+                                                                          hide_ids: Array(params[:hide_ids]))
   rescue ArgumentError => e
     render json: { error: e.message }, status: :unprocessable_entity
   end

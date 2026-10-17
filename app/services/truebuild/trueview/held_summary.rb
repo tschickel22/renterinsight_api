@@ -52,17 +52,18 @@ module Truebuild
         REASONS.find { |r| r[:match].call(n, surface) }[:key]
       end
 
+      # Held back and not yet decided: a drawing a reviewer chose to keep
+      # hidden is out of the groups for good.
       def held(run = nil)
         rows = run ? run.renders : TruebuildRender.where(purpose: 'layer')
         rows.where(status: 'rejected').where.not(catalog_plan_variant_id: nil).where.not(layer_url: nil)
+            .where.not("usage ? 'kept_hidden'")
       end
 
       # => [{ key, label, advice, count, keep_hidden, showable, scores, examples }], largest first.
       def call(run = nil)
-        rows = held(run).select(:id, :selection, :usage, :error, :source_url, :layer_url, :catalog_plan_variant_id).to_a
-        groups = rows.group_by { |r| reason(note(r), surface(r)) }
-        names = CatalogPlanVariant.where(id: rows.map(&:catalog_plan_variant_id).uniq)
-                                  .pluck(:id, Arel.sql("media->>'name'"), :model_number).to_h { |i, n, m| [i, n.presence || m] }
+        groups = rows(run).group_by { |r| reason(note(r), surface(r)) }
+        names = names_for(groups.values.flatten)
         REASONS.filter_map do |r|
           list = groups[r[:key]] or next
           scores = list.map { |x| score(x) }.tally.transform_keys(&:to_s)
@@ -72,21 +73,52 @@ module Truebuild
         end.sort_by { |g| -g[:count] }
       end
 
-      # Shows a group's drawings from SHOW_FROM up, as a reviewer's approval
-      # would one at a time. => how many.
-      def show!(key, by:, run: nil)
-        group = REASONS.find { |r| r[:key] == key } or raise ArgumentError, 'No such group'
+      # Every drawing in a group, best score first, each saying whether it
+      # can be shown, to go through before showing the rest.
+      def items(key, run = nil)
+        group = find(key)
+        list = rows(run).select { |r| reason(note(r), surface(r)) == key }.sort_by { |r| [-score(r), r.id] }
+        names = names_for(list)
+        list.map { |r| example(r, names).merge(showable: !group[:keep_hidden] && score(r) >= SHOW_FROM) }
+      end
+
+      # Shows the group's drawings named in ids that score SHOW_FROM or better,
+      # as a reviewer's approval would one at a time, and keeps the ones in
+      # hide_ids hidden for good. ids nil: every one that can be shown.
+      # => { shown:, kept_hidden: }
+      def show!(key, by:, run: nil, ids: nil, hide_ids: [])
+        group = find(key)
         raise ArgumentError, "#{group[:label]} stays hidden" if group[:keep_hidden]
 
-        approval = { 'by' => by&.id, 'at' => Time.current.iso8601, 'group' => key }
-        shown = 0
-        held(run).find_each do |r|
-          next unless score(r) >= SHOW_FROM && reason(note(r), surface(r)) == key
+        stamp = { 'by' => by&.id, 'at' => Time.current.iso8601, 'group' => key }
+        ids = ids&.map(&:to_i)
+        hide = Array(hide_ids).map(&:to_i)
+        out = { shown: 0, kept_hidden: 0 }
+        held(run).where(id: ids ? ids + hide : held(run).select(:id)).find_each do |r|
+          next unless reason(note(r), surface(r)) == key
 
-          r.update!(status: 'done', error: nil, usage: r.usage.merge('approved' => approval))
-          shown += 1
+          if hide.include?(r.id)
+            r.update!(usage: r.usage.merge('kept_hidden' => stamp))
+            out[:kept_hidden] += 1
+          elsif score(r) >= SHOW_FROM
+            r.update!(status: 'done', error: nil, usage: r.usage.merge('approved' => stamp))
+            out[:shown] += 1
+          end
         end
-        shown
+        out
+      end
+
+      def find(key)
+        REASONS.find { |r| r[:key] == key } or raise ArgumentError, 'No such group'
+      end
+
+      def rows(run)
+        held(run).select(:id, :selection, :usage, :error, :source_url, :layer_url, :catalog_plan_variant_id).to_a
+      end
+
+      def names_for(rows)
+        CatalogPlanVariant.where(id: rows.map(&:catalog_plan_variant_id).uniq)
+                          .pluck(:id, Arel.sql("media->>'name'"), :model_number).to_h { |i, n, m| [i, n.presence || m] }
       end
 
       # One line for the end-of-run notice: "12 a shade off, 8 part left as it was".
