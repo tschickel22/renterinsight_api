@@ -1,5 +1,15 @@
 #!/usr/bin/env ruby
 
+# The jobs worker on Render starts this directly, not through the Dockerfile
+# CMD that preloads jemalloc, so it ran on glibc malloc ("[Allocator] jemalloc
+# NOT loaded") and TrueView image work grew it until Render restarted it for
+# memory on 2026-10-16. Start again with jemalloc preloaded when the library is
+# installed (same lookup as the CMD). On a Mac it is not, and this does nothing.
+unless ENV["LD_PRELOAD"].to_s.include?("jemalloc")
+  jemalloc = Dir.glob("/usr/lib/**/libjemalloc.so.2").first
+  exec({ "LD_PRELOAD" => jemalloc }, RbConfig.ruby, __FILE__, *ARGV) if jemalloc
+end
+
 require_relative "../config/environment"
 require "solid_queue/cli"
 
