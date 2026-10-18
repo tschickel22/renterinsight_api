@@ -35,14 +35,17 @@ module Truebuild
       fed = {} # variant id => the feed's media, for its other sizes
 
       feed_homes(client_class, manufacturer, catalog).each do |home|
-        matches = Array(by_champion_id[home['id']])
-        matches |= numbers_in(home).flat_map { |n| Array(by_number[n]) }.select { |v| series_agrees?(v, home) }
-        if matches.empty?
-          same_series = variants.select { |v| series_agrees?(v, home) }
-          matches = same_series.select { |v| name_agrees?(v, home) }
-          # "Barkley Reverse Aisle" is Barkley mirrored: its photos fit.
-          matches = same_series.select { |v| name_agrees?(v, home, prefix: true) } if matches.empty?
-        end
+        same_series = variants.select { |v| series_agrees?(v, home) }
+        named = same_series.select { |v| name_agrees?(v, home) }
+        # "Barkley Reverse Aisle" is Barkley mirrored: its photos fit.
+        named = same_series.select { |v| name_agrees?(v, home, prefix: true) } if named.empty?
+        # A number in the photos names the size photographed, unless it names
+        # another plan: Champion labels Aspire Easton's photos with Belvidere's
+        # 2856H32392, which left Easton without photos and could hang its
+        # kitchen on Belvidere. Then the model's own name decides.
+        numbered = numbers_in(home).flat_map { |n| Array(by_number[n]) }.select { |v| series_agrees?(v, home) }
+        numbered = [] if named.any? && (numbered & named).empty?
+        matches = Array(by_champion_id[home['id']]) | (numbered.any? ? numbered : named)
         next if matches.empty?
 
         media = media_for(home, client_class)

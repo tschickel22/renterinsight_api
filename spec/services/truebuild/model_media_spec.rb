@@ -49,6 +49,22 @@ RSpec.describe Truebuild::ModelMedia do
     expect(belvidere.reload.media).to eq({}) # a Genesis home's photo named an Aspire number: not trusted
   end
 
+  it "goes by a model's own name when its photos carry another model's number" do
+    belvidere = variant('Aspire', 'Belvidere', '2856H32392', champion_id: 'c-belv')
+    easton = variant('Aspire', 'Easton', '2856H32301')
+    feed = Class.new(client) do
+      def fetch_all
+        [{ 'id' => 'c-east', 'name' => 'Aspire Easton', 'seriesName' => 'Aspire Multi-Section', 'slug' => 'aspire-easton',
+           'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Aspire_0000_2856H32392-Kitchen' }] }]
+      end
+    end
+
+    described_class.refresh!(mfr, client_class: feed)
+    expect(easton.reload.media).to include('slug' => 'aspire-easton')
+    expect(easton.external_ids['champion_model_id']).to eq('c-east')
+    expect(belvidere.reload.media).to eq({})
+  end
+
   it "takes the models no retailer stocks from Champion's catalog, asked near each plant" do
     topeka = mfr.factories.create!(name: 'Topeka, Dutch Housing', code: "TOP#{SecureRandom.hex(2)}")
     feed = Class.new(client) do
