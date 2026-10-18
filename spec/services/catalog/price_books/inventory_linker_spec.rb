@@ -13,10 +13,11 @@ RSpec.describe Catalog::PriceBooks::InventoryLinker do
                                external_ids: { 'champion_model_id' => champion_id })
   end
 
-  def feed_home(champion_id, code: 'HUD')
+  def feed_home(champion_id, code: 'HUD', images: [])
     dealer.vehicles.create!(make: 'Champion', model: 'Aspire Belvidere', year: 2026, source: 'champion_ims',
                             serial_number: "S#{SecureRandom.hex(4)}", vin: "V#{SecureRandom.hex(6)}",
-                            champion_model_id: champion_id, champion_raw_payload: { 'buildingCode' => { 'code' => code } })
+                            champion_model_id: champion_id,
+                            champion_raw_payload: { 'buildingCode' => { 'code' => code }, 'images' => images })
   end
 
   it 'links a home from a feed to its factory model when it is saved' do
@@ -35,6 +36,26 @@ RSpec.describe Catalog::PriceBooks::InventoryLinker do
     variant('2856M32392', 'g-belv')
     expect(feed_home('g-belv', code: '').catalog_plan_variant_id).to be_nil
     expect(feed_home('unknown-model').catalog_plan_variant_id).to be_nil
+  end
+
+  it 'takes the build the feed names for a plan built either way, else its one HUD build' do
+    variant('2856H32392', 'g-belv')
+    mod = variant('2856M32392', 'g-belv')
+    named = feed_home('g-belv', code: 'HUD_MOD', images: [{ 'alt' => 'Aspire_0000_2856M32392-Main' }])
+    expect(named.catalog_plan_variant_id).to eq(mod.id)
+
+    hud = CatalogPlanVariant.find_by(model_number: '2856H32392')
+    expect(feed_home('g-belv', code: 'HUD_MOD').catalog_plan_variant_id).to eq(hud.id)
+
+    variant('2860H32392', 'g-belv') # two HUD sizes: no guess
+    expect(feed_home('g-belv', code: 'HUD_MOD').catalog_plan_variant_id).to be_nil
+  end
+
+  it 'links on a later save once the catalog model learns its Champion id' do
+    home = feed_home('g-belv')
+    hud = variant('2856H32392', 'g-belv')
+    home.update!(updated_at: Time.current)
+    expect(home.reload.catalog_plan_variant_id).to eq(hud.id)
   end
 
   it 'links homes that arrived before the book was published' do
