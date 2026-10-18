@@ -120,6 +120,11 @@ module Truebuild
         end
         tinted = paint(bytes, mask, hex) or return false
         layer = Layer.build(bytes, tinted[:bytes], mask: mask, blocked: blocked)
+        if SessionChecks.session?(render)
+          SessionChecks.await!(render, kind: 'tint', layer: layer, image: tinted, usage: { 'tint_hex' => hex })
+          return true
+        end
+
         verdict = LayerCheck.judge(ctx[:source][:bytes], layer[:bytes], surface: render.selection.first['surface'],
                                                                          value: render.selection.first['value'], **ctx[:check_with])
         spent = render.cost_usd.to_f + verdict['cost_usd'].to_f

@@ -31,6 +31,7 @@ module Truebuild
       # checked. Returns the number recovered.
       def recover!(run)
         rows = run.renders.where(status: 'running').where("usage->>'batch' = 'true'").where(updated_at: ...STUCK_AFTER.ago)
+                  .where.not("usage ? 'awaiting_check'") # waiting on a session's verdict, not stuck
         unsent = rows.where.not("usage ? 'batch_name'").where.not("usage ? 'batch_drawn'")
         unchecked = rows.where("usage ? 'batch_drawn'").to_a
         # The claim goes with it, so a send still preparing it leaves it out.
@@ -201,6 +202,9 @@ module Truebuild
         end
 
         layer = Layer.build(source[:bytes], drawn[:bytes], mask: Trueview.mask_image(mask), blocked: Trueview.blocked_image(mask, source[:bytes]))
+        # Checked in a Claude Code session, not through the API (SessionChecks).
+        return SessionChecks.await!(render, kind: 'batch', layer: layer) if SessionChecks.session?(render)
+
         verdict = LayerCheck.judge(source[:bytes], layer[:bytes], surface: render.selection.first&.dig('surface'),
                                                                    value: render.selection.first&.dig('value'), **ctx_check)
         spent = render.cost_usd.to_f + verdict['cost_usd'].to_f
