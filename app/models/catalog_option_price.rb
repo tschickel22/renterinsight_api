@@ -11,11 +11,16 @@ class CatalogOptionPrice < ApplicationRecord
   belongs_to :option, class_name: 'CatalogOption', foreign_key: :catalog_option_id, inverse_of: :prices
   belongs_to :variant, class_name: 'CatalogPlanVariant', foreign_key: :catalog_plan_variant_id, optional: true
 
-  validates :dealer_cost, presence: true, unless: :is_standard?
+  validates :dealer_cost, presence: true, unless: -> { is_standard? || price_on_request? }
   validates :section_type, inclusion: { in: SECTION_TYPES }, allow_nil: true
   validates :construction, inclusion: { in: CONSTRUCTIONS }, allow_nil: true
   validates :building_code, inclusion: { in: CatalogPlanVariant::BUILDING_CODES }, allow_nil: true
   validate :length_band_order
+
+  # An upgrade the factory names without a price (Timber Creek's guide marks
+  # Midnight siding "$$ Upgrade" and prints no amount): offered, never priced,
+  # so a design with it has no total and the dealer gives the price.
+  def price_on_request? = source_ref.to_h['price_on_request'] == true
 
   # Does this price row apply to the given variant?
   def applies_to?(variant, construction: nil)
