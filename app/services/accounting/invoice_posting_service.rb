@@ -76,6 +76,7 @@ module Accounting
             location_id: location_id,
             department: line_data[:department],
             deal_id: line_data[:deal_id],
+            project_id: invoice_project_id,
             vehicle_id: line_data[:vehicle_id],
             contact_id: @invoice.try(:contact_id) || @invoice.try(:customer_id)
           )
@@ -120,6 +121,13 @@ module Accounting
       return false if @invoice.deal_id.blank?
 
       Deal.where(id: @invoice.deal_id, deal_invoice_id: @invoice.id).exists?
+    end
+
+    # An invoice billed from a project (an installer billing its dealer for a
+    # linked job, E68) puts its revenue on that project, so the job's revenue
+    # sits beside its cost in the books. AR stays untagged, like AP on bills.
+    def invoice_project_id
+      @invoice.source_id if @invoice.source_type == 'Project'
     end
 
     def should_post?

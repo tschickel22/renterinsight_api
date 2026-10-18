@@ -135,7 +135,16 @@ RSpec.describe 'Company links', type: :request do
     expect(pl.installer_invoice).to have_attributes(company_id: installer_co.id, total: 4500, status: 'finalized', recipient: link.installer_dealer_account)
     # A company made today starts with invoice posting on, so the invoice is in the installer's books.
     expect(pl.installer_invoice.gl_post_error).to be_nil
-    expect(JournalEntry.where(company_id: installer_co.id, source_entity_type: 'Invoice', source_entity_id: pl.installer_invoice_id)).to exist
+    je = JournalEntry.find_by(company_id: installer_co.id, source_entity_type: 'Invoice', source_entity_id: pl.installer_invoice_id)
+    expect(je).to be_present
+    # The revenue is the installer's job's, so its profit report shows it beside the job's costs.
+    revenue = je.journal_entry_lines.select { |l| l.credit_amount.positive? && l.chart_of_account.account_type == 'revenue' }
+    expect(revenue.map(&:project_id)).to eq([ip.id])
+    ip.project_cost_items.create!(company_id: installer_co.id, cost_type: 'subcontractor', description: 'Set crew',
+                                  amount: 3000, quantity: 1, unit_price: 3000, status: 'approved')
+    row = Reports::ProjectJobCostReportService.new(installer_co).profitability[:projects].find { |r| r[:id] == ip.id }
+    expect(row).to include(revenue_from: 'invoices', sale_price: 4500.0, job_cost: 3000.0, after_job_cost: 1500.0,
+                           margin: 33.3, received: 0.0, owed: 4500.0)
     expect(pl.dealer_bill).to have_attributes(company_id: dealer_co.id, status: 'draft', vendor_id: vendor.id, project_id: project.id, source: 'linked_installer',
                                              due_date: pl.installer_invoice.due_date)
     expect(pl.dealer_cost_item.reload.bill_id).to eq(pl.dealer_bill_id)
