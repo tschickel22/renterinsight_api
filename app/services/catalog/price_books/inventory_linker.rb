@@ -18,7 +18,8 @@ module Catalog
 
         # The HUD and modular builds of one plan share a site model; the feed
         # says which this home is.
-        code = vehicle.champion_raw_payload&.dig('buildingCode', 'code').to_s.upcase
+        # Champion words it "HUD or MOD"; BuildingCode reads any feed's wording.
+        code = BuildingCode.from_label(vehicle.champion_raw_payload&.dig('buildingCode', 'code')).to_s
         by_code = candidates.select { |v| v.building_code == code }
         return by_code.first if by_code.size == 1
         return nil unless code == BuildingCode::HUD_MOD

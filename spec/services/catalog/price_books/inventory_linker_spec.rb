@@ -41,14 +41,14 @@ RSpec.describe Catalog::PriceBooks::InventoryLinker do
   it 'takes the build the feed names for a plan built either way, else its one HUD build' do
     variant('2856H32392', 'g-belv')
     mod = variant('2856M32392', 'g-belv')
-    named = feed_home('g-belv', code: 'HUD_MOD', images: [{ 'alt' => 'Aspire_0000_2856M32392-Main' }])
+    named = feed_home('g-belv', code: 'HUD or MOD', images: [{ 'alt' => 'Aspire_0000_2856M32392-Main' }])
     expect(named.catalog_plan_variant_id).to eq(mod.id)
 
     hud = CatalogPlanVariant.find_by(model_number: '2856H32392')
-    expect(feed_home('g-belv', code: 'HUD_MOD').catalog_plan_variant_id).to eq(hud.id)
+    expect(feed_home('g-belv', code: 'HUD or MOD').catalog_plan_variant_id).to eq(hud.id)
 
     variant('2860H32392', 'g-belv') # two HUD sizes: no guess
-    expect(feed_home('g-belv', code: 'HUD_MOD').catalog_plan_variant_id).to be_nil
+    expect(feed_home('g-belv', code: 'HUD or MOD').catalog_plan_variant_id).to be_nil
   end
 
   it 'links on a later save once the catalog model learns its Champion id' do
