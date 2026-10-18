@@ -233,10 +233,20 @@ module Truebuild
         [render.usage['reviewer_note'], render.usage.dig('check', 'note')].compact_blank.uniq.join(' Also: ')
       end
 
+      # Held drawings a reviewer would show anyway go out when the run ends
+      # (HeldSummary.auto_show!); the notice says how many, to look through.
+      def auto_show!(run)
+        shown = HeldSummary.auto_show!(run)
+        run.update!(progress: run.progress.merge('auto_shown' => shown))
+      rescue StandardError => e
+        Rails.logger.warn("[TrueView] run #{run.id} auto-show: #{e.message.first(200)}")
+      end
+
       LOST_AFTER = 15.minutes # a deploy restarts the workers; a job this quiet was lost
 
       def finish!(run)
         run.update!(status: 'finished', stopped_at: Time.current)
+        auto_show!(run)
         run.notify_end
       end
 

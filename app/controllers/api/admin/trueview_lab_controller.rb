@@ -282,6 +282,18 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { groups: Truebuild::Trueview::HeldSummary.call(run) }
   end
 
+  # GET /api/admin/trueview_lab/held/auto
+  # Held drawings a run showed automatically, not looked through yet.
+  def held_auto
+    render json: { items: Truebuild::Trueview::HeldSummary.auto_shown }
+  end
+
+  # POST /api/admin/trueview_lab/held/auto/look { ids, hide_ids }
+  # Looked through: hide_ids go back to hidden for good, the rest stay shown.
+  def look_through_auto
+    render json: Truebuild::Trueview::HeldSummary.look_through!(Array(params[:ids]), hide_ids: Array(params[:hide_ids]), by: current_user)
+  end
+
   # GET /api/admin/trueview_lab/held/:key?factory_run_id=
   # Every drawing in one group, to go through before showing the rest.
   def held_group
