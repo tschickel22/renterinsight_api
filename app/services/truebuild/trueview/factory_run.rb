@@ -176,6 +176,7 @@ module Truebuild
         cost = rates[:layer] * 2 # on the larger model
         held.each do |old|
           next if passed.include?([old.source_url, old.selection_key, old.prompt])
+          next if HeldSummary.shown_anyway?(old, old.usage['check'])
           next if recutting.include?([old.source_url, Surfaces.category(old.selection.first&.dig('surface'))])
           break if spent + cost > run.budget_usd.to_f
 

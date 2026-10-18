@@ -116,6 +116,18 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(jobs).to include(TruebuildFactoryRunJob)
   end
 
+  it 'does not draw again a held drawing that will be shown when the run ends' do
+    run = TruebuildFactoryRun.create!(manufacturer_id: mfr.id, budget_usd: 5, variant_ids: [], status: 'running')
+    row = ->(note, score, value: 'Clay') { TruebuildRender.new(usage: { 'factory_run_id' => run.id }, selection: [{ 'surface' => 'Siding', 'value' => value }]).then { |r| [r, { 'ok' => false, 'score' => score, 'note' => note }] } }
+    held = Truebuild::Trueview::HeldSummary
+    expect(held.shown_anyway?(*row.call('A little warmer than the sample.', 3))).to be(true)
+    expect(held.shown_anyway?(*row.call('A little warmer than the sample.', 2))).to be(false) # the wrong finish
+    expect(held.shown_anyway?(*row.call('The old finish bleeds through along the edges.', 4))).to be(false) # your call
+    expect(held.shown_anyway?(*row.call('Virtually identical to the original.', 4))).to be(false) # never shown
+    buyer = TruebuildRender.new(usage: {}, selection: [{ 'surface' => 'Siding', 'value' => 'Clay' }])
+    expect(held.shown_anyway?(buyer, { 'ok' => false, 'score' => 3, 'note' => 'warmer' })).to be(false) # a buyer's own drawing
+  end
+
   it 'stops at its budget by what it really spent, before the next drawing starts' do
     run = described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id })
     TruebuildFactoryRunJob.perform_now(run.id)

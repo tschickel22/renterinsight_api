@@ -153,7 +153,7 @@ module Truebuild
                                                          key: render.selection_key, photo: render.source_url)
         spent += touched
         notes << verdict['note'] if verdict['note'].present?
-        break if verdict['ok'] || attempt == tries.size - 1
+        break if verdict['ok'] || attempt == tries.size - 1 || HeldSummary.shown_anyway?(render, verdict)
       end
       latency = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
       url = store(render, result[:bytes], result[:mime])
