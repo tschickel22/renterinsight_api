@@ -306,6 +306,10 @@ module Truebuild
         # stayed "running" for ever and blocked the next run of its scope.
         finish!(run) if phase == 'finished' && run.status == 'running' && run.updated_at < LOST_AFTER.ago
         { id: run.id, phase: phase, manufacturer: run.manufacturer&.name, factory_id: run.factory_id, series: run.series,
+          # The plants its models come from: a run of a few picked models
+          # from two plants has no factory of its own, and read "All factories".
+          factories: Factory.where(id: CatalogPlan.where(id: CatalogPlanVariant.where(id: run.variant_ids).select(:catalog_plan_id))
+                                                  .select(:factory_id)).order(:name).pluck(:name),
           budget_usd: run.budget_usd.to_f, committed_usd: run.committed_usd, spent_usd: run.spent_usd.round(2),
           models: run.variant_ids.size, models_queued: run.models_queued, estimate: run.estimate,
           repair: { rounds: run.progress['repair_rounds'].to_i, redrawn: run.progress['repaired'].to_i },
