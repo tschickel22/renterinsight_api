@@ -63,6 +63,11 @@ RSpec.describe 'Public TrueBuild', type: :request do
     # A lot home opens the designer once its TrueView is drawn; taken as
     # drawn here except where a test says otherwise.
     allow(Truebuild::ModelList).to receive(:trueview_ready).and_wrap_original { |_, ids| ids.to_set }
+    # Buyers see only options with a drawing; taken as all drawn here, as
+    # these examples are about the catalog. TrueView below draws for real.
+    allow(Truebuild::Trueview::Buyer).to receive(:held_back).and_wrap_original do |m, company, v|
+      m.call(company, v).merge(drawn: CatalogOption.where(manufacturer_id: v.manufacturer_id).pluck(:id).to_set)
+    end
   end
 
   it 'gives a buyer the options this home offers, at retail, with colors as one-of sets and no cost anywhere' do
@@ -499,7 +504,10 @@ RSpec.describe 'Public TrueBuild', type: :request do
       ENV['GEMINI_API_KEY'] = old
     end
 
-    before { variant.update!(media: { 'photos' => [{ 'url' => front, 'room' => 'exterior' }, { 'url' => 'https://x/bed.jpg', 'room' => 'bedroom' }] }) }
+    before do
+      variant.update!(media: { 'photos' => [{ 'url' => front, 'room' => 'exterior' }, { 'url' => 'https://x/bed.jpg', 'room' => 'bedroom' }] })
+      allow(Truebuild::Trueview::Buyer).to receive(:held_back).and_call_original
+    end
 
     def trueview = (get "/public/truebuild/models/#{variant.id}/trueview", params: { token: token, website_id: site.id }) && JSON.parse(response.body)
 
@@ -544,68 +552,22 @@ RSpec.describe 'Public TrueBuild', type: :request do
       ENV.delete('TRUEVIEW_DAILY_LIMIT')
     end
 
-    it 'does not offer a finish whose drawing failed its check, unless it is the last in its set' do
+    it 'offers buyers only finishes with a drawing that passed, keeps a shown set\'s standard, and says more may be available' do
+      option(exterior, '2x6 walls', dealer_cost: 900) # changes nothing in the picture
       draw!
-      TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
-                     .update!(status: 'rejected', layer_url: 'https://b/clay.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
-      TruebuildRender.find_by("selection->0->>'value' = 'Black'")
-                     .update!(status: 'rejected', layer_url: 'https://b/black.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
-      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
-      sets = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
-      expect(sets['Siding']).to contain_exactly('White', 'Olive')
-      expect(sets['Shutters']).to eq(['Black'])
-    end
-
-    it 'offers only the standard color when every color in a set failed, not colors that change nothing' do
-      draw!
-      TruebuildRender.where("selection->0->>'surface' = 'Siding'")
-                     .update_all(status: 'rejected', layer_url: 'https://b/x.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
-      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
-      siding = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.find { |st| st['name'] == 'Siding' }
-      expect(siding['options'].size).to eq(1)
-      expect(siding['options'].first['standard']).to be(true)
-    end
-
-    it 'does not offer a cabinet upgrade TrueView cannot draw on a model whose photos show the cabinets' do
-      cabinets = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'cabinets', name: 'Cabinets', position: 8)
-      option(cabinets, 'Destin White', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Cabinets' })
-      option(cabinets, 'HW DestinWhite IPO Wrapped', dealer_cost: 900)
-      option(cabinets, 'Mixed Cabinets IPO HW - O/U (Pkg #3)', dealer_cost: 900)
-      names = lambda do
-        Rails.cache.clear
-        get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
-        JSON.parse(response.body)['groups'].flat_map { |g| g['options'] }.map { |o| o['name'] }
-      end
-      expect(names.call).to include('Mixed Cabinets IPO HW - O/U (Pkg #3)') # no kitchen photo: nothing pictured to change
-
-      variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
-      expect(names.call).to include('HW DestinWhite IPO Wrapped')
-      expect(names.call).not_to include('Mixed Cabinets IPO HW - O/U (Pkg #3)')
-    end
-
-    it 'does not offer colors for a surface no photo shows, such as shutters on a home without them' do
-      draw!
-      TruebuildRender.find_by("selection->0->>'surface' = 'Shutters'")
-                     .update!(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
-      option(floor_plan, 'None', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Shutters' })
-      get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
-      sets = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.map { |st| st['name'] }
-      expect(sets).not_to include('Shutters')
-      expect(sets).to include('Siding', 'Corner posts')
-    end
-
-    it 'still offers a backsplash the kitchen photo does not show: a plain wall is not proof the home has none' do
-      tile = CatalogOptionGroup.create!(manufacturer: mfr, factory: factory, key: 'backsplash', name: 'Backsplash & Tile', position: 9)
-      gris = option(tile, '1 Row Inhale Gris (ceramic)', kind: 'color', is_standard: true, metadata: { 'color_set' => 'Backsplash' })
-      variant.update!(media: { 'photos' => [{ 'url' => 'https://x/kitchen.jpg', 'room' => 'kitchen' }] })
-      draw!
-      skipped = TruebuildRender.where("selection->0->>'surface' = 'Backsplash'")
-                               .update_all(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
-      expect(skipped).to be_positive
+      rows = TruebuildRender.where(purpose: 'layer')
+      rows.update_all(status: 'done', layer_url: 'https://b/x.webp', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      rows.where("selection->0->>'value' = 'Clay'").update_all(status: 'rejected')
+      rows.where("selection->0->>'value' = 'Olive'").update_all(status: 'done')
+      rows.where("selection->0->>'surface' = 'Shutters'").update_all(status: 'skipped') # no shutters on this home
       Rails.cache.clear
       get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, website_id: site.id }
-      backsplash = JSON.parse(response.body)['groups'].flat_map { |g| g['color_sets'] }.find { |st| st['name'] == 'Backsplash' }
-      expect(backsplash['options'].map { |o| o['id'] }).to include(gris.id)
+      body = JSON.parse(response.body)
+      sets = body['groups'].flat_map { |g| g['color_sets'] }.to_h { |st| [st['name'], st['options'].map { |o| o['name'] }] }
+      expect(sets['Siding']).to eq(%w[Clay Olive White]) # Clay failed but is the set's standard: kept so a buyer can go back
+      expect(sets).not_to have_key('Shutters')
+      expect(body['groups'].flat_map { |g| g['options'] }.map { |o| o['name'] }).not_to include('2x6 walls')
+      expect(body['more_options']).to be(true)
     end
 
     it 'shows the older drawing while it is cut again, and not once the new check rejects it' do

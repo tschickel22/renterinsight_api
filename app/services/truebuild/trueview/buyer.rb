@@ -67,22 +67,25 @@ module Truebuild
       #   undrawable    a cabinet upgrade with no one color to draw ("Mixed
       #                 Cabinets IPO HW"), on a model whose photos show the
       #                 cabinets: picking it changed nothing in the picture
+      #   drawn         has a drawing that passed, on at least one photo
       def self.held_back(company, variant)
-        Rails.cache.fetch("truebuild:trueview:held:v3:#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
+        Rails.cache.fetch("truebuild:trueview:held:v4:#{Layer::VERSION}:#{variant.id}", expires_in: 5.minutes) do
           new(company, variant).held_back
         end
       end
 
       def held_back
         plan = self.plan
-        failed = hidden_layers(plan) - done_layers(plan).keys
+        done = done_layers(plan).keys.to_set
+        failed = hidden_layers(plan) - done.to_a
         skipped = skipped_layers(plan)
         ids = ->(items) { items.map { |p| p[:option_id] }.uniq.to_set }
         { failed: ids.call(plan.select { |p| failed.include?([p[:photo], p[:key], p[:prompt]]) }),
           not_pictured: ids.call(plan.group_by { |p| p[:option_id] }
                                      .select { |_, ps| ps.all? { |p| skipped.include?([p[:photo], p[:key], p[:prompt]]) } }
                                      .values.flatten),
-          undrawable: undrawable(plan) }
+          undrawable: undrawable(plan),
+          drawn: ids.call(plan.select { |p| done.include?([p[:photo], p[:key], p[:prompt]]) }) }
       end
 
       def undrawable(plan)

@@ -78,46 +78,36 @@ module Truebuild
     # full catalog.
     def for_buyer
       full = call
-      full.merge(groups: without_failed_drawings(BuyerView.apply(full[:groups], @terms)))
+      groups = without_failed_drawings(BuyerView.apply(full[:groups], @terms))
+      full.merge(groups: groups, more_options: @left_out)
     end
 
-    # A finish whose TrueView drawing failed its check is not offered: a
-    # buyer shown Destin White in the wrong color, or a note that it cannot
-    # be shown, has been shown something wrong. A rep still quotes it. A set
-    # is never emptied this way; the buyer still needs a color to pick. When
-    # every color in it failed, only the standard one is left: Aspire 082's
-    # kitchen held back both cabinet colors, and offering both let a buyer
-    # click between colors that changed nothing.
-    # A color no photo shows is not offered at all: shutter colors for a
-    # home photographed without shutters, and then not "None" alone either.
-    # Paid upgrades stay; a kitchen photo without the fridge does not mean
-    # the fridge upgrade is not real. A cabinet upgrade TrueView cannot draw
-    # (two-tone "Mixed" cabinets) does not; a rep still quotes it.
-    UNSEEN_MEANS_ABSENT = %w[shutters].freeze
-
+    # Buyers see only what changes the picture (Tom, 2026-10-18, every
+    # factory): a finish with a drawing that passed on this model's photos.
+    # Anything else (an upgrade TrueView does not draw, wind zone or
+    # insulation, a color its photos do not show, one whose drawing failed)
+    # is left out without a word; the designer says more options may be
+    # available with the dealer, and a rep still quotes them all. A set keeps
+    # its standard choice beside its drawn ones, so a buyer can go back to it.
+    # This replaced keeping paid upgrades and sets the photo could not show.
     def without_failed_drawings(groups)
-      held = Trueview::Buyer.held_back(@company, @variant)
-      failed = held[:failed]
-      gone = held[:not_pictured]
-      off = failed | held[:undrawable].to_a
-      return groups if off.empty? && gone.empty?
-
-      groups.map do |g|
+      drawn = Trueview::Buyer.held_back(@company, @variant)[:drawn]
+      @left_out = false
+      kept = groups.map do |g|
         sets = g[:color_sets].filter_map do |st|
-          # Only where the photo settles it: an exterior photo shows the whole
-          # front, so no shutters there means the home has none. An interior
-          # photo with a plain wall says nothing: Bay Port's kitchen shows no
-          # tile, yet its book includes a 1 row backsplash, and hiding the set
-          # left the buyer no way to choose its color.
-          unseen = UNSEEN_MEANS_ABSENT.include?(Trueview::Surfaces.category(st[:name])) ? gone : Set.new
-          shown = st[:options].reject { |o| unseen.include?(o[:id]) }
-          next nil if shown.size < st[:options].size && shown.all? { |o| o[:name].to_s.match?(Trueview::Buyer::NOTHING) }
+          shown = st[:options].select { |o| drawn.include?(o[:id]) }
+          @left_out ||= shown.size < st[:options].size
+          next nil if shown.empty?
 
-          kept = shown.reject { |o| failed.include?(o[:id]) }
-          st.merge(options: kept.empty? ? [shown.find { |o| o[:standard] } || shown.first].compact : kept)
+          standard = st[:options].find { |o| o[:standard] }
+          shown.unshift(standard) if standard && !shown.include?(standard)
+          st.merge(options: shown)
         end
-        g.merge(color_sets: sets, options: g[:options].reject { |o| off.include?(o[:id]) })
-      end.reject { |g| g[:color_sets].empty? && g[:options].empty? }
+        options = g[:options].select { |o| drawn.include?(o[:id]) }
+        @left_out ||= options.size < g[:options].size
+        g.merge(color_sets: sets, options: options)
+      end
+      kept.reject { |g| g[:color_sets].empty? && g[:options].empty? }
     end
 
     # Every option group a model's price book offers, with no dealer and no
