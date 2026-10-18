@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_17_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_18_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2490,7 +2490,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_160000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["accepted_by_id"], name: "index_company_links_on_accepted_by_id"
-    t.index ["dealer_company_id", "installer_company_id"], name: "index_company_links_on_pair", unique: true, where: "(installer_company_id IS NOT NULL)"
+    t.index ["dealer_company_id", "installer_company_id"], name: "index_company_links_on_open_pair", unique: true, where: "((installer_company_id IS NOT NULL) AND ((status)::text <> 'ended'::text))"
     t.index ["dealer_company_id"], name: "index_company_links_on_dealer_company_id"
     t.index ["dealer_vendor_id"], name: "index_company_links_on_dealer_vendor_id"
     t.index ["dealer_vendor_id"], name: "index_company_links_on_open_vendor", unique: true, where: "((status)::text <> 'ended'::text)"
@@ -5745,6 +5745,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_17_160000) do
     t.bigint "dealer_bill_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "previous_owners", default: {}, null: false
     t.index ["company_link_id"], name: "index_project_links_on_company_link_id"
     t.index ["dealer_bill_id"], name: "index_project_links_on_dealer_bill_id"
     t.index ["dealer_company_id"], name: "index_project_links_on_dealer_company_id"

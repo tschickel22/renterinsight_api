@@ -229,7 +229,7 @@ class Notification < ApplicationRecord
       deal_id = notifiable.project_bid_request&.project&.deal_id
       deal_id ? "/deals/#{deal_id}?tab=progress&projectTab=bids" : nil
     when 'CompanyLink'
-      '/linked-companies'
+      '/linked-companies?view=links'
     when 'ProjectLink'
       # The same job opens differently on each side of the link.
       if company_id == notifiable.installer_company_id

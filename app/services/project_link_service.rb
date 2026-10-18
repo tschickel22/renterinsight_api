@@ -106,7 +106,7 @@ class ProjectLinkService
       dealer_project = pl.dealer_project
       bill = ContractorInvoiceService.new(contractor: link.dealer_vendor, project: dealer_project, phase: pl.dealer_phase)
                                      .submit_linked!(amount: amount, invoice_number: invoice_number.presence || invoice.invoice_number,
-                                                     notes: notes, source: 'linked_installer',
+                                                     notes: notes, due_date: invoice.due_date, source: 'linked_installer',
                                                      submission: { 'project_link_id' => pl.id, 'installer_company' => @company.name })
       pl.update!(installer_invoice: invoice, dealer_bill: bill)
       link.log!('job_billed', "#{@company.name} billed #{ActiveSupport::NumberHelper.number_to_currency(amount)} for #{pl.scope_label}",
@@ -136,20 +136,30 @@ class ProjectLinkService
   # The dealer's phases (or project) show the installer as their owner. Set
   # straight on the columns: the assignment service would hand each task to
   # the installer as a portal contractor, and the installer is a company.
+  # Whoever owned them before is kept, so a take back or decline restores them.
   def set_dealer_owner!(pl, vendor_id)
-    if pl.dealer_phase
-      pl.dealer_phase.update!(assigned_vendor_id: vendor_id)
-    else
-      pl.dealer_project.update!(assigned_vendor_id: vendor_id)
-      pl.dealer_project.project_phases.where.not(status: %w[completed skipped]).update_all(assigned_vendor_id: vendor_id, updated_at: Time.current)
-    end
+    project = pl.dealer_project
+    phases = pl.dealer_phase ? [pl.dealer_phase] : project.project_phases.where.not(status: %w[completed skipped]).to_a
+    previous = { 'phases' => phases.to_h { |ph| [ph.id.to_s, ph.assigned_vendor_id] } }
+    previous['project'] = project.assigned_vendor_id if pl.dealer_phase.nil?
+    pl.update!(previous_owners: previous)
+
+    project.update!(assigned_vendor_id: vendor_id) if pl.dealer_phase.nil?
+    ProjectPhase.where(id: phases.map(&:id)).update_all(assigned_vendor_id: vendor_id, updated_at: Time.current)
   end
 
+  # Gives the work back to whoever had it, unless someone has changed the
+  # owner since.
   def release_dealer!(pl)
     vendor_id = pl.company_link.dealer_vendor_id
+    previous = pl.previous_owners || {}
     phases = pl.dealer_phase ? [pl.dealer_phase] : pl.dealer_project.project_phases.to_a
-    phases.each { |ph| ph.update!(assigned_vendor_id: nil) if ph.assigned_vendor_id == vendor_id }
-    pl.dealer_project.update!(assigned_vendor_id: nil) if pl.dealer_phase.nil? && pl.dealer_project.assigned_vendor_id == vendor_id
+    phases.each do |ph|
+      ph.update!(assigned_vendor_id: previous.dig('phases', ph.id.to_s)) if ph.assigned_vendor_id == vendor_id
+    end
+    if pl.dealer_phase.nil? && pl.dealer_project.assigned_vendor_id == vendor_id
+      pl.dealer_project.update!(assigned_vendor_id: previous['project'])
+    end
     if (line = pl.dealer_cost_item) && line.status == 'pending' && line.bill_id.nil?
       pl.update_column(:dealer_cost_item_id, nil)
       line.destroy!
@@ -197,7 +207,7 @@ class ProjectLinkService
       end
       pl.link_phases.create!(dealer_phase: dph, installer_phase: iph)
     end
-    project.update_columns(phase_count: project.project_phases.count)
+    project.update_progress_cache!
     project
   end
 

@@ -39,7 +39,7 @@ class CompanyLinkService
   def accept!(link)
     raise Error, 'Only an admin can accept a link' unless @actor&.effective_admin?
     raise Error, 'This invitation is not for you' unless invitations_for_me.exists?(id: link.id)
-    if CompanyLink.where(dealer_company_id: link.dealer_company_id, installer_company_id: @company.id).where.not(id: link.id).exists?
+    if CompanyLink.open.where(dealer_company_id: link.dealer_company_id, installer_company_id: @company.id).where.not(id: link.id).exists?
       raise Error, "#{link.dealer_company.name} is already linked with #{@company.name}"
     end
 

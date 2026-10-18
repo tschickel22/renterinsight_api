@@ -7,7 +7,9 @@ class CompanyLinkNotifier
   class << self
     def invited(link)
       dealer = link.dealer_company
-      admins_with_email(link.invite_email).each do |u|
+      # Not the dealer's own people: someone who works at both shares the email
+      # and can only accept from the installer's company.
+      admins_with_email(link.invite_email).reject { |u| u.company_id == dealer.id }.each do |u|
         bell(u, :company_link, "Link request from #{dealer.name}",
              "#{dealer.name} wants to send install jobs to #{u.company.name}. Review it under Linked companies.", link)
       end
