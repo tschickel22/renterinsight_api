@@ -21,9 +21,20 @@ module Catalog
         code = vehicle.champion_raw_payload&.dig('buildingCode', 'code').to_s.upcase
         by_code = candidates.select { |v| v.building_code == code }
         return by_code.first if by_code.size == 1
+        return nil unless code == BuildingCode::HUD_MOD
 
-        # Still ambiguous: leave it unlinked rather than guess a price.
-        nil
+        # A plan built either way, ordered either way: the feed's own floor
+        # plan names the build it shows ("Aspire_0000_2876H42180-Main"), and
+        # every one of Summit Park's 21 such homes named the HUD build. Without
+        # one, the HUD build when there is exactly one. Summit Park's lot had
+        # 18 homes that could be designed left unlinked by this (2026-10-18).
+        text = vehicle.champion_raw_payload.to_json
+        named = candidates.select { |v| v.model_number.to_s.length >= 8 && text.include?(v.model_number) }
+        return named.first if named.size == 1
+
+        hud = candidates.select { |v| v.building_code == BuildingCode::HUD }
+        # Still ambiguous (two sizes of HUD): leave it unlinked rather than guess a price.
+        hud.size == 1 ? hud.first : nil
       end
 
       # Link every unlinked home carrying one of these Champion ids.

@@ -252,8 +252,11 @@ class Vehicle < ApplicationRecord
 
   # TrueBuild: a home arriving from a Champion feed finds its factory model,
   # and so its factory prices, by the Champion model id (see InventoryLinker).
+  # Tried on every save while unlinked, so each feed sync tries again: a
+  # catalog model can learn its Champion id after the home arrived (Summit
+  # Park's Prime Monte, Pike and Pinnacle sat unlinked for two weeks).
   before_save :link_catalog_variant,
-              if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? && (new_record? || will_save_change_to_champion_model_id?) }
+              if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? }
   # A home with no Champion id (a site scan, typed in) links when its model
   # text carries a priced model number and its size agrees (HomeMatcher#confident).
   before_save :link_catalog_variant_by_number,
