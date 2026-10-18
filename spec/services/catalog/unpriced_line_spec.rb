@@ -13,6 +13,15 @@ RSpec.describe Catalog::UnpricedLine do
       models: [{ number: 'CS-3240', name: 'The Cedar Creek', series: 'Creekside', width_ft: 32, length_ft: 76, beds: 4, baths: 2 }] }
   end
 
+  it 'stores a decor sample cropped in the session and sent inline' do
+    s3 = instance_double(S3UploadService, bucket_name: 'assets', region: 'us-west-2', s3_client: double(put_object: true))
+    allow(S3UploadService).to receive(:new).and_return(s3)
+    spec[:groups][0][:sets][0][:options][0][:swatch][:image_url] = "data:image/jpeg;base64,#{Base64.strict_encode64('jpegbytes')}"
+    result = described_class.load!(spec)
+    url = CatalogSwatch.find_by(manufacturer: result[:manufacturer], name: 'Graystone').image_url
+    expect(url).to start_with("https://assets.s3.us-west-2.amazonaws.com/truebuild/swatches/#{result[:manufacturer].id}/")
+  end
+
   it 'loads models and finishes with no prices, offers them to a dealer without pricing, and links feed homes by name' do
     result = described_class.load!(spec)
     described_class.load!(spec) # again: updates, adds nothing
