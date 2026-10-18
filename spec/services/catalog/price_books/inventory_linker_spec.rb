@@ -47,8 +47,11 @@ RSpec.describe Catalog::PriceBooks::InventoryLinker do
     hud = CatalogPlanVariant.find_by(model_number: '2856H32392')
     expect(feed_home('g-belv', code: 'HUD or MOD').catalog_plan_variant_id).to eq(hud.id)
 
-    variant('2860H32392', 'g-belv') # two HUD sizes: no guess
+    longer = variant('2860H32392', 'g-belv') # two HUD sizes: no guess
     expect(feed_home('g-belv', code: 'HUD or MOD').catalog_plan_variant_id).to be_nil
+    # ...unless a number in the feed, even another plan's, gives the size
+    sized = feed_home('g-belv', code: 'HUD or MOD', images: [{ 'alt' => 'Aspire_0000_2860H32301-Main' }])
+    expect(sized.catalog_plan_variant_id).to eq(longer.id)
   end
 
   it 'links on a later save once the catalog model learns its Champion id' do

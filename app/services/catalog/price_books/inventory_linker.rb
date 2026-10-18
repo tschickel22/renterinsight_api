@@ -34,8 +34,14 @@ module Catalog
         return named.first if named.size == 1
 
         hud = candidates.select { |v| v.building_code == BuildingCode::HUD }
-        # Still ambiguous (two sizes of HUD): leave it unlinked rather than guess a price.
-        hud.size == 1 ? hud.first : nil
+        return hud.first if hud.size == 1
+
+        # Two sizes: a number naming another plan still gives the size
+        # (Easton's photos carry Belvidere's 2856H32392: 28 by 56).
+        sizes = text.scan(/(?<!\d)(\d{4})[HM]\d{2}[0-9A-Z]{3}/).flatten.uniq
+        sized = hud.select { |v| sizes.include?(v.model_number.to_s[0, 4]) }
+        # Still ambiguous: leave it unlinked rather than guess a price.
+        sized.size == 1 ? sized.first : nil
       end
 
       # Link every unlinked home carrying one of these Champion ids.
