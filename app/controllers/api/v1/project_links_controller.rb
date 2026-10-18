@@ -24,17 +24,19 @@ module Api
         }
       end
 
-      # POST /api/v1/projects/:project_id/project_links { company_link_id, project_phase_id, fee, note }
+      # POST /api/v1/projects/:project_id/project_links
+      #   { company_link_id, project_phase_ids (or project_phase_id), fee, note }
+      # No phases sends the whole project.
       def create
         return unless authorize_action!('deals', 'update')
 
         link = CompanyLink.active.find_by(id: params[:company_link_id], dealer_company_id: @company.id)
-        phase = params[:project_phase_id].present? ? @project.project_phases.find_by(id: params[:project_phase_id]) : nil
-        if params[:project_phase_id].present? && phase.nil?
-          return render json: { error: 'Phase not found' }, status: :not_found
-        end
+        ids = Array(params[:project_phase_ids]).compact_blank.presence || Array(params[:project_phase_id]).compact_blank
+        ids = ids.map(&:to_i).uniq
+        phases = @project.project_phases.where(id: ids).to_a
+        return render json: { error: 'Phase not found' }, status: :not_found if phases.size != ids.size
 
-        pl = service.offer!(project: @project, phase: phase, link: link, fee: params[:fee], note: params[:note])
+        pl = service.offer!(project: @project, phases: phases, link: link, fee: params[:fee], note: params[:note])
         render json: { project_link: dealer_json(pl) }, status: :created
       rescue ProjectLinkService::Error, ActiveRecord::RecordInvalid => e
         render json: { error: e.message }, status: :unprocessable_entity
@@ -107,7 +109,7 @@ module Api
         {
           id: pl.id, status: pl.status, installer_name: pl.installer_company.name,
           project_phase_id: pl.dealer_phase_id, scope_label: pl.scope_label,
-          phase_ids: pl.dealer_phase ? [pl.dealer_phase_id] : pl.dealer_project.project_phases.pluck(:id),
+          phase_ids: pl.dealer_phases.map(&:id), whole_project: pl.whole_project?,
           fee_amount: pl.fee_amount&.to_f, note: pl.note, decline_reason: pl.decline_reason,
           offered_at: pl.offered_at, responded_at: pl.responded_at,
           dealer_bill_id: pl.dealer_bill_id, can_cancel: pl.status.in?(%w[offered accepted]) && pl.dealer_bill_id.nil?

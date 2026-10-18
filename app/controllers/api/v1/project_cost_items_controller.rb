@@ -126,7 +126,8 @@ module Api
             name: phase.name,
             estimated_budget: phase.estimated_budget,
             actual_cost: phase.actual_cost,
-            variance: phase.estimated_budget ? (phase.estimated_budget - (phase.actual_cost || 0)) : nil,
+            committed_cost: phase_items.where(status: 'pending').sum(:amount),
+            variance: phase.estimated_budget ? (phase.estimated_budget - (phase.actual_cost || 0) - phase_items.where(status: 'pending').sum(:amount)) : nil,
             by_type: phase_items.group(:cost_type).sum(:amount)
           }
         end
@@ -138,6 +139,8 @@ module Api
           project: {
             budget_amount: @project.budget_amount,
             actual_cost: @project.actual_cost,
+            committed_cost: @project.committed_cost,
+            projected_cost: @project.projected_cost,
             labor_cost: @project.labor_cost,
             materials_cost: @project.materials_cost,
             subcontractor_cost: @project.subcontractor_cost,

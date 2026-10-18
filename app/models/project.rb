@@ -298,8 +298,11 @@ class Project < ApplicationRecord
   # COST TRACKING
   # ============================================================================
 
+  # Actual cost is what has been incurred: approved, paid or disputed lines.
+  # Pending lines (an awarded bid, a linked installer's fee) are committed
+  # but not yet spent, and are reported apart (committed_cost).
   def recalculate_costs!
-    items = project_cost_items.not_deleted
+    items = project_cost_items.not_deleted.where.not(status: 'pending')
     totals = items.group(:cost_type).sum(:amount)
 
     update_columns(
@@ -311,9 +314,20 @@ class Project < ApplicationRecord
     )
   end
 
+  # Awarded but not yet billed.
+  def committed_cost
+    project_cost_items.not_deleted.where(status: 'pending').sum(:amount)
+  end
+
+  # What the job will cost once everything committed is billed.
+  def projected_cost
+    (actual_cost || 0) + committed_cost
+  end
+
+  # Budget left after what is spent and what is committed.
   def budget_variance
     return nil unless budget_amount
-    budget_amount - (actual_cost || 0)
+    budget_amount - projected_cost
   end
 
   def budget_variance_percentage
@@ -323,7 +337,7 @@ class Project < ApplicationRecord
 
   def over_budget?
     return false unless budget_amount
-    (actual_cost || 0) > budget_amount
+    projected_cost > budget_amount
   end
 
   private

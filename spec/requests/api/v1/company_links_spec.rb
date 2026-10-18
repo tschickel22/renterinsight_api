@@ -195,6 +195,44 @@ RSpec.describe 'Company links', type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
+  it 'hands several phases across for one fee' do
+    link = link!
+    post "/api/v1/projects/#{project.id}/project_links", headers: h(dealer),
+         params: { company_link_id: link.id, project_phase_ids: [finish_phase.id, set_phase.id], fee: 7000 }.to_json
+    expect(response).to have_http_status(:created), response.body
+    expect(body.dig('project_link', 'scope_label')).to eq('Set and Finish')
+    expect(body.dig('project_link', 'phase_ids')).to eq([set_phase.id, finish_phase.id])
+    pl = ProjectLink.find(body.dig('project_link', 'id'))
+    expect([set_phase.reload, finish_phase.reload].map(&:assigned_vendor_id)).to all(eq(vendor.id))
+    expect(project.reload.assigned_vendor_id).to be_nil
+    expect(pl.dealer_cost_item.amount).to eq(7000)
+    # The fee is committed, not spent: it counts against the budget, not actual cost.
+    project.update!(budget_amount: 10_000)
+    expect(project.reload).to have_attributes(actual_cost: 0, committed_cost: 7000, budget_variance: 3000)
+
+    # Either phase is now taken.
+    post "/api/v1/projects/#{project.id}/project_links", headers: h(dealer),
+         params: { company_link_id: link.id, project_phase_id: finish_phase.id }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+
+    post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
+    expect(pl.reload.installer_project.name).to eq('Maria Diaz - Set and Finish')
+    expect(pl.installer_project.project_phases.order(:position).pluck(:name)).to eq(%w[Set Finish])
+
+    allow(ProjectNotificationService).to receive(:notify_phase_change)
+    ip = pl.installer_project
+    perform_enqueued_jobs { ip.project_phases.order(:position).each { |ph| ip.set_phase_status!(ph.reload, 'completed') } }
+    expect([set_phase.reload, finish_phase.reload].map(&:status)).to all(eq('completed'))
+    expect(pl.reload.status).to eq('done')
+
+    # A phase on another project is refused.
+    other = dealer_co.projects.create!(name: 'Other', status: 'active', owner: dealer)
+    stray = other.project_phases.create!(company: dealer_co, name: 'Stray', position: 0, status: 'not_started')
+    post "/api/v1/projects/#{project.id}/project_links", headers: h(dealer),
+         params: { company_link_id: link.id, project_phase_ids: [stray.id] }.to_json
+    expect(response).to have_http_status(:not_found)
+  end
+
   it 'lets the same two companies link again after a link ends' do
     link = link!
     post "/api/v1/company_links/#{link.id}/end", headers: h(dealer)

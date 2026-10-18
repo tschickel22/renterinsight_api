@@ -16,26 +16,31 @@ class ProjectLinkService
 
   # ── Dealer side ─────────────────────────────────────────────────────────
 
-  def offer!(project:, phase:, link:, fee: nil, note: nil)
+  # phases: none for the whole project, or one or more of its phases for one
+  # fee (install and delivery together, say).
+  def offer!(project:, link:, phases: [], fee: nil, note: nil)
     raise Error, 'Not your project' unless project.company_id == @company.id
     raise Error, 'Pick an active linked installer' unless link&.active? && link.dealer_company_id == @company.id
-    raise Error, 'That phase is not on this project' if phase && phase.project_id != project.id
+    phases = Array(phases).uniq
+    raise Error, 'That phase is not on this project' if phases.any? { |ph| ph.project_id != project.id }
     fee = parse_amount(fee)
 
-    busy = ProjectLink.live.where(dealer_project_id: project.id)
-    if busy.where(dealer_phase_id: nil).exists? || (phase.nil? && busy.exists?) || (phase && busy.where(dealer_phase_id: phase.id).exists?)
+    live = ProjectLink.live.where(dealer_project_id: project.id).to_a
+    taken = live.flat_map { |l| l.dealer_phases.map(&:id) }
+    if live.any?(&:whole_project?) || (phases.empty? && live.any?) || (phases.map(&:id) & taken).any?
       raise Error, 'This work is already with an installer'
     end
 
     pl = nil
     ActiveRecord::Base.transaction do
       pl = ProjectLink.create!(company_link: link, dealer_company: @company, installer_company: link.installer_company,
-                               dealer_project: project, dealer_phase: phase, fee_amount: fee, note: note.presence,
-                               offered_by: @actor, offered_at: Time.current)
+                               dealer_project: project, dealer_phase: phases.one? ? phases.first : nil,
+                               dealer_phase_ids: phases.many? ? phases.sort_by(&:position).map(&:id) : [],
+                               fee_amount: fee, note: note.presence, offered_by: @actor, offered_at: Time.current)
       set_dealer_owner!(pl, link.dealer_vendor_id)
       pl.update!(dealer_cost_item: committed_cost!(pl)) if fee&.positive?
       link.log!('job_offered', "#{@company.name} sent #{pl.scope_label} on #{project.name}", company: @company, user: @actor,
-                project_link: pl, data: { fee: fee&.to_s, phase_id: phase&.id })
+                project_link: pl, data: { fee: fee&.to_s, phase_ids: phases.map(&:id) })
     end
     CompanyLinkNotifier.job_offered(pl)
     pl
@@ -139,12 +144,12 @@ class ProjectLinkService
   # Whoever owned them before is kept, so a take back or decline restores them.
   def set_dealer_owner!(pl, vendor_id)
     project = pl.dealer_project
-    phases = pl.dealer_phase ? [pl.dealer_phase] : project.project_phases.where.not(status: %w[completed skipped]).to_a
+    phases = pl.whole_project? ? project.project_phases.where.not(status: %w[completed skipped]).to_a : pl.dealer_phases
     previous = { 'phases' => phases.to_h { |ph| [ph.id.to_s, ph.assigned_vendor_id] } }
-    previous['project'] = project.assigned_vendor_id if pl.dealer_phase.nil?
+    previous['project'] = project.assigned_vendor_id if pl.whole_project?
     pl.update!(previous_owners: previous)
 
-    project.update!(assigned_vendor_id: vendor_id) if pl.dealer_phase.nil?
+    project.update!(assigned_vendor_id: vendor_id) if pl.whole_project?
     ProjectPhase.where(id: phases.map(&:id)).update_all(assigned_vendor_id: vendor_id, updated_at: Time.current)
   end
 
@@ -153,11 +158,10 @@ class ProjectLinkService
   def release_dealer!(pl)
     vendor_id = pl.company_link.dealer_vendor_id
     previous = pl.previous_owners || {}
-    phases = pl.dealer_phase ? [pl.dealer_phase] : pl.dealer_project.project_phases.to_a
-    phases.each do |ph|
+    pl.dealer_phases.each do |ph|
       ph.update!(assigned_vendor_id: previous.dig('phases', ph.id.to_s)) if ph.assigned_vendor_id == vendor_id
     end
-    if pl.dealer_phase.nil? && pl.dealer_project.assigned_vendor_id == vendor_id
+    if pl.whole_project? && pl.dealer_project.assigned_vendor_id == vendor_id
       pl.dealer_project.update!(assigned_vendor_id: previous['project'])
     end
     if (line = pl.dealer_cost_item) && line.status == 'pending' && line.bill_id.nil?
@@ -183,7 +187,7 @@ class ProjectLinkService
     dp = pl.dealer_project
     location_id = @company.locations.where(is_deleted: [false, nil]).order(:id).pick(:id)
     project = @company.projects.create!(
-      name: [dp.customer_display_name.presence, pl.dealer_phase&.name].compact.join(' - ').presence || dp.name,
+      name: [dp.customer_display_name.presence, (pl.scope_label unless pl.whole_project?)].compact.join(' - ').presence || dp.name,
       description: [pl.note, dp.description].compact_blank.join("\n\n").presence,
       status: 'active', location_id: location_id, owner_id: @actor.id, created_by_id: @actor.id,
       customer_name: dp.customer_name, customer_email: dp.customer_email, customer_phone: dp.customer_phone,

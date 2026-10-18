@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# A project, or one phase of it, handed from a dealer to a linked installer
-# company (E68 step 5). The dealer's project stays the record the customer
+# A project, one phase of it, or several phases for one fee, handed from a
+# dealer to a linked installer company (E68 step 5). The dealer's project stays the record the customer
 # follows; the installer works its own copy, made when it accepts.
 class ProjectLink < ApplicationRecord
   STATUSES = %w[offered accepted declined cancelled done].freeze
@@ -28,13 +28,25 @@ class ProjectLink < ApplicationRecord
   def offered? = status == 'offered'
   def accepted? = status == 'accepted'
 
+  # One phase is dealer_phase; several are dealer_phase_ids; neither is the
+  # whole project.
+  def whole_project?
+    dealer_phase_id.nil? && dealer_phase_ids.blank?
+  end
+
   # The dealer phases this hand-off covers.
   def dealer_phases
-    dealer_phase ? [dealer_phase] : dealer_project.project_phases.order(:position).to_a
+    return [dealer_phase] if dealer_phase
+    return dealer_project.project_phases.where(id: dealer_phase_ids).order(:position).to_a if dealer_phase_ids.present?
+
+    dealer_project.project_phases.order(:position).to_a
   end
 
   def scope_label
-    dealer_phase ? dealer_phase.name : 'The whole job'
+    return 'The whole job' if whole_project?
+
+    names = dealer_phases.map(&:name)
+    names.size > 3 ? "#{names.first(2).join(', ')} and #{names.size - 2} more" : names.to_sentence
   end
 
   private
@@ -46,6 +58,10 @@ class ProjectLink < ApplicationRecord
     errors.add(:installer_company, 'must be the link\'s installer') unless installer_company_id == company_link.installer_company_id
     errors.add(:dealer_project, 'must belong to the dealer') if dealer_project && dealer_project.company_id != dealer_company_id
     errors.add(:dealer_phase, 'must be on the project') if dealer_phase && dealer_phase.project_id != dealer_project_id
+    if dealer_phase_ids.present? && dealer_project &&
+       dealer_project.project_phases.where(id: dealer_phase_ids).count != dealer_phase_ids.uniq.size
+      errors.add(:dealer_phase_ids, 'must all be on the project')
+    end
     errors.add(:installer_project, 'must belong to the installer') if installer_project && installer_project.company_id != installer_company_id
   end
 end

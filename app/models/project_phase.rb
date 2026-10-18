@@ -132,7 +132,8 @@ class ProjectPhase < ApplicationRecord
   end
 
   def recalculate_costs!
-    update_column(:actual_cost, project_cost_items.not_deleted.sum(:amount))
+    # Incurred only; pending (committed) lines are reported apart.
+    update_column(:actual_cost, project_cost_items.not_deleted.where.not(status: 'pending').sum(:amount))
   end
 
   after_save :notify_status_change, if: :saved_change_to_status?
