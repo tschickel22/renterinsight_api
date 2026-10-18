@@ -232,6 +232,28 @@ module Truebuild
         [render.usage['reviewer_note'], render.usage.dig('check', 'note')].compact_blank.uniq.join(' Also: ')
       end
 
+      # A run's drawings, repair rounds, re-cuts and touch-up checks all spend
+      # inside their own jobs, so the cap is checked against what the run has
+      # really spent before each one starts. The queuing check alone, on
+      # estimates, let Easton's run end about 10% over its $7 (2026-10-18).
+      # Over the cap: this drawing and the rest waiting are cancelled, and the
+      # run can be continued with a larger budget. => true when cancelled.
+      def over_budget!(render)
+        run = TruebuildFactoryRun.find_by(id: render.usage['factory_run_id']) or return false
+        return false if run.batch? || run.status != 'running' || render.usage['copied_from']
+        return false if run.spent_usd < run.budget_usd.to_f
+
+        render.update!(status: 'cancelled')
+        run.with_lock do
+          next unless run.status == 'running'
+
+          run.update!(status: 'budget_reached', stopped_at: Time.current)
+          run.renders.where(status: 'queued').update_all(status: 'cancelled', updated_at: Time.current)
+        end
+        run.notify_end if run.saved_change_to_status?
+        true
+      end
+
       # Held drawings a reviewer would show anyway go out when the run ends
       # (HeldSummary.auto_show!); the notice says how many, to look through.
       def auto_show!(run)
