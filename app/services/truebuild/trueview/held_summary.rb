@@ -70,6 +70,17 @@ module Truebuild
 
       def group_of(r) = reason(note(r), surface(r), r.selection.first&.dig('value'))
 
+      # A factory run's drawing that failed its check but will be shown when
+      # the run ends anyway (auto_show!): drawing it again buys nothing. On
+      # run 4 (2026-10-18) held drawings cost $0.30 each against $0.09 for one
+      # that passed, almost all of it redraws of drawings shown in the end.
+      def shown_anyway?(render, verdict)
+        return false unless render.usage['factory_run_id'] && verdict && !verdict['ok'] && verdict['score'].to_i >= SHOW_FROM
+
+        group = find(reason(verdict['note'], render.selection.first&.dig('surface'), render.selection.first&.dig('value')))
+        !(group[:keep_hidden] || group[:review])
+      end
+
       # When a run ends: every held drawing from score 3 up shown, but for
       # groups held for a reviewer (review) or never shown (keep_hidden).
       # They are listed as shown automatically, to look through and hide any.

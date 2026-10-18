@@ -210,7 +210,7 @@ module Truebuild
                                                         key: render.selection_key, photo: render.source_url)
         spent += touched
         notes << verdict['note'] if verdict['note'].present?
-        return again(render, tries, notes, spent) if !verdict['ok'] && tries < limit(render)
+        return again(render, tries, notes, spent) if !verdict['ok'] && tries < limit(render) && !HeldSummary.shown_anyway?(render, verdict)
 
         attrs = { status: 'done', cost_usd: spent.round(4), layer_url: Trueview.store(render, layer[:bytes], layer[:mime], suffix: 'layer'),
                   mask_coverage: layer[:coverage],
