@@ -11,6 +11,8 @@ class TruebuildRenderJob < ApplicationJob
     # "running"; it carries on. Any other job for a running row is a duplicate.
     return unless render.status == 'queued' || (render.status == 'running' && render.usage['job_id'] == job_id)
 
+    return if Truebuild::Trueview::FactoryRun.over_budget!(render)
+
     render.update_columns(usage: render.usage.merge('job_id' => job_id))
     Truebuild::Trueview.perform!(render)
     run_finished(render)

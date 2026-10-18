@@ -116,6 +116,21 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
     expect(jobs).to include(TruebuildFactoryRunJob)
   end
 
+  it 'stops at its budget by what it really spent, before the next drawing starts' do
+    run = described_class.start!(everything, budget_usd: 5, scope: { manufacturer_id: mfr.id })
+    TruebuildFactoryRunJob.perform_now(run.id)
+    first, second, third = run.renders.order(:id).to_a
+    first.update!(status: 'done', cost_usd: 5.2, layer_url: 'https://b/l.webp') # repairs and checks ran past the estimate
+    expect(Truebuild::Trueview).not_to receive(:perform!)
+
+    TruebuildRenderJob.perform_now(second.id)
+    expect(run.reload.status).to eq('budget_reached')
+    expect([second, third].map { |r| r.reload.status }).to eq(%w[cancelled cancelled])
+
+    run.continue!(8)
+    expect(run.renders.where(status: 'queued').count).to eq(2)
+  end
+
   it 'counts a model with nothing drawn as nothing drawn, though two options share one drawing' do
     o = CatalogOption.create!(group: exterior, manufacturer: mfr, key: 'exterior--siding-white-again', name: 'White',
                               kind: 'color', metadata: { 'color_set' => 'Siding Upgrade' })
