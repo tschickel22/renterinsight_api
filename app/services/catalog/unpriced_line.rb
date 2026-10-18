@@ -88,8 +88,20 @@ module Catalog
       swatch = CatalogSwatch.where(manufacturer: @mfr, factory: @factory)
                             .where('lower(set_name) = ? AND lower(name) = ?', set_name.downcase, name.downcase)
                             .first_or_initialize(set_name: set_name, name: name)
-      swatch.update!(image_url: spec['image_url'], hex: spec['hex'], page: spec['page'], note: spec['note'])
+      swatch.update!(image_url: stored(spec['image_url']), hex: spec['hex'], page: spec['page'], note: spec['note'])
       @swatches = @swatches.to_i + 1
+    end
+
+    # A sample cropped in the session comes inline (data:image/jpeg;base64,...)
+    # and is stored where the decor sheet reader stores its swatches.
+    def stored(url)
+      return url unless url.to_s.start_with?('data:')
+
+      bytes = Base64.decode64(url.split(',', 2).last.to_s)
+      s3 = S3UploadService.new
+      key = "truebuild/swatches/#{@mfr.id}/#{Digest::SHA256.hexdigest(bytes)[0, 20]}.jpg"
+      s3.s3_client.put_object(bucket: s3.bucket_name, key: key, body: bytes, content_type: 'image/jpeg')
+      "https://#{s3.bucket_name}.s3.#{s3.region}.amazonaws.com/#{key}"
     end
 
     def load_model(spec)
