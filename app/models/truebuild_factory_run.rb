@@ -97,9 +97,11 @@ class TruebuildFactoryRun < ApplicationRecord
 
   # What the held back drawings have wrong, by group (Truebuild::Trueview::HeldSummary).
   def held_note(counts)
-    return '' unless counts['rejected'].to_i.positive?
+    auto = progress['auto_shown'].to_i
+    note = auto.positive? ? " #{auto} held back drawings shown automatically, to look through." : ''
+    return note unless counts['rejected'].to_i.positive?
 
-    " Held back: #{Truebuild::Trueview::HeldSummary.line(self)}."
+    "#{note} Held back: #{Truebuild::Trueview::HeldSummary.line(self)}."
   end
 
   # Causes the run could not fix by redrawing (Truebuild::Trueview::Patterns).

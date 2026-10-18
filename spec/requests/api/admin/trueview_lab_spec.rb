@@ -344,12 +344,12 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
     it 'groups held back layers by what the check found, and shows a group from its 3s up, never one that changed nothing' do
       held = lambda do |key, score, note|
         TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
-                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Destin White' }], selection_key: key,
+                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Urban Oak' }], selection_key: key,
                                 model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
                                 error: "Hidden: #{note}", layer_url: 'https://b/l.webp', usage: { 'check' => { 'score' => score, 'note' => note } })
       end
-      creamy = held.call('a', 3, 'The cabinets are a warmer cream than the bright near-white (#eff0e5) of the sample.')
-      too_far = held.call('b', 2, 'The cabinets read as a dark tan, not the near-white of the sample.')
+      creamy = held.call('a', 3, 'The cabinets are a warmer tan than the cool greige (#a7947b) of the sample.')
+      too_far = held.call('b', 2, 'The cabinets read as a dark brown, not the light greige of the sample.')
       trim = held.call('c', 4, 'The window trim beside the sink retains the original brown wood finish.')
       same = held.call('d', 3, 'The cabinets appear virtually identical to the original oak.')
 
@@ -369,13 +369,46 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(same.reload.status).to eq('rejected')
     end
 
+    it 'shows held drawings from 3 up when a run ends, keeps the groups a reviewer decides, and lets them hide some after' do
+      run = TruebuildFactoryRun.create!(manufacturer_id: mfr.id, budget_usd: 5, variant_ids: [variant.id], status: 'running')
+      held = lambda do |key, score, value, note|
+        TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
+                                selection: [{ 'surface' => 'Cabinets', 'value' => value }], selection_key: key,
+                                model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
+                                error: "Hidden: #{note}", layer_url: 'https://b/l.webp',
+                                usage: { 'factory_run_id' => run.id, 'check' => { 'score' => score, 'note' => note } })
+      end
+      trim = held.call('a', 3, 'Timberwolf', 'The trim strip above the upper cabinets retains the original oak.')
+      shade = held.call('b', 4, 'Timberwolf', 'A little warmer than the sample.')
+      creamy = held.call('c', 3, 'Destin White', 'The cabinets read cream rather than the near-white sample.')
+      fringe = held.call('d', 4, 'Timberwolf', 'The old golden finish bleeds through along the box edges.')
+      wrong = held.call('e', 2, 'Timberwolf', 'A different, much darker finish.')
+
+      Truebuild::Trueview::FactoryRun.finish!(run)
+      expect([trim, shade, creamy, fringe, wrong].map { |r| r.reload.status }).to eq(%w[done done rejected rejected rejected])
+      expect(run.reload.progress['auto_shown']).to eq(2)
+
+      get '/api/admin/trueview_lab/held', headers: admin
+      groups = JSON.parse(response.body)['groups'].to_h { |g| [g['key'], g.slice('count', 'review')] }
+      expect(groups).to include('white_cream' => { 'count' => 1, 'review' => true }, 'bleed_through' => { 'count' => 1, 'review' => true })
+
+      get '/api/admin/trueview_lab/held/auto', headers: admin
+      expect(JSON.parse(response.body)['items'].map { |x| x['id'] }).to eq([trim.id, shade.id])
+
+      post '/api/admin/trueview_lab/held/auto/look', headers: admin, params: { ids: [trim.id], hide_ids: [shade.id] }.to_json
+      expect(JSON.parse(response.body)).to eq('hidden' => 1, 'kept' => 1)
+      expect([trim.reload.status, shade.reload.status]).to eq(%w[done rejected])
+      get '/api/admin/trueview_lab/held/auto', headers: admin
+      expect(JSON.parse(response.body)['items']).to eq([])
+    end
+
     it 'lists every drawing in a group, shows the ones picked and keeps the rest hidden for good' do
       rows = [4, 3, 3].each_with_index.map do |score, i|
         TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
-                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Destin White' }], selection_key: "s#{i}",
+                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Urban Oak' }], selection_key: "s#{i}",
                                 model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
-                                error: 'Hidden: a warmer cream than the sample', layer_url: 'https://b/l.webp',
-                                usage: { 'check' => { 'score' => score, 'note' => 'A warmer cream than the sample.' } })
+                                error: 'Hidden: a warmer tan than the sample', layer_url: 'https://b/l.webp',
+                                usage: { 'check' => { 'score' => score, 'note' => 'A warmer tan than the sample.' } })
       end
       get '/api/admin/trueview_lab/held/shade', headers: admin
       expect(JSON.parse(response.body)['items'].map { |x| [x['id'], x['showable']] }).to eq(rows.map { |r| [r.id, true] })

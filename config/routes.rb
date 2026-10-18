@@ -3191,6 +3191,8 @@ Rails.application.routes.draw do
       post 'trueview_lab/layers/:id/approve', to: 'trueview_lab#approve_layer'
       get  'trueview_lab/attention', to: 'trueview_lab#attention'
       get  'trueview_lab/held', to: 'trueview_lab#held'
+      get  'trueview_lab/held/auto', to: 'trueview_lab#held_auto'
+      post 'trueview_lab/held/auto/look', to: 'trueview_lab#look_through_auto'
       post 'trueview_lab/held/:key/show', to: 'trueview_lab#show_held'
       get  'trueview_lab/held/:key', to: 'trueview_lab#held_group'
       get    'trueview_transfer', to: 'trueview_transfer#export'

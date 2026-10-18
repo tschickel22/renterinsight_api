@@ -87,6 +87,7 @@ module Truebuild
           text += " The option is #{value}: it must show #{look}. A different finish is clearly wrong: score 2."
         end
         text += fridge_layout(OptionLook.style(value.to_s)) if OptionLook.fridge?(surface, value) && surface.to_s.match?(OptionLook::APPLIANCES)
+        text += BLACK_STAINLESS if value.to_s.match?(/black\s*(stainless|ss\b)/i)
         "#{text} If the photo already showed this finish, little or no change is correct (score 4 or 5). An appliance " \
           'package may leave the range hood as it was. Anything added or doubled (a second pull or knob on a door, new ' \
           'hardware, a new object) is clearly wrong: score 2.'
@@ -97,6 +98,12 @@ module Truebuild
       # doors of the photo's own refrigerator. A top-freezer is a narrower,
       # cheaper refrigerator, so it is never shown for a full-width one or
       # the other way round.
+      # Black stainless photographs close to stainless, and Tom showed every
+      # drawing held back only for that (2026-10-18): not worth a redraw.
+      BLACK_STAINLESS = ' Black stainless steel photographs close to stainless steel: an appliance in a dark, smoky or ' \
+                        'brushed stainless look is correct (score 4), and so is one that reads a little lighter than ' \
+                        'the others; only a plainly bright silver appliance is wrong.'
+
       def fridge_layout(style)
         case style
         when 'top-freezer'
