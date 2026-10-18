@@ -176,7 +176,8 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: runs.map { |r| Truebuild::Trueview::FactoryRun.progress(r) }
   end
 
-  # POST /api/admin/trueview_lab/factory_runs { manufacturer_id, factory_id, series, variant_ids, budget_usd }
+  # POST /api/admin/trueview_lab/factory_runs { manufacturer_id, factory_id, series, variant_ids, budget_usd, checks }
+  # checks: 'session' has a Claude Code session check the drawings (SessionChecks).
   def create_factory_run
     return render json: { error: 'TrueView is not set up (no Gemini key)' }, status: :unprocessable_entity unless Truebuild::Trueview.configured?(Truebuild::Trueview::Buyer::MODEL)
 
@@ -197,7 +198,8 @@ class Api::Admin::TrueviewLabController < ApplicationController
     return if performed?
 
     run = Truebuild::Trueview::FactoryRun.start!(variants, budget_usd: budget, scope: scope, by: current_user, at: at,
-                                                           batch: ActiveModel::Type::Boolean.new.cast(params[:batch]))
+                                                           batch: ActiveModel::Type::Boolean.new.cast(params[:batch]),
+                                                           checks: params[:checks] == 'session' ? 'session' : nil)
     render json: Truebuild::Trueview::FactoryRun.progress(run), status: :created
   end
 

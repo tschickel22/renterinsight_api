@@ -71,13 +71,17 @@ module Truebuild
 
       # at: when to start (nil or past: now). batch: draw through Gemini's
       # batch mode. A scheduled run waits; TruebuildFactoryRunTickJob starts it.
-      def start!(variants, budget_usd:, scope:, by: nil, at: nil, batch: false)
+      # checks: 'session' to have a Claude Code session check the drawings
+      # (SessionChecks); it draws through batch mode, where checks wait anyway.
+      def start!(variants, budget_usd:, scope:, by: nil, at: nil, batch: false, checks: nil)
         later = at.present? && at > 1.minute.from_now
+        session = checks.to_s == 'session'
+        batch ||= session
         run = TruebuildFactoryRun.create!(manufacturer_id: scope[:manufacturer_id], factory_id: scope[:factory_id].presence,
                                           series: scope[:series].presence, budget_usd: budget_usd, created_by_id: by&.id,
                                           variant_ids: variants.map(&:id), estimate: estimate(variants, batch: batch)[:totals],
                                           mode: batch ? 'batch' : 'now', status: later ? 'scheduled' : 'running',
-                                          scheduled_at: later ? at : nil)
+                                          scheduled_at: later ? at : nil, progress: session ? { 'checks' => 'session' } : {})
         TruebuildFactoryRunJob.perform_later(run.id) unless later
         run
       end
@@ -296,9 +300,11 @@ module Truebuild
         open = counts.values_at('queued', 'running').compact.sum
         repair_queued = run.progress['repair_queued'].to_i
         at_google = run.batch? && run.renders.where(status: 'running').where("usage ? 'batch_name'").exists?
+        awaiting = SessionChecks.waiting(run).count
         phase = if run.status != 'running' then run.status
                 elsif run.models_queued < run.variant_ids.size then 'queuing'
                 elsif at_google then 'waiting_on_google'
+                elsif awaiting.positive? && open == awaiting then 'waiting_on_claude_code'
                 elsif open.positive? then repair_queued.positive? ? 'repairing' : 'drawing'
                 elsif repair_queued > run.progress['repair_rounds'].to_i then 'repairing'
                 else 'finished'
@@ -317,6 +323,7 @@ module Truebuild
           drawings: { done: counts['done'].to_i, held_back: counts['rejected'].to_i, not_in_photo: counts['skipped'].to_i,
                       failed: counts['failed'].to_i, waiting: open, cancelled: counts['cancelled'].to_i },
           mode: run.mode, scheduled_at: run.scheduled_at, batches: Array(run.progress['batches']).size,
+          checks: run.progress['checks'] || 'api', awaiting_checks: awaiting,
           patterns: Array(run.progress['patterns']).map { |p| p.slice('surface', 'held', 'of', 'cause', 'summary', 'action') },
           created_at: run.created_at, stopped_at: run.stopped_at }
       end
