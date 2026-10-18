@@ -18,10 +18,9 @@ module Truebuild
       RECUT_COST = 0.012 # an existing drawing cut again on a newer outline: only its check is paid
       OUTLINE_COST = 0.06
 
-      # Active models of the scope that a published price book prices.
+      # Active models of the scope that buyers can design (CatalogPlanVariant.designable).
       def variants(manufacturer_id:, factory_id: nil, series: nil)
-        priced = CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id)).select(:catalog_plan_variant_id)
-        scope = CatalogPlanVariant.active.where(manufacturer_id: manufacturer_id, id: priced)
+        scope = CatalogPlanVariant.active.designable.where(manufacturer_id: manufacturer_id)
                                   .joins(:catalog_plan).includes(:catalog_plan)
         scope = scope.where(catalog_plans: { factory_id: factory_id }) if factory_id.present?
         scope = scope.where(catalog_plans: { series: series }) if series.present?

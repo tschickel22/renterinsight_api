@@ -21,6 +21,17 @@ class CatalogPlanVariant < ApplicationRecord
   before_validation :normalize_model_number
 
   scope :active, -> { where(status: 'active') }
+  # What TrueBuild offers buyers: models a published book prices, and models
+  # a loaded plant builds that only Champion's site lists (champion_only?).
+  scope :designable, lambda {
+    where(id: CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id)).select(:catalog_plan_variant_id))
+      .or(where("catalog_plan_variants.external_ids ? 'champion_only'"))
+  }
+
+  # A model of a loaded plant that Champion's site shows and no price book
+  # prices yet (Truebuild::ModelMedia.add_unpriced!). Buyers design it with
+  # the plant's options and finishes and ask the dealer for the price.
+  def champion_only? = external_ids.to_h['champion_only'] == true
 
   # Media keys people set (a platform admin's hidden photos and TrueView
   # photos) or made once per model (Claude's photo pick). A rescan of the

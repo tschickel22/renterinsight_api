@@ -107,6 +107,20 @@ RSpec.describe Truebuild::PricingEngine do
     expect(f).to include(cost: 2500.0, retail: 2500.0) # 6 x 50 x 2 + 300 = 900, under the dealer's 2,500 minimum
   end
 
+  it 'prices a model only Champion lists with options and no base, so there is no total' do
+    company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.3)
+    tile = option('Tile backsplash', series: 'Aspire', dealer_cost: 400)
+    unpriced = CatalogPlanVariant.create!(catalog_plan: CatalogPlan.create!(manufacturer: mfr, factory: factory, series: 'Aspire', name: '184'),
+                                          manufacturer: mfr, model_number: '1672H32184', external_ids: { 'champion_only' => true })
+    expect(CatalogPlanVariant.designable).to include(unpriced, variant)
+
+    r = described_class.new(company: company, variant: unpriced, option_ids: [tile.id]).call
+    expect(r.lines.first).to include(kind: 'base', cost: nil, retail: nil)
+    expect(r.lines.find { |l| l[:kind] == 'option' }[:cost]).to eq(400.0)
+    expect(r.totals[:retail]).to be_nil
+    expect(r.warnings.join).to include('Quote it by hand')
+  end
+
   it 'has no retail and says so when no rule covers the home' do
     r = price
     expect(r.totals[:retail]).to be_nil

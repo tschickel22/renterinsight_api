@@ -46,7 +46,11 @@ module Truebuild
         numbered = numbers_in(home).flat_map { |n| Array(by_number[n]) }.select { |v| series_agrees?(v, home) }
         numbered = [] if named.any? && (numbered & named).empty?
         matches = Array(by_champion_id[home['id']]) | (numbered.any? ? numbered : named)
-        next if matches.empty?
+        if matches.empty?
+          linked += 1 if add_unpriced!(manufacturer, home, variants, client_class)
+          next
+        end
+        retire_unpriced!(home, matches)
 
         media = media_for(home, client_class)
         matches.each do |v|
@@ -59,6 +63,54 @@ module Truebuild
       end
       share_with_sizes!(variants, fed)
       linked
+    end
+
+    # A model Champion's site lists for a plant we have loaded, with photos,
+    # that no price book prices (Aspire 184 at Topeka, Prime Grand 043 at
+    # Decatur): added to the catalog so buyers can design it with the plant's
+    # options and finishes, and ask the dealer for the price. The model number
+    # comes from its photos; without one, a stand-in from its name.
+    def add_unpriced!(manufacturer, home, variants, client_class)
+      return nil unless manufacturer
+
+      factory = manufacturer.factories.find { |f| f.city.present? && f.city.casecmp?(home['factoryBrandCity'].to_s) }
+      like = factory && variants.find { |v| v.catalog_plan&.factory_id == factory.id && series_agrees?(v, home) }
+      return nil unless like
+
+      media = media_for(home, client_class)
+      return nil if Array(media['photos']).empty?
+
+      series = like.catalog_plan.series
+      words = series.downcase.split
+      name = home['name'].to_s.split.reject { |w| words.include?(w.downcase) || w.match?(/\A\d{3}\z/) }.join(' ').presence || home['name'].to_s
+      number = numbers_in(home).first || home['slug'].to_s.upcase.delete('^A-Z0-9')
+      parsed = Catalog::ModelNumber.parse(number)
+      code = parsed.building_code || (BuildingCode.from_label(home.dig('buildingCode', 'code')) == BuildingCode::MOD ? 'MOD' : 'HUD')
+      plan = CatalogPlan.find_or_create_by!(manufacturer: manufacturer, series: series, slug: name.parameterize) do |p|
+        p.name = name
+        p.factory = factory
+        p.status = 'active'
+      end
+      CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: manufacturer, model_number: number, building_code: code,
+                                 width_ft: parsed.width_ft, length_ft: parsed.length_ft, beds: home['numberOfBeds'],
+                                 baths: home['numberOfBaths'], square_feet: home['squareFeet'], media: media,
+                                 external_ids: { 'champion_model_id' => home['id'], 'champion_slug' => home['slug'],
+                                                 'champion_name' => home['name'], 'champion_only' => true })
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.warn("[ModelMedia] could not add #{home['name']}: #{e.message.first(200)}")
+      nil
+    end
+
+    # A book now prices a model that was Champion's only: the stand-in
+    # retires and the homes on lots move to the priced model.
+    def retire_unpriced!(home, matches)
+      return if matches.all?(&:champion_only?)
+
+      CatalogPlanVariant.active.where("external_ids->>'champion_model_id' = ?", home['id']).select(&:champion_only?).each do |v|
+        v.update_columns(status: 'discontinued', updated_at: Time.current)
+        Vehicle.where(catalog_plan_variant_id: v.id).update_all(catalog_plan_variant_id: nil)
+      end
+      Catalog::PriceBooks::InventoryLinker.link_all([home['id']])
     end
 
     # Champion photographs one size of a plan. Its other sizes, its HUD and
