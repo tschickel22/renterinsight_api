@@ -81,7 +81,7 @@ module Truebuild
 
     def base_line
       vp = @cost_book.variant_prices.find_by(catalog_plan_variant_id: @variant.id)
-      return unpriced_base_line if !vp && @variant.champion_only?
+      return unpriced_base_line if !vp && @variant.unpriced?
       raise ArgumentError, "#{@variant.model_number} has no price in #{@cost_book.name}" unless vp
 
       gross = vp.base_cost.to_d
@@ -154,6 +154,11 @@ module Truebuild
       if price.is_standard
         return { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
                  cost: 0.0, retail: 0.0, detail: { standard: true } }
+      end
+      if price.price_on_request?
+        @warnings << "#{option.name} has no factory price. Quote it by hand."
+        return { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
+                 cost: nil, retail: nil, detail: { price_on_request: true } }
       end
 
       cost = price.dealer_cost.to_d

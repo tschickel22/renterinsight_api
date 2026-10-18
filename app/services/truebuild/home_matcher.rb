@@ -32,6 +32,39 @@ module Truebuild
       found.one? ? found.first : nil
     end
 
+    # A line loaded without prices (Catalog::UnpricedLine) whose feed names its
+    # homes and prints no model number: Timber Creek's "The Cedar Creek". The
+    # one model of the home's builder with that name, or nil. The name decides,
+    # not the size: the feed gives the box (32x76) where the factory sheet
+    # prints the overall length (32x80).
+    def by_name(vehicle)
+      key = name_key(vehicle.model)
+      return nil if key.length < 3
+
+      builder = vehicle.make.to_s.downcase.scan(/[a-z]{3,}/) - %w[homes home the housing]
+      found = unpriced_lines.select do |v|
+        names = [v.catalog_plan&.name, *Array(v.external_ids['names'])].map { |n| name_key(n) }
+        names.include?(key) && builder.any? { |w| v.manufacturer.name.to_s.downcase.include?(w) }
+      end
+      found.one? ? found.first : nil
+    end
+
+    def name_key(text) = text.to_s.downcase.sub(/\Athe\s+/, '').gsub(/[^a-z0-9]/, '')
+
+    def unpriced_lines
+      @unpriced_lines ||= CatalogPlanVariant.active.where("external_ids->>'unpriced' = 'true'").includes(:catalog_plan, :manufacturer).to_a
+    end
+
+    # Links every unlinked new home of an unpriced line by its name (by_name).
+    # Returns [vehicle id, model number] pairs; dry_run links none.
+    def link_by_name_all(vehicles, dry_run: false)
+      vehicles.where(catalog_plan_variant_id: nil, champion_model_id: [nil, '']).where.not(condition: 'used').find_each.filter_map do |vehicle|
+        variant = by_name(vehicle) or next
+        vehicle.update_columns(catalog_plan_variant_id: variant.id) unless dry_run
+        [vehicle.id, variant.model_number]
+      end
+    end
+
     # Up to three likely models, best first, with why.
     def suggest(vehicle)
       numbered = by_number(vehicle)

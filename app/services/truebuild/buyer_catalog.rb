@@ -15,7 +15,7 @@ module Truebuild
     def self.available?(company, variant)
       return false unless variant && BookResolver.current_for(variant)
       return false unless company.has_module?(MODULE)
-      return false unless company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
+      return false unless variant.unpriced? || pricing_set_up?(company)
 
       # Only factories a platform admin gave this dealer, while released (E64).
       DealerFactories.offered?(company, variant)
@@ -32,14 +32,19 @@ module Truebuild
     # on its drawings is listed like any other: 32 of one lot's homes said
     # Design it with finishes drawn on two.
     def self.designable_homes(company, vehicles)
-      return vehicles.none unless company.has_module?(MODULE) &&
-                                  (company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?)
+      return vehicles.none unless company.has_module?(MODULE)
 
-      linked = vehicles.where(status: DESIGNABLE_STATUSES)
-                       .where(catalog_plan_variant_id: CatalogPlanVariant.designable.select(:id))
+      # A dealer who has not set up pricing can still offer models with no
+      # factory price: there is nothing to mark up.
+      models = pricing_set_up?(company) ? CatalogPlanVariant.designable : CatalogPlanVariant.where("external_ids ?| array['champion_only','unpriced']")
+      linked = vehicles.where(status: DESIGNABLE_STATUSES).where(catalog_plan_variant_id: models.select(:id))
       offered = DealerFactories.offered_variant_ids(company, linked.distinct.pluck(:catalog_plan_variant_id))
       ready = ModelList.trueview_ready(offered)
       linked.where(catalog_plan_variant_id: ready.to_a)
+    end
+
+    def self.pricing_set_up?(company)
+      company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?
     end
 
     def self.designable_home?(company, vehicle)

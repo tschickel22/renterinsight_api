@@ -262,6 +262,11 @@ class Vehicle < ApplicationRecord
   before_save :link_catalog_variant_by_number,
               if: -> { champion_model_id.blank? && catalog_plan_variant_id.nil? && condition.to_s.downcase != 'used' &&
                        model.to_s.match?(/\d{4}/) && (new_record? || will_save_change_to_model?) }
+  # A home of a line loaded without prices links by its name, which is all its
+  # feed gives (HomeMatcher#by_name: Timber Creek's "The Cedar Creek").
+  before_save :link_catalog_variant_by_name,
+              if: -> { champion_model_id.blank? && catalog_plan_variant_id.nil? && condition.to_s.downcase != 'used' &&
+                       (new_record? || will_save_change_to_model? || will_save_change_to_make?) }
 
   # Structured "landed" cost of the unit — the single source of truth for cost.
   # `total_cost` is authoritative when maintained; otherwise the sum of its components
@@ -447,6 +452,10 @@ class Vehicle < ApplicationRecord
 
   def link_catalog_variant_by_number
     self.catalog_plan_variant_id = Truebuild::HomeMatcher.new.confident(self)&.id
+  end
+
+  def link_catalog_variant_by_name
+    self.catalog_plan_variant_id = Truebuild::HomeMatcher.new.by_name(self)&.id
   end
 
   def factory_model_name?
