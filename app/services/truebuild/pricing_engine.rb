@@ -81,6 +81,7 @@ module Truebuild
 
     def base_line
       vp = @cost_book.variant_prices.find_by(catalog_plan_variant_id: @variant.id)
+      return unpriced_base_line if !vp && @variant.champion_only?
       raise ArgumentError, "#{@variant.model_number} has no price in #{@cost_book.name}" unless vp
 
       gross = vp.base_cost.to_d
@@ -95,6 +96,14 @@ module Truebuild
         detail: { net_base_price: money(vp.net_base_price), required_adders: vp.required_adders,
                   program_discount: money(discount), rule: describe(rule) }
       }
+    end
+
+    # A model no book prices yet: no base cost or retail, so there is no
+    # total and the buyer asks the dealer for the price.
+    def unpriced_base_line
+      @warnings << "#{@variant.catalog_plan.name} is not in #{@cost_book.name}, so it has no factory price. Quote it by hand."
+      { kind: 'base', label: "#{@variant.catalog_plan.name} (#{@variant.model_number})", cost: nil, retail: nil,
+        detail: { unpriced: true } }
     end
 
     # ---- options -------------------------------------------------------

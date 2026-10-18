@@ -36,8 +36,7 @@ module Truebuild
                                   (company.dealer_markup_rules.active.exists? || company.dealer_catalog_terms.exists?)
 
       linked = vehicles.where(status: DESIGNABLE_STATUSES)
-                       .where(catalog_plan_variant_id: CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id))
-                                                                          .select(:catalog_plan_variant_id))
+                       .where(catalog_plan_variant_id: CatalogPlanVariant.designable.select(:id))
       offered = DealerFactories.offered_variant_ids(company, linked.distinct.pluck(:catalog_plan_variant_id))
       ready = ModelList.trueview_ready(offered)
       linked.where(catalog_plan_variant_id: ready.to_a)

@@ -65,6 +65,40 @@ RSpec.describe Truebuild::ModelMedia do
     expect(belvidere.reload.media).to eq({})
   end
 
+  it 'adds a photographed model of a loaded plant that no book prices, and retires it once a book does' do
+    topeka = mfr.factories.create!(name: 'Topeka, Dutch Housing', code: "TOP#{SecureRandom.hex(2)}", city: 'Topeka', state: 'IN')
+    plan = CatalogPlan.create!(manufacturer: mfr, factory: topeka, series: 'Aspire', name: 'Winston', slug: 'winston')
+    CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: '3272H32186')
+    feed = Class.new(client) do
+      def fetch_all
+        [{ 'id' => 'c-184', 'name' => 'Aspire 184', 'seriesName' => 'Aspire Multi-Section', 'slug' => 'aspire-184',
+           'factoryBrandCity' => 'Topeka', 'numberOfBeds' => 3, 'buildingCode' => { 'code' => 'HUD' },
+           'images' => [{ 'path' => 'https://s7d9.scene7.com/is/image/championhomes/Aspire_1672H32184-Kitchen' }] },
+         { 'id' => 'c-far', 'name' => 'Aspire Faraway', 'seriesName' => 'Aspire', 'slug' => 'aspire-faraway',
+           'factoryBrandCity' => 'Dresden', 'images' => [] }]
+      end
+    end
+    dealer = Company.create!(name: "Dealer #{SecureRandom.hex(3)}")
+    home = dealer.vehicles.create!(make: 'Champion', model: 'Aspire 184', year: 2026, source: 'champion_ims', serial_number: 'S184',
+                                   vin: 'V184', champion_model_id: 'c-184', champion_raw_payload: { 'buildingCode' => { 'code' => 'HUD' } })
+
+    described_class.refresh!(mfr, client_class: feed)
+    added = CatalogPlanVariant.find_by(model_number: '1672H32184')
+    expect(added).to have_attributes(champion_only?: true, width_ft: 16, length_ft: 72, building_code: 'HUD', beds: 3)
+    expect(added.catalog_plan).to have_attributes(name: 'Aspire 184', series: 'Aspire', factory_id: topeka.id)
+    expect(added.media['slug']).to eq('aspire-184')
+    expect(CatalogPlanVariant.where(model_number: 'ASPIREFARAWAY')).to be_empty # another plant: not ours to add
+    home.update!(updated_at: Time.current)
+    expect(home.reload.catalog_plan_variant_id).to eq(added.id)
+
+    # A book prices it: the stand-in retires and the home moves to the priced model.
+    priced = CatalogPlanVariant.create!(catalog_plan: added.catalog_plan, manufacturer: mfr, model_number: '1672M32184',
+                                        external_ids: { 'champion_model_id' => 'c-184' })
+    described_class.refresh!(mfr, client_class: feed)
+    expect(added.reload.status).to eq('discontinued')
+    expect(home.reload.catalog_plan_variant_id).to eq(priced.id)
+  end
+
   it "takes the models no retailer stocks from Champion's catalog, asked near each plant" do
     topeka = mfr.factories.create!(name: 'Topeka, Dutch Housing', code: "TOP#{SecureRandom.hex(2)}")
     feed = Class.new(client) do

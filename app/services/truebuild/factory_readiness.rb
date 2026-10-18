@@ -65,8 +65,7 @@ module Truebuild
     def build(factories = Factory.active)
       factories = factories.includes(:manufacturer, :truebuild_released_by).to_a
       ids = factories.map(&:id)
-      priced = CatalogVariantPrice.where(catalog_price_book_id: CatalogPriceBook.published.select(:id)).select(:catalog_plan_variant_id)
-      variants = CatalogPlanVariant.active.joins(:catalog_plan).where(id: priced, catalog_plans: { factory_id: ids })
+      variants = CatalogPlanVariant.active.designable.joins(:catalog_plan).where(catalog_plans: { factory_id: ids })
                                    .select('catalog_plan_variants.*', 'catalog_plans.factory_id AS plan_factory_id').to_a
       by_factory = variants.group_by(&:plan_factory_id)
       photographed = variants.select { |v| Trueview::PhotoChoice.photos(v).any? }.map(&:id).to_set
