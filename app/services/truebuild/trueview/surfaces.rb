@@ -67,7 +67,9 @@ module Truebuild
          'the backsplash: the tile, brick or panel on the wall above the countertops, everywhere it runs (beside a window, ' \
          'behind the range up to the hood). Not the range, microwave, hood, outlets, window, cabinets or anything on the counter'],
         ['flooring', /floor|carpet/i, 'the floor. Not rugs, furniture legs or cabinets'],
-        ['accent wall', /accent|wall ?board/i,
+        # A "Gable accent" (Timber Creek's shakes) is the outside gable, not a
+        # wall inside: matched as an accent wall, shakes were drawn on baths.
+        ['accent wall', /(?<!gable )accent|wall ?board/i,
          'one painted wall (plain drywall or wall panel) facing the camera, the largest one, from floor or countertop to ' \
          'ceiling. Exactly one wall. Never any part of a tub or shower surround (fiberglass, acrylic or tile) or its edge, ' \
          'trim or door frame, never tile, brick, stone or a backsplash, and not the ceiling, cabinets, windows, doors, ' \
@@ -80,9 +82,9 @@ module Truebuild
          'as it is, along with the trim, fascia and gutters'],
         ['corner posts', /corner post/i,
          "the narrow vertical trim boards at the outside corners of the main house's walls. Not porch posts, columns or downspouts"],
-        # Outlined only so a tinted siding color leaves it as it was (Tint):
-        # no option is named this, and it claims nothing from the siding.
-        ['gable cladding', /gable cladding/i,
+        # Outlined so a tinted siding color leaves it as it was (Tint), and
+        # drawn for a gable option ("Gable accent"); it claims nothing from the siding.
+        ['gable cladding', /gable/i,
          'wall cladding of the main house that differs from its main siding: shakes, scallops, board and batten or ' \
          'vertical siding, usually in the triangular gable under the roof peak or above the porch. Not the main lap ' \
          'siding, trim, roof, windows, doors or vents']
@@ -92,8 +94,17 @@ module Truebuild
         CATEGORIES.find { |_, re, _| surface.to_s.match?(re) }&.first
       end
 
+      # Pulls and knobs are drawn inside the cabinets' outline, but checked
+      # as hardware: described as the cabinets, the check asked whether the
+      # doors were "in Black Bar".
+      HARDWARE = /\bpulls?\b|\bknobs?\b|hardware/i
+      HARDWARE_TEXT = 'the cabinet pulls and knobs: the handles on every cabinet door and drawer. The doors, drawer ' \
+                      'fronts and cabinet boxes keep their own finish'
+
       # What a finish's surface covers in a photo, in words.
       def describe(surface)
+        return HARDWARE_TEXT if surface.to_s.match?(HARDWARE)
+
         CATEGORIES.find { |_, re, _| surface.to_s.match?(re) }&.last
       end
 
