@@ -448,6 +448,7 @@ class Api::V1::WebsitesController < ApplicationController
         false
       end
     website_json['concierge_name'] = @website.concierge_display_name
+    website_json['promo_popup'] = Websites::PromoPopup.public_payload(@website)
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound
@@ -544,6 +545,7 @@ class Api::V1::WebsitesController < ApplicationController
         false
       end
     website_json['concierge_name'] = @website.concierge_display_name
+    website_json['promo_popup'] = Websites::PromoPopup.public_payload(@website)
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound
@@ -600,6 +602,7 @@ class Api::V1::WebsitesController < ApplicationController
                                               .where(is_deleted: [false, nil])
                                               .order(:order, :name)
                                               .as_json(only: [:id, :name, :slug], methods: [:posts_count])
+    website_json['promo_popup'] = Websites::PromoPopup.public_payload(@website)
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound

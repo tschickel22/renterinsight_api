@@ -55,6 +55,9 @@ module Websites
       # Narrows the logo strip to brands this dealer actually carries, rather
       # than advertising their competitors on their own site.
       payload['manufacturers'] = LotManufacturers.for(@website.company)
+      # Normalized and trimmed rather than the raw column, which as_json above
+      # also carries. The browser decides the date window; see PromoPopup.
+      payload['promo_popup'] = PromoPopup.public_payload(@website)
       payload
     end
 
