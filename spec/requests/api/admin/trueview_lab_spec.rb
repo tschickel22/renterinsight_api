@@ -369,6 +369,28 @@ RSpec.describe 'Api::Admin::TrueviewLab', type: :request do
       expect(same.reload.status).to eq('rejected')
     end
 
+    it 'closes out what cannot be shown, leaving the drawings a reviewer could still show' do
+      held = lambda do |key, score, note|
+        TruebuildRender.create!(catalog_plan_variant: variant, source_url: kitchen_photo, room: 'kitchen', purpose: 'layer',
+                                selection: [{ 'surface' => 'Cabinets', 'value' => 'Urban Oak' }], selection_key: key,
+                                model_key: 'nb2-lite', provider: 'gemini', model: 'lite', prompt: 'p', status: 'rejected',
+                                error: "Hidden: #{note}", layer_url: 'https://b/l.webp', usage: { 'check' => { 'score' => score, 'note' => note } })
+      end
+      showable = held.call('a', 3, 'The cabinets are a warmer tan than the cool greige (#a7947b) of the sample.')
+      too_far = held.call('b', 2, 'The cabinets read as a dark brown, not the light greige of the sample.')
+      same = held.call('c', 3, 'The cabinets appear virtually identical to the original oak.')
+
+      post '/api/admin/trueview_lab/held/close_out', headers: admin
+      expect(JSON.parse(response.body)).to eq('kept_hidden' => 2)
+      expect(too_far.reload.usage['kept_hidden']).to include('closed_out' => true, 'group' => 'shade')
+      expect(same.reload.usage['kept_hidden']).to include('group' => 'unchanged')
+      expect(showable.reload.usage).not_to have_key('kept_hidden')
+      expect([showable, too_far, same].map(&:status)).to eq(%w[rejected rejected rejected])
+
+      get '/api/admin/trueview_lab/held', headers: admin
+      expect(JSON.parse(response.body)['groups'].sum { |g| g['count'] }).to eq(1)
+    end
+
     it 'shows held drawings from 3 up when a run ends, keeps the groups a reviewer decides, and lets them hide some after' do
       run = TruebuildFactoryRun.create!(manufacturer_id: mfr.id, budget_usd: 5, variant_ids: [variant.id], status: 'running')
       held = lambda do |key, score, value, note|

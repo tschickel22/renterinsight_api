@@ -3231,6 +3231,7 @@ Rails.application.routes.draw do
       get  'trueview_lab/held', to: 'trueview_lab#held'
       get  'trueview_lab/held/auto', to: 'trueview_lab#held_auto'
       post 'trueview_lab/held/auto/look', to: 'trueview_lab#look_through_auto'
+      post 'trueview_lab/held/close_out', to: 'trueview_lab#close_out_held'
       post 'trueview_lab/held/:key/show', to: 'trueview_lab#show_held'
       get  'trueview_lab/held/:key', to: 'trueview_lab#held_group'
       get    'trueview_transfer', to: 'trueview_transfer#export'
