@@ -268,6 +268,26 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(response.body).not_to match(/cost/i)
   end
 
+  it 'lists a line with no factory price, priced on request, even before the dealer sets up pricing' do
+    tc = Manufacturer.create!(name: "Timber Creek #{SecureRandom.hex(3)}", industry_type: 'manufactured_home')
+    bear = tc.factories.create!(name: 'Bear Creek', code: "BC#{SecureRandom.hex(2)}", truebuild_released_at: Time.current)
+    CatalogPriceBook.create!(manufacturer: tc, factory: bear, name: 'Timber Creek', status: 'published', metadata: { 'unpriced' => true })
+    cahaba = CatalogPlan.create!(manufacturer: tc, factory: bear, series: 'Timber Creek', name: 'The Cahaba')
+    CatalogPlanVariant.create!(catalog_plan: cahaba, manufacturer: tc, model_number: 'CS-1604', width_ft: 16, length_ft: 76, building_code: 'HUD',
+                               external_ids: { 'unpriced' => true })
+    company.dealer_factories.create!(factory: bear)
+    list = -> { (get '/public/truebuild/models', params: { token: token, website_id: site.id }) && JSON.parse(response.body)['models'] }
+
+    found = list.call.find { |m| m['name'] == 'The Cahaba' }
+    expect(found).to include('starting_price' => nil, 'starting_monthly' => nil)
+    expect(list.call.map { |m| m['name'] }).to include('Belvidere')
+
+    company.dealer_markup_rules.destroy_all
+    company.dealer_catalog_terms.destroy_all
+    Rails.cache.clear
+    expect(list.call.map { |m| m['name'] }).to eq(['The Cahaba'])
+  end
+
   it 'shows only the brands, series or TrueView-ready models a site asks for' do
     allow(Truebuild::ModelList).to receive(:trueview_ready).and_call_original
     photo = 'https://s7d9.scene7.com/is/image/championhomes/belvidere-exterior-1'

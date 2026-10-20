@@ -72,12 +72,18 @@ module Truebuild
     private
 
     def build(manufacturer_id)
-      return [] unless @company.dealer_markup_rules.active.exists? || @company.dealer_catalog_terms.exists?
-
       books = CatalogPriceBook.published
       books = books.where(manufacturer_id: manufacturer_id) if manufacturer_id
-      variants = CatalogPlanVariant.where(id: CatalogVariantPrice.where(catalog_price_book_id: books.select(:id)).select(:catalog_plan_variant_id))
-                                   .where(status: 'active').includes(:catalog_plan, :manufacturer).to_a
+      priced = CatalogPlanVariant.where(id: CatalogVariantPrice.where(catalog_price_book_id: books.select(:id)).select(:catalog_plan_variant_id))
+      # Models with no factory price (Timber Creek, Champion-only models) are
+      # listed too, priced on request: only priced ones were, so a whole
+      # unpriced line was missing from Floor Plans while its homes could be
+      # designed. A dealer who has not set up pricing offers only those, as
+      # on the lot (BuyerCatalog.designable_homes).
+      unpriced = CatalogPlanVariant.where("catalog_plan_variants.external_ids ?| array['champion_only','unpriced']")
+      unpriced = unpriced.where(manufacturer_id: manufacturer_id) if manufacturer_id
+      scope = BuyerCatalog.pricing_set_up?(@company) ? priced.or(unpriced) : unpriced
+      variants = scope.where(status: 'active').includes(:catalog_plan, :manufacturer).to_a
 
       # Only factories a platform admin gave this dealer, while released (E64).
       offered = DealerFactories.offered_ids(@company)
@@ -86,7 +92,8 @@ module Truebuild
 
       variants.group_by(&:catalog_plan).filter_map do |plan, vs|
         priced = vs.filter_map { |v| (r = base_retail(v)) ? [v, r] : nil }
-        next if priced.empty? # no retail for any size: nothing a buyer can price
+        # No retail for any size: nothing a buyer can price, unless it has no factory price at all.
+        next if priced.empty? && vs.none?(&:unpriced?)
 
         cheapest = priced.min_by { |_, r| r }
         media = vs.map(&:shown_media).find { |m| m.present? && (Array(m['photos']).any? || Array(m['elevations']).any?) } || {}
@@ -95,8 +102,8 @@ module Truebuild
           image: Array(media['elevations']).first || media.dig('photos', 0, 'url'),
           beds: vs.map(&:beds).compact.uniq.sort, baths: vs.map { |v| v.baths&.to_f }.compact.uniq.sort,
           sizes: vs.filter_map { |v| "#{v.width_ft}' x #{v.length_ft}'" if v.width_ft && v.length_ft }.uniq,
-          starting_price: show_prices? ? cheapest[1] : nil,
-          starting_monthly: show_monthly? && cheapest[1] ? @payments.monthly(cheapest[1]) : nil,
+          starting_price: show_prices? ? cheapest&.last : nil,
+          starting_monthly: show_monthly? && cheapest ? @payments.monthly(cheapest.last) : nil,
           variants: vs.sort_by { |v| [v.width_ft.to_i, v.length_ft.to_i, v.model_number] }
                       .map { |v| { id: v.id, model_number: v.model_number, building_code: v.building_code, beds: v.beds,
                                    baths: v.baths&.to_f, width_ft: v.width_ft, length_ft: v.length_ft } }
