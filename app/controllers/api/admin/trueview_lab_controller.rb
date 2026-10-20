@@ -307,6 +307,16 @@ class Api::Admin::TrueviewLabController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # POST /api/admin/trueview_lab/held/close_out { factory_run_id }
+  # Keeps hidden for good every held drawing that cannot be shown, so
+  # nothing is left waiting on a reviewer who has nothing to decide.
+  def close_out_held
+    run = held_run
+    return if performed?
+
+    render json: Truebuild::Trueview::HeldSummary.close_out!(by: current_user, run: run)
+  end
+
   # POST /api/admin/trueview_lab/held/:key/show { ids, hide_ids, factory_run_id }
   # Shows the drawings in ids that scored 3 or better, as approving each
   # would, and keeps the ones in hide_ids hidden for good. Without ids,

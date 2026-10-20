@@ -207,6 +207,25 @@ module Truebuild
         out
       end
 
+      # Closes out what is left that cannot be shown (scored under 3, or a
+      # group that stays hidden): kept hidden for good, as a reviewer's
+      # Keep hidden would. Those are greyed out on Draw a factory, so a run
+      # kept saying there was something to review with nothing to do (E81).
+      # Drawings that could still be shown are left for a reviewer.
+      # => { kept_hidden: }
+      def close_out!(by:, run: nil)
+        at = Time.current.iso8601
+        n = 0
+        held(run).find_each do |r|
+          key = group_of(r)
+          next if !find(key)[:keep_hidden] && score(r) >= SHOW_FROM
+
+          r.update!(usage: r.usage.merge('kept_hidden' => { 'by' => by&.id, 'at' => at, 'group' => key, 'closed_out' => true }))
+          n += 1
+        end
+        { kept_hidden: n }
+      end
+
       def find(key)
         REASONS.find { |r| r[:key] == key } or raise ArgumentError, 'No such group'
       end
