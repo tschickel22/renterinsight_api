@@ -1010,6 +1010,10 @@ Rails.application.routes.draw do
         get 'featured_homes', to: 'website_featured_homes#index'
         put 'featured_homes', to: 'website_featured_homes#replace'
 
+        # The arrival popup (flyer, video, dates), read and replaced whole
+        get 'promo_popup', to: 'website_promo_popups#show'
+        put 'promo_popup', to: 'website_promo_popups#update'
+
         # Website Media (nested under websites)
         resources :media, controller: 'website_media'
         
