@@ -729,9 +729,14 @@ module Migrations
 
       # ------------------------------------------------------------ files
 
+      # One crosswalk row per file per owner: the same file (a flyer sent in 30
+      # texts) is uploaded once and that blob attached to every message that
+      # carried it.
       def load_documents
+        @blobs = {}
         @data['documents'].each do |d|
-          next if id_for('document', d['ghl_id'])
+          key = "#{d['owner_type']}:#{d['owner_ghl_id']}:#{d['ghl_id']}"
+          next if id_for('document', key)
 
           owner = case d['owner_type']
                   when 'Lead' then @company.leads.find_by(id: id_for('lead', d['owner_ghl_id']))
@@ -740,28 +745,57 @@ module Migrations
                   end
           next @report['document'][:no_parent] += 1 unless owner
 
-          if @dry_run
-            head_check('document', d['url'])
+          name = d['file_name'].presence || File.basename(URI(d['url']).path)
+          if (existing = attached_already(owner, name))
+            remember_raw('document', key, existing.class.name, existing.id)
+            @report['document'][:already_there] += 1
             next
           end
-          download(d['url']) do |file, content_type|
-            name = d['file_name'].presence || File.basename(URI(d['url']).path)
-            if owner.is_a?(Communication)
-              owner.attachments.attach(io: file, filename: name, content_type: content_type)
-              remember_raw('document', d['ghl_id'], 'ActiveStorage::Attachment', owner.attachments.last.id)
-            else
-              doc = PortalDocument.new(owner: owner, category: d['category'].presence || 'other', document_name: name,
-                                       description: d['opportunity'].present? ? "From GoHighLevel opportunity #{d['opportunity']}" : 'From GoHighLevel',
-                                       uploaded_by: 'staff')
-              doc.file.attach(io: file, filename: name, content_type: content_type)
-              doc.save!
-              remember('document', d['ghl_id'], doc)
-            end
-            @report['document'][:created] += 1
+          if @dry_run
+            head_check('document', d['url']) unless @blobs.key?(d['url'])
+            @blobs[d['url']] = true
+            next
           end
+
+          blob = @blobs[d['url']] ||= download(d['url']) do |file, content_type|
+            ActiveStorage::Blob.create_and_upload!(io: file, filename: name, content_type: content_type)
+          end
+          if owner.is_a?(Communication)
+            owner.attachments.attach(blob)
+            remember_raw('document', key, 'ActiveStorage::Attachment', owner.attachments.order(:id).last.id)
+          else
+            doc = PortalDocument.new(owner: owner, category: d['category'].presence || 'other', document_name: name,
+                                     description: d['opportunity'].present? ? "From GoHighLevel opportunity #{d['opportunity']}" : 'From GoHighLevel',
+                                     uploaded_by: 'staff')
+            doc.file.attach(blob)
+            save_portal_document!(doc)
+            remember('document', key, doc)
+          end
+          @report['document'][:created] += 1
         rescue StandardError => e
-          fail_record('document', d['ghl_id'], e)
+          fail_record('document', key, e)
         end
+      end
+
+      def attached_already(owner, name)
+        if owner.is_a?(Communication)
+          owner.attachments.joins(:blob).find_by(active_storage_blobs: { filename: name })
+        else
+          PortalDocument.find_by(owner: owner, document_name: name)
+        end
+      end
+
+      # PortalDocument caps files at 10MB for buyer uploads. Signed paperwork
+      # from GHL can be larger (three EHS agreements are 11 to 14MB) and must
+      # not be left behind, so when size is the only objection it is kept.
+      def save_portal_document!(doc)
+        return doc.save! if doc.valid?
+
+        only_size = doc.errors.attribute_names == [:file] && doc.errors[:file].all? { |m| m.include?('too large') }
+        raise ActiveRecord::RecordInvalid, doc unless only_size
+
+        doc.save!(validate: false)
+        @report['document'][:kept_over_10mb] += 1
       end
 
       def load_media
@@ -801,8 +835,10 @@ module Migrations
       end
 
       # Streams to a Tempfile so a large video never sits in memory.
+      # Returns whatever the block returns.
       def download(url, limit = 3)
         uri = URI(url)
+        result = nil
         Tempfile.create(['ghl', File.extname(uri.path)], binmode: true) do |file|
           Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 15, read_timeout: 120) do |http|
             http.request(Net::HTTP::Get.new(uri.request_uri, 'User-Agent' => 'DealerTide-Migration/1.0')) do |res|
@@ -814,10 +850,11 @@ module Migrations
               res.read_body { |chunk| file.write(chunk) }
               file.flush
               file.rewind
-              yield file, res['content-type'].to_s.split(';').first.presence || 'application/octet-stream'
+              result = yield file, res['content-type'].to_s.split(';').first.presence || 'application/octet-stream'
             end
           end
         end
+        result
       end
 
       # ------------------------------------------------------------ report
