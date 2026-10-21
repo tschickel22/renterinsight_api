@@ -128,6 +128,11 @@ class Api::V1::CompanyDomainsController < ApplicationController
       # added later, so this does not fail the request.
       cloudflare_service.create_worker_route(hostname)
 
+      # Lead forms are guarded by one Turnstile widget, which only runs on hostnames it
+      # lists. Without this the site works and every form submission is rejected. Best
+      # effort for the same reason as the route, but it alerts rather than failing quietly.
+      TurnstileDomainService.allow_with_alert(hostname)
+
       Rails.logger.info "[CompanyDomains] Created domain #{hostname} for company #{@company.id}"
       
       render json: { 
