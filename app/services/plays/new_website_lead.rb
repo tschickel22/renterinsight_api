@@ -28,8 +28,8 @@ module Plays
         (own + default_sources).uniq.sort
       end
 
-      # A form with the text consent box, for a site whose contact form has
-      # none. Without consent the play cannot text, however fast it is.
+      # A form with the consent box ticked on, for a site whose contact form has
+      # it off. Without consent the play cannot text, however fast it is.
       def forms
         [{ name: 'Website Contact', source: 'Website', fields: :contact }]
       end
