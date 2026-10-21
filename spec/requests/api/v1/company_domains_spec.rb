@@ -128,6 +128,32 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       expect(cname['expected']).to eq('connect.mydealertide.com')
     end
 
+    # A tenant with the TXT live everywhere and the CNAME still on their old host was told
+    # "Not all records are visible yet", which read as the TXT having failed.
+    it 'names what was found and what the CNAME points at now' do
+      allow(Dns::Lookup).to receive(:txt).and_return(['abc-123-token'])
+      allow(Dns::Lookup).to receive(:cname).and_return(['cname.vercel-dns.com.'])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      message = JSON.parse(response.body)['message']
+      expect(message).to include('Found: TXT _cf-custom-hostname.dealer.example')
+      expect(message).to include('CNAME dealer.example points at cname.vercel-dns.com. ' \
+                                 'Change it to connect.mydealertide.com.')
+      expect(message).not_to match(/propagate|up to an hour/)
+    end
+
+    it 'says a record is not published yet when nothing answers for it' do
+      allow(Dns::Lookup).to receive(:txt).and_return([])
+      allow(Dns::Lookup).to receive(:cname).and_return([])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      message = JSON.parse(response.body)['message']
+      expect(message).to include('TXT _cf-custom-hostname.dealer.example is not published yet')
+      expect(message).not_to include('Found:')
+    end
+
     it 'says so plainly when nothing has been issued yet' do
       domain.update!(verification_records: [], cname_target: nil)
 
