@@ -15,7 +15,29 @@ RSpec.describe Truebuild::Trueview::Surfaces do
     end
   end
 
+  describe '.strict_fit' do
+    let(:slight_miss) { { 'fit' => 3, 'spills_onto' => 'none', 'spill_size' => 'none', 'misses' => 'a sliver by the dining table', 'miss_size' => 'slight' } }
+
+    it 'passes a floor outline that leaves out only a slight, distant part' do
+      expect(described_class.strict_fit('flooring', slight_miss)).to eq(described_class::MIN_FIT)
+    end
+
+    it 'still turns down a floor outline that clearly misses part of the floor' do
+      expect(described_class.strict_fit('flooring', slight_miss.merge('miss_size' => 'clear'))).to eq(3)
+      expect(described_class.strict_fit('flooring', slight_miss.merge('fit' => 2))).to eq(2)
+    end
+
+    it 'allows no miss on any other surface' do
+      expect(described_class.strict_fit('cabinets', slight_miss.merge('fit' => 4))).to eq(3)
+    end
+  end
+
   describe '.describe' do
+    it 'names the parts of a floor the painter used to leave out' do
+      expect(described_class.describe('Flooring')).to include('the whole floor', 'far walls', 'island or vanity')
+    end
+
+
     it 'checks pulls as hardware, with the doors keeping their finish' do
       expect(described_class.describe('Cabinet pulls')).to include('pulls and knobs')
       expect(described_class.describe('Cabinets')).to include('cabinet doors, drawer fronts')
