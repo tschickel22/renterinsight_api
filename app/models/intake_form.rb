@@ -41,6 +41,8 @@ class IntakeForm < ApplicationRecord
   validates :assignment_mode, inclusion: { in: ASSIGNMENT_MODES }, allow_nil: true
   validate :rotation_has_reps
   validate :assignees_belong_to_company
+  validate :redirect_url_is_web_address
+  normalizes :redirect_url, with: ->(url) { url.strip.presence }
   
   scope :active, -> { where(is_active: true) }
   scope :inactive, -> { where(is_active: false) }
@@ -246,6 +248,19 @@ class IntakeForm < ApplicationRecord
        !RoundRobinAssignmentList.where(id: round_robin_list_id, company_id: company_id).exists?
       errors.add(:round_robin_list_id, 'must be one of this dealership\'s rotations')
     end
+  end
+
+  # After a submit the visitor's browser is sent to this address, so it must
+  # be a web page: a javascript: address would run on the dealer's site.
+  def redirect_url_is_web_address
+    return if redirect_url.blank? || !will_save_change_to_redirect_url?
+
+    uri = URI.parse(redirect_url)
+    return if uri.is_a?(URI::HTTP) && uri.host.present?
+
+    errors.add(:redirect_url, 'must be a web address starting with https://')
+  rescue URI::InvalidURIError
+    errors.add(:redirect_url, 'must be a web address starting with https://')
   end
 
   def update_submission_count
