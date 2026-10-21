@@ -178,6 +178,24 @@ RSpec.describe 'Company links', type: :request do
     expect(set_phase.reload.assigned_vendor_id).to be_nil
   end
 
+  it "closes the installer's copy of a job the dealer takes back" do
+    link = link!
+    pl = offer!(link, phase: set_phase, fee: 900)
+    post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
+    copy = pl.reload.installer_project
+    post "/api/v1/project_links/#{pl.id}/cancel", headers: h(dealer)
+    expect(copy.reload.status).to eq('cancelled')
+
+    # Money already spent on it keeps it on the installer's profit report.
+    pl2 = offer!(link, phase: finish_phase, fee: 500)
+    post "/api/v1/project_links/#{pl2.id}/accept", headers: h(boss)
+    copy2 = pl2.reload.installer_project
+    copy2.project_cost_items.create!(company_id: installer_co.id, cost_type: 'subcontractor', description: 'Crane',
+                                     amount: 300, quantity: 1, unit_price: 300, date: Date.current, status: 'approved')
+    post "/api/v1/project_links/#{pl2.id}/cancel", headers: h(dealer)
+    expect(copy2.reload.status).to eq('on_hold')
+  end
+
   it 'keeps each side to its own records' do
     link = link!
     pl = offer!(link)

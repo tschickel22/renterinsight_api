@@ -56,6 +56,7 @@ class ProjectLinkService
     ActiveRecord::Base.transaction do
       pl.update!(status: 'cancelled')
       release_dealer!(pl)
+      close_installer_copy!(pl)
       pl.company_link.log!('job_cancelled', "#{@company.name} took back #{pl.scope_label}", company: @company, user: @actor, project_link: pl)
     end
     CompanyLinkNotifier.job_cancelled(pl)
@@ -169,6 +170,19 @@ class ProjectLinkService
       line.destroy!
     end
     pl.link_phases.delete_all
+  end
+
+  # The installer's copy of a taken-back job leaves its active list. With no
+  # costs on it, it's cancelled. With costs (bids awarded, bills in), it goes
+  # on hold instead, because a cancelled project drops out of the profit
+  # report and those costs are real money the installer still has to settle.
+  def close_installer_copy!(pl)
+    project = pl.installer_project
+    return unless project && project.status.in?(%w[active on_hold])
+
+    has_costs = project.project_cost_items.not_deleted.exists? ||
+                pl.installer_company.bills.where(project_id: project.id).where.not(status: 'void').exists?
+    project.update!(status: has_costs ? 'on_hold' : 'cancelled')
   end
 
   # The installer's fee is the dealer's committed cost, like an awarded bid.
