@@ -34,7 +34,10 @@ module Migrations
 
       attr_reader :report
 
-      def initialize(company:, data:, batch:, dry_run: true, steps: STEPS, fallback_user: nil, log: $stdout)
+      # user_email_rewrite: ['@easyhomesource.com', '@ehs-staging.invalid'] matches
+      # owners against stand-in users on a test company, so a staging load
+      # never points records (or notifications) at real staff inboxes.
+      def initialize(company:, data:, batch:, dry_run: true, steps: STEPS, fallback_user: nil, user_email_rewrite: nil, log: $stdout)
         @company = company
         @data = data
         @batch = batch
@@ -43,6 +46,7 @@ module Migrations
         @log = log
         @users = company.users.where(deleted_at: nil).index_by { |u| u.email.to_s.downcase }
         @fallback_user = fallback_user
+        @rewrite = user_email_rewrite
         @ids = {}
         @report = Hash.new { |h, k| h[k] = Hash.new(0) }
         @errors = []
@@ -91,10 +95,19 @@ module Migrations
 
       # One record, in its own savepoint so a failure is reported and the run
       # carries on. Returns the saved record or nil.
-      def upsert(type, source_id, klass, scope, attrs)
+      # adopt: natural key to take over a record that already exists in the
+      # company (a lead status, source or tag the dealer already had) instead
+      # of failing on a duplicate.
+      def upsert(type, source_id, klass, scope, attrs = nil, adopt: nil, **fields)
+        attrs = (attrs || {}).merge(fields)
         source_id = source_id.to_s
         existing_id, loaded_at = @ids[[type, source_id]]
         record = existing_id && scope.find_by(id: existing_id)
+        if record.nil? && adopt && (found = scope.where(adopt).first)
+          remember(type, source_id, found)
+          @report[type][:adopted_existing] += 1
+          return found
+        end
         if record && loaded_at && record.updated_at > loaded_at + 5.seconds
           @edited << "#{type} #{source_id} (#{klass.name} #{record.id})"
           @report[type][:kept_dealertide_edit] += 1
@@ -148,7 +161,9 @@ module Migrations
       def owner_id(email)
         return nil if email.blank?
 
-        user = @users[email.downcase]
+        key = email.downcase
+        key = key.sub(@rewrite[0].downcase, @rewrite[1].downcase) if @rewrite
+        user = @users[key]
         @report[:owners][user ? :matched : :not_found] += 1
         @report[:owners_missing][email] += 1 unless user
         user&.id
@@ -179,7 +194,8 @@ module Migrations
         ref = @data['reference']
 
         ref['lead_statuses'].each_with_index do |(label, key), i|
-          upsert('lead_status', key, LeadStatus, @company.lead_statuses, key: key, label: label, sort_order: i, is_active: true)
+          upsert('lead_status', key, LeadStatus, @company.lead_statuses, { key: key, label: label, sort_order: i, is_active: true },
+                 adopt: ['lower(key) = :k OR lower(label) = :l', { k: key.downcase, l: label.downcase }])
         end
 
         stages = ref['deal_stages'].each_with_index.map do |(name, key, probability, color), i|
@@ -195,32 +211,43 @@ module Migrations
           @report['pipeline_stages'][:set] += 1
         end
 
-        ref['sources'].each { |n| upsert('source', n, Source, @company.sources, name: n, is_active: true) }
-        ref['tags'].each { |n| upsert('tag', n, Tag, Tag.where(company_id: @company.id), name: n, company_id: @company.id, is_active: true) }
-        ref['lenders'].each { |n| upsert('lender', n, Lender, @company.lenders, name: n, active: true) }
+        ref['sources'].each do |n|
+          upsert('source', n, Source, @company.sources, { name: n, is_active: true }, adopt: ['lower(name) = ?', n.downcase])
+        end
+        ref['tags'].each do |n|
+          upsert('tag', n, Tag, Tag.where(company_id: @company.id), { name: n, company_id: @company.id, is_active: true },
+                 adopt: ['lower(name) = ?', n.downcase])
+        end
+        ref['lenders'].each do |n|
+          upsert('lender', n, Lender, @company.lenders.where(is_deleted: false), { name: n, active: true }, adopt: ['lower(name) = ?', n.downcase])
+        end
         ref['custom_fields'].each_with_index do |f, i|
           mod = { 'lead' => 'leads', 'contact' => 'contacts', 'deal' => 'deals' }.fetch(f['module'])
           long = f['name'] =~ /notes|setbacks/i
+          key = field_key(f['name'])
           upsert('custom_field', "#{mod}:#{f['name']}", CustomField, CustomField.where(company_id: @company.id),
-                 company_id: @company.id, module: mod, name: field_key(f['name']), field_key: field_key(f['name']),
-                 label: f['name'], field_type: long ? 'longtext' : 'text', display_order: 100 + i, section: 'GoHighLevel', is_active: true)
+                 { company_id: @company.id, module: mod, name: key, field_key: key, label: f['name'],
+                   field_type: long ? 'longtext' : 'text', display_order: 100 + i, section: 'GoHighLevel', is_active: true },
+                 adopt: { module: mod, field_key: key })
         end
 
         tpl = ref['project_template']
         template = upsert('project_template', tpl['name'], ProjectTemplate, @company.project_templates,
-                          name: tpl['name'], template_type: tpl['template_type'], is_active: true, is_deleted: false,
-                          phase_count: tpl['phases'].size, location_id: nil)
+                          { name: tpl['name'], template_type: tpl['template_type'], is_active: true, is_deleted: false,
+                            phase_count: tpl['phases'].size, location_id: nil },
+                          adopt: ['lower(name) = ? AND coalesce(is_deleted, false) = false', tpl['name'].downcase])
         return unless template
 
         tpl['phases'].each_with_index do |ph, i|
           phase = upsert('project_template_phase', "#{tpl['name']}:#{i}", ProjectTemplatePhase, template.project_template_phases,
-                         name: ph['name'], position: i, visible_to_client: true, is_required: true,
-                         notify_client_on_start: false, notify_client_on_complete: false)
+                         { name: ph['name'], position: i, visible_to_client: true, is_required: true,
+                           notify_client_on_start: false, notify_client_on_complete: false },
+                         adopt: { position: i })
           next unless phase
 
           ph['tasks'].each_with_index do |t, j|
             upsert('project_template_task', "#{tpl['name']}:#{i}:#{j}", ProjectTemplatePhaseTask, phase.project_template_phase_tasks,
-                   name: t, position: j, is_required: false, visible_to_client: false)
+                   { name: t, position: j, is_required: false, visible_to_client: false }, adopt: { position: j })
           end
         end
         @template = template
@@ -233,10 +260,10 @@ module Migrations
 
       def load_vendors
         @data['vendors'].each do |v|
-          upsert('vendor', v['ghl_key'], Vendor, @company.vendors,
-                 name: v['name'], vendor_type: v['vendor_type'], status: 'active', active: true, is_vendor: true,
-                 is_deleted: false,
-                 notes: v['source_company_names'].size > 1 ? "Names in GoHighLevel: #{v['source_company_names'].join('; ')}" : nil)
+          upsert('vendor', v['ghl_key'], Vendor, @company.vendors.where(is_deleted: [false, nil]),
+                 { name: v['name'], vendor_type: v['vendor_type'], status: 'active', active: true, is_vendor: true, is_deleted: false,
+                   notes: v['source_company_names'].size > 1 ? "Names in GoHighLevel: #{v['source_company_names'].join('; ')}" : nil },
+                 adopt: ['lower(name) = ?', v['name'].downcase])
         end
         @data['vendor_contacts'].each do |p|
           vendor_id = id_for('vendor', p['vendor_key'])
@@ -253,8 +280,29 @@ module Migrations
 
       # ------------------------------------------------------------ leads
 
+      # People already in the company before the import (website form leads,
+      # hand-entered contacts) that match an imported person by email or phone.
+      # Not merged automatically: listed so the dealer decides.
+      def note_possible_duplicate(kind, ghl_id, email, phone)
+        @pre_existing ||= begin
+          ids = MigrationRecord.where(company_id: @company.id, source_system: SYSTEM, record_type: %w[Lead Contact]).pluck(:record_type, :record_id).to_set
+          people = @company.leads.pluck(:id, :email, :phone).map { |i, e, p| ['Lead', i, e, p] } +
+                   @company.contacts.pluck(:id, :email, :phone).map { |i, e, p| ['Contact', i, e, p] }
+          people.reject { |t, i, _, _| ids.include?([t, i]) }
+        end
+        digits = ->(v) { v.to_s.gsub(/\D/, '').last(10) }
+        hit = @pre_existing.find do |_, _, e, p|
+          (email.present? && e.to_s.casecmp?(email)) || (phone.present? && digits.(p).length == 10 && digits.(p) == digits.(phone))
+        end
+        return unless hit
+
+        @report['possible_duplicate'][kind] += 1
+        @errors << "possible duplicate: GHL #{kind} #{ghl_id} matches existing #{hit[0]} #{hit[1]} (#{email || phone}); both kept"
+      end
+
       def load_leads
         @data['leads'].each do |l|
+          note_possible_duplicate('lead', l['ghl_id'], l['email'], l['phone']) unless id_for('lead', l['ghl_id'])
           others = l['other_opportunities'].map { |o| "#{o['name']} (#{o['stage']}, #{o['status']})" }
           notes = lines(
             "Imported from GoHighLevel#{l['ghl_source'].present? ? ". Source in GHL: #{l['ghl_source']}" : ''}.",
@@ -309,6 +357,7 @@ module Migrations
 
           stamp(acct, a['created_at'])
           a['contacts'].each do |c|
+            note_possible_duplicate('contact', c['ghl_id'], c['email'], c['phone']) unless id_for('contact', c['ghl_id'])
             rec = upsert('contact', c['ghl_id'], Contact, @company.contacts,
                          account_id: acct.id, first_name: c['first_name'].presence || c['last_name'].presence || c['email'].presence || 'Unknown',
                          last_name: c['first_name'].present? ? c['last_name'] : nil,
