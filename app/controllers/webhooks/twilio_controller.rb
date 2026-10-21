@@ -361,48 +361,63 @@ module Webhooks
 
     private
     
+    # Twilio signs every webhook with the auth token of the account it came from.
+    # This used to read the token from ENV only; production has it in Platform
+    # Settings instead, so every request was let through unchecked. Turning the
+    # check on can also turn away every real request, if the address we see is
+    # not the one Twilio signed (Render's edge sits in front of us), so it runs
+    # log-only until TWILIO_SIGNATURE_MODE=enforce, and the log says which way
+    # each request went.
     def verify_twilio_signature
-      auth_token = own_account_token || ENV['TWILIO_AUTH_TOKEN']
-      
+      auth_token = own_account_token || TwilioSmsService.master_credentials.last
       unless auth_token.present?
         Rails.logger.warn "[Twilio] Auth token not configured - skipping signature verification"
         return true
       end
-      
+
       signature = request.headers['X-Twilio-Signature']
-      
-      unless signature.present?
-        Rails.logger.error "[Twilio] Missing X-Twilio-Signature header"
-        head :forbidden
-        return false
-      end
-      
       validator = Twilio::Security::RequestValidator.new(auth_token)
-      url = request.original_url
       post_params = request.request_parameters
-      
-      is_valid = validator.validate(url, post_params, signature)
-
-      unless is_valid
-        Rails.logger.error "[Twilio] Invalid signature - possible spoofed request"
-        head :forbidden
-        return false
+      matched = signature.present? && signed_urls.detect { |url| validator.validate(url, post_params, signature) }
+      if matched
+        Rails.logger.info "[Twilio] Signature ok (#{matched == request.original_url ? 'as received' : matched})"
+        return true
       end
 
-      true
-    rescue NameError => e
-      Rails.logger.warn "[Twilio] Twilio gem not loaded - skipping signature verification: #{e.message}"
-      true
+      reason = signature.present? ? 'Invalid signature' : 'Missing X-Twilio-Signature header'
+      unless enforce_signature?
+        Rails.logger.warn "[Twilio] Signature check would reject (log only): #{reason}; url=#{request.original_url}"
+        return true
+      end
+
+      Rails.logger.error "[Twilio] #{reason} - possible spoofed request; url=#{request.original_url}"
+      head :forbidden
+      false
     rescue => e
       Rails.logger.error "[Twilio] Signature verification error: #{e.message}"
+      return true unless enforce_signature?
+
       head :internal_server_error
       false
     end
-    
+
+    def enforce_signature?
+      ENV['TWILIO_SIGNATURE_MODE'] == 'enforce'
+    end
+
+    # The address Twilio signed: as it reached us, as https (a proxy may hand us
+    # http), and on our configured API origin (a proxy may hand us its own host).
+    def signed_urls
+      urls = [request.original_url, request.original_url.sub(/\Ahttp:/, 'https:')]
+      base = TwilioProvisioningService.api_base_url rescue nil
+      urls << "#{base}#{request.fullpath}" if base
+      urls.uniq
+    end
+
     # A dealer's own Twilio account signs its webhooks with its own token.
     def own_account_token
       sid = params['AccountSid'].presence
-      return nil if sid.blank? || sid == ENV['TWILIO_ACCOUNT_SID']
+      return nil if sid.blank? || sid == TwilioSmsService.master_credentials.first
 
       TwilioAccount.active.where(sub_account_sid: sid).detect(&:own_account?)&.auth_token.presence
     end
