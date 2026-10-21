@@ -962,6 +962,10 @@ class Api::V1::WebsitesController < ApplicationController
       permitted[:site_footer] = params[:website][:site_footer].permit!.to_h
     end
 
+    # A site's own access level overrides the dealer's plan, so only a platform
+    # admin may set it. Otherwise a dealer could give themselves the full editor.
+    permitted.delete(:client_access_level) unless current_user.platform_admin?
+
     permitted
   end
 end

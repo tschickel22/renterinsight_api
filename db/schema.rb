@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_20_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_21_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8606,7 +8606,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_150000) do
     t.string "subdomain"
     t.integer "status", default: 0, null: false
     t.integer "build_status", default: 0, null: false
-    t.integer "client_access_level", default: 3, null: false
+    t.integer "client_access_level"
     t.jsonb "theme", default: {}
     t.jsonb "nav_config", default: {}
     t.jsonb "brand", default: {}
