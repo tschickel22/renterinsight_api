@@ -419,7 +419,8 @@ module Webhooks
       sid = params['AccountSid'].presence
       return nil if sid.blank? || sid == TwilioSmsService.master_credentials.first
 
-      TwilioAccount.active.where(sub_account_sid: sid).detect(&:own_account?)&.auth_token.presence
+      TwilioAccount.active.where(sub_account_sid: sid).detect(&:own_account?)&.auth_token.presence ||
+        CommunicationSettingsService.stored_twilio_token(sid)
     end
 
     # Forward an inbound contact reply to the CRM user who originally sent the SMS

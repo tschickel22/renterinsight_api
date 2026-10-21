@@ -7,6 +7,23 @@ class CommunicationSettingsService
     @user = user
   end
   
+  # The auth token a company or location saved for its own Twilio account
+  # (Communications settings), found by that account's SID. Twilio signs a
+  # webhook for that account with this token, not ours.
+  def self.stored_twilio_token(account_sid)
+    return nil unless account_sid.to_s.match?(/\AAC\h{32}\z/)
+
+    Setting.where(scope_type: %w[Company Location], key: 'communications')
+           .where('value LIKE ?', "%#{account_sid}%").order(updated_at: :desc).each do |row|
+      sms = (JSON.parse(row.value) rescue nil).to_h['sms'].to_h
+      next unless sms['twilioAccountSid'] == account_sid
+
+      token = new.send(:decrypt_value, sms['twilioAuthToken'])
+      return token if token.present?
+    end
+    nil
+  end
+
   def self.for_company(company, location: nil)
     new(company: company, location: location)
   end
