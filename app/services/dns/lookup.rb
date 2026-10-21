@@ -37,21 +37,56 @@ module Dns
       resolve(name, Resolv::DNS::Resource::IN::NS, timeout: timeout) { |r| r.name.to_s.downcase }
     end
 
+    def a(name, timeout: DEFAULT_TIMEOUT)
+      resolve(name, Resolv::DNS::Resource::IN::A, timeout: timeout) { |r| r.address.to_s }
+    end
+
+    # Resolv has no CAA class, so the record arrives as raw RDATA: one flags byte, one
+    # tag-length byte, the tag, then the value. A CNAME in the answer is followed, which is
+    # what a CA does too: a CNAME to another host inherits that host's CAA set. That is how
+    # Vercel's CAA list blocked a dealer's certificate from a zone the dealer controlled.
+    CAA = Resolv::DNS::Resource::Generic.create(257, Resolv::DNS::Resource::IN::ClassValue)
+
+    def caa(name, timeout: DEFAULT_TIMEOUT)
+      resolve(name, CAA, timeout: timeout) do |r|
+        data = r.data.to_s.b
+        tag_length = data.getbyte(1).to_i
+        { flags: data.getbyte(0).to_i,
+          tag: data[2, tag_length].to_s.downcase,
+          value: data[(2 + tag_length)..].to_s.force_encoding('UTF-8') }
+      end
+    end
+
+    # TTL as the zone publishes it, asked of the zone's own name server. A recursive
+    # resolver reports whatever is left on its cached copy, which can read as a few seconds
+    # for a record that is really held for a week.
+    def authoritative_ttl(name, type, zone:, timeout: DEFAULT_TIMEOUT)
+      server = ns(zone, timeout: timeout).first
+      return nil if server.blank?
+
+      ip = a(server, timeout: timeout).first
+      return nil if ip.blank?
+
+      resolve(name, type, timeout: timeout, nameserver: ip, &:ttl).max
+    end
+
     # Returns [] on any resolution failure. Callers that must distinguish "no records" from
     # "could not ask" should use resolve! instead: for a collision check, an unanswered
     # query is not the same as a free name.
-    def resolve(name, type, timeout: DEFAULT_TIMEOUT, &block)
-      resolve!(name, type, timeout: timeout, &block)
+    def resolve(name, type, timeout: DEFAULT_TIMEOUT, nameserver: nil, &block)
+      resolve!(name, type, timeout: timeout, nameserver: nameserver, &block)
     rescue StandardError => e
       Rails.logger.warn("[Dns::Lookup] #{type.to_s.split('::').last} lookup failed for #{name}: #{e.message}")
       []
     end
 
-    def resolve!(name, type, timeout: DEFAULT_TIMEOUT)
+    def resolve!(name, type, timeout: DEFAULT_TIMEOUT, nameserver: nil)
       return [] if name.blank?
 
-      # No arguments to open. Anything passed here is nameserver config, never a timeout.
-      Resolv::DNS.open do |dns|
+      # No arguments to open unless a specific server is wanted. Anything passed here is
+      # nameserver config, never a timeout.
+      config = nameserver ? [{ nameserver: [nameserver] }] : []
+      Resolv::DNS.open(*config) do |dns|
         dns.timeouts = timeout
         dns.getresources(name.to_s, type).map { |r| yield(r) }
       end

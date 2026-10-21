@@ -63,17 +63,57 @@ RSpec.describe CloudflareSaasService do
         expect(JSON.parse(opts[:body])).to eq('ssl' => { 'method' => 'http', 'type' => 'dv' })
         instance_double(HTTParty::Response, success?: true, body: '{"success":true}')
       end
+      allow_any_instance_of(described_class).to receive(:check_custom_hostname_status)
+        .and_return(result: { ssl: { method: 'http' } })
       allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
 
       expect(described_class.new.revalidate_custom_hostname('cf-abc')).to be true
     end
 
+    # This hard-coded 'http' and the poller runs it every 20 minutes, which put
+    # www.easyhomesource.com back on HTTP validation each time it was moved to TXT. HTTP
+    # cannot pass while the dealer's old site is still live, so the certificate never came.
+    it 'keeps the validation method the hostname already uses' do
+      allow_any_instance_of(described_class).to receive(:check_custom_hostname_status)
+        .and_return(result: { ssl: { method: 'txt' } })
+      expect(described_class).to receive(:patch) do |_path, opts|
+        expect(JSON.parse(opts[:body])).to eq('ssl' => { 'method' => 'txt', 'type' => 'dv' })
+        instance_double(HTTParty::Response, success?: true, body: '{"success":true}')
+      end
+      allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
+
+      described_class.new.revalidate_custom_hostname('cf-abc')
+    end
+
     it 'reports failure without raising, so reading the status still happens' do
+      allow_any_instance_of(described_class).to receive(:check_custom_hostname_status)
+        .and_return(result: { ssl: { method: 'http' } })
       allow(described_class).to receive(:patch).and_return(
         instance_double(HTTParty::Response, success?: false, body: '{"errors":[{"message":"nope"}]}')
       )
 
       expect(described_class.new.revalidate_custom_hostname('cf-abc')).to be false
+    end
+  end
+
+  describe '#parse_custom_hostname_response' do
+    before { configure! }
+
+    it 'keeps the certificate TXT records Cloudflare issues under TXT validation' do
+      parsed = described_class.new.parse_custom_hostname_response(
+        result: { id: 'cf-1', status: 'active',
+                  ssl: { status: 'pending_validation', method: 'txt',
+                         validation_records: [
+                           { status: 'pending', txt_name: '_acme-challenge.www.x.com', txt_value: 'v1' },
+                           { status: 'pending', http_url: 'http://www.x.com/.well-known/acme-challenge/a' }
+                         ] } }
+      )
+
+      expect(parsed[:ssl_method]).to eq('txt')
+      expect(parsed[:certificate_records]).to eq([
+        { 'type' => 'TXT', 'name' => '_acme-challenge.www.x.com', 'value' => 'v1', 'ttl' => 600,
+          'kind' => 'certificate' }
+      ])
     end
   end
 
@@ -141,6 +181,16 @@ RSpec.describe CloudflareSaasService do
       allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
 
       described_class.new.add_custom_hostname('www.sunshine-rv.com')
+    end
+
+    it 'asks for TXT validation when told to' do
+      expect(described_class).to receive(:post) do |_path, opts|
+        expect(JSON.parse(opts[:body]).dig('ssl', 'method')).to eq('txt')
+        success
+      end
+      allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
+
+      described_class.new.add_custom_hostname('www.sunshine-rv.com', ssl_method: 'txt')
     end
 
     it 'retries without custom_origin_server when the plan rejects it' do

@@ -12,8 +12,40 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
   let(:auth_headers) { { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' } }
 
   describe 'POST /api/v1/company-domains' do
+    let(:preflight) { Dns::PreFlight::Result.new(current_addresses: [], points_at_us: false, issues: []) }
+
     before do
       allow(CloudflareSaasService).to receive(:configured?).and_return(true)
+      allow(Dns::PreFlight).to receive(:for).and_return(preflight)
+    end
+
+    # www.easyhomesource.com was created on HTTP validation while it still served the
+    # dealer's Vercel site, so the certificate could not issue until they switched, and
+    # the site would have had none in between.
+    it 'uses TXT validation and keeps the certificate records when a site is live elsewhere' do
+      preflight.current_target = 'cname.vercel-dns.com'
+      service = instance_double(CloudflareSaasService)
+      allow(CloudflareSaasService).to receive(:new).and_return(service)
+      allow(service).to receive(:cname_target).and_return('connect.mydealertide.com')
+      allow(service).to receive(:create_worker_route)
+      expect(service).to receive(:add_custom_hostname)
+        .with('www.live.example', ssl_method: 'txt').and_return({})
+      allow(service).to receive(:parse_custom_hostname_response).and_return(
+        custom_hostname_id: 'cf-live', verification_status: 'pending', ssl_status: 'pending_validation',
+        verification_records: [{ 'type' => 'TXT', 'name' => '_cf-custom-hostname.www.live.example',
+                                 'value' => 'own-1' }],
+        certificate_records: [{ 'type' => 'TXT', 'name' => '_acme-challenge.www.live.example',
+                                'value' => 'cert-1', 'kind' => 'certificate' }]
+      )
+
+      post '/api/v1/company-domains',
+           params: { hostname: 'www.live.example', purpose: 'web' }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:created)
+      records = JSON.parse(response.body)['domain']['web_dns_records']
+      expect(records.map { |r| r['value'] }).to eq(%w[own-1 cert-1 connect.mydealertide.com])
+      expect(records.last['switch_last']).to be true
     end
 
     # Cloudflare's SSL vocabulary is far wider than the four values the model used to
@@ -143,6 +175,22 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       expect(message).not_to match(/propagate|up to an hour/)
     end
 
+    it 'tells a tenant on TXT validation to leave the CNAME until the certificate issues' do
+      domain.update!(verification_records: domain.verification_records + [
+        { 'type' => 'TXT', 'name' => '_acme-challenge.dealer.example', 'value' => 'cert-1',
+          'kind' => 'certificate' }
+      ])
+      allow(Dns::Lookup).to receive(:txt).and_return(%w[abc-123-token cert-1])
+      allow(Dns::Lookup).to receive(:cname).and_return(['cname.vercel-dns.com.'])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      message = JSON.parse(response.body)['message']
+      expect(message).to include('Found: TXT _cf-custom-hostname.dealer.example, TXT _acme-challenge.dealer.example')
+      expect(message).to include('which keeps your current site up')
+      expect(message).to include('once the certificate shows as issued')
+    end
+
     it 'says a record is not published yet when nothing answers for it' do
       allow(Dns::Lookup).to receive(:txt).and_return([])
       allow(Dns::Lookup).to receive(:cname).and_return([])
@@ -160,6 +208,24 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
 
       expect(JSON.parse(response.body)['message']).to match(/no dns records issued/i)
+    end
+  end
+
+  describe 'GET /api/v1/company-domains/hostname-advice' do
+    it 'includes the pre-flight for the hostname being added' do
+      allow(CloudflareSaasService).to receive(:configured?).and_return(false)
+      allow(Dns::PreFlight).to receive(:for).with('www.dealer.example', our_target: nil).and_return(
+        Dns::PreFlight::Result.new(hostname: 'www.dealer.example', current_target: 'cname.vercel-dns.com',
+                                   current_addresses: [], points_at_us: false, caa_issuers: [],
+                                   caa_missing: [], issues: [])
+      )
+
+      get '/api/v1/company-domains/hostname-advice', params: { hostname: 'www.dealer.example' },
+                                                     headers: auth_headers.except('Content-Type')
+
+      preflight = JSON.parse(response.body)['preflight']
+      expect(preflight['live_elsewhere']).to be true
+      expect(preflight['ssl_method']).to eq('txt')
     end
   end
 

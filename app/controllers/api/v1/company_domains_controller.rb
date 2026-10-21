@@ -103,7 +103,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
     provisioned_hostname_id = nil
     begin
       cloudflare_service = CloudflareSaasService.new
-      cf_response = cloudflare_service.add_custom_hostname(hostname)
+      # A hostname still serving a live site elsewhere gets TXT validation, so the
+      # certificate can issue before the dealer switches and the site never goes dark.
+      preflight = Dns::PreFlight.for(hostname, our_target: cloudflare_service.cname_target)
+      cf_response = cloudflare_service.add_custom_hostname(hostname, ssl_method: preflight.ssl_method)
 
       # Parse response and update domain
       parsed = cloudflare_service.parse_custom_hostname_response(cf_response)
@@ -113,7 +116,7 @@ class Api::V1::CompanyDomainsController < ApplicationController
       domain.update!(
         cloudflare_custom_hostname_id: parsed[:custom_hostname_id],
         verification_status: parsed[:verification_status],
-        verification_records: parsed[:verification_records],
+        verification_records: parsed[:verification_records].to_a + parsed[:certificate_records].to_a,
         ssl_status: parsed[:ssl_status],
         # Our configured target, not parsed[:cname_target]. That field carried Cloudflare's
         # ownership token, which is a TXT value and not something anyone can CNAME to.
@@ -288,7 +291,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
       return render json: { configured: false, message: 'No DNS records issued for this domain yet' }
     end
 
-    results = expected.map { |record| check_expected_record(record).merge(required: record['required'] != false) }
+    results = expected.map do |record|
+      check_expected_record(record).merge(required: record['required'] != false,
+                                          switch_last: record['switch_last'] == true)
+    end
     # Gated on the required records only. The optional ownership record is reported so a
     # tenant can see it landed, but its absence does not mean the setup is incomplete.
     configured = results.select { |r| r[:required] }.all? { |r| r[:found] }
@@ -409,8 +415,13 @@ class Api::V1::CompanyDomainsController < ApplicationController
     return unless authorize_action!('company_settings', 'read')
 
     advice = Dns::ApexAdvisor.for(params[:hostname])
+    # Checked on the hostname they will actually end up using: a bare domain that cannot
+    # work here is going to be replaced by its www suggestion.
+    preflight_host = advice.workable? ? params[:hostname] : advice.suggested_hostname
+    our_target = cloudflare_enabled? ? CloudflareSaasService.new.cname_target : nil
 
     render json: {
+      preflight: Dns::PreFlight.for(preflight_host, our_target: our_target).as_json,
       apex: advice.apex?,
       workable: advice.workable?,
       strategy: advice.strategy,
@@ -523,7 +534,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
     missing.each do |r|
       current = Array(r[:found_values]).map { |v| v.to_s.chomp('.') }.reject(&:blank?)
       lines <<
-        if current.any?
+        if current.any? && r[:switch_last]
+          "#{r[:type]} #{r[:name]} still points at #{current.join(', ')}, which keeps your " \
+            "current site up. Change it to #{r[:expected]} once the certificate shows as issued."
+        elsif current.any?
           "#{r[:type]} #{r[:name]} points at #{current.join(', ')}. Change it to #{r[:expected]}."
         else
           "#{r[:type]} #{r[:name]} is not published yet (expected #{r[:expected]}). " \

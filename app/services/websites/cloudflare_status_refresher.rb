@@ -32,6 +32,9 @@ module Websites
       @domain.update!(
         verification_status: parsed[:verification_status],
         ssl_status: parsed[:ssl_status],
+        # Cloudflare reissues certificate tokens when it retries, so the stored set is
+        # replaced each time rather than kept. Ownership records stay as created.
+        verification_records: @domain.ownership_records + parsed[:certificate_records].to_a,
         ssl_issued_at: parsed[:ssl_status] == 'active' ? (@domain.ssl_issued_at || Time.current) : @domain.ssl_issued_at,
         dns_checked_at: Time.current,
         dns_error: nil

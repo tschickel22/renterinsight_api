@@ -113,10 +113,21 @@ class CompanyDomain < ApplicationRecord
     pending? && verification_records.present?
   end
   
+  # verification_records holds two kinds. Ownership ('_cf-custom-hostname') is issued once,
+  # at creation. Certificate TXT records ('_acme-challenge', kind 'certificate') exist only
+  # under TXT validation and are replaced on every refresh, because Cloudflare reissues them.
+  def ownership_records
+    Array(verification_records).reject { |r| r['kind'] == 'certificate' }
+  end
+
+  def certificate_records
+    Array(verification_records).select { |r| r['kind'] == 'certificate' }
+  end
+
   def dns_records_for_display
     return [] unless verification_records.present?
 
-    verification_records.map do |record|
+    ownership_records.map do |record|
       {
         type: record['type'],
         name: record['name'] || hostname,
@@ -150,14 +161,34 @@ class CompanyDomain < ApplicationRecord
       )
     end
 
+    # Under TXT validation, published while the dealer's old site is still live, so the
+    # certificate exists before anyone is sent to us.
+    certificate_pending = !ssl_active? && certificate_records.any?
+    if certificate_pending
+      certificate_records.each do |r|
+        records << {
+          type: 'TXT', name: r['name'], value: r['value'], ttl: r['ttl'] || 600,
+          purpose: 'Lets the certificate be issued while your current site is still up. ' \
+                   'Publish both now.',
+          required: true
+        }
+      end
+    end
+
     if cname_target.present?
       records << {
         type: 'CNAME',
         name: hostname,
         value: cname_target,
-        ttl: 3600,
-        purpose: 'Points your domain at us. Without this the site never loads and the ' \
-                 'certificate cannot be issued.',
+        ttl: 600,
+        purpose: if certificate_pending
+                   'Change this last, once the certificate shows as issued. Your site moves ' \
+                   'to us when it changes, and the certificate will already be in place.'
+                 else
+                   'Points your domain at us. Without this the site never loads and the ' \
+                     'certificate cannot be issued.'
+                 end,
+        switch_last: certificate_pending,
         required: true
       }
     end
