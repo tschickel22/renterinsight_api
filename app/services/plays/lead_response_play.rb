@@ -93,6 +93,74 @@ module Plays
         []
       end
 
+      # Whether a dealer may run the play on a form they already have instead
+      # of the one it creates. Off for a play whose form something else finds
+      # by name (TrueBuild's saved designs).
+      def form_choosable?
+        forms.any?
+      end
+
+      # The existing form a dealer most likely means, chosen for them before
+      # they look: one this play made earlier, by name, so turning it on again
+      # does not make "Website Contact (2)". A preset whose leads arrive on a
+      # form already live elsewhere (the website) looks there first.
+      def suggested_form_for(company)
+        return nil if company.nil? || !form_choosable?
+
+        company.intake_forms.active.where(name: forms.first[:name]).order(:created_at).first
+      end
+
+      # Every active form the play could run on, with who each one sends leads to.
+      def form_choices(company)
+        return [] if company.nil? || !form_choosable?
+
+        on_site = Websites::FormsInUse.ids_for(company)
+        forms = company.intake_forms.active.includes(:source, :round_robin_list, :notified_user).order(:name).to_a
+        rep_ids = forms.select(&:rotates?).flat_map(&:rotation_user_ids).uniq
+        names = User.where(company_id: company.id, id: rep_ids).index_by(&:id)
+        forms.map do |form|
+          rotation = form.rotates? ? form.rotation_user_ids : []
+          {
+            id: form.id, name: form.name, source: form.source&.name, on_website: on_site.include?(form.id),
+            rotates: form.rotates?, round_robin_list_id: form.rotates? ? form.round_robin_list_id : nil,
+            rotation_user_ids: rotation,
+            rotation_rep_names: rotation.filter_map { |id| names[id] && display_name(names[id]) },
+            notified_user_name: form.notified_user && display_name(form.notified_user)
+          }
+        end
+      end
+
+      # The form an install runs on: one it adopted, or the one it created.
+      def linked_form_for(installation)
+        assets = (installation.assets || {}).deep_stringify_keys
+        scope = IntakeForm.where(company_id: installation.company_id)
+        adopted_id = assets.dig('adopted_intake_form', 'id')
+        (adopted_id && scope.find_by(id: adopted_id)) || scope.active.where(id: Array(assets['intake_form_ids'])).order(:id).first
+      end
+
+      # Rotations the install made itself, as opposed to one it uses from its form.
+      def own_rotation_ids(installation)
+        assets = (installation&.assets || {}).deep_stringify_keys
+        (Array(assets['round_robin_list_ids']) + assets['round_robin_lists'].to_h.values).map(&:to_i).uniq
+      end
+
+      # Puts back what the play changed on a dealer's own form, setting by
+      # setting, and only where the form still holds what the play gave it: a
+      # rotation the dealer has since changed on the form stays theirs.
+      def release_adopted_form!(company_id, adopted)
+        adopted = adopted.to_h.deep_stringify_keys
+        form = IntakeForm.find_by(company_id: company_id, id: adopted['id'])
+        return unless form
+
+        previous = adopted['previous'].to_h
+        adopted['applied'].to_h.each do |attribute, value|
+          next unless form.has_attribute?(attribute) && form[attribute] == value
+
+          form[attribute] = previous[attribute]
+        end
+        form.save!(validate: false) if form.changed?
+      end
+
       # The tag that starts the play when a rep adds it, before the dealer
       # changes it. Each install keeps its own (answers['start_tag']).
       def start_tag
@@ -180,6 +248,10 @@ module Plays
           default_sources: default_sources_for(company),
           available_sources: company.sources.active.order(:name).pluck(:name).uniq,
           forms: forms.map { |form| form[:name] },
+          form_name: forms.first&.dig(:name),
+          form_choosable: form_choosable?,
+          form_choices: form_choices(company),
+          suggested_intake_form_id: suggested_form_for(company)&.id,
           start_tag: start_tag,
           default_start_tag: start_tag,
           weekly_homes_tag: WEEKLY_HOMES_TAG,
@@ -197,6 +269,11 @@ module Plays
         answers = answers_for(installation)
         rep_ids = answers['reps_by_location'].values.flatten.uniq
         rep_names = User.where(company_id: company.id, id: rep_ids).map { |u| display_name(u) }
+        linked = linked_form_for(installation)
+        own_rotations = own_rotation_ids(installation)
+        form_rotation = linked&.rotates? && !own_rotations.include?(linked.round_robin_list_id) ? linked : nil
+        rep_names = User.where(company_id: company.id, id: form_rotation.rotation_user_ids).map { |u| display_name(u) } if form_rotation
+        adopted_id = (installation.assets || {}).deep_stringify_keys.dig('adopted_intake_form', 'id')
 
         {
           id: installation.id,
@@ -209,10 +286,13 @@ module Plays
           send_texts: answers['send_texts'],
           content: answers['content'],
           map: map_for(company: company, sources: answers['sources'], content: answers['content'],
-                       rep_names: rep_names, send_texts: answers['send_texts'], tag: answers['start_tag']),
-          intake_forms: IntakeForm.where(company_id: company.id, id: installation.asset_ids(:intake_form_ids)).map do |form|
+                       rep_names: rep_names, send_texts: answers['send_texts'], tag: answers['start_tag'],
+                       form_name: linked&.name, form_rotates: form_rotation.present?),
+          intake_form_id: linked&.id,
+          own_round_robin_list_ids: own_rotations,
+          intake_forms: IntakeForm.where(company_id: company.id, id: installation.asset_ids(:intake_form_ids) + [adopted_id].compact).map do |form|
             { id: form.id, name: form.name, source: form.source&.name, public_url: form.public_url,
-              embed_code: form.embed_code, is_active: form.is_active }
+              embed_code: form.embed_code, is_active: form.is_active, adopted: form.id == adopted_id }
           end,
           workflow_rules: WorkflowRule.where(company_id: company.id, id: installation.asset_ids(:workflow_rule_ids))
                                       .map { |rule| { id: rule.id, name: rule.name, status: rule.status } },
@@ -233,6 +313,7 @@ module Plays
           'start_tag' => stored.key?('start_tag') ? normalize_tag(stored['start_tag']) : start_tag,
           'reps_by_location' => stored['reps_by_location'] || {},
           'send_texts' => ActiveModel::Type::Boolean.new.cast(stored['send_texts']) || false,
+          'intake_form_id' => stored['intake_form_id'],
           'content' => normalize_content(stored['content'])
         }
       end
@@ -258,6 +339,8 @@ module Plays
 
           IntakeForm.where(company_id: company_id, id: installation.asset_ids(:intake_form_ids))
                     .update_all(is_active: false, updated_at: Time.current)
+          # A form the dealer already had stays on; it only gets its own settings back.
+          release_adopted_form!(company_id, (installation.assets || {}).deep_stringify_keys['adopted_intake_form'])
 
           sequence_ids = NurtureSequence.where(company_id: company_id, id: installation.asset_ids(:nurture_sequence_ids)).pluck(:id)
           NurtureSequence.where(id: sequence_ids).update_all(is_active: false, updated_at: Time.current)
@@ -367,22 +450,26 @@ module Plays
       # What the play does, in order, with each message previewed on sample
       # values. Drawn before a play is on (from its defaults) and after (from
       # the dealer's content), so what they see is what runs.
-      def map_for(company:, sources:, content:, rep_names:, send_texts:, tag: start_tag)
+      def map_for(company:, sources:, content:, rep_names:, send_texts:, tag: start_tag, form_name: nil, form_rotates: false)
         sample = SAMPLE_VALUES.merge('rep_name' => rep_names.first || 'Your rep', 'dealership' => company.name)
         steps = []
 
         trigger_detail = []
-        trigger_detail << "Forms: #{forms.map { |f| f[:name] }.join(', ')}" if forms.any?
+        form_names = form_name ? [form_name] : forms.map { |f| f[:name] }
+        trigger_detail << "Forms: #{form_names.join(', ')}" if form_names.any?
         trigger_detail << "Or when a rep tags a lead #{tag}" if tag
         steps << { key: 'trigger', kind: 'trigger', title: "New lead from #{Array(sources).join(', ')}",
                    detail: trigger_detail.join('. ').presence }
 
-        assign_detail = if assignment == :keep_owner
+        assign_detail = if form_name
+                          "The #{form_name} form gives each lead the next rep in its rotation. A lead that already " \
+                            'has a rep keeps them; any other lead gets the next rep in the rotation.'
+                        elsif assignment == :keep_owner
                           'Stays with the rep who entered the lead. Unassigned leads go to the next rep in the rotation.'
                         else
                           'The next rep in the rotation at the lead\'s location.'
                         end
-        assign_detail += " Rotation: #{rep_names.join(', ')}." if rep_names.any?
+        assign_detail += " Rotation#{' (set on the form)' if form_rotates}: #{rep_names.join(', ')}." if rep_names.any?
         steps << { key: 'assign', kind: 'assign', title: 'Assign a rep', detail: assign_detail }
 
         weekly_step = { key: 'weekly_homes', kind: 'tag', title: 'Added to the weekly homes email', detail: "Tagged #{WEEKLY_HOMES_TAG}" }
@@ -480,7 +567,9 @@ module Plays
 
     # answers:
     #   sources:          lead source names that start the play
-    #   reps_by_location: { location_id => [user_id, ...] }
+    #   reps_by_location: { location_id => [user_id, ...] }, not needed when
+    #                     the chosen form already rotates (the play uses its rotation)
+    #   intake_form_id:   an existing form to run on, or 'new' for the play's own
     #   send_texts:       only honoured when the company can text
     #   content:          see normalize_content
     def initialize(company:, user:, answers:, installation: nil)
@@ -500,7 +589,7 @@ module Plays
         source_records = ensure_sources
         ensure_tags
         rotations = sync_rotations({})
-        forms = self.class.forms.map { |form| create_form(form) }
+        form_assets = link_form!(rotations, {})
         nurture = create_nurture
         sync_nurture_steps(nurture)
         steps = steps_graph(nurture: nurture, rotations: rotations)
@@ -514,11 +603,12 @@ module Plays
           status: 'active',
           answers: stored_answers,
           assets: {
-            intake_form_ids: forms.map(&:id),
+            intake_form_ids: form_assets['intake_form_ids'],
+            adopted_intake_form: form_assets['adopted_intake_form'],
             workflow_rule_ids: rules.map(&:id),
             nurture_sequence_ids: [nurture.id],
-            round_robin_list_ids: rotations.values.map(&:id),
-            round_robin_lists: rotations.transform_values(&:id),
+            round_robin_list_ids: own_rotations(rotations).values.map(&:id),
+            round_robin_lists: own_rotations(rotations).transform_values(&:id),
             tag_ids: @created_tag_ids || [],
             source_ids: @created_source_ids || []
           },
@@ -540,6 +630,7 @@ module Plays
         ensure_tags
         assets = (@installation.assets || {}).deep_stringify_keys
         rotations = sync_rotations(assets['round_robin_lists'] || legacy_rotation_ids(assets))
+        form_assets = link_form!(rotations, assets)
 
         nurture = NurtureSequence.find_by(company_id: @company.id, id: Array(assets['nurture_sequence_ids']).first) || create_nurture
         nurture.update!(is_active: true, stop_on_reply: true, stop_on_conversion: true)
@@ -566,20 +657,16 @@ module Plays
           tag_rule.update!(status: 'archived')
         end
 
-        # A play that had no form when it was turned on, or whose form was
-        # deleted, gets one here, rather than asking a dealer to turn the play
-        # off and on to gain it.
-        form_ids = Array(assets['intake_form_ids'])
-        form_ids = self.class.forms.map { |form| create_form(form).id } if IntakeForm.where(company_id: @company.id, id: form_ids).none?
-
+        own = own_rotations(rotations)
         @installation.update!(
           answers: stored_answers,
           assets: assets.merge(
-            'intake_form_ids' => form_ids,
+            'intake_form_ids' => form_assets['intake_form_ids'],
+            'adopted_intake_form' => form_assets['adopted_intake_form'],
             'workflow_rule_ids' => rule_ids.uniq,
             'nurture_sequence_ids' => [nurture.id],
-            'round_robin_list_ids' => (Array(assets['round_robin_list_ids']) + rotations.values.map(&:id)).uniq,
-            'round_robin_lists' => rotations.transform_values(&:id)
+            'round_robin_list_ids' => (Array(assets['round_robin_list_ids']) + own.values.map(&:id)).uniq,
+            'round_robin_lists' => own.transform_values(&:id)
           )
         )
       end
@@ -592,7 +679,9 @@ module Plays
 
     def validate!
       raise InstallError, 'Choose at least one lead source that starts this play.' if sources.empty?
-      raise InstallError, 'Choose at least one rep to receive new leads.' if reps_by_location.values.flatten.empty?
+      if form_rotation.nil? && reps_by_location.values.flatten.empty?
+        raise InstallError, 'Choose at least one rep to receive new leads.'
+      end
 
       claimed = claimed_sources
       overlap = sources & claimed.keys
@@ -627,11 +716,57 @@ module Plays
       end
     end
 
+    # Leads from the play's form always start it, whatever else is chosen.
     def sources
       @sources ||= begin
         given = Array(@answers['sources']).map { |name| name.to_s.strip }.reject(&:blank?).uniq
-        given.presence || (@answers.key?('sources') ? [] : self.class.default_sources_for(@company))
+        chosen = given.presence || (@answers.key?('sources') ? [] : self.class.default_sources_for(@company))
+        (chosen + [form_source_name].compact).uniq
       end
+    end
+
+    # The source a lead from the play's form arrives with: the chosen form's
+    # own, or the preset's when the form has none (it is given the preset's).
+    def form_source_name
+      return nil if self.class.forms.empty?
+
+      chosen_form&.source&.name || self.class.forms.first[:source]
+    end
+
+    # The dealer's form the play runs on, or nil for the play's own form.
+    # Not answered (an older screen, or a customize that leaves it alone)
+    # keeps whatever the install already uses.
+    def chosen_form
+      return @chosen_form if defined?(@chosen_form)
+
+      @chosen_form =
+        if !self.class.form_choosable?
+          nil
+        elsif @answers.key?('intake_form_id')
+          id = @answers['intake_form_id'].to_s
+          if id.blank? || id == 'new'
+            nil
+          else
+            @company.intake_forms.active.find_by(id: id.to_i) ||
+              raise(InstallError, 'That form is no longer available. Choose another, or create a new one.')
+          end
+        elsif @installation
+          adopted_id = (@installation.assets || {}).deep_stringify_keys.dig('adopted_intake_form', 'id')
+          adopted_id && @company.intake_forms.find_by(id: adopted_id)
+        end
+    end
+
+    # The rotation already set on the chosen form, which the play uses instead
+    # of asking for reps again. A rotation this play wrote onto the form
+    # itself is the play's own, edited here as before.
+    def form_rotation
+      return @form_rotation if defined?(@form_rotation)
+
+      form = chosen_form
+      @form_rotation =
+        if form&.rotates? && !self.class.own_rotation_ids(@installation).include?(form.round_robin_list_id)
+          form.round_robin_list
+        end
     end
 
     # Sources other active plays already start from, name => play name.
@@ -680,7 +815,7 @@ module Plays
         reps_by_location: reps_by_location.to_h { |location, ids| [location.id.to_s, ids] },
         send_texts: send_texts?,
         content: content
-      }
+      }.tap { |answers| answers[:intake_form_id] = chosen_form&.id || 'new' if self.class.form_choosable? }
     end
 
     # ── Records ──────────────────────────────────────────────────────────
@@ -710,6 +845,13 @@ module Plays
     # its place in line across edits.
     def sync_rotations(existing_ids)
       existing_ids = (existing_ids || {}).transform_keys(&:to_s)
+      # The form's own rotation does the assigning; any the play made before stop.
+      if form_rotation
+        RoundRobinAssignmentList.where(company_id: @company.id, id: existing_ids.values).where.not(id: form_rotation.id)
+                                .update_all(active: false, updated_at: Time.current)
+        return { 'all' => form_rotation }
+      end
+
       desired = { 'all' => ['All locations', reps_by_location.values.flatten.uniq] }
       if reps_by_location.size > 1
         reps_by_location.each { |location, ids| desired[location.id.to_s] = [location.name, ids] }
@@ -732,6 +874,92 @@ module Plays
         RoundRobinAssignmentList.where(company_id: @company.id, id: existing_ids[key]).update_all(active: false, updated_at: Time.current)
       end
       rotations
+    end
+
+    # Rotations the play made, leaving out one it uses from its form.
+    def own_rotations(rotations)
+      form_rotation ? {} : rotations
+    end
+
+    # Points the play at its form: a dealer's own (adopted) or the play's
+    # (created once and kept). Switching away from an adopted form gives it
+    # its settings back; switching away from the play's own turns that off,
+    # since nobody fills it in any more.
+    #
+    # Returns the form assets: intake_form_ids (forms the play made) and
+    # adopted_intake_form ({ id, previous, applied }).
+    def link_form!(rotations, assets)
+      created_ids = Array(assets['intake_form_ids']).map(&:to_i)
+      adopted = assets['adopted_intake_form'].presence
+      return { 'intake_form_ids' => created_ids, 'adopted_intake_form' => adopted } if self.class.forms.empty?
+
+      target = chosen_form
+      target = nil if target && created_ids.include?(target.id)
+
+      if adopted && adopted['id'].to_i != target&.id
+        self.class.release_adopted_form!(@company.id, adopted)
+        adopted = nil
+      end
+
+      if target
+        IntakeForm.where(company_id: @company.id, id: created_ids, is_active: true)
+                  .update_all(is_active: false, updated_at: Time.current)
+        adopted = adopt_form!(target, adopted)
+        form = target
+      else
+        form = IntakeForm.where(company_id: @company.id, id: created_ids).order(:id).first
+        if form
+          form.update!(is_active: true) unless form.is_active
+        elsif self.class.forms.any?
+          form = create_form(self.class.forms.first)
+          created_ids += [form.id]
+        end
+      end
+
+      adopted = link_rotation!(form, rotations, adopted) if form
+      @linked_form = form
+      { 'intake_form_ids' => created_ids, 'adopted_intake_form' => adopted }
+    end
+
+    # The play makes the call task, so the form's own task is turned off (the
+    # rep would get two); the consent box is turned on, since the play texts
+    # only a lead who ticked it. A form with no source gets the preset's, so
+    # its leads start the play. Each change is recorded to be put back.
+    def adopt_form!(form, adopted)
+      adopted = (adopted || { 'id' => form.id, 'previous' => {}, 'applied' => {} }).deep_stringify_keys
+      changes = { 'auto_create_activity' => false, 'marketing_consent_enabled' => true }
+      if form.source_id.nil?
+        changes['source_id'] = @company.sources.find_or_create_by!(name: self.class.forms.first[:source]) { |s| s.is_active = true }.id
+      end
+      record_and_apply!(form, adopted, changes)
+    end
+
+    # A form that already rotates keeps its rotation and the play uses it.
+    # Otherwise the play's rotation goes on the form (the one for the form's
+    # location, if the play has one), so the form and the play share one list
+    # and one place in line.
+    def link_rotation!(form, rotations, adopted)
+      return adopted if form_rotation
+
+      list = rotations[form.location_id.to_s] || rotations['all']
+      return adopted unless list
+
+      changes = { 'assignment_mode' => 'round_robin', 'round_robin_list_id' => list.id }
+      if adopted
+        record_and_apply!(form, adopted, changes)
+      else
+        form.update!(changes)
+        adopted
+      end
+    end
+
+    def record_and_apply!(form, adopted, changes)
+      changes.each do |attribute, value|
+        adopted['previous'][attribute] = form[attribute] unless adopted['applied'].key?(attribute)
+        adopted['applied'][attribute] = value
+      end
+      form.update!(changes)
+      adopted
     end
 
     def legacy_rotation_ids(assets)
@@ -762,9 +990,9 @@ module Plays
         field_mappings: schema.to_h { |f| [f['name'], f['leadField']] },
         source_id: source.id,
         location_id: only_location&.id,
-        # Whoever set the play up hears about each new lead; the rep it is
-        # assigned to gets the call task.
-        notified_user_id: @user&.id,
+        # Whoever set the play up, if they work here. A platform admin signed
+        # in as the dealer is not, and must not own or hear about its leads.
+        notified_user_id: (@user.id if @user && @user.company_id == @company.id),
         is_active: true,
         auto_create_lead: true,
         # The play creates its own call task for the assigned rep.
@@ -884,7 +1112,9 @@ module Plays
       location_rotations = rotations.except('all').map { |id, list| [id.to_i, list] }
       rotation_entry = location_rotations.any? ? "at_location_#{location_rotations.first[0]}" : 'assign_all'
 
-      if self.class.assignment == :keep_owner
+      # A play with a form keeps the rep the form gave the lead, rather than
+      # spending a second turn in the same rotation.
+      if self.class.assignment == :keep_owner || @linked_form
         branch('has_owner', { 'field' => 'entity.owner_id', 'operator' => 'is_set' }, after_assignment, rotation_entry)
       end
 

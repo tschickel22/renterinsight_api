@@ -105,8 +105,11 @@ RSpec.describe Plays::PromoLandingPage do
 
       Plays::NewFacebookLead.new(company: company, user: manager, installation: facebook.reload,
                                  answers: Plays::NewFacebookLead.answers_for(facebook).merge('sources' => ['Promo landing page'])).customize!
-      expect { customize(installation, 'follow_up_play' => 'none') }
-        .to raise_error(Plays::InstallError, /starts only from Promo landing page/)
+      # A play with a form always starts from that form's source, so taking the
+      # landing page away cannot leave it with nothing to start from.
+      expect(sources_of(Plays::NewFacebookLead, facebook)).to contain_exactly('Promo landing page', 'Facebook')
+      customize(installation, 'follow_up_play' => 'none')
+      expect(sources_of(Plays::NewFacebookLead, facebook)).to eq(['Facebook'])
     end
   end
 

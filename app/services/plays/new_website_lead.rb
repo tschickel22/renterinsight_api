@@ -28,10 +28,18 @@ module Plays
         (own + default_sources).uniq.sort
       end
 
-      # A form with the consent box ticked on, for a site whose contact form has
-      # it off. Without consent the play cannot text, however fast it is.
+      # The form the play creates when the dealer has none to run it on.
       def forms
         [{ name: 'Website Contact', source: 'Website', fields: :contact }]
+      end
+
+      # The form the dealer's website already submits to, so the play runs on
+      # the form visitors fill in rather than a second one nobody sees.
+      def suggested_form_for(company)
+        return nil if company.nil?
+
+        website_form = company.intake_forms.active.find_by(id: Websites::FormsInUse.ids_for(company).first)
+        website_form || super
       end
 
       def start_tag

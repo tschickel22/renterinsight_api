@@ -305,6 +305,10 @@ module Api
             :marketing_consent_enabled, :marketingConsentEnabled,
             :marketing_consent_text, :marketingConsentText,
             :marketing_consent_version, :marketingConsentVersion,
+            # Who new leads go to: one person (notified_user_id) or a rotation.
+            # The rotation is saved as reps, never as a list id from the browser.
+            :assignment_mode, :assignmentMode,
+            rotation_user_ids: [], rotationUserIds: [],
             field_mappings: {},
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
@@ -372,6 +376,15 @@ module Api
             if p.key?(:marketing_consent_enabled)
               p[:marketing_consent_enabled] = ActiveModel::Type::Boolean.new.cast(p[:marketing_consent_enabled])
             end
+
+            { assignmentMode: :assignment_mode, rotationUserIds: :rotation_user_ids }.each do |camel, snake|
+              if p.key?(snake)
+                p.delete(camel)
+              elsif p.key?(camel)
+                p[snake] = p.delete(camel)
+              end
+            end
+            p[:assignment_mode] = nil if p[:assignment_mode].is_a?(String) && p[:assignment_mode].strip.empty?
 
             # Ensure fields is set (will be saved to schema column via model)
             p[:fields] ||= []

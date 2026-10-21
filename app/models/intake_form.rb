@@ -23,13 +23,24 @@ class IntakeForm < ApplicationRecord
   # this form land at that location instead of the company's Corporate
   # fallback (see IntakeSubmission#create_lead_from_submission).
   belongs_to :location, optional: true
+  # Who a new lead belongs to: the notified user (one person), or the next rep
+  # in this rotation. The list is the same kind plays, API keys and workflows
+  # use, and a play running on this form shares it, so the form and the play
+  # keep one place in line rather than two.
+  belongs_to :round_robin_list, class_name: 'RoundRobinAssignmentList', optional: true
   has_many :intake_submissions, dependent: :destroy
-  
+
+  ASSIGNMENT_MODES = %w[notified_user round_robin].freeze
+
   before_create :generate_public_id
+  before_save :save_rotation
   after_save :update_submission_count
-  
+
   validates :name, presence: true
   validates :public_id, uniqueness: true, allow_nil: true
+  validates :assignment_mode, inclusion: { in: ASSIGNMENT_MODES }, allow_nil: true
+  validate :rotation_has_reps
+  validate :assignees_belong_to_company
   
   scope :active, -> { where(is_active: true) }
   scope :inactive, -> { where(is_active: false) }
@@ -39,6 +50,29 @@ class IntakeForm < ApplicationRecord
   
   def fields
     schema || []
+  end
+
+  # The reps to rotate between, in order. Set from the form builder; saved onto
+  # the form's rotation list (created the first time) when the form is saved.
+  def rotation_user_ids
+    return @rotation_user_ids unless @rotation_user_ids.nil?
+
+    Array(round_robin_list&.user_ids).map(&:to_i)
+  end
+
+  def rotation_user_ids=(ids)
+    @rotation_user_ids = Array(ids).map(&:to_i).select(&:positive?).uniq
+  end
+
+  def rotates?
+    assignment_mode == 'round_robin' && round_robin_list&.active == true
+  end
+
+  # The rep a new lead from this form belongs to. Advances the rotation, so
+  # call it once per lead actually created. Falls back to the notified user
+  # when everyone in the rotation is inactive.
+  def next_owner_id
+    (rotates? ? round_robin_list.next_active_user!&.id : nil) || notified_user_id
   end
   
   def fields=(value)
@@ -63,6 +97,11 @@ class IntakeForm < ApplicationRecord
     json['publicUrl'] = public_url
     json['embedCode'] = embed_code
     json['notifiedUserId'] = json['notified_user_id']
+    json['assignment_mode'] = assignment_mode || 'notified_user'
+    json['assignmentMode'] = json['assignment_mode']
+    json['roundRobinListId'] = round_robin_list_id
+    json['rotation_user_ids'] = rotation_user_ids
+    json['rotationUserIds'] = json['rotation_user_ids']
     json['locationId'] = json['location_id']
     json['autoCreateLead'] = json['auto_create_lead']
     json['autoCreateActivity'] = json['auto_create_activity']
@@ -162,7 +201,53 @@ class IntakeForm < ApplicationRecord
   end
 
   private
-  
+
+  # Only this company's active users join the rotation; anything else in the
+  # request is dropped. The list is updated in place, so a play sharing it
+  # sees the change and the rotation keeps its place in line.
+  def save_rotation
+    return if @rotation_user_ids.nil? || assignment_mode != 'round_robin'
+
+    active = User.where(company_id: company_id, status: 'active', id: @rotation_user_ids).pluck(:id)
+    ids = @rotation_user_ids & active
+    list = round_robin_list if round_robin_list&.company_id == company_id
+    if list
+      list.update!(user_ids: ids, active: true)
+    else
+      taken = RoundRobinAssignmentList.where(company_id: company_id).pluck(:name)
+      base = "#{name} rotation"
+      list_name = base
+      n = 1
+      list_name = "#{base} (#{n += 1})" while taken.include?(list_name)
+      self.round_robin_list = RoundRobinAssignmentList.create!(company_id: company_id, name: list_name, user_ids: ids, active: true)
+    end
+    @rotation_user_ids = nil
+  end
+
+  def rotation_has_reps
+    return unless assignment_mode == 'round_robin'
+
+    if @rotation_user_ids.nil?
+      errors.add(:base, 'Choose at least one rep to rotate new leads between.') if round_robin_list.nil?
+    elsif User.where(company_id: company_id, status: 'active', id: @rotation_user_ids).none?
+      errors.add(:base, 'Choose at least one active rep to rotate new leads between.')
+    end
+  end
+
+  # A form from one company must never hand its leads, or news of them, to
+  # someone in another. Checked only on change so a form saved before this
+  # rule still saves.
+  def assignees_belong_to_company
+    if will_save_change_to_notified_user_id? && notified_user_id.present? &&
+       !User.where(id: notified_user_id, company_id: company_id).exists?
+      errors.add(:notified_user_id, 'must be someone at this dealership')
+    end
+    if will_save_change_to_round_robin_list_id? && round_robin_list_id.present? &&
+       !RoundRobinAssignmentList.where(id: round_robin_list_id, company_id: company_id).exists?
+      errors.add(:round_robin_list_id, 'must be one of this dealership\'s rotations')
+    end
+  end
+
   def update_submission_count
     return unless saved_change_to_id? || saved_change_to_is_active?
     update_column(:submission_count, intake_submissions.count)
