@@ -37,6 +37,7 @@ module Truebuild
         hidden = hidden_layers(plan)
         done = older_layers(plan).except(*hidden, *failed_now(plan)).merge(done_layers(plan))
         skipped = skipped_layers(plan)
+        untraced = untraced_layers(plan) & skipped
         requeue_stale(plan)
         drawing = rows(plan).where(status: %w[queued running]).count
         photos = plan.group_by { |p| p[:photo] }.map do |photo, items|
@@ -44,10 +45,11 @@ module Truebuild
           # Finishes this photo will show once drawn, so the page can say so.
           { room: items.first[:room], url: Trueview.sized(photo), layers: layers,
             pending: items.reject { |i| (skipped | hidden).include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
-            # Drawn, but held back by its check until someone reviews it.
-            unavailable: items.select { |i| hidden.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
+            # Drawn, but held back by its check until someone reviews it, or
+            # in the photo but its surface could not be outlined.
+            unavailable: items.select { |i| (hidden | untraced).include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq - layers.keys,
             # Picked but not in this photo (a house with no shutters), so the page can say so.
-            not_shown: items.select { |i| skipped.include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq }
+            not_shown: items.select { |i| (skipped - untraced).include?([photo, i[:key], i[:prompt]]) }.map { |i| i[:option_id] }.uniq }
         end
         # The surface each finish paints, so Compare treats the cabinet chips
         # and the cabinet upgrades (or a fridge and an appliance package) as
@@ -291,6 +293,18 @@ module Truebuild
         rows(plan).where(status: 'skipped').select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
                   .reject { |r| due.include?([r.source_url, Surfaces.category(r.selection.first&.dig('surface'))]) }
                   .to_set { |r| plan_key(r, prompts) }
+      end
+
+      # Skipped because every outline of a surface the photo does show was
+      # turned down (Surfaces.rejected?). Told apart from one the photo does
+      # not show: Cahaba's kitchen said its floor was "not shown in this photo".
+      def untraced_layers(plan)
+        refused = TruebuildSurfaceMask.where(source_url: plan.map { |p| p[:photo] }.uniq, version: Surfaces::VERSION).to_a
+                                      .select { |m| Surfaces.rejected?(m) }.to_set { |m| [m.source_url, m.surface] }
+        return Set.new if refused.empty?
+
+        plan.select { |p| refused.include?([p[:photo], Surfaces.category(p[:selection].first&.dig('surface'))]) }
+            .to_set { |p| [p[:photo], p[:key], p[:prompt]] }
       end
 
       # Held back under the current cut without the larger model having

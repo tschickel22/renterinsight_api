@@ -66,7 +66,14 @@ module Truebuild
         ['backsplash', /backsplash/i,
          'the backsplash: the tile, brick or panel on the wall above the countertops, everywhere it runs (beside a window, ' \
          'behind the range up to the hood). Not the range, microwave, hood, outlets, window, cabinets or anything on the counter'],
-        ['flooring', /floor|carpet/i, 'the floor. Not rugs, furniture legs or cabinets'],
+        # Painted as "the floor", the painter covered a strip and stopped: 48 of
+        # production's 92 floor outlines were turned down for what they left
+        # out (the far end of the kitchen, the floor in front of the vanity).
+        ['flooring', /floor|carpet/i,
+         'the whole floor, every part of it that can be seen: from the bottom edge of the photo to the far walls, on both ' \
+         'sides of the room, in front of and around an island or vanity, between cabinet runs, around a toilet or tub, ' \
+         'under a table, and through open doorways into the next room. Not rugs, furniture legs, cabinets, appliances, ' \
+         'a tub or shower, or baseboards'],
         # A "Gable accent" (Timber Creek's shakes) is the outside gable, not a
         # wall inside: matched as an accent wall, shakes were drawn on baths.
         ['accent wall', /(?<!gable )accent|wall ?board/i,
@@ -339,6 +346,9 @@ module Truebuild
             misses: { type: 'string',
                       description: 'A clearly visible part of the surface left out of the magenta, in a few words ("the ' \
                                    'cabinet above the microwave", "the floor left of the vanity"), or "none".' },
+            miss_size: { type: 'string', enum: %w[none slight clear],
+                         description: 'slight: a small or distant part a buyer would hardly notice left in the old finish ' \
+                                      '(a sliver of floor in the far background); clear: a part a buyer would see.' },
             walls: { type: 'integer', description: 'For an accent wall only: how many separate walls the magenta covers.' },
             note: { type: 'string', description: 'One short sentence: what is wrong, if anything.' }
           },
@@ -403,7 +413,7 @@ module Truebuild
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
         cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
-        verdict = result[:input].slice('fit', 'note', 'spills_onto', 'spill_size', 'misses', 'walls')
+        verdict = result[:input].slice('fit', 'note', 'spills_onto', 'spill_size', 'misses', 'miss_size', 'walls')
         verdict['fit'] = strict_fit(key, verdict)
         verdict.merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
       end
@@ -414,6 +424,9 @@ module Truebuild
         above = PRECEDENCE.select { |o| o != key && outranks?(o, key) }
         above.empty? ? '' : " Overlap with the #{above.join(', ')} does not matter (each keeps its own pixels): do not mark it down."
       end
+
+      # Surfaces whose outline may leave a little out (strict_fit).
+      SLIGHT_MISS_OK = ['flooring'].freeze
 
       # A 4 allows a few stray pixels, not a neighbor: Aspire 082's bath accent
       # wall took three walls and the shower surround's edge and scored 4. But
@@ -430,9 +443,14 @@ module Truebuild
         harmless = onto.blank? || onto == 'none' || onto == 'furniture or decor' || outranks?(onto, key) ||
                    verdict['spill_size'] == 'slight'
         missed = verdict['misses'].present? && !verdict['misses'].to_s.strip.match?(/\Anone\.?\z/i)
+        # A floor is large and runs off behind everything: Cahaba's kitchen
+        # floor was turned down for a sliver by the dining table, and the
+        # buyer saw no flooring at all. A slight miss there is let through.
+        missed = false if missed && SLIGHT_MISS_OK.include?(key) && verdict['miss_size'] == 'slight'
         # Marked down for nothing but a slight or harmless spill: Brighton's
         # roof and Woodward's counter scored 3 for "slightly" touching trim.
-        fit = MIN_FIT if harmless && !missed && fit == MIN_FIT - 1 && verdict['spill_size'].present?
+        # A floor's slight miss likewise.
+        fit = MIN_FIT if harmless && !missed && fit == MIN_FIT - 1 && (verdict['spill_size'].present? || verdict['miss_size'] == 'slight')
         fit = [fit, MIN_FIT - 1].min unless harmless
         # Woodward's kitchen cabinets left out the one above the microwave.
         fit = [fit, MIN_FIT - 1].min if missed

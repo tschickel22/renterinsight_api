@@ -590,6 +590,21 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(body['more_options']).to be(true)
     end
 
+    it 'tells a surface the photo lacks apart from one it shows but could not outline' do
+      draw!
+      rows = TruebuildRender.where(purpose: 'layer')
+      rows.update_all(status: 'skipped', usage: { 'mask_version' => Truebuild::Trueview::Layer::VERSION })
+      # The siding is there, but every outline of it was turned down; the house has no shutters.
+      TruebuildSurfaceMask.create!(source_url: rows.first.source_url, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION,
+                                   status: 'done', coverage: 0, mask_url: 'https://b/m.png',
+                                   usage: { 'tries' => 2, 'attempts' => [{ 'present' => true, 'fit' => 3 }] })
+      Rails.cache.clear
+      photo = trueview['photos'].first
+      expect(photo['unavailable']).to include(clay.id, white.id)
+      expect(photo['not_shown']).to include(shutter_black.id)
+      expect(photo['not_shown']).not_to include(clay.id, white.id)
+    end
+
     it 'shows the older drawing while it is cut again, and not once the new check rejects it' do
       draw!
       clay_row = TruebuildRender.find_by("selection->0->>'value' = 'Clay'")
