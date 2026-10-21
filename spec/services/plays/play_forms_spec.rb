@@ -35,7 +35,16 @@ RSpec.describe 'Play intake forms' do
     expect(phone['type']).to eq('phone')
     expect(phone['required']).to be true
     expect(form.fields.map { |field| field['type'] }).not_to include('tel')
-    expect(form.fields.map { |field| field['name'] }).to include('First Name', 'Last Name', 'Email', 'Phone', 'Text Me')
+    expect(form.fields.map { |field| field['name'] }).to include('First Name', 'Last Name', 'Email', 'Phone')
+  end
+
+  it 'asks for consent once, with the box every form already has' do
+    form = forms_of(install(Plays::WalkInVisit)).first
+
+    expect(form.marketing_consent?).to be true
+    # A second box of the play's own drew two consent questions on one form.
+    expect(form.fields.map { |field| field['type'] }).not_to include('consent')
+    expect(form.fields.map { |field| field['leadField'] }).not_to include('opt_in_sms')
   end
 
   it 'creates the form when a play that is already on has none' do

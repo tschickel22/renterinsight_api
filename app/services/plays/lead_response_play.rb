@@ -742,7 +742,7 @@ module Plays
     def create_form(form)
       fields = CONTACT_FIELDS.dup
       fields += PREQUALIFICATION_FIELDS if form[:fields] == :prequalification
-      fields += [MESSAGE_FIELD, sms_consent_field]
+      fields += [MESSAGE_FIELD]
 
       schema = fields.each_with_index.map do |field, index|
         {
@@ -769,21 +769,14 @@ module Plays
         auto_create_lead: true,
         # The play creates its own call task for the assigned rep.
         auto_create_activity: false,
+        # The play texts only a lead who agreed. Every form's own consent box
+        # ("email and text me") is that agreement: ticking it sets opt_in_sms.
+        # Named here because the play depends on it; a second SMS box of its
+        # own drew two consent questions on one form.
+        marketing_consent_enabled: true,
         submit_button_text: 'Send',
         thank_you_message: "Thanks for reaching out. Someone from #{@company.name} will be in touch shortly."
       )
-    end
-
-    # Texts need consent. The play only texts a lead who ticked this box.
-    # 'consent' renders as a checkbox labelled by the placeholder, with the
-    # consent text in a box beneath it, on both public form renderers.
-    def sms_consent_field
-      {
-        name: 'Text Me', label: 'Text messages', placeholder: 'Text me about my inquiry', type: 'consent',
-        required: false, lead_field: 'opt_in_sms',
-        consent_text: "By checking this box you agree to receive text messages from #{@company.name} about your inquiry. " \
-                      'Message and data rates may apply. Reply STOP to opt out.'
-      }
     end
 
     # Email only: a nurture step does not check text consent, so it never texts.
