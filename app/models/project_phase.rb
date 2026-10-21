@@ -19,6 +19,7 @@ class ProjectPhase < ApplicationRecord
   validates :name, presence: true
   validates :position, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :status, presence: true, inclusion: { in: STATUSES }
+  validate :not_held_for_price, on: :update
 
   # Scopes
   scope :ordered, -> { order(:position) }
@@ -150,7 +151,34 @@ class ProjectPhase < ApplicationRecord
     link&.installer_company&.name
   end
 
+  # On the installer's side of a priced job (E68 step 6): why this phase
+  # can't start yet, while a price or change order waits for the dealer.
+  def price_hold_message
+    map = ProjectLinkPhase.includes(project_link: :dealer_company).find_by(installer_phase_id: id)
+    pl = map&.project_link
+    return nil unless pl&.accepted? && !pl.legacy_price?
+
+    dealer = pl.dealer_company.name
+    if (held = pl.hold_for(map.dealer_phase_id))
+      "#{name} can't start until #{dealer} approves #{held.price? ? 'the price' : held.label.downcase}."
+    elsif !pl.price_agreed?
+      "#{name} can't start until #{dealer} approves a price for the job."
+    end
+  end
+
+  # Would this save start a phase that isn't started yet?
+  def starting?
+    status_was == 'not_started' && status.in?(%w[in_progress completed])
+  end
+
   private
+
+  def not_held_for_price
+    return unless will_save_change_to_status? && starting?
+
+    msg = price_hold_message
+    errors.add(:base, msg) if msg
+  end
 
   def linked_sync_change?
     return false if Current.project_link_sync

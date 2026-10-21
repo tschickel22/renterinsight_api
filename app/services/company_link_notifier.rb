@@ -93,6 +93,46 @@ class CompanyLinkNotifier
       end
     end
 
+    # ── Rate cards, price requests and change orders (step 6) ──────────────
+
+    def rate_card_submitted(card)
+      link = card.company_link
+      dealer_people(link).each do |u|
+        bell(u, :company_link, "New rate card from #{link.installer_company.name}",
+             "Version #{card.version}, #{card.items.size} #{'line'.pluralize(card.items.size)}. Approve it under Linked companies, Links.", card)
+      end
+    end
+
+    def rate_card_decided(card)
+      link = card.company_link
+      verb = card.approved? ? 'approved' : 'declined'
+      text = card.approved? ? 'Jobs priced from it are approved when they are sent.' : card.decline_reason.presence || 'Send a new version from Linked companies, Links.'
+      installer_admins(link).each do |u|
+        bell(u, :company_link, "#{link.dealer_company.name} #{verb} your rate card", "Version #{card.version}. #{text}", card)
+      end
+    end
+
+    def change_requested(change)
+      pl = change.project_link
+      amount = ActiveSupport::NumberHelper.number_to_currency(change.amount)
+      title = change.price? ? "#{pl.installer_company.name} priced a job at #{amount}" : "Change order from #{pl.installer_company.name}: #{amount}"
+      what = change.price? ? 'Its phases' : (change.dealer_phase&.name || 'The phases it covers')
+      dealer_recipients(pl).each do |u|
+        bell(u, :project_link, title,
+             "#{pl.scope_label} on #{pl.dealer_project.name}. #{what} can't start until you approve it.", change)
+      end
+    end
+
+    def change_decided(change)
+      pl = change.project_link
+      verb = change.status == 'approved' ? 'approved' : 'declined'
+      text = "#{change.price? ? 'Price' : "Change order #{change.number}"} #{ActiveSupport::NumberHelper.number_to_currency(change.amount)} on #{pl.scope_label}."
+      text += " Reason: #{change.decline_reason}" if change.decline_reason.present?
+      installer_admins(pl.company_link).each do |u|
+        bell(u, :project_link, "#{pl.dealer_company.name} #{verb} your #{change.price? ? 'price' : 'change order'}", text, change)
+      end
+    end
+
     private
 
     def bell(user, type, title, message, notifiable)

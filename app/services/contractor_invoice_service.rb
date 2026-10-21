@@ -57,14 +57,29 @@ class ContractorInvoiceService
   # A linked installer company's invoice for the job (E68 step 5e). Same
   # draft bill and cost-line match as a portal invoice, without a file: the
   # installer's own invoice is the record, in its own books.
-  def submit_linked!(amount:, invoice_number: nil, notes: nil, due_date: nil, source: 'linked_installer', submission: {})
+  #
+  # cost_items: the committed lines this bill pays (the agreed price and its
+  # approved change orders, E68 step 6). They add up to the amount, so the
+  # bill takes them over as they are. Without them the usual match applies.
+  def submit_linked!(amount:, invoice_number: nil, notes: nil, due_date: nil, source: 'linked_installer', submission: {},
+                     cost_items: nil)
     amount = amount.to_s.delete(',$').to_d
     raise Error, 'Enter the invoice total' unless amount.positive?
     check_duplicate!(invoice_number)
+    if cost_items.present?
+      raise Error, 'Those cost lines are not on this project' if cost_items.any? { |l| l.project_id != @project.id }
+      raise Error, 'Those cost lines are already billed' if cost_items.any?(&:bill_id)
+      raise Error, 'The bill must match its cost lines' unless cost_items.sum { |l| l.amount.to_d } == amount
+    end
 
     ActiveRecord::Base.transaction do
       @bill = create_bill!(amount, invoice_number, nil, notes, nil, nil, source: source, extra: submission, due_date: due_date)
-      @cost_item = link_cost_item!(amount, invoice_number, nil)
+      if cost_items.present?
+        cost_items.each { |l| l.update!(bill_id: @bill.id, invoice_number: invoice_number.presence || l.invoice_number) }
+        @cost_item = cost_items.first
+      else
+        @cost_item = link_cost_item!(amount, invoice_number, nil)
+      end
     end
     @bill
   end

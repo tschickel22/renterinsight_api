@@ -16,6 +16,7 @@ class CompanyLink < ApplicationRecord
   belongs_to :installer_dealer_account, class_name: 'Account', optional: true
   has_many :project_links, dependent: :restrict_with_error
   has_many :events, class_name: 'CompanyLinkEvent', dependent: :delete_all
+  has_many :rate_cards, class_name: 'LinkRateCard', dependent: :destroy
 
   validates :status, inclusion: { in: STATUSES }
   validates :invite_email, presence: true
@@ -36,6 +37,16 @@ class CompanyLink < ApplicationRecord
     return :installer if company&.id == installer_company_id
 
     nil
+  end
+
+  # The installer's prices in force for this dealer (E68 step 6), and a newer
+  # version waiting for the dealer, if any.
+  def current_rate_card
+    rate_cards.approved.order(version: :desc).first
+  end
+
+  def pending_rate_card
+    rate_cards.submitted.order(version: :desc).first
   end
 
   def log!(kind, summary, company:, user: nil, project_link: nil, data: {})

@@ -58,6 +58,7 @@ class Project < ApplicationRecord
     return { error: 'No current phase set' } unless current
     return { error: 'Current phase is already completed' } if current.status == 'completed'
     return linked_phase_error(current) if linked_phase_error(current)
+    return { error: current.price_hold_message } if current.status == 'not_started' && current.price_hold_message
 
     # Complete the current phase
     current.mark_complete!(completed_by: completed_by)
@@ -69,7 +70,7 @@ class Project < ApplicationRecord
                                .first
 
     if next_phase
-      next_phase.mark_in_progress!
+      next_phase.mark_in_progress! unless next_phase.price_hold_message
       self.current_phase_id = next_phase.id
     else
       # All phases done — project is complete
@@ -89,6 +90,9 @@ class Project < ApplicationRecord
     return { error: 'Phase not found in this project' } unless phase.project_id == id
     return { error: 'Invalid status' } unless ProjectPhase::STATUSES.include?(new_status)
     return linked_phase_error(phase) if linked_phase_error(phase)
+    if phase.status == 'not_started' && new_status.in?(%w[in_progress completed]) && (held = phase.price_hold_message)
+      return { error: held }
+    end
 
     old_status = phase.status
 
@@ -215,7 +219,7 @@ class Project < ApplicationRecord
                                  .order(:position)
                                  .first
       if next_phase
-        next_phase.mark_in_progress!
+        next_phase.mark_in_progress! unless next_phase.price_hold_message
         update!(current_phase_id: next_phase.id)
       else
         update!(status: 'completed', actual_completion_date: Date.current, current_phase_id: nil)
@@ -252,7 +256,7 @@ class Project < ApplicationRecord
 
   def start!
     first_phase = project_phases.order(:position).first
-    return unless first_phase && first_phase.status == 'not_started'
+    return unless first_phase && first_phase.status == 'not_started' && first_phase.price_hold_message.nil?
 
     first_phase.mark_in_progress!
     update!(current_phase_id: first_phase.id, started_at: Date.current)

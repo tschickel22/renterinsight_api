@@ -108,7 +108,10 @@ RSpec.describe 'Company links', type: :request do
     expect(job).to include('customer_name' => 'Maria Diaz', 'customer_phone' => '303-555-0100', 'scope_label' => 'Set', 'fee_amount' => 4500.0)
     expect(job['site']).to include('Golden')
     expect(job['phases'].first['tasks']).to eq(['Set and level', 'Tie down'])
-    expect(job.keys.grep(/price|gross|cost/)).to be_empty
+    # The deal's price and the dealer's costs never cross. The price agreed
+    # between the two companies (step 6) does.
+    expect(job.keys.grep(/price|gross|cost/) - %w[price_source price_lines price_agreed]).to be_empty
+    expect(job.to_s).not_to include('deal_price', 'sale_price', 'front_gross')
 
     post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
     expect(response).to have_http_status(:ok), response.body
@@ -290,6 +293,6 @@ RSpec.describe 'Company links', type: :request do
     post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
     project.update!(deal_id: nil)
     dealer_note = Notification.where(recipient: dealer, notification_type: 'project_link').last
-    expect(dealer_note.computed_action_url).to eq('/linked-companies')
+    expect(dealer_note.computed_action_url).to eq("/deals/projects/#{project.id}")
   end
 end

@@ -18,9 +18,16 @@ class ProjectLink < ApplicationRecord
   belongs_to :installer_invoice, class_name: 'Invoice', optional: true
   belongs_to :dealer_bill, class_name: 'Bill', optional: true
   has_many :link_phases, class_name: 'ProjectLinkPhase', dependent: :delete_all
+  # Price requests and change orders (step 6). Not named "changes": that is
+  # ActiveRecord's dirty tracking.
+  has_many :link_changes, class_name: 'ProjectLinkChange', dependent: :destroy
+  belongs_to :link_rate_card, optional: true
+
+  PRICE_SOURCES = %w[card dealer quote].freeze
 
   validates :status, inclusion: { in: STATUSES }
   validates :fee_amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :price_source, inclusion: { in: PRICE_SOURCES }, allow_nil: true
   validate :records_match_the_link
 
   scope :live, -> { where(status: %w[offered accepted]) }
@@ -40,6 +47,29 @@ class ProjectLink < ApplicationRecord
     return dealer_project.project_phases.where(id: dealer_phase_ids).order(:position).to_a if dealer_phase_ids.present?
 
     dealer_project.project_phases.order(:position).to_a
+  end
+
+  # Sent before step 6 with no price rules: billed for whatever the
+  # installer enters, and nothing holds its phases.
+  def legacy_price?
+    price_source.nil?
+  end
+
+  # The price is agreed: from the card or the dealer at hand-off, or a price
+  # request the dealer approved.
+  def price_agreed?
+    !legacy_price? && !fee_amount.nil?
+  end
+
+  # What the dealer has agreed to pay: the price plus approved change orders.
+  def approved_total
+    fee_amount.to_d + link_changes.approved.where(kind: 'change').sum(:amount)
+  end
+
+  # A request waiting for the dealer that holds this dealer phase: one aimed
+  # at it, or one for the whole job.
+  def hold_for(dealer_phase_id)
+    link_changes.pending.where(dealer_phase_id: [nil, dealer_phase_id]).order(:number).first
   end
 
   def scope_label

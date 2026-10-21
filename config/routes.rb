@@ -690,6 +690,16 @@ Rails.application.routes.draw do
           post :accept
           post :end, action: :end_link
           get :events
+          get :rate_cards
+          post :rate_cards, action: :submit_rate_card
+        end
+      end
+      # Rate cards, price requests and change orders (E68 step 6)
+      resources :link_rate_cards, only: [] do
+        member do
+          post :approve
+          post :decline
+          post :withdraw
         end
       end
       resources :project_links, only: [] do
@@ -698,6 +708,14 @@ Rails.application.routes.draw do
           post :accept
           post :decline
           post :bill
+          post :changes, action: :request_change
+        end
+      end
+      resources :project_link_changes, only: [] do
+        member do
+          post :approve
+          post :decline
+          post :withdraw
         end
       end
 

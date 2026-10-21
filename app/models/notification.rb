@@ -228,15 +228,17 @@ class Notification < ApplicationRecord
       # Bids live on the deal's Progress tab, beside the project's phases.
       deal_id = notifiable.project_bid_request&.project&.deal_id
       deal_id ? "/deals/#{deal_id}?tab=progress&projectTab=bids" : nil
-    when 'CompanyLink'
+    when 'CompanyLink', 'LinkRateCard'
       '/linked-companies?view=links'
-    when 'ProjectLink'
-      # The same job opens differently on each side of the link.
-      if company_id == notifiable.installer_company_id
+    when 'ProjectLink', 'ProjectLinkChange'
+      # The same job opens differently on each side of the link. A price
+      # request or change order opens its job.
+      pl = notifiable_type == 'ProjectLink' ? notifiable : notifiable.project_link
+      if company_id == pl.installer_company_id
         '/linked-companies?view=jobs'
       else
-        deal_id = notifiable.dealer_project&.deal_id
-        deal_id ? "/deals/#{deal_id}?tab=progress" : '/linked-companies'
+        deal_id = pl.dealer_project&.deal_id
+        deal_id ? "/deals/#{deal_id}?tab=progress" : "/deals/projects/#{pl.dealer_project_id}"
       end
     when 'Note'
       # Try to get parent URL

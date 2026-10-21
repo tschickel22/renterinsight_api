@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
 # Handing a project, or one phase, to a linked installer company and taking
-# it through accept, decline, take back and billing (E68 steps 5c and 5e).
+# it through accept, decline, take back and billing (E68 steps 5c and 5e),
+# with its price agreed first: from the installer's rate card, set by the
+# dealer, or quoted by the installer and approved by the dealer, plus change
+# orders the dealer approves (step 6).
 #
 # Every write to the other company's records happens here or in
 # ProjectLinkSync, with both companies named and the link checked. Nothing a
@@ -18,12 +21,39 @@ class ProjectLinkService
 
   # phases: none for the whole project, or one or more of its phases for one
   # fee (install and delivery together, say).
-  def offer!(project:, link:, phases: [], fee: nil, note: nil)
+  #
+  # price_mode: 'card' (card_lines picked from their approved rate card, the
+  # total is the fee, approved at hand-off), 'dealer' (the fee the dealer
+  # typed) or 'quote' (the installer prices it when accepting, and the dealer
+  # approves that before any of it starts). Left out, a fee means 'dealer'
+  # and no fee means 'quote'.
+  def offer!(project:, link:, phases: [], fee: nil, note: nil, price_mode: nil, card_lines: [])
     raise Error, 'Not your project' unless project.company_id == @company.id
     raise Error, 'Pick an active linked installer' unless link&.active? && link.dealer_company_id == @company.id
     phases = Array(phases).uniq
     raise Error, 'That phase is not on this project' if phases.any? { |ph| ph.project_id != project.id }
     fee = parse_amount(fee)
+    price_mode = price_mode.presence || (fee ? 'dealer' : 'quote')
+    raise Error, 'Pick how to price it' unless price_mode.in?(ProjectLink::PRICE_SOURCES)
+
+    card = nil
+    lines = []
+    case price_mode
+    when 'card'
+      card = link.current_rate_card
+      raise Error, "#{link.installer_company.name} has no approved rate card" unless card
+      begin
+        lines = card.price_lines(card_lines)
+      rescue ArgumentError => e
+        raise Error, e.message
+      end
+      raise Error, 'Pick at least one line from their rate card' if lines.empty?
+      fee = lines.sum { |l| l['amount'].to_d }
+    when 'dealer'
+      raise Error, 'Enter the price' unless fee&.positive?
+    when 'quote'
+      fee = nil
+    end
 
     live = ProjectLink.live.where(dealer_project_id: project.id).to_a
     taken = live.flat_map { |l| l.dealer_phases.map(&:id) }
@@ -36,11 +66,12 @@ class ProjectLinkService
       pl = ProjectLink.create!(company_link: link, dealer_company: @company, installer_company: link.installer_company,
                                dealer_project: project, dealer_phase: phases.one? ? phases.first : nil,
                                dealer_phase_ids: phases.many? ? phases.sort_by(&:position).map(&:id) : [],
-                               fee_amount: fee, note: note.presence, offered_by: @actor, offered_at: Time.current)
+                               fee_amount: fee, note: note.presence, offered_by: @actor, offered_at: Time.current,
+                               price_source: price_mode, price_lines: lines, link_rate_card: card)
       set_dealer_owner!(pl, link.dealer_vendor_id)
       pl.update!(dealer_cost_item: committed_cost!(pl)) if fee&.positive?
       link.log!('job_offered', "#{@company.name} sent #{pl.scope_label} on #{project.name}", company: @company, user: @actor,
-                project_link: pl, data: { fee: fee&.to_s, phase_ids: phases.map(&:id) })
+                project_link: pl, data: { fee: fee&.to_s, price_source: price_mode, rate_card_version: card&.version, phase_ids: phases.map(&:id) })
     end
     CompanyLinkNotifier.job_offered(pl)
     pl
@@ -65,18 +96,101 @@ class ProjectLinkService
 
   # ── Installer side ──────────────────────────────────────────────────────
 
-  def accept!(pl)
+  # price_lines: the installer's price, required on a job sent for a quote.
+  # On a priced job it's a different price than the one offered. Either way
+  # it waits for the dealer, and the job's phases can't start until then.
+  def accept!(pl, price_lines: nil, price_note: nil)
     check_installer!(pl)
     raise Error, 'This job is no longer waiting for you' unless pl.offered?
+    lines = Array(price_lines).compact_blank.presence && build_lines(pl, price_lines)
+    raise Error, "Enter your price. #{pl.dealer_company.name} asked you to quote this job." if pl.price_source == 'quote' && lines.nil?
 
+    request = nil
     ActiveRecord::Base.transaction do
       pl.lock!
       project = build_installer_project!(pl)
       pl.update!(status: 'accepted', installer_project: project, responded_by: @actor, responded_at: Time.current)
       pl.company_link.log!('job_accepted', "#{@company.name} accepted #{pl.scope_label}", company: @company, user: @actor, project_link: pl)
+      request = create_change!(pl, kind: 'price', lines: lines, description: price_note) if lines
     end
     CompanyLinkNotifier.job_answered(pl)
+    CompanyLinkNotifier.change_requested(request) if request
     pl
+  end
+
+  # ── Price requests and change orders (step 6) ──────────────────────────
+
+  # Installer side. kind 'change' adds work and money; 'price' asks for a
+  # different price for the job. dealer_phase_id holds that one phase;
+  # without it the request holds every phase of the job not yet started.
+  def request_change!(pl, kind:, lines:, description: nil, dealer_phase_id: nil)
+    check_installer!(pl)
+    raise Error, 'Accept the job first' unless pl.accepted?
+    raise Error, 'This job has already been billed' if pl.dealer_bill_id
+    raise Error, 'Pick a price request or a change order' unless kind.in?(ProjectLinkChange::KINDS)
+    raise Error, 'Describe the change' if kind == 'change' && description.blank?
+    raise Error, 'A price request is already waiting for the dealer' if kind == 'price' && pl.link_changes.pending.where(kind: 'price').exists?
+    if dealer_phase_id.present?
+      phase = pl.dealer_phases.find { |ph| ph.id == dealer_phase_id.to_i }
+      raise Error, 'That phase is not on this job' unless phase
+      raise Error, "#{phase.name} is already finished" if phase.status.in?(%w[completed skipped])
+    end
+
+    change = nil
+    ActiveRecord::Base.transaction do
+      pl.lock!
+      change = create_change!(pl, kind: kind, lines: build_lines(pl, lines), description: description,
+                                  dealer_phase_id: phase&.id)
+    end
+    CompanyLinkNotifier.change_requested(change)
+    change
+  end
+
+  def withdraw_change!(change)
+    pl = change.project_link
+    check_installer!(pl)
+    raise Error, 'Only a request still waiting can be withdrawn' unless change.pending?
+
+    change.update!(status: 'withdrawn', decided_by: @actor, decided_at: Time.current)
+    pl.company_link.log!('change_withdrawn', "#{@company.name} withdrew #{change.label.downcase} on #{pl.scope_label}",
+                         company: @company, user: @actor, project_link: pl)
+    change
+  end
+
+  # Dealer side. An approved price becomes the job's fee and its committed
+  # cost; an approved change order adds its own committed cost line.
+  def approve_change!(change)
+    pl = check_dealer_change!(change)
+    ActiveRecord::Base.transaction do
+      pl.lock!
+      change.update!(status: 'approved', decided_by: @actor, decided_at: Time.current)
+      if change.price?
+        pl.update!(fee_amount: change.amount, price_lines: change.lines)
+        line = pl.dealer_cost_item
+        if line && line.status == 'pending' && line.bill_id.nil?
+          line.update!(amount: change.amount, unit_price: change.amount)
+        else
+          pl.update!(dealer_cost_item: committed_cost!(pl))
+        end
+      else
+        change.update!(dealer_cost_item: change_cost!(pl, change))
+      end
+      pl.installer_project&.update!(budget_amount: pl.approved_total)
+      pl.company_link.log!('change_approved', "#{@company.name} approved #{change.label.downcase} on #{pl.scope_label}: " \
+                                              "#{money(change.amount)}", company: @company, user: @actor, project_link: pl,
+                           data: { change_id: change.id, amount: change.amount.to_s })
+    end
+    CompanyLinkNotifier.change_decided(change)
+    change
+  end
+
+  def decline_change!(change, reason: nil)
+    pl = check_dealer_change!(change)
+    change.update!(status: 'declined', decided_by: @actor, decided_at: Time.current, decline_reason: reason.presence)
+    pl.company_link.log!('change_declined', ["#{@company.name} declined #{change.label.downcase} on #{pl.scope_label}", reason.presence].compact.join(': '),
+                         company: @company, user: @actor, project_link: pl, data: { change_id: change.id })
+    CompanyLinkNotifier.change_decided(change)
+    change
   end
 
   def decline!(pl, reason: nil)
@@ -100,7 +214,22 @@ class ProjectLinkService
     check_installer!(pl)
     raise Error, 'Accept the job before billing it' unless pl.status.in?(%w[accepted done])
     raise Error, 'This job has already been billed' if pl.dealer_bill_id
+    if (waiting = pl.link_changes.pending.order(:number).first)
+      raise Error, "#{pl.dealer_company.name} hasn't decided on #{waiting.price? ? 'the price' : waiting.label.downcase} yet. Wait for it, or withdraw it."
+    end
     amount = parse_amount(amount)
+    cost_items = nil
+    # A priced job bills what the dealer agreed to, and pays those committed
+    # lines, so the job's cost is counted once.
+    unless pl.legacy_price?
+      raise Error, "#{pl.dealer_company.name} hasn't approved a price for this job yet" unless pl.price_agreed?
+      agreed = pl.approved_total
+      if amount && amount != agreed
+        raise Error, "The approved total is #{money(agreed)}. To bill a different amount, send a change order or a new price first."
+      end
+      amount = agreed
+      cost_items = [pl.dealer_cost_item, *pl.link_changes.approved.where(kind: 'change').order(:number).map(&:dealer_cost_item)].compact
+    end
     raise Error, 'Enter the amount' unless amount&.positive?
 
     link = pl.company_link
@@ -113,6 +242,7 @@ class ProjectLinkService
       bill = ContractorInvoiceService.new(contractor: link.dealer_vendor, project: dealer_project, phase: pl.dealer_phase)
                                      .submit_linked!(amount: amount, invoice_number: invoice_number.presence || invoice.invoice_number,
                                                      notes: notes, due_date: invoice.due_date, source: 'linked_installer',
+                                                     cost_items: cost_items,
                                                      submission: { 'project_link_id' => pl.id, 'installer_company' => @company.name })
       pl.update!(installer_invoice: invoice, dealer_bill: bill)
       link.log!('job_billed', "#{@company.name} billed #{ActiveSupport::NumberHelper.number_to_currency(amount)} for #{pl.scope_label}",
@@ -169,6 +299,13 @@ class ProjectLinkService
       pl.update_column(:dealer_cost_item_id, nil)
       line.destroy!
     end
+    pl.link_changes.each do |change|
+      change.update!(status: 'withdrawn', decided_at: Time.current) if change.pending?
+      next unless (line = change.dealer_cost_item) && line.status == 'pending' && line.bill_id.nil?
+
+      change.update_column(:dealer_cost_item_id, nil)
+      line.destroy!
+    end
     pl.link_phases.delete_all
   end
 
@@ -183,6 +320,74 @@ class ProjectLinkService
     has_costs = project.project_cost_items.not_deleted.exists? ||
                 pl.installer_company.bills.where(project_id: project.id).where.not(status: 'void').exists?
     project.update!(status: has_costs ? 'on_hold' : 'cancelled')
+  end
+
+  def check_dealer_change!(change)
+    pl = change.project_link
+    raise Error, 'Not your job' unless pl.dealer_company_id == @company.id
+    raise Error, 'The link with this installer has ended' unless pl.company_link.active?
+    raise Error, 'This request is not waiting for you' unless change.pending?
+    raise Error, 'This job is closed' unless pl.accepted?
+
+    pl
+  end
+
+  def create_change!(pl, kind:, lines:, description: nil, dealer_phase_id: nil)
+    number = (pl.link_changes.maximum(:number) || 0) + 1
+    change = pl.link_changes.create!(number: number, kind: kind, lines: lines, description: description.presence,
+                                     amount: lines.sum { |l| l['amount'].to_d }, dealer_phase_id: dealer_phase_id,
+                                     requested_by: @actor)
+    pl.company_link.log!(kind == 'price' ? 'price_requested' : 'change_requested',
+                         "#{@company.name} asked for #{kind == 'price' ? 'a price of' : "change order #{number},"} #{money(change.amount)} on #{pl.scope_label}",
+                         company: @company, user: @actor, project_link: pl, data: { change_id: change.id, amount: change.amount.to_s })
+    change
+  end
+
+  # The installer's lines: picked from its approved rate card for this
+  # dealer ({ item_key, qty }) or written out ({ name, qty, price }).
+  def build_lines(pl, raw)
+    card = pl.company_link.current_rate_card
+    lines = Array(raw).compact_blank.map do |line|
+      line = line.to_h.stringify_keys
+      if line['item_key'].present?
+        raise Error, 'Your rate card for this dealer is not approved yet' unless card
+        begin
+          card.price_lines([line]).first
+        rescue ArgumentError => e
+          raise Error, e.message
+        end
+      else
+        name = line['name'].to_s.strip
+        qty = line['qty'].to_s.presence&.to_d || 1.to_d
+        price = parse_amount(line['price'])
+        raise Error, 'Each line needs a description' if name.blank?
+        raise Error, "Enter a quantity for #{name}" unless qty.positive?
+        raise Error, "Enter a price for #{name}" unless price && price >= 0
+
+        { 'item_key' => nil, 'name' => name.truncate(200), 'unit' => 'each', 'qty' => qty.to_s,
+          'price' => price.to_s, 'amount' => (price * qty).round(2).to_s }
+      end
+    end
+    raise Error, 'Add at least one line' if lines.empty?
+    raise Error, 'The total must be more than zero' unless lines.sum { |l| l['amount'].to_d }.positive?
+
+    lines
+  end
+
+  def money(amount)
+    ActiveSupport::NumberHelper.number_to_currency(amount)
+  end
+
+  # An approved change order is committed cost on the dealer's project, on
+  # the phase it names (or the job's one phase), until the bill pays it.
+  def change_cost!(pl, change)
+    pl.dealer_project.project_cost_items.create!(
+      company_id: pl.dealer_company_id, project_phase_id: change.dealer_phase_id || pl.dealer_phase&.id,
+      vendor_id: pl.company_link.dealer_vendor_id, cost_type: 'subcontractor',
+      description: "Installer change order #{change.number}: #{change.description}".truncate(250),
+      amount: change.amount, quantity: 1, unit_price: change.amount, date: Date.current, status: 'pending',
+      metadata: { 'source' => 'project_link_change', 'project_link_id' => pl.id, 'change_id' => change.id }
+    )
   end
 
   # The installer's fee is the dealer's committed cost, like an awarded bid.
@@ -241,8 +446,19 @@ class ProjectLinkService
       invoice_date: Date.current, due_date: Date.current + 30, status: 'draft',
       notes: ["#{pl.scope_label} for #{pl.dealer_project.customer_display_name}", notes.presence].compact.join("\n")
     )
-    invoice.invoice_items.build(description: "#{pl.scope_label}: #{pl.dealer_project.customer_display_name}".truncate(250),
-                                quantity: 1, rate: amount, position: 0)
+    if pl.legacy_price?
+      invoice.invoice_items.build(description: "#{pl.scope_label}: #{pl.dealer_project.customer_display_name}".truncate(250),
+                                  quantity: 1, rate: amount, position: 0)
+    else
+      # The agreed price, then each approved change order, so both companies'
+      # records show the same breakdown.
+      invoice.invoice_items.build(description: "#{pl.scope_label}: #{pl.dealer_project.customer_display_name}".truncate(250),
+                                  quantity: 1, rate: pl.fee_amount, position: 0)
+      pl.link_changes.approved.where(kind: 'change').order(:number).each_with_index do |change, i|
+        invoice.invoice_items.build(description: "Change order #{change.number}: #{change.description}".truncate(250),
+                                    quantity: 1, rate: change.amount, position: i + 1)
+      end
+    end
     invoice.save!
     # Finalizing is what posts it to the installer's books (auto-post).
     invoice.update!(status: 'finalized')

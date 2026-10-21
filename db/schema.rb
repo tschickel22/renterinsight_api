@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_20_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4479,6 +4479,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
     t.index ["company_id"], name: "index_lenders_on_company_id"
   end
 
+  create_table "link_rate_cards", force: :cascade do |t|
+    t.bigint "company_link_id", null: false
+    t.integer "version", null: false
+    t.string "status", default: "submitted", null: false
+    t.jsonb "items", default: [], null: false
+    t.text "note"
+    t.bigint "submitted_by_id"
+    t.bigint "decided_by_id"
+    t.datetime "decided_at"
+    t.text "decline_reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_link_id", "version"], name: "index_link_rate_cards_on_company_link_id_and_version", unique: true
+    t.index ["company_link_id"], name: "index_link_rate_cards_on_company_link_id"
+    t.index ["decided_by_id"], name: "index_link_rate_cards_on_decided_by_id"
+    t.index ["submitted_by_id"], name: "index_link_rate_cards_on_submitted_by_id"
+  end
+
   create_table "listings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "vehicle_id", null: false
@@ -5714,6 +5732,31 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
     t.index ["uploaded_by_id"], name: "index_project_documents_on_uploaded_by_id"
   end
 
+  create_table "project_link_changes", force: :cascade do |t|
+    t.bigint "project_link_id", null: false
+    t.integer "number", null: false
+    t.string "kind", null: false
+    t.string "status", default: "pending", null: false
+    t.text "description"
+    t.jsonb "lines", default: [], null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.bigint "dealer_phase_id"
+    t.bigint "requested_by_id"
+    t.bigint "decided_by_id"
+    t.datetime "decided_at"
+    t.text "decline_reason"
+    t.bigint "dealer_cost_item_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["dealer_cost_item_id"], name: "index_project_link_changes_on_dealer_cost_item_id"
+    t.index ["dealer_phase_id"], name: "index_project_link_changes_on_dealer_phase_id"
+    t.index ["decided_by_id"], name: "index_project_link_changes_on_decided_by_id"
+    t.index ["project_link_id", "number"], name: "index_project_link_changes_on_project_link_id_and_number", unique: true
+    t.index ["project_link_id", "status"], name: "index_project_link_changes_on_project_link_id_and_status"
+    t.index ["project_link_id"], name: "index_project_link_changes_on_project_link_id"
+    t.index ["requested_by_id"], name: "index_project_link_changes_on_requested_by_id"
+  end
+
   create_table "project_link_phases", force: :cascade do |t|
     t.bigint "project_link_id", null: false
     t.bigint "dealer_phase_id", null: false
@@ -5747,6 +5790,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
     t.datetime "updated_at", null: false
     t.jsonb "previous_owners", default: {}, null: false
     t.bigint "dealer_phase_ids", default: [], null: false, array: true
+    t.string "price_source"
+    t.jsonb "price_lines", default: [], null: false
+    t.bigint "link_rate_card_id"
     t.index ["company_link_id"], name: "index_project_links_on_company_link_id"
     t.index ["dealer_bill_id"], name: "index_project_links_on_dealer_bill_id"
     t.index ["dealer_company_id"], name: "index_project_links_on_dealer_company_id"
@@ -5757,6 +5803,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
     t.index ["installer_company_id"], name: "index_project_links_on_installer_company_id"
     t.index ["installer_invoice_id"], name: "index_project_links_on_installer_invoice_id"
     t.index ["installer_project_id"], name: "index_project_links_on_installer_project_id"
+    t.index ["link_rate_card_id"], name: "index_project_links_on_link_rate_card_id"
     t.index ["offered_by_id"], name: "index_project_links_on_offered_by_id"
     t.index ["responded_by_id"], name: "index_project_links_on_responded_by_id"
   end
@@ -9202,6 +9249,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
   add_foreign_key "lender_program_tiers", "lender_programs"
   add_foreign_key "lender_programs", "companies"
   add_foreign_key "lenders", "companies"
+  add_foreign_key "link_rate_cards", "company_links"
+  add_foreign_key "link_rate_cards", "users", column: "decided_by_id"
+  add_foreign_key "link_rate_cards", "users", column: "submitted_by_id"
   add_foreign_key "listings", "companies"
   add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"
@@ -9288,6 +9338,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
   add_foreign_key "project_documents", "companies"
   add_foreign_key "project_documents", "projects"
   add_foreign_key "project_documents", "users", column: "uploaded_by_id", on_delete: :nullify
+  add_foreign_key "project_link_changes", "project_cost_items", column: "dealer_cost_item_id", on_delete: :nullify
+  add_foreign_key "project_link_changes", "project_links"
+  add_foreign_key "project_link_changes", "project_phases", column: "dealer_phase_id"
+  add_foreign_key "project_link_changes", "users", column: "decided_by_id"
+  add_foreign_key "project_link_changes", "users", column: "requested_by_id"
   add_foreign_key "project_link_phases", "project_links"
   add_foreign_key "project_link_phases", "project_phases", column: "dealer_phase_id"
   add_foreign_key "project_link_phases", "project_phases", column: "installer_phase_id"
@@ -9296,6 +9351,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_20_120000) do
   add_foreign_key "project_links", "companies", column: "installer_company_id"
   add_foreign_key "project_links", "company_links"
   add_foreign_key "project_links", "invoices", column: "installer_invoice_id"
+  add_foreign_key "project_links", "link_rate_cards"
   add_foreign_key "project_links", "project_cost_items", column: "dealer_cost_item_id"
   add_foreign_key "project_links", "project_phases", column: "dealer_phase_id"
   add_foreign_key "project_links", "projects", column: "dealer_project_id"
