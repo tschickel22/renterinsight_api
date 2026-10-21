@@ -57,7 +57,9 @@ class Api::V1::VendorsController < ApplicationController
 
   def show
     return unless authorize_action!('vendors', 'read')
-    render json: vendor_detail_json(@vendor)
+    render json: vendor_detail_json(@vendor).merge(
+      contacts: @vendor.vendor_contacts.map { |c| Api::V1::VendorContactsController.contact_json(c) }
+    )
   end
 
   def create

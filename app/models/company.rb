@@ -133,6 +133,7 @@ class Company < ApplicationRecord
 
   # Vendors (unified contractors + suppliers)
   has_many :vendors, dependent: :destroy
+  has_many :vendor_contacts
   has_many :contractors  # alias subclass of Vendor scoped to vendor_type='contractor'
   has_many :contractor_assignments, dependent: :destroy
 

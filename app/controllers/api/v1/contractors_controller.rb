@@ -65,7 +65,9 @@ module Api
       def show
         return unless authorize_action!('contractors', 'read')
 
-        render json: contractor_json(@contractor)
+        render json: contractor_json(@contractor).merge(
+          contacts: @contractor.vendor_contacts.map { |c| Api::V1::VendorContactsController.contact_json(c) }
+        )
       end
 
       # POST /api/v1/contractors

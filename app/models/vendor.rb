@@ -15,6 +15,10 @@ class Vendor < ApplicationRecord
   belongs_to :created_by, class_name: 'User', optional: true
   belongs_to :updated_by, class_name: 'User', optional: true
 
+  # The people at this vendor (CreateVendorContacts).
+  has_many :vendor_contacts, -> { where(is_deleted: false).order(is_primary: :desc, first_name: :asc, id: :asc) },
+           dependent: :destroy
+
   # Contractor surface
   has_many :contractor_assignments, dependent: :destroy
   # Phones allowed to unlock the contractor portal with a fingerprint or Face ID.
@@ -176,6 +180,20 @@ class Vendor < ApplicationRecord
   # True when we hold a consent record good enough to text this contractor.
   def can_receive_sms?
     sms_opt_in? && phone.present?
+  end
+
+  NoticeRecipient = Struct.new(:name, :email, :phone, :sms_ok, keyword_init: true)
+
+  # Who project emails and texts go to: every contact ticked "Gets project
+  # emails", or the vendor's own email and phone when nobody is ticked (which is
+  # every vendor that has no contacts, so they keep working as before).
+  def notice_recipients
+    chosen = vendor_contacts.select(&:receives_project_notices)
+    if chosen.any?
+      chosen.map { |c| NoticeRecipient.new(name: c.name, email: c.email, phone: c.phone, sms_ok: c.can_receive_sms?) }
+    else
+      [NoticeRecipient.new(name: contact_name.presence || name, email: email, phone: phone, sms_ok: can_receive_sms?)]
+    end
   end
 
   def sms_consent_json

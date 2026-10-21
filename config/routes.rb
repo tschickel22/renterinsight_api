@@ -868,7 +868,11 @@ Rails.application.routes.draw do
       end
 
       # ==================== VENDORS (unified contractors + suppliers) ====================
-      resources :vendors
+      resources :vendors do
+        resources :contacts, controller: 'vendor_contacts', only: [:index, :create, :update, :destroy] do
+          member { post :sms_consent, path: 'sms-consent' }
+        end
+      end
 
       # ==================== CONTRACTORS ====================
       resources :contractors do

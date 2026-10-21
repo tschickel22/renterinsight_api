@@ -285,27 +285,29 @@ class ProjectNotificationService
   # (E69). Task assignments email through the batch below; this covers the owner
   # who would otherwise only find the job by opening the portal.
   def self.notify_contractor_owner_assigned(contractor, project, phase: nil)
-    return unless contractor&.email.present?
+    return unless notice_email?(contractor)
 
     company = project.company
     what = phase ? "the #{phase.name} phase of #{project.name}" : project.name
     subject = phase ? "New Assignment: #{phase.name} (#{project.name})" : "New Assignment: #{project.name}"
     sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
     body = <<~HTML
-      <p>Hello #{ERB::Util.html_escape(contractor.contact_name.presence || contractor.name)},</p>
+      <p>Hello #{ERB::Util.html_escape(notice_greeting(contractor))},</p>
       <p>#{ERB::Util.html_escape(company.name)} has assigned you #{ERB::Util.html_escape(what)}.</p>
       #{sign_in_note}
       <p>Thank you,<br>#{ERB::Util.html_escape(company.name)}</p>
     HTML
 
-    CommunicationService.send_email(
-      company: company,
-      to: contractor.email,
-      subject: subject,
-      body: wrap_html(body, subject, audience: :contractor, login_url: sign_in_url),
-      category: 'project_notification',
-      communicable: phase || project
-    )
+    notice_emails(contractor).each do |to|
+      CommunicationService.send_email(
+        company: company,
+        to: to,
+        subject: subject,
+        body: wrap_html(body, subject, audience: :contractor, login_url: sign_in_url),
+        category: 'project_notification',
+        communicable: phase || project
+      )
+    end
   rescue => e
     Rails.logger.error("[ProjectNotificationService] owner notice failed for contractor #{contractor&.id}: #{e.class}: #{e.message}")
     nil
@@ -315,7 +317,7 @@ class ProjectNotificationService
   # Sends ONE email listing all pending assignments for a contractor within a company.
   def self.notify_contractor_assigned_batch(contractor, assignments)
     return if assignments.blank?
-    return unless contractor&.email.present?
+    return unless notice_email?(contractor)
 
     company = assignments.first.company
     count = assignments.size
@@ -332,7 +334,7 @@ class ProjectNotificationService
     # Isolated in its own rescue so an SMS/Twilio failure never blocks the email
     # that already sent, nor the notified_at stamping the caller does next.
     # SMS provider resolves Location -> Company -> Platform (most-specific wins).
-    if contractor.sms_opt_in && contractor.phone.present?
+    notice_phones(contractor).each do |phone|
       begin
         # Reuses the URL already minted for the email rather than calling
         # contractor_sign_in_block again — a second call would rotate the token
@@ -346,7 +348,7 @@ class ProjectNotificationService
         CommunicationService.send_sms(
           company: company,
           location: resolve_project(assignments.first)&.deal&.location,
-          to: contractor.phone,
+          to: phone,
           body: sms_body,
           category: 'project_notification',
           communicable: assignments.first
@@ -390,17 +392,18 @@ class ProjectNotificationService
     subject, body, sign_in_url = assignment_email_parts(contractor, company, [assignment])
 
     # ── Email
-    if contractor.email.present?
+    emails = notice_emails(contractor)
+    if emails.any?
       begin
         comm = send_contractor_review_email(contractor, company, subject, body, assignment, login_url: sign_in_url)
         send_assigner_copy(contractor, company, [assignment], force_to: copy_to)
         result[:email] = {
-          attempted: true, ok: true, to: contractor.email,
+          attempted: true, ok: true, to: emails.join(', '),
           communication_id: comm.respond_to?(:id) ? comm.id : nil
         }
       rescue => e
         Rails.logger.error("[ProjectNotificationService] resend email failed for assignment #{assignment.id}: #{e.class}: #{e.message}")
-        result[:email] = { attempted: true, ok: false, to: contractor.email, error: e.message }
+        result[:email] = { attempted: true, ok: false, to: emails.join(', '), error: e.message }
       end
     else
       result[:email] = { attempted: false, ok: false, reason: 'Contractor has no email address on file' }
@@ -408,30 +411,35 @@ class ProjectNotificationService
 
     # ── SMS. Gated on TCPA opt-in exactly like the automatic path, so a resend can
     # never text someone who has not consented.
-    if contractor.phone.blank?
+    any_phone = contractor.notice_recipients.map(&:phone).compact_blank
+    phones = notice_phones(contractor)
+    if any_phone.empty?
       result[:sms] = { attempted: false, ok: false, reason: 'Contractor has no phone number on file' }
-    elsif !contractor.sms_opt_in
-      result[:sms] = { attempted: false, ok: false, to: contractor.phone,
+    elsif phones.empty?
+      result[:sms] = { attempted: false, ok: false, to: any_phone.join(', '),
                        reason: 'Contractor has not opted in to SMS' }
     else
       begin
-        comm = CommunicationService.send_sms(
-          company: company,
-          location: resolve_project(assignment)&.deal&.location,
-          to: contractor.phone,
-          # Same URL the email carries, for the same reason: regenerating here
-          # would invalidate the link in the message that just went out.
-          body: "New assignment from #{company.name}: #{sms_task_label(assignment)}. #{sign_in_url}",
-          category: 'project_notification',
-          communicable: assignment
-        )
+        comm = nil
+        phones.each do |phone|
+          comm = CommunicationService.send_sms(
+            company: company,
+            location: resolve_project(assignment)&.deal&.location,
+            to: phone,
+            # Same URL the email carries, for the same reason: regenerating here
+            # would invalidate the link in the message that just went out.
+            body: "New assignment from #{company.name}: #{sms_task_label(assignment)}. #{sign_in_url}",
+            category: 'project_notification',
+            communicable: assignment
+          )
+        end
         result[:sms] = {
-          attempted: true, ok: true, to: contractor.phone,
+          attempted: true, ok: true, to: phones.join(', '),
           communication_id: comm.respond_to?(:id) ? comm.id : nil
         }
       rescue => e
         Rails.logger.error("[ProjectNotificationService] resend SMS failed for assignment #{assignment.id}: #{e.class}: #{e.message}")
-        result[:sms] = { attempted: true, ok: false, to: contractor.phone, error: e.message }
+        result[:sms] = { attempted: true, ok: false, to: phones.join(', '), error: e.message }
       end
     end
 
@@ -556,14 +564,14 @@ class ProjectNotificationService
   # ── Dealer approves review → notify contractor ────────────────────
   def self.notify_review_approved(assignment, reviewer)
     contractor = assignment.contractor
-    return unless contractor&.email.present?
+    return unless notice_email?(contractor)
 
     company = assignment.company
     task_name = resolve_task_name(assignment)
 
     subject = "Work Approved: #{task_name}"
     body = <<~HTML
-      <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+      <p>Hello #{ERB::Util.html_escape(notice_greeting(contractor))},</p>
       <p>Great news! Your work on <strong>#{task_name}</strong> has been approved by #{reviewer&.full_name}.</p>
       #{assignment.review_notes.present? ? "<p><em>Notes:</em> #{assignment.review_notes}</p>" : ''}
       <p>Thank you for your excellent work!</p>
@@ -578,14 +586,14 @@ class ProjectNotificationService
   # ── Dealer requests revision → notify contractor ──────────────────
   def self.notify_revision_requested(assignment, reviewer)
     contractor = assignment.contractor
-    return unless contractor&.email.present?
+    return unless notice_email?(contractor)
 
     company = assignment.company
     task_name = resolve_task_name(assignment)
 
     subject = "Revision Requested: #{task_name}"
     body = <<~HTML
-      <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+      <p>Hello #{ERB::Util.html_escape(notice_greeting(contractor))},</p>
       <p>Your submission for <strong>#{task_name}</strong> needs revision. #{reviewer&.full_name} has requested the following changes:</p>
       <blockquote style="border-left: 3px solid #f59e0b; padding-left: 12px; margin: 12px 0; color: #92400e;">
         #{assignment.revision_notes}
@@ -602,14 +610,14 @@ class ProjectNotificationService
   # ── Dealer rejects review → notify contractor ─────────────────────
   def self.notify_review_rejected(assignment, reviewer)
     contractor = assignment.contractor
-    return unless contractor&.email.present?
+    return unless notice_email?(contractor)
 
     company = assignment.company
     task_name = resolve_task_name(assignment)
 
     subject = "Work Rejected: #{task_name}"
     body = <<~HTML
-      <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+      <p>Hello #{ERB::Util.html_escape(notice_greeting(contractor))},</p>
       <p>Your submission for <strong>#{task_name}</strong> has been rejected by #{reviewer&.full_name}.</p>
       #{assignment.review_notes.present? ? "<p><em>Reason:</em> #{assignment.review_notes}</p>" : ''}
       <p>If you have questions, please contact the dealer directly.</p>
@@ -754,10 +762,10 @@ class ProjectNotificationService
     on_behalf = assignment.acted_on_behalf_by_id.present?
 
     # 1) Contractor: redo the work
-    if contractor&.email.present?
+    if notice_email?(contractor)
       subject = "#{rejected ? 'Work Rejected' : 'Revision Requested'} by Customer: #{task_name}"
       body = <<~HTML
-        <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+        <p>Hello #{ERB::Util.html_escape(notice_greeting(contractor))},</p>
         <p>The customer has #{rejected ? 'rejected' : 'requested a revision on'} your work for <strong>#{task_name}</strong>.</p>
         #{assignment.client_review_notes.present? ? "<blockquote style=\"border-left: 3px solid #f59e0b; padding-left: 12px; margin: 12px 0; color: #92400e;\">#{assignment.client_review_notes}</blockquote>" : ''}
         <p>Please log in to the Contractor Portal, make the requested changes, and resubmit for review.</p>
@@ -908,7 +916,7 @@ class ProjectNotificationService
 
       body = <<~HTML
         <p>This is your copy of the notice sent to <strong>#{contractor.name}</strong>
-        (#{contractor.email}).</p>
+        (#{notice_emails(contractor).join(', ')}).</p>
         <ul style="padding-left: 20px; margin: 14px 0;">
           #{rows}
         </ul>
@@ -954,7 +962,7 @@ class ProjectNotificationService
       sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
 
       body = <<~HTML
-        <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+        <p>Hello #{ERB::Util.html_escape(notice_greeting(contractor))},</p>
         <p>You have #{count == 1 ? 'been assigned a new task' : "#{count} new assignments"}:</p>
         <ul style="padding-left: 20px; margin: 14px 0;">
           #{rows}
@@ -1000,17 +1008,49 @@ class ProjectNotificationService
       [contractor_portal_url, '<p>Log in to the Contractor Portal to accept and get started.</p>']
     end
 
+    # One email to each person at the vendor who gets project notices. Returns
+    # the first communication for callers that report a single id.
     def send_contractor_review_email(contractor, company, subject, body, assignment, login_url: nil)
-      comm = CommunicationService.send_email(
-        company: company,
-        to: contractor.email,
-        subject: subject,
-        body: wrap_html(body, subject, audience: :contractor, login_url: login_url),
-        category: 'project_notification',
-        communicable: assignment
-      )
-      Rails.logger.info("[ProjectNotificationService] Email sent to contractor #{contractor.email}")
-      comm
+      notice_emails(contractor).map do |to|
+        comm = CommunicationService.send_email(
+          company: company,
+          to: to,
+          subject: subject,
+          body: wrap_html(body, subject, audience: :contractor, login_url: login_url),
+          category: 'project_notification',
+          communicable: assignment
+        )
+        Rails.logger.info("[ProjectNotificationService] Email sent to contractor #{contractor.id} at #{to}")
+        comm
+      end.first
+    end
+
+    # Who at the vendor hears about project work: the people ticked "Gets project
+    # emails", or the vendor's own email and phone when nobody is ticked.
+    def notice_emails(contractor)
+      return [] unless contractor
+
+      contractor.notice_recipients.map(&:email).compact_blank.uniq
+    end
+
+    def notice_email?(contractor)
+      notice_emails(contractor).any?
+    end
+
+    # Only people who consented to texts, and only numbers we have.
+    def notice_phones(contractor)
+      return [] unless contractor
+
+      contractor.notice_recipients.select(&:sms_ok).map(&:phone).compact_blank.uniq
+    end
+
+    # One recipient: greet them by name. Several: greet the company, since the
+    # same message goes to each of them.
+    def notice_greeting(contractor)
+      recipients = contractor.notice_recipients
+      return recipients.first.name.presence || contractor.name if recipients.one?
+
+      contractor.name
     end
 
     def send_dealer_review_email(user, company, subject, body, assignment)

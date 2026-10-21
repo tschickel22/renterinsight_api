@@ -8187,6 +8187,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_22_120100) do
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
+  create_table "vendor_contacts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "vendor_id", null: false
+    t.string "first_name"
+    t.string "last_name"
+    t.string "title"
+    t.string "email"
+    t.string "phone"
+    t.string "priority"
+    t.text "notes"
+    t.boolean "is_primary", default: false, null: false
+    t.boolean "receives_project_notices", default: false, null: false
+    t.boolean "sms_opt_in", default: false, null: false
+    t.string "sms_consent_source"
+    t.datetime "sms_consent_recorded_at"
+    t.bigint "sms_consent_recorded_by_id"
+    t.text "sms_consent_note"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_vendor_contacts_on_company_id"
+    t.index ["vendor_id", "is_deleted"], name: "index_vendor_contacts_on_vendor_id_and_is_deleted"
+    t.index ["vendor_id"], name: "index_vendor_contacts_on_vendor_id"
+  end
+
   create_table "vendors", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
