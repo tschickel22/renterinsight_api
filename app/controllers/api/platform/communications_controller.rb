@@ -353,7 +353,8 @@ module Api
       def send_sms_unified
         # Get settings
         settings = get_effective_settings
-        sms_config = settings.dig(:communications, :sms) || settings.dig('communications', 'sms') || {}
+        sms_config = own_account_sms_config ||
+                     settings.dig(:communications, :sms) || settings.dig('communications', 'sms') || {}
         
         Rails.logger.info "[Platform::CommunicationsController#sms] SMS config: #{sms_config.keys}"
         
@@ -459,6 +460,19 @@ module Api
           success: false,
           error: e.message
         }
+      end
+
+      # A dealer's own Twilio number, connected as if we had provisioned it,
+      # sends from that number on their account, as the CRM send does. The
+      # settings waterfall below knows nothing of connected numbers.
+      def own_account_sms_config
+        company = resolve_sms_usage_company
+        ta = company&.twilio_account
+        return nil unless ta&.active? && ta.own_account? && company.sms_provisioning_mode == 'dedicated'
+
+        sid, token = ta.api_credentials
+        { provider: 'twilio', isEnabled: true, fromNumber: ta.phone_number, twilioAccountSid: sid,
+          twilioAuthToken: token, twilioMessagingServiceSid: ta.messaging_service_sid }.compact
       end
 
       def get_effective_settings
@@ -1200,7 +1214,10 @@ module Api
         account_sid           = config['twilioAccountSid'] || config[:twilioAccountSid]
         auth_token            = config['twilioAuthToken'] || config[:twilioAuthToken]
         from_number           = config['fromNumber'] || config[:fromNumber]
-        messaging_service_sid = config['twilioMessagingServiceSid'] || config[:twilioMessagingServiceSid] || ENV['TWILIO_MESSAGING_SERVICE_SID']
+        messaging_service_sid = config['twilioMessagingServiceSid'] || config[:twilioMessagingServiceSid]
+        # Our Messaging Service belongs to our account; Twilio answers 404 when
+        # it is sent on a dealer's own account.
+        messaging_service_sid ||= TwilioSmsService.master_messaging_service_sid if account_sid == TwilioSmsService.master_credentials.first
 
         # Normalize to E.164 — add +1 for bare 10-digit US/CA numbers
         to = to.to_s.gsub(/[^+\d]/, '')
