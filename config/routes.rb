@@ -2622,6 +2622,9 @@ Rails.application.routes.draw do
   get  '/u/:token',  to: 'campaign_tracking#unsubscribe_show', as: :campaign_unsubscribe_show
   post '/u/:token',  to: 'campaign_tracking#unsubscribe_confirm', as: :campaign_unsubscribe_confirm
 
+  # A rep's contact card, linked from play texts and emails ({{contact_card_link}}).
+  get  '/vc/:token', to: 'contact_cards#show', as: :contact_card, constraints: { token: %r{[^/]+} }
+
   # "Refer a friend" — public, no-auth (the React page lives at /r/:token on the FE).
   get  '/api/referrals/:token', to: 'public/referrals#show',   as: :public_referral_show
   post '/api/referrals/:token', to: 'public/referrals#create', as: :public_referral_create

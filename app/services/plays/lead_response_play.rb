@@ -28,8 +28,19 @@ module Plays
       'rep_phone' => '{{entity.owner_phone}}',
       'rep_email' => '{{entity.owner_email}}',
       'booking_link' => '{{rep_booking_link}}',
+      'contact_card_link' => '{{entity.owner_contact_card_url}}',
       'dealership' => :dealership
     }.freeze
+
+    # Off unless a preset turns it on, so existing plays are unchanged.
+    DEFAULT_CONTACT_CARD = {
+      'enabled' => false,
+      'body' => 'Save my contact info so you always know it is me: {{contact_card_link}}'
+    }.freeze
+
+    # When a lead joins the weekly homes email: 'end' after the follow-ups (what
+    # every play did before this was a choice), or 'start' as soon as they are assigned.
+    WEEKLY_HOMES_TIMINGS = %w[start end].freeze
 
     # Follow-up emails are sent by the nurture job, which knows fewer fields.
     FOLLOW_UP_FIELDS = {
@@ -41,7 +52,8 @@ module Plays
     SAMPLE_VALUES = {
       'first_name' => 'Tia', 'last_name' => 'May', 'lead_name' => 'Tia May',
       'rep_phone' => '(303) 555-0142', 'rep_email' => 'rep@yourdealership.com',
-      'booking_link' => 'https://calendly.com/your-rep'
+      'booking_link' => 'https://calendly.com/your-rep',
+      'contact_card_link' => 'https://api.dealertide.com/vc/your-card'
     }.freeze
 
     FIELD_PATTERN = /\{\{\s*([a-z_]+)\s*\}\}/
@@ -68,6 +80,12 @@ module Plays
       # Lead sources that start the play unless the dealer chooses others.
       def default_sources
         []
+      end
+
+      # The sources offered for this dealer. A preset whose leads arrive under
+      # names each dealer chose themselves ("Website", "Web Form") overrides this.
+      def default_sources_for(_company)
+        default_sources
       end
 
       # Intake forms the play creates: [{ name:, source:, fields: :contact | :prequalification }]
@@ -159,7 +177,7 @@ module Plays
           hidden: hidden?,
           copy_of: copy? ? { key: base_play::KEY, name: base_play::NAME } : nil,
           assignment: assignment.to_s,
-          default_sources: default_sources,
+          default_sources: default_sources_for(company),
           available_sources: company.sources.active.order(:name).pluck(:name).uniq,
           forms: forms.map { |form| form[:name] },
           start_tag: start_tag,
@@ -169,8 +187,8 @@ module Plays
           weekly_homes_on: PlayInstallation.active.exists?(company_id: company.id, play_key: WeeklyHomesEmail::KEY),
           texting_ready: texting,
           fields: { messages: MESSAGE_FIELDS.keys, follow_up_emails: FOLLOW_UP_FIELDS.keys },
-          default_content: default_content,
-          map: map_for(company: company, sources: default_sources, content: normalize_content(nil), rep_names: [], send_texts: texting)
+          default_content: normalize_content(nil),
+          map: map_for(company: company, sources: default_sources_for(company), content: normalize_content(nil), rep_names: [], send_texts: texting)
         }
       end
 
@@ -261,6 +279,9 @@ module Plays
         defaults = default_content.deep_stringify_keys
         given = (raw || {}).to_h.deep_stringify_keys
         text = defaults['first_text'].merge(given['first_text'].to_h.slice('enabled', 'body'))
+        card = (defaults['contact_card'] || DEFAULT_CONTACT_CARD).merge(given['contact_card'].to_h.slice('enabled', 'body'))
+        weekly = given.fetch('weekly_homes_timing', defaults['weekly_homes_timing']).to_s
+        weekly = 'end' unless WEEKLY_HOMES_TIMINGS.include?(weekly)
         email = defaults['first_email'].merge(given['first_email'].to_h.slice('enabled', 'subject', 'body', 'booking_line', 'signature'))
         call = defaults['call_task'].merge(given['call_task'].to_h.slice('enabled', 'subject', 'due_type', 'due_minutes', 'due_time'))
         follow_ups = given.key?('follow_up_emails') ? Array(given['follow_up_emails']) : defaults['follow_up_emails']
@@ -268,6 +289,8 @@ module Plays
         {
           'first_touch_wait_minutes' => given.fetch('first_touch_wait_minutes', defaults['first_touch_wait_minutes']).to_i,
           'first_text' => { 'enabled' => cast_bool(text['enabled']), 'body' => text['body'].to_s.strip },
+          'contact_card' => { 'enabled' => cast_bool(card['enabled']), 'body' => card['body'].to_s.strip },
+          'weekly_homes_timing' => weekly,
           'first_email' => {
             'enabled' => cast_bool(email['enabled']),
             'subject' => email['subject'].to_s.strip,
@@ -301,6 +324,14 @@ module Plays
           raise InstallError, 'Write the first text, or turn it off.' if text['body'].blank?
           raise InstallError, 'Keep the first text under 480 characters.' if text['body'].length > 480
           check_fields!(text['body'], MESSAGE_FIELDS, 'the first text')
+        end
+
+        card = content['contact_card']
+        if card['enabled']
+          raise InstallError, 'Write the contact card text, or turn it off.' if card['body'].blank?
+          raise InstallError, 'Keep the contact card text under 480 characters.' if card['body'].length > 480
+          raise InstallError, 'The contact card text needs {{contact_card_link}}, the link that saves the rep.' unless card['body'].include?('{{contact_card_link}}')
+          check_fields!(card['body'], MESSAGE_FIELDS, 'the contact card text')
         end
 
         email = content['first_email']
@@ -354,6 +385,9 @@ module Plays
         assign_detail += " Rotation: #{rep_names.join(', ')}." if rep_names.any?
         steps << { key: 'assign', kind: 'assign', title: 'Assign a rep', detail: assign_detail }
 
+        weekly_step = { key: 'weekly_homes', kind: 'tag', title: 'Added to the weekly homes email', detail: "Tagged #{WEEKLY_HOMES_TAG}" }
+        steps << weekly_step.merge(timing: 'Right away') if content['weekly_homes_timing'] == 'start'
+
         if content['first_touch_wait_minutes'].positive?
           steps << { key: 'first_wait', kind: 'wait', title: 'Wait', timing: duration_phrase(content['first_touch_wait_minutes']) }
         end
@@ -363,6 +397,15 @@ module Plays
             key: 'first_text', kind: 'text', title: 'Text from the rep',
             condition: send_texts ? 'Only if the lead agreed to texts' : 'Off: texting is not set up for your dealership',
             skipped: !send_texts, preview: fill(content['first_text']['body'], sample)
+          }
+        end
+
+        if content['contact_card']['enabled']
+          steps << {
+            key: 'contact_card', kind: 'text', title: "Rep's contact card",
+            detail: 'The link saves the rep\'s name, direct phone and email to the lead\'s contacts in one tap.',
+            condition: send_texts ? 'Only if the lead agreed to texts' : 'Off: texting is not set up for your dealership',
+            skipped: !send_texts, preview: fill(content['contact_card']['body'], sample)
           }
         end
 
@@ -400,7 +443,7 @@ module Plays
           ]
         }
 
-        steps << { key: 'weekly_homes', kind: 'tag', title: 'Added to the weekly homes email', detail: "Tagged #{WEEKLY_HOMES_TAG}" }
+        steps << weekly_step unless content['weekly_homes_timing'] == 'start'
         steps
       end
 
@@ -587,7 +630,7 @@ module Plays
     def sources
       @sources ||= begin
         given = Array(@answers['sources']).map { |name| name.to_s.strip }.reject(&:blank?).uniq
-        given.presence || (@answers.key?('sources') ? [] : self.class.default_sources)
+        given.presence || (@answers.key?('sources') ? [] : self.class.default_sources_for(@company))
       end
     end
 
@@ -843,7 +886,7 @@ module Plays
     def steps_graph(nurture:, rotations:)
       @nodes = []
       @edges = []
-      after_assignment = first_touch_entry
+      after_assignment = weekly_homes_first? ? 'tag_weekly_homes_start' : first_touch_entry
 
       location_rotations = rotations.except('all').map { |id, list| [id.to_i, list] }
       rotation_entry = location_rotations.any? ? "at_location_#{location_rotations.first[0]}" : 'assign_all'
@@ -861,13 +904,25 @@ module Plays
       end
       node('assign_all', 'assign_owner', { 'strategy' => 'round_robin_list', 'round_robin_list_id' => rotations.fetch('all').id }, after_assignment)
 
+      # Signed up as soon as there is a rep, so the first weekly email can name them.
+      if weekly_homes_first?
+        node('tag_weekly_homes_start', 'add_tag', { 'tag_names' => [WEEKLY_HOMES_TAG] }, first_touch_entry)
+      end
+
       if content['first_touch_wait_minutes'].positive?
         node('first_wait', 'wait', { 'duration' => content['first_touch_wait_minutes'], 'unit' => 'minutes' }, text_entry)
       end
 
+      if texting? || card_texting?
+        first_sms = texting? ? 'text_hello' : 'text_card'
+        branch('consent', { 'field' => 'entity.opt_in_sms', 'operator' => 'equals', 'value' => true }, first_sms, email_entry)
+      end
       if texting?
-        branch('consent', { 'field' => 'entity.opt_in_sms', 'operator' => 'equals', 'value' => true }, 'text_hello', email_entry)
-        node('text_hello', 'send_sms', { 'to' => '{{entity.phone}}', 'body' => message_text(content['first_text']['body']) }, email_entry)
+        node('text_hello', 'send_sms', { 'to' => '{{entity.phone}}', 'body' => message_text(content['first_text']['body']) },
+             card_texting? ? 'text_card' : email_entry)
+      end
+      if card_texting?
+        node('text_card', 'send_sms', { 'to' => '{{entity.phone}}', 'body' => message_text(content['contact_card']['body']) }, email_entry)
       end
 
       if content['first_email']['enabled']
@@ -925,6 +980,15 @@ module Plays
       send_texts? && content['first_text']['enabled']
     end
 
+    # The rep's contact card, texted after the first text. Same consent rule.
+    def card_texting?
+      send_texts? && content['contact_card']['enabled']
+    end
+
+    def weekly_homes_first?
+      content['weekly_homes_timing'] == 'start'
+    end
+
     def first_touch_entry
       return 'first_wait' if content['first_touch_wait_minutes'].positive?
 
@@ -932,7 +996,7 @@ module Plays
     end
 
     def text_entry
-      texting? ? 'consent' : email_entry
+      texting? || card_texting? ? 'consent' : email_entry
     end
 
     def email_entry
@@ -980,6 +1044,7 @@ module Plays
         case field
         when 'dealership' then ERB::Util.html_escape(@company.name)
         when 'booking_link' then '<a href="{{rep_booking_link}}">{{rep_booking_link}}</a>'
+        when 'contact_card_link' then '<a href="{{entity.owner_contact_card_url}}">Save my contact info</a>'
         else MESSAGE_FIELDS.fetch(field)
         end
       end

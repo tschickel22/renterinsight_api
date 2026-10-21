@@ -5,7 +5,7 @@ module Plays
   # registered so an install that is already on can be managed.
   module Registry
     def self.all
-      [Plays::NewFacebookLead, Plays::WalkInVisit, Plays::PromoLandingPage, Plays::WeeklyHomesEmail, Plays::WakeUpColdLeads,
+      [Plays::NewFacebookLead, Plays::NewWebsiteLead, Plays::WalkInVisit, Plays::PromoLandingPage, Plays::WeeklyHomesEmail, Plays::WakeUpColdLeads,
        Plays::DealToSold, Plays::NewLeadAnyChannel, Plays::SavedHomeDesign]
     end
 
