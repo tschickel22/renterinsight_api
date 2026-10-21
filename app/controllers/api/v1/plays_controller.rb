@@ -291,7 +291,7 @@ module Api
       def answers_param
         raw = params[:answers]
         raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
-        (raw || {}).to_h.slice('sources', 'start_tag', 'reps_by_location', 'send_texts', 'content')
+        (raw || {}).to_h.slice('sources', 'start_tag', 'reps_by_location', 'send_texts', 'intake_form_id', 'content')
       end
 
       def play_json(play)

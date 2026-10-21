@@ -121,8 +121,10 @@ class IntakeSubmission < ApplicationRecord
       end
     end
 
-    # Only set owner_id if notified_user exists
-    if form.notified_user_id.present?
+    # Only set owner_id if notified_user exists. A form that rotates picks its
+    # rep just before the lead is created, so an enquiry that lands on an
+    # existing record does not use up someone's turn.
+    if form.notified_user_id.present? && !form.rotates?
       lead_data[:owner_id] = form.notified_user_id
     end
     
@@ -267,6 +269,7 @@ class IntakeSubmission < ApplicationRecord
     end
     
     Rails.logger.info "[IntakeSubmission] Creating lead with data: #{lead_data.inspect}"
+    lead_data[:owner_id] = form.next_owner_id if form.rotates?
     new_lead = Lead.create!(lead_data.merge(origin: Lead::ORIGIN_INTAKE_FORM))
     Rails.logger.info "[IntakeSubmission] Lead created successfully: #{new_lead.id}"
 
@@ -549,10 +552,12 @@ class IntakeSubmission < ApplicationRecord
 
   def create_activity_and_notify(lead, form, mode: :new_lead)
     Rails.logger.info "[IntakeSubmission] >>> create_activity_and_notify called for lead #{lead.id}, form #{form.id}"
-    return unless form.notified_user_id.present?
-    
-    notified_user = User.find_by(id: form.notified_user_id)
-    Rails.logger.info "[IntakeSubmission] Notified user: #{notified_user&.email || 'NOT FOUND'} (ID: #{form.notified_user_id})"
+    # A rotating form tells the rep the lead went to; otherwise the form's one person.
+    recipient_id = (form.rotates? && lead.owner_id.presence) || form.notified_user_id
+    return unless recipient_id.present?
+
+    notified_user = User.find_by(id: recipient_id, company_id: form.company_id)
+    Rails.logger.info "[IntakeSubmission] Notified user: #{notified_user&.email || 'NOT FOUND'} (ID: #{recipient_id})"
     return unless notified_user
 
     is_update = (mode == :existing_lead)
@@ -562,8 +567,8 @@ class IntakeSubmission < ApplicationRecord
     # Create activity for the notified user
     activity = LeadActivity.create!(
       lead_id: lead.id,
-      user_id: form.notified_user_id,
-      assigned_to_id: form.notified_user_id,
+      user_id: notified_user.id,
+      assigned_to_id: notified_user.id,
       activity_type: 'reminder',
       subject: "#{subject_prefix}: #{lead.first_name} #{lead.last_name}",
       description: "#{description_prefix} '#{form.name}'. Contact: #{lead.email || lead.phone || 'N/A'}",
