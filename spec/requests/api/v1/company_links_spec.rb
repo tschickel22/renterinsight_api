@@ -85,6 +85,18 @@ RSpec.describe 'Company links', type: :request do
     expect(link.events.pluck(:kind)).to eq(%w[invited accepted])
   end
 
+  it 'sends a platform-branded invite with a link straight to the Links tab' do
+    post '/api/v1/company_links', headers: h(dealer), params: { vendor_id: vendor.id, email: 'boss@install.example' }.to_json
+    sent = nil
+    allow(CommunicationService).to receive(:send_email) { |**kw| sent = kw }
+    CompanyLinkNotifier.invite_email(CompanyLink.find(body.dig('company_link', 'id')))
+
+    expect(sent[:to]).to eq('boss@install.example')
+    expect(sent[:body]).to include('/linked-companies?view=links', 'Review the invitation', Brand.current.name)
+    expect(sent[:body]).to include('invited this address to link companies')
+    expect(sent[:body]).not_to match(/[–—]/)
+  end
+
   it 'hands a phase across, syncs status and dates, and bills the dealer' do
     link = link!
     pl = offer!(link)

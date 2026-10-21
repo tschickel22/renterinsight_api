@@ -32,7 +32,7 @@
             </tr>
             <tr>
               <td style="padding:18px 28px 26px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;">
-                You are receiving this because you are an administrator of <%= @company&.name %> in <%= @brand.name %>.
+                <%= @footer_note || "You are receiving this because you are an administrator of #{@company&.name} in #{@brand.name}." %>
                 Questions? <a href="mailto:<%= @brand.support_email %>" style="color:<%= @brand_accent %>;"><%= @brand.support_email %></a>
                 <br>&copy; <%= Time.current.year %> <%= @brand.name %>
               </td>

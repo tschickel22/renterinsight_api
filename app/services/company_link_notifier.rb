@@ -17,20 +17,30 @@ class CompanyLinkNotifier
     end
 
     # Sent from a job: an inline send held the dealer's request for seconds.
+    # Platform-branded (logo, colors, footer), since it invites the installer
+    # into the platform, with a button straight to the Links tab where they
+    # accept. Sign-in keeps the link, so it lands there after logging in.
     def invite_email(link)
       dealer = link.dealer_company
-      esc = ->(v) { ERB::Util.html_escape(v.to_s) }
-      subject = "#{dealer.name} wants to link with you on #{Brand.current.name}"
-      body = <<~HTML
-        <p>Hello,</p>
-        <p>#{esc.(dealer.name)} would like to send install jobs to your company through #{esc.(Brand.current.name)}, as #{esc.(link.dealer_vendor.name)}.</p>
-        <p>Once linked, jobs they hand you arrive in your own company with the customer's details, and the progress you record goes back to their project.</p>
-        <p>To accept, sign in to #{esc.(Brand.current.name)} as an admin of your company and open <strong>Linked companies</strong>. If you don't use #{esc.(Brand.current.name)} yet, reply to #{esc.(dealer.name)}.</p>
-      HTML
+      brand = Brand.current
+      branding = (PlatformSetting.branding || {}).to_h.with_indifferent_access
+      subject = "#{dealer.name} wants to link with you on #{brand.name}"
+      html = ActionController::Base.render(
+        template: 'company_link_mailer/invite', layout: 'branded_mailer', formats: [:html],
+        assigns: {
+          brand: brand, dealer: dealer, vendor_name: link.dealer_vendor.name,
+          accept_url: "#{Brand.app_url.to_s.chomp('/')}/linked-companies?view=links",
+          brand_primary: branding[:primaryColor].presence || '#0F2A52',
+          brand_accent: branding[:secondaryColor].presence || '#00AFA8',
+          brand_font: "#{branding[:fontFamily].presence || 'Poppins'}, -apple-system, 'Segoe UI', Arial, sans-serif",
+          footer_note: "You are receiving this because #{dealer.name} invited this address to link companies on #{brand.name}."
+        }
+      )
+      # Embedded, not linked: Outlook blocks remote images.
+      logo = brand.logo_url.present? ? InvitationService.new(invited_by: link.invited_by).send(:build_inline_logo_attachments, brand.logo_url) : []
       CommunicationService.send_email(
-        company: dealer, to: link.invite_email, subject: subject,
-        body: ProjectNotificationService.send(:wrap_html_minimal, body, subject),
-        category: 'project_notification', communicable: link
+        company: dealer, to: link.invite_email, subject: subject, body: html,
+        category: 'project_notification', communicable: link, inline_images: logo
       )
     rescue => e
       Rails.logger.error("[CompanyLinkNotifier] invite email: #{e.message}")
