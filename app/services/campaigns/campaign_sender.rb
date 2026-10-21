@@ -364,17 +364,8 @@ module Campaigns
         campaign_send: send_record, company: @company, base_url: @base_url
       ).render
 
-      sid, token = TwilioSmsService.master_credentials
-      msid = TwilioSmsService.master_messaging_service_sid
-
-      twilio_result = TwilioSmsService.send(
-        to: contact_value,
-        body: rendered[:body],
-        from_number: twilio_acct.phone_number,
-        account_sid: sid,
-        auth_token: token,
-        messaging_service_sid: msid
-      )
+      # Our master account, or the dealer's own account for their own number.
+      twilio_result = twilio_acct.send_sms(to: contact_value, body: rendered[:body])
 
       if twilio_result[:success]
         comm = Communication.create!(

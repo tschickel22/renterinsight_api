@@ -88,14 +88,10 @@ module Webhooks
           status: 'active'
         )
         if twilio_acct
-          # ONE permitted use of send_via_master in campaign code paths:
-          # legally-required compliance auto-reply on inbound STOP/HELP/START.
-          # Outbound campaign sends still must NEVER use master.
-          TwilioSmsService.send_via_master(
-            to: from_number,
-            body: campaign_result.reply_body,
-            from_number: twilio_acct.phone_number
-          )
+          # Legally required compliance auto-reply on inbound STOP/HELP/START,
+          # from the number that was texted: on our master account, or on the
+          # dealer's own account for their own number.
+          twilio_acct.send_sms(to: from_number, body: campaign_result.reply_body)
         end
         head :ok and return
       end
@@ -366,7 +362,7 @@ module Webhooks
     private
     
     def verify_twilio_signature
-      auth_token = ENV['TWILIO_AUTH_TOKEN']
+      auth_token = own_account_token || ENV['TWILIO_AUTH_TOKEN']
       
       unless auth_token.present?
         Rails.logger.warn "[Twilio] Auth token not configured - skipping signature verification"
@@ -387,8 +383,6 @@ module Webhooks
       
       is_valid = validator.validate(url, post_params, signature)
 
-      # No sub-account fallback needed — all numbers are on master account now
-
       unless is_valid
         Rails.logger.error "[Twilio] Invalid signature - possible spoofed request"
         head :forbidden
@@ -405,6 +399,14 @@ module Webhooks
       false
     end
     
+    # A dealer's own Twilio account signs its webhooks with its own token.
+    def own_account_token
+      sid = params['AccountSid'].presence
+      return nil if sid.blank? || sid == ENV['TWILIO_ACCOUNT_SID']
+
+      TwilioAccount.active.where(sub_account_sid: sid).detect(&:own_account?)&.auth_token.presence
+    end
+
     # Forward an inbound contact reply to the CRM user who originally sent the SMS
     # Appends a tokenized reply link so the user can respond without logging in
     # The shared sending number, in the shape Twilio reports a recipient.

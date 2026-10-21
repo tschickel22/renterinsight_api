@@ -105,6 +105,21 @@ class CommunicationSettingsService
     # so we use master credentials with the company's dedicated from_number.
     if mode == 'dedicated' && company&.twilio_account&.active?
       ta = company.twilio_account
+      if ta.own_account?
+        sid, token = ta.api_credentials
+        Rails.logger.info "[CommSettings] Using the dealer's own Twilio number for Company #{company.id}: #{ta.phone_number}"
+        return {
+          provider:                      'twilio',
+          from_number:                   ta.phone_number,
+          twilio_account_sid:            sid,
+          twilio_auth_token:             token,
+          twilio_messaging_service_sid:  ta.messaging_service_sid,
+          enabled:                       true,
+          sms_provisioning_mode:         'dedicated',
+          source:                        'dedicated_own_account'
+        }
+      end
+
       master_sid   = ENV['TWILIO_ACCOUNT_SID'].presence
       master_token = ENV['TWILIO_AUTH_TOKEN'].presence
 
@@ -142,13 +157,22 @@ class CommunicationSettingsService
 
     # For 'platform' mode: use existing waterfall
     config = merged_settings.dig('sms') || {}
+    account_sid = decrypt_value(config['twilioAccountSid']) || ENV['TWILIO_ACCOUNT_SID']
+    msid = config['twilioMessagingServiceSid'].presence || ENV['TWILIO_MESSAGING_SERVICE_SID']
+    # Our Messaging Service belongs to our account. A company that entered its
+    # own account SID inherits it through the merge, and Twilio answers 404
+    # ("The requested resource ... was not found") for the whole send.
+    master_sid = TwilioSmsService.master_credentials.first
+    if msid.present? && master_sid.present? && account_sid != master_sid && msid == TwilioSmsService.master_messaging_service_sid
+      msid = nil
+    end
 
     {
       provider:                      config['provider'] || ENV['SMS_PROVIDER'] || 'twilio',
       from_number:                   config['fromNumber'] || ENV['TWILIO_PHONE_NUMBER'],
-      twilio_account_sid:            decrypt_value(config['twilioAccountSid']) || ENV['TWILIO_ACCOUNT_SID'],
+      twilio_account_sid:            account_sid,
       twilio_auth_token:             decrypt_value(config['twilioAuthToken']) || ENV['TWILIO_AUTH_TOKEN'],
-      twilio_messaging_service_sid:  config['twilioMessagingServiceSid'] || ENV['TWILIO_MESSAGING_SERVICE_SID'],
+      twilio_messaging_service_sid:  msid,
       enabled:                       config['isEnabled'] != false,
       sms_provisioning_mode:         mode
     }
