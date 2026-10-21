@@ -23,10 +23,12 @@ namespace :ghl do
     end
     steps = ENV['STEPS'].present? ? ENV['STEPS'].split(',').map(&:strip) : Migrations::Ghl::Loader::STEPS
     fallback = ENV['FALLBACK_USER_EMAIL'].present? ? company.users.find_by!(email: ENV['FALLBACK_USER_EMAIL'].downcase) : nil
+    # USER_EMAIL_REWRITE="@easyhomesource.com=@ehs-staging.invalid" matches owners to stand-in users on a test company.
+    rewrite = ENV['USER_EMAIL_REWRITE'].presence&.split('=', 2)
     puts "Bundle #{File.basename(path)} mapped #{data['mapped_at']}; loading into company #{company.id} #{company.name}"
     Migrations::Ghl::Loader.new(
       company: company, data: data, batch: ENV['BATCH'].presence || "ghl_#{Time.current.strftime('%Y%m%d_%H%M')}",
-      dry_run: ENV['DRY_RUN'].present?, steps: steps, fallback_user: fallback
+      dry_run: ENV['DRY_RUN'].present?, steps: steps, fallback_user: fallback, user_email_rewrite: rewrite
     ).run
   end
 

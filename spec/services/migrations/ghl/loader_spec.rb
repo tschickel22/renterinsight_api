@@ -117,6 +117,33 @@ RSpec.describe Migrations::Ghl::Loader, type: :service do
     expect(LeadActivity.where(lead_id: company.leads.sole.id).count).to eq(1)
   end
 
+  it 'takes over statuses and sources the company already has instead of duplicating them' do
+    company.lead_statuses.create!(key: 'new', label: 'New')
+    company.sources.create!(name: 'website')
+    result = load!
+
+    expect(result[:errors]).to be_empty
+    expect(company.lead_statuses.where(key: 'new').count).to eq(1)
+    expect(company.sources.where('lower(name) = ?', 'website').count).to eq(1)
+    expect(result[:report]['lead_status'][:adopted_existing]).to eq(1)
+  end
+
+  it 'matches owners to stand-in users when emails are rewritten' do
+    standin = company.users.create!(email: 'rep@stage.invalid', first_name: 'S', last_name: 'I', password: 'secret123', status: 'active', role: 'admin')
+    described_class.new(company: company, data: data, batch: 'b1', dry_run: false, log: StringIO.new,
+                        steps: %w[setup leads], user_email_rewrite: ['@dealer.example', '@stage.invalid']).run
+
+    expect(company.leads.sole.owner_id).to eq(standin.id)
+  end
+
+  it 'lists people who were already in the company instead of merging them' do
+    company.leads.create!(first_name: 'Joe', email: 'JOE@example.com', status: 'new', skip_workflows: true)
+    result = load!
+
+    expect(company.leads.count).to eq(2)
+    expect(result[:errors].grep(/possible duplicate: GHL lead L1/).size).to eq(1)
+  end
+
   it 'leaves a record edited in DealerTide alone on a refresh' do
     load!
     lead = company.leads.sole
