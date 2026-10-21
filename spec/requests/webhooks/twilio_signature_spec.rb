@@ -68,6 +68,19 @@ RSpec.describe 'Twilio webhook signatures', type: :request do
       post_status(sign('http://www.example.com/webhooks/twilio/sms/status', body: body), body: body)
       expect(response).to have_http_status(:forbidden)
     end
+    it 'checks an account a dealer typed into Communications settings against the token saved there' do
+      sid = "AC#{'e8' * 16}"
+      company = Company.create!(name: "Typed-#{SecureRandom.hex(4)}")
+      Setting.set('Company', company.id, 'communications',
+                  { 'sms' => { 'provider' => 'twilio', 'twilioAccountSid' => sid, 'twilioAuthToken' => 'typedtoken' } })
+      body = params.merge('AccountSid' => sid)
+
+      post_status(sign('http://www.example.com/webhooks/twilio/sms/status', with: 'typedtoken', body: body), body: body)
+      expect(response).to have_http_status(:ok)
+
+      post_status(sign('http://www.example.com/webhooks/twilio/sms/status', body: body), body: body)
+      expect(response).to have_http_status(:forbidden)
+    end
   end
 
   context 'log only (the default)' do

@@ -133,7 +133,7 @@ module Api
     # PATCH /api/settings (old format)
     # PUT /api/settings (new format)
     def update
-      Rails.logger.info "🔧 [SettingsController#update] Received params: #{params.inspect}"
+      Rails.logger.info "🔧 [SettingsController#update] Received params: #{request.filtered_parameters.inspect}"
       Rails.logger.info "🔧 [SettingsController#update] Company: #{@company&.name} (ID: #{@company&.id})"
       
       # Handle company attribute updates (name, domain)
