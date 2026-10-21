@@ -80,6 +80,9 @@ module Websites
 
       return default if page_title.blank?
       return page_title if page_title.casecmp?(default.to_s)
+      # A page title that already names the dealer ("Blog | Easy Homesource") would
+      # read the name twice. Templates write SEO titles that way, so this is common.
+      return page_title if names_site?(page_title)
 
       combined = "#{page_title} | #{default}"
       return combined if combined.length <= TITLE_LIMIT
@@ -90,6 +93,11 @@ module Websites
       # name plus a dealership name is routinely over the limit, and truncation
       # was landing mid model number.
       page_title
+    end
+
+    def names_site?(text)
+      name = site_name.to_s.strip
+      name.present? && text.downcase.include?(name.downcase)
     end
 
     # The home's own words first. A listing that inherits the site description

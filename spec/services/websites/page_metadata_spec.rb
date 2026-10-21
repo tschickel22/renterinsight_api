@@ -33,6 +33,16 @@ RSpec.describe Websites::PageMetadata do
       expect(title).to eq('2026 Skyline Homes Prairie Dune 8710')
       expect(title.length).to be <= described_class::TITLE_LIMIT
     end
+
+    # Templates write SEO titles as "Blog | Dealer", and appending the name again read
+    # "Blog | Easy Homesource | Easy HomeSource" (www.easyhomesource.com, 2026-10-21).
+    it 'does not repeat a site name the page title already carries, whatever its case' do
+      # Short enough that the length rule alone would let the pair through.
+      website.update!(brand: { 'company_name' => 'Easy HomeSource' })
+      page.update!(seo_title: 'Blog | Easy Homesource')
+
+      expect(meta(page: page)[:title]).to eq('Blog | Easy Homesource')
+    end
   end
 
   # A hero subtitle is written as a tagline, not as a search result, and it is
