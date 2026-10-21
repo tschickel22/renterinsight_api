@@ -157,12 +157,53 @@ class TwilioProvisioningService
     end
   end
 
+  # A number on the dealer's own Twilio account, connected so it works like one we
+  # provisioned: sends from it (with their credentials, TwilioAccount#own_account?)
+  # and two-way texting, since its inbound SMS is pointed at us. Nothing is bought,
+  # and it stays out of our Messaging Service; its A2P registration is the dealer's.
+  def self.connect_own_number(company, account_sid:, auth_token:, phone_number:, messaging_service_sid: nil)
+    number = Campaigns::SmsInboundHandler.normalize_phone(phone_number)
+    if company.twilio_account&.active? && !company.twilio_account.own_account?
+      return { success: false, error: 'Company already has a number we provisioned' }
+    end
+
+    webhook_url = inbound_webhook_url
+    client = Twilio::REST::Client.new(account_sid, auth_token)
+    phone = client.api.incoming_phone_numbers.list(phone_number: number, limit: 1).first
+    return { success: false, error: "#{number} is not on Twilio account #{account_sid}" } unless phone
+
+    previous_sms_url = phone.sms_url
+    client.api.incoming_phone_numbers(phone.sid).update(sms_url: webhook_url, sms_method: 'POST')
+
+    account = company.twilio_account || company.build_twilio_account
+    account.assign_attributes(
+      phone_number: number, phone_number_sid: phone.sid, status: 'active', provisioned_at: Time.current,
+      sub_account_sid: account_sid, auth_token: auth_token,
+      metadata: (account.metadata || {}).merge('own_account' => true, 'messaging_service_sid' => messaging_service_sid.presence,
+                                               'previous_sms_url' => previous_sms_url).compact
+    )
+    account.save!
+    company.update!(sms_provisioning_mode: 'dedicated')
+    Rails.logger.info "[TwilioProvisioning] Connected the dealer's own number #{number} for Company #{company.id} -> #{webhook_url}"
+
+    { success: true, twilio_account: account, phone_number: number, webhook_url: webhook_url, previous_sms_url: previous_sms_url }
+  rescue Twilio::REST::RestError => e
+    { success: false, error: "Twilio API error: #{e.message} (code: #{e.code})" }
+  end
+
   def self.deprovision_client(company)
     Rails.logger.info "[TwilioProvisioning] Starting deprovision for Company #{company.id}"
 
     twilio_account = company.twilio_account
     unless twilio_account
       return { success: false, error: 'No Twilio account found for this company' }
+    end
+
+    # The dealer's own number is theirs to keep; it only stops being used here.
+    if twilio_account.own_account?
+      twilio_account.destroy!
+      company.update!(sms_provisioning_mode: 'platform')
+      return { success: true }
     end
 
     begin

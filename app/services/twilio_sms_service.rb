@@ -24,6 +24,8 @@ module TwilioSmsService
     end
 
     to_normalized = normalize_phone(to)
+    # Settings store a typed number ("1352-558-8888"); Twilio wants E.164.
+    from_number = normalize_phone(from_number) if from_number.present?
 
     if messaging_service_sid.present? && from_number.present?
       Rails.logger.info "[TwilioSmsService] Sending to #{to_normalized} via MessagingService #{messaging_service_sid} from #{from_number}"
@@ -46,6 +48,11 @@ module TwilioSmsService
     else
       form_data['From'] = from_number
     end
+
+    # Our Messaging Service reports delivery to us; a dealer's own account
+    # only does when each message asks.
+    callback = own_account_status_callback(account_sid)
+    form_data['StatusCallback'] = callback if callback
 
     request.set_form_data(form_data)
 
@@ -126,6 +133,17 @@ module TwilioSmsService
     rescue StandardError
       nil
     end
+  end
+
+  def self.own_account_status_callback(account_sid)
+    return nil if account_sid == master_credentials.first
+
+    base = TwilioProvisioningService.api_base_url
+    return nil unless base.start_with?('https://') && !base.include?('localhost')
+
+    "#{base}/webhooks/twilio/sms/status"
+  rescue TwilioProvisioningService::ProvisioningError
+    nil
   end
 
   def self.normalize_phone(phone)
