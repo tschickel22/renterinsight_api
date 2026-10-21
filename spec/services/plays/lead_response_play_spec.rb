@@ -90,6 +90,70 @@ RSpec.describe Plays::LeadResponsePlay do
     end
   end
 
+  describe Plays::NewWebsiteLead do
+    it "starts from the dealer's own website sources as well as its form's" do
+      company.sources.create!(name: 'Website Contact (dealer.example)', is_active: true)
+      company.sources.create!(name: 'Web Form', is_active: true)
+      company.sources.create!(name: 'Facebook', is_active: true)
+
+      expect(described_class.default_sources_for(company))
+        .to eq(['Web Form', 'Website', 'Website Contact (dealer.example)'])
+    end
+
+    it 'joins the weekly homes email right away, then texts, sends the contact card, emails and sets a call' do
+      install(described_class)
+      lead = Lead.create!(company_id: company.id, source_id: source('Website').id, location_id: main_location.id,
+                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', opt_in_sms: true)
+
+      run = advance(run_for(lead))
+
+      expect(lead.reload.owner_id).to eq(main_rep.id)
+      expect(lead.tags.pluck(:name)).to include(described_class::WEEKLY_HOMES_TAG)
+      card_url = ContactCard.url_for(main_rep)
+      expect(CommunicationService).to have_received(:send_sms).with(hash_including(body: a_string_including('Thanks for reaching out on our website')))
+      expect(CommunicationService).to have_received(:send_sms).with(hash_including(body: a_string_including(card_url)))
+      expect(CommunicationService).to have_received(:send_email).with(hash_including(body: a_string_including(%(href="#{card_url}"))))
+      expect(LeadActivity.where(lead_id: lead.id, activity_type: 'call').count).to eq(1)
+      expect(run).to have_attributes(status: 'waiting', wait_reason: 'reply_pause')
+    end
+
+    it 'sends no texts, the card included, to a lead who did not agree to texts' do
+      install(described_class)
+      lead = Lead.create!(company_id: company.id, source_id: source('Website').id, location_id: main_location.id,
+                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', opt_in_sms: false)
+
+      advance(run_for(lead))
+
+      expect(CommunicationService).not_to have_received(:send_sms)
+      expect(CommunicationService).to have_received(:send_email).once
+    end
+
+    it 'refuses a contact card text without the link' do
+      content = described_class.default_content.deep_dup
+      content['contact_card']['body'] = 'Save my number'
+
+      expect { install(described_class, 'content' => content) }
+        .to raise_error(Plays::InstallError, /contact_card_link/)
+    end
+
+    it 'shows the weekly homes email first and the contact card on the map' do
+      keys = described_class.definition(company)[:map].map { |step| step[:key] }
+
+      expect(keys.first(4)).to eq(%w[trigger assign weekly_homes first_text])
+      expect(keys).to include('contact_card')
+      expect(keys.count('weekly_homes')).to eq(1)
+    end
+  end
+
+  # Contact card and early weekly signup are new; plays already on must not change.
+  it 'leaves existing presets without a contact card and joining the weekly email at the end' do
+    content = Plays::NewFacebookLead.normalize_content(nil)
+
+    expect(content['contact_card']['enabled']).to be false
+    expect(content['weekly_homes_timing']).to eq('end')
+    expect(Plays::NewFacebookLead.definition(company)[:map].last[:key]).to eq('weekly_homes')
+  end
+
   describe Plays::WalkInVisit do
     it 'keeps the lead with the rep who entered it, waits two hours, then texts and sets a call for the next morning' do
       install(described_class)

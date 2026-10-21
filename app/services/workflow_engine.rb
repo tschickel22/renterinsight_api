@@ -164,6 +164,8 @@ module WorkflowEngine
         # The record owner's own booking link, so one rule sends each prospect
         # their rep's calendar rather than whoever wrote the rule.
         hash['owner_booking_url'] ||= owner.try(:booking_url).presence
+        # The owning rep's contact card, so "save my number" saves the right rep.
+        hash['owner_contact_card_url'] ||= ContactCard.url_for(owner) if owner.is_a?(User)
       end
 
       account = entity.try(:account) || entity.try(:converted_account)

@@ -30,10 +30,10 @@ RSpec.describe 'Api::V1::Plays', type: :request do
 
     expect(response).to have_http_status(:ok)
     keys = body['plays'].map { |p| p['key'] }
-    expect(keys).to contain_exactly('new_facebook_lead', 'walk_in_visit', 'promo_landing_page', 'weekly_homes_email',
+    expect(keys).to contain_exactly('new_facebook_lead', 'new_website_lead', 'walk_in_visit', 'promo_landing_page', 'weekly_homes_email',
                                     'wake_up_cold_leads', 'deal_to_sold')
     expect(body['plays'].to_h { |p| [p['key'], p['kind']] })
-      .to eq('new_facebook_lead' => 'lead_response', 'walk_in_visit' => 'lead_response',
+      .to eq('new_facebook_lead' => 'lead_response', 'new_website_lead' => 'lead_response', 'walk_in_visit' => 'lead_response',
              'promo_landing_page' => 'landing_page', 'weekly_homes_email' => 'recurring_email',
              'wake_up_cold_leads' => 'reengagement', 'deal_to_sold' => 'deal_followup')
     facebook = body['plays'].find { |p| p['key'] == 'new_facebook_lead' }
