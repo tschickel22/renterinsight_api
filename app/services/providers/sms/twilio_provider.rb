@@ -69,7 +69,11 @@ module Providers
         else
           form_data['From'] = from
         end
-        
+        # Our Messaging Service reports delivery for our own account; a
+        # dealer's own account has to be told where to send it.
+        callback = TwilioSmsService.own_account_status_callback(account_sid)
+        form_data['StatusCallback'] = callback if callback
+
         request.set_form_data(form_data)
         
         response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|

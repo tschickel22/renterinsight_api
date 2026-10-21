@@ -166,7 +166,6 @@ class SmsService
       
       # Decrypt any encrypted values
       comm_settings = decrypt_hash(comm_settings)
-      Rails.logger.info "[SmsService] After decryption - twilioAuthToken: #{comm_settings['sms']['twilioAuthToken'][0..10]}..." if comm_settings['sms']['twilioAuthToken'].present?
       
       if comm_settings['sms'].present?
         Rails.logger.info "[SmsService] Using Platform SMS settings"
