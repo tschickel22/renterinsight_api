@@ -32,6 +32,15 @@ RSpec.describe Truebuild::Trueview::Surfaces do
     end
   end
 
+  describe '.main_parts' do
+    it 'drops a patch painted apart from the floor, and keeps the floor' do
+      mask = Vips::Image.black(100, 100).draw_rect(255, 0, 60, 100, 40, fill: true).draw_rect(255, 45, 10, 6, 10, fill: true)
+      kept = described_class.main_parts(mask)
+      expect(kept.getpoint(50, 80).first).to eq(255)
+      expect(kept.getpoint(47, 14).first).to eq(0)
+    end
+  end
+
   describe '.find!' do
     it 'paints a floor with Lite on every try' do
       photo = Vips::Image.black(40, 30, bands: 3).copy(interpretation: :srgb).jpegsave_buffer
@@ -50,7 +59,7 @@ RSpec.describe Truebuild::Trueview::Surfaces do
 
   describe '.describe' do
     it 'names the parts of a floor the painter used to leave out' do
-      expect(described_class.describe('Flooring')).to include('the whole floor', 'far walls', 'island or vanity')
+      expect(described_class.describe('Flooring')).to include('the whole floor', 'far walls', 'island or vanity', 'Not doors')
     end
 
 
