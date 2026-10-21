@@ -558,8 +558,13 @@ module Catalog
             'source_url'   => url,
             'local_url'    => nil,
             'alt'          => img[:alt].to_s,
-            'is_floorplan' => floorplan?(url, img[:alt])
+            'is_floorplan' => false
           }
+          # A drawing is one wherever any copy of it says so. Timber Creek names
+          # its drawings by number ("3242.jpg"), so only the grid card, swept in
+          # last, says "floorplan"; keeping the first copy's word left 22 of
+          # Easy Homesource's homes with the drawing as their cover photo.
+          seen[url]['is_floorplan'] ||= floorplan?(url, img[:alt])
         end
         seen.values
       end
