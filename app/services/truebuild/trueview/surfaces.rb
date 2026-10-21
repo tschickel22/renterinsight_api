@@ -34,6 +34,11 @@ module Truebuild
       # on Bay Port's front the larger model was turned down three times where
       # Lite's outline had been accepted.
       PAINT_ORDER = %w[nb2 nb2 nb2-lite].freeze
+      # Floors are Lite's: on production (2026-10-20) Lite painted 38 of the 39
+      # floor outlines that passed, while the larger model left most of the
+      # floor unpainted, spending both its tries on every one of the 48 that
+      # failed. Retried on Cahaba's kitchen, it scored 2 twice again.
+      PAINT_ORDER_BY_SURFACE = { 'flooring' => %w[nb2-lite nb2-lite nb2-lite] }.freeze
       MAGENTA = [255, 0, 255]
       MAGENTA_DE = 45   # CIE dE76 from pure magenta that still counts as painted
       RETRY_FAILED_AFTER = 30.minutes
@@ -248,7 +253,7 @@ module Truebuild
         spent = 0.0
         attempts = []
         mask = verdict = result = nil
-        (painter ? [painter] * OUTLINE_ATTEMPTS : PAINT_ORDER).each do |painter_key|
+        (painter ? [painter] * OUTLINE_ATTEMPTS : PAINT_ORDER_BY_SURFACE.fetch(key, PAINT_ORDER)).each do |painter_key|
           spec = MODELS.fetch(painter_key)
           result = Providers::Gemini.edit(spec, { bytes: source_bytes, mime: 'image/jpeg' },
                                           paint_prompt(description, attempts.last&.dig('note') || correction), aspect: aspect)
