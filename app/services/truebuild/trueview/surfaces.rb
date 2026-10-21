@@ -75,10 +75,10 @@ module Truebuild
         # production's 92 floor outlines were turned down for what they left
         # out (the far end of the kitchen, the floor in front of the vanity).
         ['flooring', /floor|carpet/i,
-         'the whole floor, every part of it that can be seen: from the bottom edge of the photo to the far walls, on both ' \
-         'sides of the room, in front of and around an island or vanity, between cabinet runs, around a toilet or tub, ' \
-         'under a table, and through open doorways into the next room. Not rugs, furniture legs, cabinets, appliances, ' \
-         'a tub or shower, or baseboards'],
+         'the whole floor, every part of it that can be seen: from the bottom edge of the photo to where the floor meets ' \
+         'the far walls, on both sides of the room, in front of and around an island or vanity, between cabinet runs, ' \
+         'around a toilet or tub, and under a table. Not doors, door frames, walls, rugs, furniture legs, cabinets, ' \
+         'appliances, a tub or shower, or baseboards'],
         # A "Gable accent" (Timber Creek's shakes) is the outside gable, not a
         # wall inside: matched as an accent wall, shakes were drawn on baths.
         ['accent wall', /(?<!gable )accent|wall ?board/i,
@@ -262,6 +262,7 @@ module Truebuild
 
           mask = without_others(magenta(Vips::Image.new_from_buffer(result[:bytes], ''), image.width, image.height),
                                 source_url, key)
+          mask = main_parts(mask) if MAIN_PARTS_ONLY.include?(key)
           verdict = (mask.avg / 255.0).positive? ? check(image, mask, key, description) : { 'present' => false, 'fit' => 0 }
           spent += verdict['cost_usd'].to_f
           attempts << verdict
@@ -414,7 +415,7 @@ module Truebuild
                                           'closely where light colors meet (white doors under a white counter edge, a pale wall ' \
                                           'beside a white tub surround) and at the top of the cabinets (one above the microwave ' \
                                           'or hood, ones reaching the ceiling, crown molding fitted on top of them): that is ' \
-                                          "where outlines go wrong.#{fine_overlap(key)}" },
+                                          "where outlines go wrong.#{fine_overlap(key)}#{slight_miss(key)}" },
                     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: look(tinted) } }]
         )
         cost = Catalog::PriceBooks::ClaudeClient.cost_usd(result[:input_tokens], result[:output_tokens])
@@ -423,11 +424,41 @@ module Truebuild
         verdict.merge('present' => true, 'cost_usd' => (cost + seen['cost_usd'].to_f).round(4))
       end
 
+      # What counts as a slight miss, for a surface allowed one (SLIGHT_MISS_OK).
+      # Cahaba's kitchen floor, covered but for the strip behind its island,
+      # was called a clear miss three times.
+      def slight_miss(key)
+        return '' unless SLIGHT_MISS_OK.include?(key)
+
+        ' Floor left out only far in the background (a strip behind an island or table, a corner by the far wall) is ' \
+        'a slight miss; a part in the foreground or middle of the room is a clear one.'
+      end
+
       # Surfaces this one may overlap without harm: each keeps its own pixels
       # when layers are cut, so Claude should not mark the outline down for it.
       def fine_overlap(key)
         above = PRECEDENCE.select { |o| o != key && outranks?(o, key) }
         above.empty? ? '' : " Overlap with the #{above.join(', ')} does not matter (each keeps its own pixels): do not mark it down."
+      end
+
+      # Surfaces that are one connected area: a patch painted apart from it is
+      # something else. Lite painted Cahaba's back door along with the floor.
+      MAIN_PARTS_ONLY = ['flooring'].freeze
+      MAIN_PART_SHARE = 0.15 # of the largest part, below which a part is dropped
+
+      # The outline without patches much smaller than its largest part.
+      def main_parts(mask)
+        on = (mask > 127).ifthenelse(255, 0).cast(:uchar)
+        regions = on.labelregions
+        return mask if regions.max > 65_000
+
+        labels = (on > 0).ifthenelse(regions + 1, 0).cast(:ushort)
+        counts = labels.hist_find.to_a.first.map(&:first)
+        largest = counts.drop(1).max.to_i
+        return mask if largest.zero?
+
+        keep = counts.each_with_index.map { |c, i| i.positive? && c >= largest * MAIN_PART_SHARE ? 255 : 0 }
+        labels.maplut(Vips::Image.new_from_array([keep]).cast(:uchar))
       end
 
       # Surfaces whose outline may leave a little out (strict_fit).
