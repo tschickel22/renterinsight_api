@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_21_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_21_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5009,6 +5009,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_21_200000) do
     t.index ["token_digest"], name: "index_mfa_tokens_on_token_digest", unique: true
     t.index ["user_id", "user_type", "used_at"], name: "index_mfa_tokens_on_user_id_and_user_type_and_used_at"
     t.index ["user_type", "user_id"], name: "index_mfa_tokens_on_user"
+  end
+
+  create_table "migration_records", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "source_system", null: false
+    t.string "source_type", null: false
+    t.string "source_id", null: false
+    t.string "record_type", null: false
+    t.bigint "record_id", null: false
+    t.string "batch"
+    t.datetime "loaded_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "batch"], name: "index_migration_records_on_company_id_and_batch"
+    t.index ["company_id", "source_system", "source_type", "source_id"], name: "idx_migration_records_source", unique: true
+    t.index ["record_type", "record_id"], name: "index_migration_records_on_record_type_and_record_id"
   end
 
   create_table "notes", force: :cascade do |t|
