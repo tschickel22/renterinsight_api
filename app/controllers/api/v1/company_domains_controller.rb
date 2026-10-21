@@ -302,7 +302,7 @@ class Api::V1::CompanyDomainsController < ApplicationController
                  'DNS is pointing at us. The certificate is issued automatically and usually ' \
                  'takes a few minutes.'
                else
-                 'Not all records are visible yet. DNS can take up to an hour to propagate.'
+                 dns_progress_message(results)
                end,
       records: results
     }
@@ -509,6 +509,29 @@ class Api::V1::CompanyDomainsController < ApplicationController
   rescue StandardError => e
     Rails.logger.warn "[CompanyDomains] lookup failed for #{record['name']}: #{e.message}"
     { type: record['type'], name: record['name'], expected: record['value'], found: false, found_values: [] }
+  end
+
+  # Names each record rather than summing them up. "Not all records are visible yet" read as
+  # "nothing worked" to a tenant whose ownership TXT was live everywhere and whose only
+  # outstanding step was the CNAME, still pointed at their old host on purpose. A record
+  # that resolves to something else is not a propagation delay, so say what it points at.
+  def dns_progress_message(results)
+    found, missing = results.partition { |r| r[:found] }
+    lines = []
+    lines << "Found: #{found.map { |r| "#{r[:type]} #{r[:name]}" }.join(', ')}." if found.any?
+
+    missing.each do |r|
+      current = Array(r[:found_values]).map { |v| v.to_s.chomp('.') }.reject(&:blank?)
+      lines <<
+        if current.any?
+          "#{r[:type]} #{r[:name]} points at #{current.join(', ')}. Change it to #{r[:expected]}."
+        else
+          "#{r[:type]} #{r[:name]} is not published yet (expected #{r[:expected]}). " \
+            'New records can take up to an hour to show.'
+        end
+    end
+
+    lines.join(' ')
   end
 
   # Best-effort cleanup so a failed setup does not strand a hostname in Cloudflare that
