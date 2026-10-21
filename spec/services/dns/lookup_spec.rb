@@ -53,6 +53,23 @@ RSpec.describe Dns::Lookup do
 
       expect(described_class.ns('example.com')).to eq(['ns57.domaincontrol.com'])
     end
+
+    # Resolv has no CAA class, so the raw RDATA is parsed here: flags, tag length, tag, value.
+    it 'parses CAA from raw RDATA' do
+      stub_records([described_class::CAA.new("\x00\x05issuessl.com")])
+
+      expect(described_class.caa('example.com')).to eq([{ flags: 0, tag: 'issue', value: 'ssl.com' }])
+    end
+  end
+
+  it 'asks a specific name server when one is given' do
+    dns = instance_double(Resolv::DNS)
+    allow(dns).to receive(:timeouts=)
+    allow(dns).to receive(:getresources).and_return([])
+
+    expect(Resolv::DNS).to receive(:open).with({ nameserver: ['1.2.3.4'] }).and_yield(dns)
+
+    described_class.resolve('example.com', Resolv::DNS::Resource::IN::A, nameserver: '1.2.3.4', &:ttl)
   end
 
   describe 'failure handling' do

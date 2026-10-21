@@ -54,11 +54,14 @@ class CloudflareSaasService
   
   # Add a custom hostname to Cloudflare for SaaS
   # @param hostname [String] The domain to add (e.g., "www.sunshine-rv.com")
+  # @param ssl_method [String] 'http' (default), or 'txt' when the hostname still serves a
+  #   live site elsewhere: HTTP validation needs traffic to reach us, so it cannot pass
+  #   until the dealer switches, and the site would sit without a certificate meanwhile.
   # @return [Hash] Response with custom_hostname_id and verification records
-  def add_custom_hostname(hostname)
-    Rails.logger.info "[CloudflareSaaS] Adding custom hostname: #{hostname}"
+  def add_custom_hostname(hostname, ssl_method: 'http')
+    Rails.logger.info "[CloudflareSaaS] Adding custom hostname: #{hostname} (#{ssl_method} validation)"
 
-    response = post_custom_hostname(hostname, custom_origin: true)
+    response = post_custom_hostname(hostname, custom_origin: true, ssl_method: ssl_method)
 
     # custom_origin_server has restricted availability on some Cloudflare plans. Without
     # this, a plan that rejects it would fail every dealer domain outright, when the
@@ -69,7 +72,7 @@ class CloudflareSaasService
         "[CloudflareSaaS] custom_origin_server rejected for #{hostname}; retrying with the " \
         'zone fallback origin. Confirm the fallback origin is set under SSL/TLS > Custom Hostnames.'
       )
-      response = post_custom_hostname(hostname, custom_origin: false)
+      response = post_custom_hostname(hostname, custom_origin: false, ssl_method: ssl_method)
     end
 
     # Cloudflare refuses a hostname it already holds. That happens whenever a previous
@@ -158,8 +161,14 @@ class CloudflareSaasService
   #
   # Best effort: if the patch fails, the caller still reads the current status, which is no
   # worse than before.
-  def revalidate_custom_hostname(custom_hostname_id)
-    update_custom_hostname(custom_hostname_id, ssl: { method: 'http', type: 'dv' })
+  #
+  # Re-sends the method the hostname already uses. This used to hard-code 'http', and the
+  # poller runs it every 20 minutes, so a hostname moved to TXT validation (to issue the
+  # certificate while the dealer's old site was still live) was silently put back on HTTP,
+  # where it could never pass. www.easyhomesource.com, 2026-10-20.
+  def revalidate_custom_hostname(custom_hostname_id, ssl_method: nil)
+    ssl_method ||= check_custom_hostname_status(custom_hostname_id).dig(:result, :ssl, :method).presence || 'http'
+    update_custom_hostname(custom_hostname_id, ssl: { method: ssl_method, type: 'dv' })
     true
   rescue CloudflareError => e
     Rails.logger.warn "[CloudflareSaaS] Could not trigger revalidation for #{custom_hostname_id}: #{e.message}"
@@ -236,6 +245,15 @@ class CloudflareSaasService
       verification_status: result[:status], # pending, active, moved, deleted
       verification_records: parse_verification_records(ownership_verification),
       ssl_status: ssl[:status], # pending, active, expired
+      ssl_method: ssl[:method],
+      # Present only under TXT validation. They are what lets the certificate issue while
+      # the dealer's old site is still live, so they have to reach the screen.
+      certificate_records: Array(ssl[:validation_records]).filter_map do |r|
+        next if r[:txt_name].blank? || r[:txt_value].blank?
+
+        { 'type' => 'TXT', 'name' => r[:txt_name], 'value' => r[:txt_value], 'ttl' => 600,
+          'kind' => 'certificate' }
+      end,
       ssl_issued_at: ssl[:certificate_authority] ? Time.current : nil,
       cname_target: result[:ownership_verification]&.dig(:value),
       created_at: result[:created_at],
@@ -252,11 +270,11 @@ class CloudflareSaasService
     }
   end
   
-  def post_custom_hostname(hostname, custom_origin:)
+  def post_custom_hostname(hostname, custom_origin:, ssl_method:)
     body = {
       hostname: hostname,
       ssl: {
-        method: 'http',
+        method: ssl_method,
         type: 'dv',
         settings: { http2: 'on', min_tls_version: '1.2', tls_1_3: 'on' }
       }
