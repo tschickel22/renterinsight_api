@@ -252,6 +252,13 @@ RSpec.describe Catalog::Adapters::ManufacturedHomesPlatformAdapter do
           .to eq ["#{cdn}/manufacturer/3391/floorplan/231596/Cahaba%20CS-1604%20floor-plans-SMALL.jpg"]
       end
 
+      it 'tags a numbered drawing the page shows first as a photo, from its grid card' do
+        drawing = "#{cdn}/manufacturer/3391/floorplan/231596/3242.jpg"
+        html = %(<html><body><img src="#{drawing}" /><img src="#{cdn}/manufacturer/3391/floorplan/231596/front.jpg" /></body></html>)
+        parsed = tc_adapter.parse(key: '231596', url: 'https://x/', html: html, card: { 'image' => drawing })
+        expect(parsed.images.select { |i| i['is_floorplan'] }.map { |i| i['source_url'] }).to eq [drawing]
+      end
+
       it 'keeps a thumbnail that has no full-resolution sibling' do
         html = %(<html><body><img src="#{cdn}/manufacturer/3391/floorplan/231596/only_thumb_xxl.jpg" /></body></html>)
         parsed = tc_adapter.parse(key: '231596', url: 'https://x/', html: html, card: {})
