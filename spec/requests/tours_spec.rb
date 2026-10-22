@@ -107,6 +107,28 @@ RSpec.describe 'Product tours', type: :request do
       expect(tour.steps.find_by(position: 2).check_status).to eq('missing')
     end
 
+    it 'passes a tour whose only missing step is a plain field the player skips' do
+      admin = make_user(role: 'platform_admin')
+      tour.steps.create!(position: 3, title: 'Three', content: 'Save', selector: '[data-tour="c"]', click_required: true)
+      post "/api/v1/tours/#{tour.id}/check_results",
+           params: { results: [{ position: 1, status: 'found' }, { position: 2, status: 'missing' }, { position: 3, status: 'found' }] },
+           headers: auth(admin), as: :json
+      expect(JSON.parse(response.body)['check_status']).to eq('passing')
+
+      tour.steps.find_by(position: 2).update!(click_required: true)
+      post "/api/v1/tours/#{tour.id}/check_results",
+           params: { results: [{ position: 2, status: 'missing' }] }, headers: auth(admin), as: :json
+      expect(JSON.parse(response.body)['check_status']).to eq('failing')
+    end
+
+    it 'records a tour the checker could not reach as not offered, keeping the last check time' do
+      admin = make_user(role: 'platform_admin')
+      tour.update_columns(check_status: 'failing', checked_at: 2.days.ago)
+      post "/api/v1/tours/#{tour.id}/check_results", params: { not_offered: '/contacts' }, headers: auth(admin), as: :json
+      expect(tour.reload.check_status).to eq('not_offered')
+      expect(tour.checked_at).to be < 1.day.ago
+    end
+
     it 'is for platform admins only' do
       post "/api/v1/tours/#{tour.id}/check_results", params: { results: [] }, headers: auth(user), as: :json
       expect(response).to have_http_status(:forbidden)
