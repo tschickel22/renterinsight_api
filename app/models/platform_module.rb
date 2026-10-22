@@ -101,6 +101,11 @@ class PlatformModule
     'management.calendar' => { name: 'Calendar Scheduling', category: 'Management', icon: 'Calendar', description: 'Appointment and event scheduling' },
     'management.contractors' => { name: 'Contractor Management', category: 'Management', icon: 'Briefcase', description: 'External contractor coordination' },
     'management.projects' => { name: 'Project Management', category: 'Management', icon: 'FolderKanban', description: 'Project tracking with phases, tasks, and client visibility' },
+    # Add-on, absent from every PLAN_TEMPLATE: most dealers assign installers
+    # as ordinary contractors and never need it. Attach per tenant with a
+    # TenantModuleOverride. An installer on an open link gets it implied
+    # (ModuleAccessService#linked_installer?) so it can see the jobs sent to it.
+    'management.linked_companies' => { name: 'Linked Installers', category: 'Management', icon: 'Link2', description: 'Send jobs to an installer that runs its own DealerTide company. Not needed to assign contractors' },
     'management.workflows' => { name: 'Workflow Automation', category: 'Management', icon: 'GitBranch', description: 'Business process automation' },
     'management.territories' => { name: 'Territory Management', category: 'Management', icon: 'MapPin', description: 'Sales territory assignment and tracking' },
     'management_ai_reports' => { name: 'AI Report Queries', category: 'Management', icon: 'Sparkles', description: 'Natural language AI queries for reports' },

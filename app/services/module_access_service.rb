@@ -25,16 +25,7 @@ class ModuleAccessService
     end
 
     # Fall back to subscription plan
-    subscription = company.tenant_subscription
-    enabled =
-      if subscription&.subscription_plan
-        subscription.subscription_plan
-                    .subscription_plan_modules
-                    .exists?(module_key: module_key, is_enabled: true)
-      else
-        # No subscription - check legacy subscription_tier field
-        legacy_tier_check(module_key)
-      end
+    enabled = plan_grants?(module_key)
 
     # Some modules come free with another. Campaign Desk always includes
     # Landing Pages, because Campaign Desk's own description promises one.
@@ -43,6 +34,7 @@ class ModuleAccessService
     # explicitly DISABLES a module has already returned above — so an
     # implication can never silently undo a deliberate revocation.
     enabled ||= implied?(module_key)
+    enabled ||= module_key == LINKED_COMPANIES && linked_installer?
 
     @cache[module_key] = enabled
     enabled
@@ -64,6 +56,22 @@ class ModuleAccessService
     end
   end
   
+  LINKED_COMPANIES = 'management.linked_companies'
+
+  # Bought, by plan or override, as opposed to implied by an open link. Only a
+  # company that bought Linked Installers may invite installers.
+  def linked_companies_bought?
+    override = company.tenant_module_overrides.find_by(module_key: LINKED_COMPANIES)
+    override ? override.is_enabled : plan_grants?(LINKED_COMPANIES)
+  end
+
+  # Linked Installers is bought by the dealer. The installer it links to gets
+  # the page for as long as a link is open, without buying it too, so the jobs
+  # sent to it are never hidden.
+  def linked_installer?
+    CompanyLink.open.exists?(installer_company_id: company.id)
+  end
+
   # Alias for has_module?
   def module_enabled?(module_key)
     has_module?(module_key)
@@ -142,6 +150,10 @@ class ModuleAccessService
 
         plan_modules << key unless plan_modules.include?(key)
       end
+    end
+
+    if !disabled.include?(LINKED_COMPANIES) && !plan_modules.include?(LINKED_COMPANIES) && linked_installer?
+      plan_modules << LINKED_COMPANIES
     end
 
     Rails.logger.info "[ModuleAccessService] Final enabled modules: #{plan_modules.uniq.inspect}"
@@ -315,6 +327,18 @@ class ModuleAccessService
                .to_h
   end
   
+  def plan_grants?(module_key)
+    subscription = company.tenant_subscription
+    if subscription&.subscription_plan
+      subscription.subscription_plan
+                  .subscription_plan_modules
+                  .exists?(module_key: module_key, is_enabled: true)
+    else
+      # No subscription - check legacy subscription_tier field
+      legacy_tier_check(module_key)
+    end
+  end
+
   # Legacy support for companies without TenantSubscription
   # Based on subscription_tier field on Company
   def legacy_tier_check(module_key)

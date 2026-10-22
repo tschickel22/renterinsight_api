@@ -26,6 +26,7 @@ module Api
 
         render json: {
           is_admin: current_user.effective_admin?,
+          can_invite: ModuleAccessService.new(@company).linked_companies_bought?,
           agreement_version: CompanyLink::AGREEMENT_VERSION,
           as_dealer: as_dealer.map { |l| link_json(l) },
           as_installer: as_installer.map { |l| link_json(l) },
@@ -37,6 +38,9 @@ module Api
       # POST /api/v1/company_links { vendor_id, email }
       def create
         return unless authorize_action!('vendors', 'update')
+        unless ModuleAccessService.new(@company).linked_companies_bought?
+          return render(json: { error: 'Linked Installers is not turned on for your company' }, status: :forbidden)
+        end
 
         vendor = @company.vendors.find_by(id: params[:vendor_id])
         link = service.invite!(vendor: vendor, email: params[:email])

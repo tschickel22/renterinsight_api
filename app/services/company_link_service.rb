@@ -6,7 +6,10 @@
 # that email accepts from inside the installer's company (the company they are
 # signed in to, or switched to), and that sets which company the link points
 # at. Nothing about the installer is looked up or shown to the dealer before
-# then, so an invite can't be used to find out who uses DealerTide.
+# then. The one thing an invite does reveal is whether the email belongs to an
+# admin here: an invite to anyone else is refused rather than emailed, because
+# it could never be accepted (there is no self-serve signup). The add-on that
+# gates inviting (management.linked_companies) keeps that to a few dealers.
 class CompanyLinkService
   class Error < StandardError; end
 
@@ -20,6 +23,10 @@ class CompanyLinkService
     email = email.to_s.strip.downcase
     raise Error, 'Enter the email of an admin at the installer' unless email.match?(URI::MailTo::EMAIL_REGEXP)
     raise Error, "#{vendor.name} already has a link" if CompanyLink.open.exists?(dealer_vendor_id: vendor.id)
+    unless dealertide_admin?(email)
+      raise Error, "#{email} is not an admin of a company on #{Brand.current.name}. Linking is only for an installer that " \
+                   'already runs its own company here. To give a contractor work, assign them on the project instead.'
+    end
 
     link = CompanyLink.create!(dealer_company: @company, dealer_vendor: vendor, invite_email: email, invited_by: @actor,
                                agreement_version: CompanyLink::AGREEMENT_VERSION, dealer_agreed_at: Time.current)
@@ -48,6 +55,7 @@ class CompanyLinkService
                    installer_agreed_at: Time.current, installer_dealer_account: dealer_as_customer(link.dealer_company))
       link.log!('accepted', "#{@company.name} accepted the link", company: @company, user: @actor)
     end
+    bust_tenant_cache(@company.id)
     CompanyLinkNotifier.accepted(link)
     link
   end
@@ -60,11 +68,29 @@ class CompanyLinkService
       link.update!(status: 'ended', ended_at: Time.current, ended_by: @actor)
       link.log!('ended', ["#{@company.name} ended the link", reason.presence].compact.join(': '), company: @company, user: @actor)
     end
+    bust_tenant_cache(link.installer_company_id) if link.installer_company_id
     CompanyLinkNotifier.ended(link, by: @company)
     link
   end
 
   private
+
+  # An active admin account with this email, in an active company other than
+  # the inviting dealer. Linked accounts count: one sign-in can be an admin at
+  # several companies.
+  def dealertide_admin?(email)
+    User.active.where('LOWER(email) = ?', email).where.not(company_id: @company.id).includes(:company).any? do |u|
+      u.company && %w[active trial].include?(u.company.status.presence || 'active') && u.effective_admin?
+    end
+  end
+
+  # The installer's module list comes from a cached tenant payload; an open
+  # link turns Linked Installers on for it (ModuleAccessService#linked_installer?).
+  def bust_tenant_cache(company_id)
+    Rails.cache.delete_matched("tenant_basic/#{company_id}/*")
+  rescue NotImplementedError
+    Company.where(id: company_id).update_all(updated_at: Time.current)
+  end
 
   # The dealer as a customer account of the installer, so the installer can
   # invoice it. An existing account with the same name is reused.

@@ -21,6 +21,10 @@ RSpec.describe 'Company links', type: :request do
   let(:stranger) { admin(stranger_co, 'x@else.example') }
   let(:vendor) { Contractor.create!(company: dealer_co, name: 'Summit Install (vendor)', email: 'boss@install.example', status: 'active') }
   let!(:location) { installer_co.locations.first || installer_co.locations.create!(name: 'Yard', active: true) }
+  # Inviting needs the Linked Installers add-on, and the invited email must
+  # already be an admin here.
+  let!(:linked_addon) { TenantModuleOverride.create!(company: dealer_co, module_key: 'management.linked_companies', is_enabled: true) }
+  before { boss }
 
   let(:project) do
     dealer_co.projects.create!(name: 'Diaz home', status: 'active', owner: dealer, customer_name: 'Maria Diaz',
@@ -83,6 +87,45 @@ RSpec.describe 'Company links', type: :request do
     expect(link.installer_company).to eq(installer_co)
     expect(link.installer_dealer_account.name).to eq('Summit Homes')
     expect(link.events.pluck(:kind)).to eq(%w[invited accepted])
+  end
+
+  it 'refuses an invite to an email that is not an admin on the platform, and sends nothing' do
+    contractor = Contractor.create!(company: dealer_co, name: 'Joe Setter', email: 'joe@setter.example', status: 'active')
+    expect {
+      post '/api/v1/company_links', headers: h(dealer), params: { vendor_id: contractor.id, email: 'joe@setter.example' }.to_json
+    }.not_to have_enqueued_job(CompanyLinkInviteEmailJob)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(body['error']).to include('not an admin of a company', 'assign them on the project instead')
+
+    # A user who is not an admin does not count either.
+    User.create!(email: 'crew@install.example', first_name: 'C', last_name: 'D', password: 'Pass1234!', company_id: installer_co.id, role: 'sales', status: 'active')
+    post '/api/v1/company_links', headers: h(dealer), params: { vendor_id: contractor.id, email: 'crew@install.example' }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(CompanyLink.count).to eq(0)
+  end
+
+  it 'needs the Linked Installers add-on to invite, and gives the installer the page while linked' do
+    expect(dealer_co.has_module?('management.linked_companies')).to be(true)
+    expect(installer_co.has_module?('management.linked_companies')).to be(false)
+
+    linked_addon.update!(is_enabled: false)
+    post '/api/v1/company_links', headers: h(dealer), params: { vendor_id: vendor.id, email: boss.email }.to_json
+    expect(response).to have_http_status(:forbidden)
+    get '/api/v1/company_links', headers: h(dealer)
+    expect(body['can_invite']).to be(false)
+    linked_addon.update!(is_enabled: true)
+
+    link = link!
+    expect(Company.find(installer_co.id).has_module?('management.linked_companies')).to be(true)
+    expect(ModuleAccessService.new(installer_co).enabled_modules).to include('management.linked_companies')
+    # The installer sees its jobs but can't invite installers of its own.
+    get '/api/v1/company_links', headers: h(boss)
+    expect(body['can_invite']).to be(false)
+    post '/api/v1/company_links', headers: h(boss), params: { vendor_id: vendor.id, email: dealer.email }.to_json
+    expect(response).to have_http_status(:forbidden)
+
+    post "/api/v1/company_links/#{link.id}/end", headers: h(dealer), params: {}.to_json
+    expect(Company.find(installer_co.id).has_module?('management.linked_companies')).to be(false)
   end
 
   it 'sends a platform-branded invite with a link straight to the Links tab' do
