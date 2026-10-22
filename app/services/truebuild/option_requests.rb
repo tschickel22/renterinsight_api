@@ -29,8 +29,9 @@ module Truebuild
       CatalogOptionRequest.transaction do
         case @request.action
         when 'add' then publish_color!(option)
-        when 'hide' then option.update!(status: 'discontinued', discontinued_on: Date.current)
-        when 'rename' then option.update!(name: @request.name)
+        # Every copy of the color (one per series), as the dealer saw it.
+        when 'hide' then DealerOptions.twins(option).update_all(status: 'discontinued', discontinued_on: Date.current, updated_at: Time.current)
+        when 'rename' then DealerOptions.twins(option).find_each { |o| o.update!(name: @request.name) }
         end
         resolve!('applied', note)
       end

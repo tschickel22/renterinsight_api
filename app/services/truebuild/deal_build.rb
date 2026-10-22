@@ -444,7 +444,7 @@ module Truebuild
         # The dealer's own cost from their price list, and their name for the option (E85).
         source.dig(:detail, :dealer_cost_set) ? meta['dealer_cost_set'] = true : meta.delete('dealer_cost_set')
         if line.kind == 'option' && line.option
-          renamed = dealer_options.names.key?(line.option.id)
+          renamed = dealer_options.renamed?(line.option)
           renamed ? meta['book_name'] = line.option.name : meta.delete('book_name')
           line.label = dealer_options.label_for(line.option)
           # A code corrected in the price book reaches open sheets (and their factory PO).
