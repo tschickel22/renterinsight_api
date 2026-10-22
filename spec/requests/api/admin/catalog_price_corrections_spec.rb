@@ -77,7 +77,7 @@ RSpec.describe 'Price book corrections', type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
-  it 'takes a dealer report from the sheet, and applies or dismisses it, telling the rep' do
+  it 'takes a dealer report from the sheet, and applies or dismisses it, telling the rep only when it is turned down' do
     post sheet, headers: rep, params: { variant_id: variant.id }.to_json
     post "#{sheet}/lines", headers: rep, params: { kind: 'option', option_id: insulation.id }.to_json
     lines = body['build']['lines']
@@ -108,9 +108,11 @@ RSpec.describe 'Price book corrections', type: :request do
     expect(body['request']).to include('status' => 'dismissed', 'resolution_note' => 'Price list is right')
     expect(base_price.reload.net_base_price.to_f).to eq(49_645.0)
 
+    # A cost they set already priced their deals; whether it went to every
+    # dealer is not theirs to follow. Turned down, it stops working for them.
     rep_user = rep_user_and_headers.first
     expect(Notification.where(recipient: rep_user, notification_type: 'truebuild_price_request').pluck(:title))
-      .to contain_exactly('Price book corrected', 'Price book left as is')
+      .to contain_exactly('Price book left as is')
   end
 
   it 'has nothing to correct on a line that is not from a book' do

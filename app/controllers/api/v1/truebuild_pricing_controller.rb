@@ -8,8 +8,8 @@
 #
 # Their price list (backlog E85), by factory book: their own price for any
 # home or option, their cost when the factory's is wrong (sent to the
-# platform admin too), their names for options, their own colors and the
-# factory colors they hide.
+# platform admin, which the dealer never needs to see), their names for
+# options, their own colors and the factory colors they hide.
 #
 #   GET    /api/v1/truebuild_pricing/price_list?book_id=&kind=base|option|color&search=&group=&page=
 #   POST   /api/v1/truebuild_pricing/price_list/remember   { kind: base|option, price_id, price?, cost?, name?, note? }
@@ -18,7 +18,6 @@
 #   DELETE /api/v1/truebuild_pricing/colors/:id
 #   POST   /api/v1/truebuild_pricing/colors/:id/hide       a factory color
 #   DELETE /api/v1/truebuild_pricing/colors/:id/hide
-#   GET    /api/v1/truebuild_pricing/changes                what they sent the platform admin, and what came of it
 class Api::V1::TruebuildPricingController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -387,21 +386,6 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
     Truebuild::DealerOptions.unhide!(company: @company, option_id: params[:id], user: current_user)
     head :no_content
-  end
-
-  # GET /api/v1/truebuild_pricing/changes
-  def changes
-    return unless authorize_action!('company_settings', 'read')
-
-    price = @company.catalog_price_requests.where.not(status: 'withdrawn').includes(:requested_by, :price_book).order(created_at: :desc).limit(100)
-                    .map { |r| { id: "price-#{r.id}", kind: 'price', label: r.label, field: r.field, from: r.current_value&.to_f, to: r.suggested_value&.to_f,
-                                 status: r.status, note: r.note, resolution_note: r.resolution_note, requested_by: r.requested_by&.name,
-                                 book: r.price_book&.name, created_at: r.created_at, resolved_at: r.resolved_at } }
-    option = @company.catalog_option_requests.where.not(status: 'withdrawn').includes(:requested_by, :option, :manufacturer).order(created_at: :desc).limit(100)
-                     .map { |r| { id: "option-#{r.id}", kind: r.action, label: r.label, status: r.status, note: r.note,
-                                  resolution_note: r.resolution_note, requested_by: r.requested_by&.name, book: r.manufacturer&.name,
-                                  created_at: r.created_at, resolved_at: r.resolved_at } }
-    render json: { changes: (price + option).sort_by { |c| c[:created_at] }.reverse.first(100) }
   end
 
   private

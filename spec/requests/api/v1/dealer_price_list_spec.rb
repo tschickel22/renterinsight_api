@@ -100,6 +100,10 @@ RSpec.describe 'Dealer price list and colors', type: :request do
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: dishwasher.id }.to_json
     dish = lines.find { |l| l['option_id'] == dishwasher.id }
 
+    # The order form says what the dealer charges now: cost 340 plus their 25%.
+    get "#{path}/options", headers: headers
+    expect(body['groups'].flat_map { |g| g['options'] }.find { |o| o['id'] == dishwasher.id }).to include('price' => 425.0, 'your_price' => nil)
+    get path, headers: headers
     post "#{path}/remember", headers: headers, params: { line_id: dish['id'], cost: 395, price: 425 }.to_json
     dish = lines.find { |l| l['option_id'] == dishwasher.id }
     expect(dish).to include('unit_cost' => 395.0, 'unit_retail' => 425.0)
@@ -177,8 +181,5 @@ RSpec.describe 'Dealer price list and colors', type: :request do
 
     patch "/api/v1/truebuild_pricing/colors/#{company.dealer_colors.first.id}", headers: headers_for(other), params: { name: 'Mine' }.to_json
     expect(response).to have_http_status(:not_found)
-
-    get '/api/v1/truebuild_pricing/changes', headers: headers
-    expect(body['changes'].map { |c| c['label'] }).to include('Rename Dishwasher to Dishwasher SS', 'Add Shingles: Black')
   end
 end
