@@ -140,7 +140,14 @@ module Api
       # POST /api/v1/tours/:id/check_results  { results: [{ position, status }] }
       # What a check of the tour against the live app found for each step:
       # found, missing or ambiguous. Platform admins run it from Knowledge admin.
+      # { not_offered: '/contacts' } instead says the checker's company hid the
+      # tour's menu row, so nothing was checked and an old result no longer holds.
       def check_results
+        if params[:not_offered].present?
+          @tour.update_columns(check_status: 'not_offered')
+          return render json: { ok: true, check_status: @tour.check_status, checked_at: @tour.checked_at }
+        end
+
         now = Time.current
         Array(params[:results]).each do |r|
           status = r[:status].to_s
@@ -148,8 +155,7 @@ module Api
 
           @tour.steps.where(position: r[:position].to_i).update_all(check_status: status, checked_at: now)
         end
-        failing = @tour.steps.where(check_status: %w[missing ambiguous]).exists?
-        @tour.update_columns(checked_at: now, check_status: failing ? 'failing' : 'passing')
+        @tour.update_columns(checked_at: now, check_status: broken_step?(@tour) ? 'failing' : 'passing')
         render json: { ok: true, check_status: @tour.check_status, checked_at: @tour.checked_at }
       end
 
@@ -199,6 +205,20 @@ module Api
       end
 
       private
+
+      # A plain field in the middle of a tour that is not on this form (Industry
+      # is hidden for consumer dealers, Cost is on another tab) is skipped by the
+      # player, so it does not break the tour. A missing click, the first or last
+      # step, or an element matched twice does. Same rule as scripts/tour-check.cjs.
+      def broken_step?(tour)
+        steps = tour.steps.to_a
+        steps.each_with_index.any? do |s, i|
+          next true if s.check_status == 'ambiguous'
+          next false unless s.check_status == 'missing'
+
+          s.click_required || i.zero? || i == steps.size - 1
+        end
+      end
 
       def require_admin_or_checker!
         return true if platform_admin_request? || Guide::Checker.user?(current_user)
