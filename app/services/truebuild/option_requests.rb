@@ -9,7 +9,9 @@ module Truebuild
   #   keep!         for that dealer only; it goes on working for them
   #   dismiss!      turned down: the dealer's change is undone
   #
-  # The dealer is told which. Open Deal Sheets reprice when next opened
+  # The dealer is told only when their change is turned down (it stops
+  # working for them); whether it went to every dealer is not theirs to
+  # follow (Tom, 2026-10-22). Open Deal Sheets reprice when next opened
   # (DealBuild.stale?); signed ones never change.
   class OptionRequests
     class Invalid < StandardError; end
@@ -32,13 +34,11 @@ module Truebuild
         end
         resolve!('applied', note)
       end
-      notify('Fixed for every dealer', "#{@request.label}: done for everyone.#{note.present? ? " #{note}" : ''}")
     end
 
     def keep!(note: nil)
       open!
       resolve!('dealer_only', note)
-      notify('Kept for your dealership', "#{@request.label}: kept for your dealership only.#{note.present? ? " #{note}" : ''}")
     end
 
     def dismiss!(note: nil)
@@ -49,7 +49,7 @@ module Truebuild
         @request.option.update!(status: 'discontinued', discontinued_on: Date.current) if @request.action == 'add' && @request.option.dealer_color?
         resolve!('dismissed', note)
       end
-      notify('Change turned down', "#{@request.label}: not made.#{note.present? ? " #{note}" : ''}")
+      notify('Change undone', "#{@request.label}: undone, the factory's is back.#{note.present? ? " #{note}" : ''}")
     end
 
     private

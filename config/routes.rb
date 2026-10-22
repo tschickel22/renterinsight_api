@@ -326,7 +326,6 @@ Rails.application.routes.draw do
       delete 'truebuild_pricing/colors/:id', to: 'truebuild_pricing#destroy_color'
       post   'truebuild_pricing/colors/:id/hide', to: 'truebuild_pricing#hide_color'
       delete 'truebuild_pricing/colors/:id/hide', to: 'truebuild_pricing#unhide_color'
-      get    'truebuild_pricing/changes', to: 'truebuild_pricing#changes'
       get    'truebuild_pricing/addons', to: 'truebuild_pricing#addons'
       post   'truebuild_pricing/addons', to: 'truebuild_pricing#create_addon'
       patch  'truebuild_pricing/addons/:id', to: 'truebuild_pricing#update_addon'

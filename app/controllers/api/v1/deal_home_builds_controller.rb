@@ -206,6 +206,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     rows = Truebuild::OptionSource.for_dealer(@company, book, variant, construction: @build.construction, keep_ids: chosen.to_a)
     own = Truebuild::DealerOptions.new(@company, variant.manufacturer_id)
     prices = Truebuild::DealerPrices.new(@company)
+    engine = Truebuild::PricingEngine.new(company: @company, variant: variant, location: @build.location, construction: @build.construction)
     ids = rows.map(&:catalog_option_id).uniq
     rules = CatalogOptionRule.approved.where(catalog_option_id: ids).pluck(:catalog_option_id, :rule_type, :target_option_id)
                              .group_by(&:first)
@@ -224,6 +225,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
             hidden: own.hidden_ids.include?(op.catalog_option_id),
             factory_cost: op.dealer_cost&.to_f, dealer_cost_set: dealer_cost.present?,
             your_price: prices.manual_retail(op.option)&.to_f,
+            # What the dealer charges for it now, so an editor starts from the real figure.
+            price: engine.retail_for(op),
             cost: (dealer_cost || op.dealer_cost)&.to_f, suggested_retail: op.suggested_retail&.to_f, factory_code: op.option.factory_code,
             includes: Array(op.option.package_items).map(&:to_s),
             unit: DealHomeBuildLine.unit_for(op.option.name), chosen: chosen.include?(op.catalog_option_id),

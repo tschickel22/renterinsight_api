@@ -81,6 +81,13 @@ module Truebuild
       Result.new(book: @book, cost_book: @cost_book, options_book: @options_cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
 
+    # What the dealer sells one option row for on this model, before it is
+    # on a sheet: their set price, their markup, or the factory's suggested
+    # retail, as a sheet would price it. Nil when the factory gives no price.
+    def retail_for(row)
+      option_line(row)[:retail]
+    end
+
     private
 
     # ---- base ----------------------------------------------------------

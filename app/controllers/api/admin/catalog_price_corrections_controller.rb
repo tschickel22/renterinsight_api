@@ -172,10 +172,12 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
       note: r.note, resolution_note: r.resolution_note, resolved_at: r.resolved_at, created_at: r.created_at }
   end
 
-  # Closes the request and tells the dealer who sent it.
+  # Closes the request and tells the dealer who sent it. A cost they set
+  # for themselves already works for them, so they hear back only if it is
+  # turned down; a reported wrong suggested retail still hears either way.
   def resolve!(price_request, status, note)
     price_request.update!(status: status, resolved_by: original_user, resolved_at: Time.current, resolution_note: note.presence)
-    notify_dealer(price_request, status, note)
+    notify_dealer(price_request, status, note) if price_request.field != 'cost' || status == 'dismissed'
   end
 
   # Best-effort: the request is already closed either way.
@@ -187,7 +189,7 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
       recipient: price_request.requested_by, notification_type: :truebuild_price_request, notifiable: price_request,
       company_id: price_request.company_id, title: applied ? 'Price book corrected' : 'Price book left as is',
       message: applied ? "#{price_request.label}: the price book now has the corrected figure." :
-                         "#{price_request.label}: the price book was not changed.#{note.present? ? " #{note}" : ''}",
+                         "#{price_request.label}: #{price_request.field == 'cost' ? "the factory's figure is back on your deals" : 'the price book was not changed'}.#{note.present? ? " #{note}" : ''}",
       action_url: price_request.deal_id ? "/deals/#{price_request.deal_id}?tab=home_build" : nil, action_text: price_request.deal_id ? 'Open the deal' : nil
     )
   rescue StandardError => e
