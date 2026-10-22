@@ -397,8 +397,10 @@ class ProjectPdfGenerator
     budget_data << ['Subcontractor', format_currency(p.subcontractor_cost)] if p.subcontractor_cost.to_f > 0
     budget_data << ['Other', format_currency(p.other_cost)] if p.other_cost.to_f > 0
     budget_data << ['Actual Cost', format_currency(p.actual_cost)]
+    committed = p.committed_cost
+    budget_data << ['Committed', format_currency(committed)] if committed.to_f > 0
 
-    remaining = (p.budget_amount.to_f - p.actual_cost.to_f)
+    remaining = (p.budget_amount.to_f - p.actual_cost.to_f - committed.to_f)
     budget_data << ['Remaining', format_currency(remaining)]
 
     pdf.table(budget_data, position: :left, width: 300,

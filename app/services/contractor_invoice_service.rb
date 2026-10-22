@@ -54,6 +54,36 @@ class ContractorInvoiceService
     @bill
   end
 
+  # A linked installer company's invoice for the job (E68 step 5e). Same
+  # draft bill and cost-line match as a portal invoice, without a file: the
+  # installer's own invoice is the record, in its own books.
+  #
+  # cost_items: the committed lines this bill pays (the agreed price and its
+  # approved change orders, E68 step 6). They add up to the amount, so the
+  # bill takes them over as they are. Without them the usual match applies.
+  def submit_linked!(amount:, invoice_number: nil, notes: nil, due_date: nil, source: 'linked_installer', submission: {},
+                     cost_items: nil)
+    amount = amount.to_s.delete(',$').to_d
+    raise Error, 'Enter the invoice total' unless amount.positive?
+    check_duplicate!(invoice_number)
+    if cost_items.present?
+      raise Error, 'Those cost lines are not on this project' if cost_items.any? { |l| l.project_id != @project.id }
+      raise Error, 'Those cost lines are already billed' if cost_items.any?(&:bill_id)
+      raise Error, 'The bill must match its cost lines' unless cost_items.sum { |l| l.amount.to_d } == amount
+    end
+
+    ActiveRecord::Base.transaction do
+      @bill = create_bill!(amount, invoice_number, nil, notes, nil, nil, source: source, extra: submission, due_date: due_date)
+      if cost_items.present?
+        cost_items.each { |l| l.update!(bill_id: @bill.id, invoice_number: invoice_number.presence || l.invoice_number) }
+        @cost_item = cost_items.first
+      else
+        @cost_item = link_cost_item!(amount, invoice_number, nil)
+      end
+    end
+    @bill
+  end
+
   private
 
   def scan_document(file)
@@ -74,7 +104,7 @@ class ContractorInvoiceService
     raise Error, "Invoice #{invoice_number} was already submitted" if dup
   end
 
-  def create_bill!(amount, invoice_number, invoice_date, notes, scan, attachment)
+  def create_bill!(amount, invoice_number, invoice_date, notes, scan, attachment, source: 'contractor_portal', extra: {}, due_date: nil)
     account = ProjectCostBillService.expense_account_for(@company, @contractor)
     where = @phase ? "#{@phase.name}, #{@project.name}" : @project.name
     memo = ["Invoice from #{@contractor.name} for #{where}", notes.presence].compact.join(". ")
@@ -85,12 +115,12 @@ class ContractorInvoiceService
       project: @project,
       location_id: @project.location_id,
       status: 'draft',
-      source: 'contractor_portal',
+      source: source,
       bill_date: parse_date(invoice_date) || parse_date(scan&.dig(:bill_date)) || Date.current,
-      due_date: parse_date(scan&.dig(:due_date)),
+      due_date: due_date || parse_date(scan&.dig(:due_date)),
       reference_number: invoice_number,
       memo: memo,
-      attachments: [attachment],
+      attachments: [attachment].compact,
       submission: {
         'contractor_id' => @contractor.id,
         'assignment_id' => @assignment&.id,
@@ -100,7 +130,7 @@ class ContractorInvoiceService
         'notes' => notes,
         'scanned_total' => scan&.dig(:total_amount),
         'needs_account' => account.nil?
-      }.compact,
+      }.merge(extra.to_h).compact,
       # Without an expense account the line cannot exist (the column is
       # required). The draft then shows a zero total and needs_account, and
       # the dealer picks the account when approving.

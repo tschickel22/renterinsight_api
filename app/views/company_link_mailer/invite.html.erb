@@ -1,0 +1,33 @@
+<h2 style="margin:0 0 14px 0;font-size:22px;color:<%= @brand_primary %>;"><%= @dealer.name %> wants to send you install jobs</h2>
+
+<p>Hello,</p>
+
+<p>
+  <strong><%= @dealer.name %></strong> would like to send install jobs to your company through <%= @brand.name %>.
+  In their books you are their vendor <strong><%= @vendor_name %></strong>.
+</p>
+
+<p>Once you link:</p>
+<ul style="padding-left:20px;margin:0 0 14px 0;">
+  <li>Jobs they hand you arrive in your own company with the customer's details.</li>
+  <li>The progress and dates you record go back to their project.</li>
+  <li>Your costs, bids, subcontractors and margins stay in your company.</li>
+</ul>
+
+<p style="text-align:center;margin:24px 0 10px 0;">
+  <a href="<%= @accept_url %>"
+     style="display:inline-block;background:<%= @brand_accent %>;color:#ffffff;text-decoration:none;
+            font-weight:bold;padding:12px 26px;border-radius:6px;">Review the invitation</a>
+</p>
+<p style="font-size:13px;color:#6b7280;text-align:center;margin:0 0 18px 0;">
+  This opens <strong>Projects, Linked companies, Links</strong>. Sign in as an admin of your company to accept.
+</p>
+
+<p style="font-size:13px;color:#6b7280;">
+  Button not working? Paste this into your browser:<br>
+  <a href="<%= @accept_url %>" style="color:<%= @brand_accent %>;word-break:break-all;"><%= @accept_url %></a>
+</p>
+
+<p style="font-size:13px;color:#6b7280;">
+  Not on <%= @brand.name %> yet? Reply to <%= @dealer.name %> and they can tell you how to get set up.
+</p>

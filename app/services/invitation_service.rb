@@ -69,6 +69,15 @@ class InvitationService
       end
     end
     
+    # Someone who already signs in to another company gets a linked account
+    # here (E68 5a). Platform admins never do: they reach every company already.
+    if invitation_type == 'company_user' && normalized_email.present? && @company
+      elsewhere = User.sign_in_accounts.where('LOWER(email) = ?', normalized_email).where.not(company_id: @company.id).first
+      if elsewhere && (elsewhere.platform_admin? || elsewhere.super_admin?)
+        raise Error, "#{normalized_email} is a platform admin account and can't be added to a company"
+      end
+    end
+
     # Normalize location_ids to array of integers
     normalized_location_ids = normalize_location_ids(location_ids)
     
@@ -646,8 +655,10 @@ class InvitationService
     Rails.logger.info "📧 [InvitationService] Location IDs: #{invitation.location_ids.inspect}"
     Rails.logger.info "📧 [InvitationService] Location Role: #{invitation.location_role}"
     
-    # Check if user already exists
-    existing_user = User.find_by(email: invitation.email)
+    # Check if the user already exists in THIS company. Looking across every
+    # company used to hand a user from another company a role and locations
+    # here, and acceptance then reset their password and turned off their MFA.
+    existing_user = User.where(company_id: invitation.company_id).where('LOWER(email) = ?', invitation.email.to_s.downcase).first
     if existing_user
       Rails.logger.info "📧 [InvitationService] User already exists: #{existing_user.id}"
       # Ensure existing user has RBAC role assigned
@@ -667,13 +678,18 @@ class InvitationService
       last_name = parts[1] if parts.length > 1
     end
     
+    # Someone who signs in to another company: an invited linked account here,
+    # under their existing sign-in. They accept with their own password.
+    sign_in_account = User.sign_in_accounts.where('LOWER(email) = ?', invitation.email.to_s.downcase).first
+
     # Create user with invited status
     user = User.create!(
-      email: invitation.email,
-      phone: invitation.phone,
-      first_name: first_name,
-      last_name: last_name,
-      name: recipient_name,
+      email: sign_in_account&.email || invitation.email,
+      primary_user: sign_in_account,
+      phone: invitation.phone || sign_in_account&.phone,
+      first_name: sign_in_account&.first_name || first_name,
+      last_name: sign_in_account&.last_name || last_name,
+      name: sign_in_account ? sign_in_account.read_attribute(:name) : recipient_name,
       role: invitation.role || 'staff',
       permissions: invitation.permissions || [],
       status: 'invited',
@@ -789,9 +805,28 @@ class InvitationService
   def create_company_user(invitation, user_params)
     Rails.logger.info "👤 [InvitationService] Accepting invitation for #{invitation.email}"
     
-    # Find existing invited user
-    user = User.find_by(email: invitation.email)
-    
+    # Find existing invited user, in the invitation's company only
+    user = User.where(company_id: invitation.company_id).where('LOWER(email) = ?', invitation.email.to_s.downcase).first
+    sign_in_account = User.sign_in_accounts.where('LOWER(email) = ?', invitation.email.to_s.downcase).where.not(company_id: invitation.company_id).first
+
+    # A person who already signs in elsewhere accepts with that password. Their
+    # sign-in account is left exactly as it is: no new password, MFA untouched.
+    if (user.nil? && sign_in_account) || user&.linked_account?
+      root = user&.primary_user || sign_in_account
+      raise Error, 'Incorrect password for your DealerTide account' unless root.authenticate(user_params[:password].to_s)
+
+      user ||= User.create!(
+        email: root.email, primary_user: root, company_id: invitation.company_id,
+        first_name: root.first_name, last_name: root.last_name, name: root.read_attribute(:name), phone: root.phone,
+        role: invitation.role || 'staff', permissions: invitation.permissions || [],
+        invitation_id: invitation.id, status: 'invited', password: SecureRandom.hex(32)
+      )
+      user.update!(status: 'active')
+      assign_rbac_role_to_user(user, invitation.role, invitation.company_id)
+      assign_user_to_locations_safe(invitation, user) if UserLocation.where(user_id: user.id).none?
+      return user
+    end
+
     if user
       Rails.logger.info "👤 [InvitationService] Updating existing placeholder user: #{user.id}"
       

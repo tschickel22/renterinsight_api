@@ -43,7 +43,8 @@ RSpec.describe 'Contractor portal invoices', type: :request do
 
     item = project.project_cost_items.find_by(bill_id: bill.id)
     expect(item).to have_attributes(amount: 4850, cost_type: 'subcontractor', project_phase_id: phase.id, status: 'pending')
-    expect(project.reload.actual_cost).to eq(4850)
+    # Committed until the dealer approves the bill, which approves the line.
+    expect(project.reload).to have_attributes(actual_cost: 0, committed_cost: 4850)
     expect(ProjectNotificationService).to have_received(:announce_invoice_submitted).with(bill, installer, project)
     expect(body['invoice']).to include('status_label' => 'Received', 'invoice_number' => 'INV-1042')
   end

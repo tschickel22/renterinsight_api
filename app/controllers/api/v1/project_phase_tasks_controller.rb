@@ -61,6 +61,12 @@ module Api
       def toggle
         return unless authorize_action!('deals', 'update')
 
+        # Ticking a task starts its phase, so a phase on a price hold
+        # (E68 step 6) refuses before the task changes.
+        if @task.status != 'completed' && @phase.status == 'not_started' && (held = @phase.price_hold_message)
+          return render json: { error: held }, status: :unprocessable_entity
+        end
+
         if @task.status == 'completed'
           @task.reopen!
         else

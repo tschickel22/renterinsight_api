@@ -48,7 +48,22 @@ class User < ApplicationRecord
   # Email Connection Associations (for sending from personal email)
   has_many :user_email_connections, dependent: :destroy
 
-  validates :email, presence: true, uniqueness: true
+  # One sign-in for several companies (E68 step 5a). A linked account is an
+  # ordinary user in one company, with its own role and locations there, that
+  # points at the person's sign-in account. It has the same email and no
+  # password of its own, so it is never signed in to directly: the person signs
+  # in once and switches (Api::Auth::AccountsController).
+  belongs_to :primary_user, class_name: 'User', optional: true
+  has_many :linked_users, class_name: 'User', foreign_key: :primary_user_id, dependent: :nullify
+
+  # Every email lookup that signs someone in goes through this, or a linked
+  # account sharing the email could be picked instead of the sign-in account.
+  scope :sign_in_accounts, -> { where(primary_user_id: nil) }
+
+  validates :email, presence: true
+  validates :email, uniqueness: { case_sensitive: false, conditions: -> { where(primary_user_id: nil) } }, unless: :primary_user_id?
+  validates :email, uniqueness: { case_sensitive: false, scope: :company_id }, if: :primary_user_id?
+  validate :linked_account_shape, if: :primary_user_id?
   validates :first_name, presence: true, if: -> { name.blank? }
   validates :password, length: { minimum: 6 }, if: -> { password.present? }
 
@@ -418,7 +433,43 @@ class User < ApplicationRecord
     ReplyToAddressService.generate_bcc_address(self)
   end
 
+  def linked_account?
+    primary_user_id.present?
+  end
+
+  # The account the person signs in with: password, MFA and resets live there.
+  def sign_in_account
+    primary_user || self
+  end
+
+  # Every account this person can switch to, including this one: active, in a
+  # company that isn't suspended. Platform admins don't get linked accounts.
+  def company_accounts
+    root = sign_in_account
+    User.where(id: root.id).or(User.where(primary_user_id: root.id))
+        .where(status: 'active')
+        .joins(:company)
+        .includes(:company)
+        .order(:id)
+        .reject { |u| u.company.access_blocked? }
+  end
+
   private
+
+  def linked_account_shape
+    root = primary_user
+    if root.nil?
+      errors.add(:primary_user, 'must exist')
+    elsif root.primary_user_id.present?
+      errors.add(:primary_user, 'must be a sign-in account')
+    elsif root.email.to_s.casecmp(email.to_s) != 0
+      errors.add(:email, 'must match the sign-in account')
+    elsif company_id.blank? || company_id == root.company_id
+      errors.add(:company_id, 'must be a different company from the sign-in account')
+    elsif root.platform_admin? || root.super_admin? || %w[platform_admin super_admin].include?(role)
+      errors.add(:role, 'platform admins do not get linked accounts')
+    end
+  end
 
   def revoke_device_sessions_after_password_change
     DeviceSession.revoke_all_for(self, 'password_changed')

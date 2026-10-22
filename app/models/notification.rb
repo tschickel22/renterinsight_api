@@ -107,6 +107,9 @@ class Notification < ApplicationRecord
     project_phase_completed: { category: 'service', priority: 'normal', title: 'Project Phase Completed' },
     contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' },
     contractor_invoice_submitted: { category: 'finance', priority: 'high', title: 'Contractor Invoice Submitted' },
+    project_bid_submitted: { category: 'service', priority: 'high', title: 'Bid Received' },
+    company_link: { category: 'service', priority: 'high', title: 'Linked Company' },
+    project_link: { category: 'service', priority: 'high', title: 'Linked Job' },
 
     # AI connector oversight (backlog E53): an AI app hit the daily record
     # limit, or kept being refused. In-app only; not push eligible.
@@ -218,6 +221,25 @@ class Notification < ApplicationRecord
       end
     when 'ContractorAssignment'
       "/projects/reviews"
+    when 'Bill'
+      # A contractor's portal invoice waits as a draft bill (E68).
+      "/accounting/bills?billId=#{notifiable_id}"
+    when 'ProjectBid'
+      # Bids live on the deal's Progress tab, beside the project's phases.
+      deal_id = notifiable.project_bid_request&.project&.deal_id
+      deal_id ? "/deals/#{deal_id}?tab=progress&projectTab=bids" : nil
+    when 'CompanyLink', 'LinkRateCard'
+      '/linked-companies?view=links'
+    when 'ProjectLink', 'ProjectLinkChange'
+      # The same job opens differently on each side of the link. A price
+      # request or change order opens its job.
+      pl = notifiable_type == 'ProjectLink' ? notifiable : notifiable.project_link
+      if company_id == pl.installer_company_id
+        '/linked-companies?view=jobs'
+      else
+        deal_id = pl.dealer_project&.deal_id
+        deal_id ? "/deals/#{deal_id}?tab=progress" : "/deals/projects/#{pl.dealer_project_id}"
+      end
     when 'Note'
       # Try to get parent URL
       if notifiable.notable_type == 'Lead'

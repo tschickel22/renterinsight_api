@@ -90,6 +90,12 @@ module Api
       def show
         return unless authorize_action!('deals', 'read')
 
+        # Phases a linked installer company is running (E68 step 5): their
+        # status comes from the installer, so the page says who has them.
+        linked = ProjectLinkPhase.joins(:project_link)
+                                 .where(project_links: { dealer_project_id: @project.id, status: 'accepted' })
+                                 .includes(project_link: :installer_company)
+                                 .to_h { |lp| [lp.dealer_phase_id.to_s, lp.project_link.installer_company.name] }
         render json: {
           project: @project.as_json(
             only: %i[id name project_number description status progress_percent phase_count completed_phase_count
@@ -138,7 +144,7 @@ module Api
                 }
               }
             }
-          )
+          ).each { |ph| ph['linked_installer_name'] = linked[ph['id'].to_s] }
         }
       end
 
@@ -415,6 +421,12 @@ module Api
 
         task = phase.project_phase_tasks.find_by(id: params[:task_id])
         return render(json: { error: 'Task not found' }, status: :not_found) unless task
+
+        # Ticking a task starts its phase, so a phase on a price hold
+        # (E68 step 6) refuses before the task changes.
+        if task.status != 'completed' && phase.status == 'not_started' && (held = phase.price_hold_message)
+          return render json: { error: held }, status: :unprocessable_entity
+        end
 
         if task.status == 'completed'
           task.reopen!

@@ -694,6 +694,41 @@ Rails.application.routes.draw do
       get 'workflow_field_options', to: 'workflow_field_options#index'
 
       # ==================== PROJECTS ====================
+      # Dealer and installer company links, and the jobs handed across (E68 step 5)
+      resources :company_links, only: %i[index create] do
+        member do
+          post :accept
+          post :end, action: :end_link
+          get :events
+          get :rate_cards
+          post :rate_cards, action: :submit_rate_card
+        end
+      end
+      # Rate cards, price requests and change orders (E68 step 6)
+      resources :link_rate_cards, only: [] do
+        member do
+          post :approve
+          post :decline
+          post :withdraw
+        end
+      end
+      resources :project_links, only: [] do
+        member do
+          post :cancel
+          post :accept
+          post :decline
+          post :bill
+          post :changes, action: :request_change
+        end
+      end
+      resources :project_link_changes, only: [] do
+        member do
+          post :approve
+          post :decline
+          post :withdraw
+        end
+      end
+
       resources :projects do
         collection do
           get :summary
@@ -766,6 +801,20 @@ Rails.application.routes.draw do
         resources :notification_preferences, controller: 'project_notification_preferences', only: [:index, :create, :update, :destroy] do
           collection do
             post :auto_setup
+          end
+        end
+
+        # Hand the project or a phase to a linked installer company (E68 step 5)
+        resources :project_links, only: %i[index create]
+
+        # Bids on a phase or the whole project (E68 step 4)
+        resources :bid_requests, controller: 'project_bid_requests', only: %i[index create] do
+          member do
+            post :invite
+            post :record_bid
+            post :award
+            post :undo_award
+            post :cancel
           end
         end
 
@@ -2612,6 +2661,9 @@ Rails.application.routes.draw do
       get 'me', to: 'login#me'
       # Re-verify the signed-in user's own password (e.g. Deal Desk "Employee View" reveal).
       post 'verify_password', to: 'login#verify_password'
+      # One sign-in for several companies (E68 5a)
+      get 'accounts', to: 'login#accounts'
+      post 'switch_account', to: 'login#switch_account'
 
       # Password Reset
       post 'request_password_reset', to: 'password_reset#request_reset'
@@ -3597,6 +3649,14 @@ Rails.application.routes.draw do
       resources :projects, only: [:index, :show] do
         # Invoices sent from the portal become draft bills (E68)
         resources :invoices, only: [:index, :create]
+      end
+
+      # Bid requests sent to me, and my answers (E68 step 4)
+      resources :bids, only: [:index, :show] do
+        member do
+          post :submit
+          post :decline
+        end
       end
 
       # Tasks

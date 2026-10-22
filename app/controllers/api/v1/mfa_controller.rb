@@ -32,7 +32,6 @@ module Api
         
         # Debug logging
         Rails.logger.info "=== MFA ENROLL DEBUG ==="
-        Rails.logger.info "Generated secret: #{secret}"
         Rails.logger.info "Secret length: #{secret.length}"
         Rails.logger.info "User email: #{current_user.email}"
         
@@ -40,15 +39,11 @@ module Api
         current_user.update!(mfa_secret: secret)
         
         # Verify it was saved
-        Rails.logger.info "Saved secret: #{current_user.reload.mfa_secret}"
-        Rails.logger.info "Secrets match: #{current_user.mfa_secret == secret}"
         
         # Generate QR code URL for authenticator apps
         totp = ROTP::TOTP.new(secret, issuer: 'Platform DMS')
         qr_code_url = totp.provisioning_uri(current_user.email)
         
-        Rails.logger.info "QR Code URL: #{qr_code_url}"
-        Rails.logger.info "Current code: #{totp.now}"
         Rails.logger.info "========================"
         
         render json: {
@@ -68,8 +63,6 @@ module Api
         
         # Debug logging
         Rails.logger.info "=== MFA VERIFY DEBUG ==="
-        Rails.logger.info "Code received: #{code}"
-        Rails.logger.info "Secret: #{current_user.mfa_secret}"
         Rails.logger.info "User email: #{current_user.email}"
         
         # Verify the code
@@ -77,7 +70,6 @@ module Api
         
         # Get current valid code for debugging
         current_valid_code = totp.now
-        Rails.logger.info "Current valid code: #{current_valid_code}"
         Rails.logger.info "Server time: #{Time.current}"
         
         verification_result = totp.verify(code, drift_behind: 30, drift_ahead: 30)
@@ -281,7 +273,8 @@ module Api
         begin
           decoded = JWT.decode(token, Rails.application.secret_key_base, true, algorithm: 'HS256')
           user_id = decoded[0]['user_id']
-          @current_user = User.find(user_id)
+          # MFA belongs to the sign-in account, never a linked one (E68 5a).
+          @current_user = User.find(user_id).sign_in_account
         rescue JWT::DecodeError, ActiveRecord::RecordNotFound
           render json: { error: 'Invalid or expired token' }, status: :unauthorized
         end

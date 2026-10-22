@@ -95,6 +95,38 @@ class Website < ApplicationRecord
     kind == 'marketing'
   end
 
+  # Sections a dealer keeps current from the websites list without opening the
+  # editor, so a site whose access is View Only can still post this month's
+  # events and change lot rent. Keyed by what the list's menu offers:
+  #   events   - a features block laid out as an events calendar
+  #   lot_rent - a pricing block (lot, pad and site rent cards)
+  EDITABLE_SECTION_SQL = <<~SQL.squish
+    SELECT website_pages.website_id,
+           bool_or(block->>'type' = 'features' AND block->'content'->>'layout' = 'events') AS events,
+           bool_or(block->>'type' = 'pricing') AS lot_rent
+    FROM website_pages
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(website_pages.blocks) = 'array' THEN website_pages.blocks ELSE '[]'::jsonb END
+    ) AS block
+    WHERE website_pages.website_id IN (:ids)
+      AND website_pages.is_deleted IS NOT TRUE
+    GROUP BY website_pages.website_id
+  SQL
+
+  # { website_id => ['events', 'lot_rent'] } in one query for a page of sites.
+  def self.editable_sections_for(ids)
+    ids = Array(ids).compact
+    return {} if ids.empty?
+
+    rows = connection.select_all(sanitize_sql_array([EDITABLE_SECTION_SQL, { ids: ids }]))
+    rows.each_with_object({}) do |row, out|
+      sections = []
+      sections << 'events' if ActiveModel::Type::Boolean.new.cast(row['events'])
+      sections << 'lot_rent' if ActiveModel::Type::Boolean.new.cast(row['lot_rent'])
+      out[row['website_id'].to_i] = sections
+    end
+  end
+
   # The chat assistant on this site's pages. Two things a dealer could not
   # touch before: whether it shows at all, and what it calls itself. It used to
   # caption itself with `name`, which for the landing page container is an

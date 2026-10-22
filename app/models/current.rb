@@ -19,6 +19,9 @@ class Current < ActiveSupport::CurrentAttributes
   # check this flag and skip emission so a workflow that updates an entity
   # doesn't retrigger its own rule (see rule 63 on staging: 291 runs in 8min).
   attribute :user, :original_user, :company_id, :location_id, :ip_address, :suppress_workflow_events
+  # Set while ProjectLinkSync writes one company's phase from the other's, so
+  # that write doesn't sync straight back (E68 step 5d).
+  attribute :project_link_sync
   
   # Check if we're filtering by a specific location
   def location_filtered?

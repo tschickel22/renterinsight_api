@@ -25,18 +25,23 @@ module Reports
       costs = cost_buckets(projects.map(&:id))
       on_books = ledger_cost(projects.map(&:id))
       funding = DealFundingReportService.new(@company).rows_for(projects.map(&:deal_id).compact)
+      invoiced = invoiced_by_project(projects.reject(&:deal_id).map(&:id))
 
       rows = projects.map do |project|
         c = costs.fetch(project.id, empty_bucket)
         job_cost = c[:committed] + c[:billed] + c[:paid]
         deal = project.deal
-        sale_price = deal&.selling_price&.to_d
-        front_gross = deal&.front_gross&.to_d
+        billed = invoiced[project.id]
+        # A project with no deal (an installer's linked job, E68) earns what it
+        # invoices: that is its sale, and with no home cost, its front gross.
+        sale_price = deal ? deal.selling_price&.to_d : billed&.dig(:revenue)
+        front_gross = deal ? deal.front_gross&.to_d : billed&.dig(:revenue)
         after = front_gross && (front_gross - job_cost)
         budget = project.budget_amount&.to_d
 
         project_row(project).merge(
           deal_number: deal&.try(:deal_number),
+          revenue_from: deal ? 'deal' : (billed ? 'invoices' : nil),
           sale_price: sale_price&.to_f,
           front_gross: front_gross&.to_f,
           budget: budget&.to_f,
@@ -44,10 +49,14 @@ module Reports
           disputed: c[:disputed].to_f,
           budget_variance: budget && (budget - job_cost).to_f,
           on_books: on_books.fetch(project.id, 0).to_f,
-          # What the customer has paid and still owes on the deal (nil until
-          # the deal is approved and invoiced).
-          received: funding[project.deal_id]&.dig(:received),
-          owed: funding[project.deal_id] && (funding[project.deal_id][:invoice_id] ? funding[project.deal_id][:owed] : nil),
+          # What the customer has paid and still owes on the deal, or on the
+          # project's own invoices (nil until there is an invoice).
+          received: deal ? funding[project.deal_id]&.dig(:received) : billed&.dig(:received)&.to_f,
+          owed: if deal
+                  funding[project.deal_id] && (funding[project.deal_id][:invoice_id] ? funding[project.deal_id][:owed] : nil)
+                else
+                  billed&.dig(:owed)&.to_f
+                end,
           after_job_cost: after&.to_f,
           margin: after && sale_price&.positive? ? (after / sale_price * 100).round(1).to_f : nil
         )
@@ -114,6 +123,19 @@ module Reports
     end
 
     private
+
+    # Revenue billed from projects that have no deal: their own invoices that
+    # have gone out (not drafts or cancelled), before tax.
+    def invoiced_by_project(project_ids)
+      return {} if project_ids.empty?
+
+      @company.invoices.not_deleted
+              .where(source_type: 'Project', source_id: project_ids)
+              .where.not(status: %w[draft cancelled])
+              .group(:source_id)
+              .pluck(:source_id, Arel.sql('SUM(subtotal)'), Arel.sql('SUM(amount_paid)'), Arel.sql('SUM(total - amount_paid)'))
+              .to_h { |id, revenue, received, owed| [id, { revenue: revenue.to_d, received: received.to_d, owed: owed.to_d }] }
+    end
 
     def scoped_projects(status: nil, location_id: nil, start_date: nil, end_date: nil, project_id: nil)
       projects = @company.projects.not_deleted

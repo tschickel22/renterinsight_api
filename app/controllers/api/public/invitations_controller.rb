@@ -86,6 +86,9 @@ module Api
             expiresAt: invitation.expires_at&.iso8601,
             message: invitation.message,
             invitationType: invitation.invitation_type,
+            # Already signs in to another company: accept with that password,
+            # no name or new password asked for (E68 5a).
+            existingAccount: invitation.existing_account?,
             token: token,
             branding: company_branding
           }
@@ -144,7 +147,9 @@ module Api
           }, status: :bad_request
         end
         
-        unless user_params[:first_name].present? && user_params[:last_name].present?
+        existing_account = Invitation.find_valid_token(token)&.existing_account? || false
+
+        unless existing_account || (user_params[:first_name].present? && user_params[:last_name].present?)
           return render json: { 
             success: false,
             error: 'First name and last name are required' 
@@ -160,6 +165,18 @@ module Api
           user_agent: request.user_agent
         )
         
+        if result[:success] && existing_account
+          # No session from the invite link: the person signs in as usual
+          # (with their MFA, if they use it) and picks the company from the
+          # switcher.
+          return render json: {
+            success: true,
+            existingAccount: true,
+            companyName: result[:user]&.company&.name,
+            message: 'Added. Sign in and choose the company from your menu.'
+          }
+        end
+
         if result[:success]
           user = result[:user]
 

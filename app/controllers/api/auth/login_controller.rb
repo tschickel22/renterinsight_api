@@ -4,7 +4,7 @@ module Api
   module Auth
     class LoginController < ApplicationController
       skip_before_action :authenticate, only: [:create, :refresh]
-      before_action :authenticate_user_from_token!, only: [:verify, :me]
+      before_action :authenticate_user_from_token!, only: [:verify, :me, :accounts, :switch_account]
 
       # POST /api/auth/verify_password
       # Confirms the password of the REAL person at the keyboard. Used by the Deal Desk
@@ -17,7 +17,7 @@ module Api
       # admin during impersonation, otherwise the token's user is @current_user_id. That's
       # the person whose password must match.
       def verify_password
-        user = @original_user || User.find_by(id: @current_user_id)
+        user = (@original_user || User.find_by(id: @current_user_id))&.sign_in_account
         password = params[:password].to_s
         if password.present? && user&.authenticate(password)
           render json: { valid: true }, status: :ok
@@ -28,7 +28,7 @@ module Api
 
       # POST /api/auth/login
       def create
-        user = User.find_by(email: params[:email]&.downcase)
+        user = User.sign_in_accounts.find_by(email: params[:email]&.downcase)
 
         if user&.authenticate(params[:password])
           if user.inactive? || user.suspended?
@@ -198,6 +198,49 @@ module Api
         render json: {
           success: true,
           user: build_user_response(current_user)
+        }, status: :ok
+      end
+
+      # GET /api/auth/accounts
+      # The companies this person can switch between (E68 5a): their sign-in
+      # account and its linked accounts, active and in a company that isn't
+      # suspended. Empty of others while impersonating, so support stays inside
+      # the account they opened.
+      def accounts
+        list = impersonating? ? [current_user] : current_user.company_accounts
+        render json: {
+          current_user_id: current_user.id,
+          accounts: list.map do |u|
+            { user_id: u.id, company_id: u.company_id, company_name: u.company&.name, current: u.id == current_user.id }
+          end
+        }, status: :ok
+      end
+
+      # POST /api/auth/switch_account { user_id }
+      # Issues a session for another of this person's accounts. The target must
+      # come from company_accounts, so a user id from the browser can only ever
+      # pick one of the person's own accounts.
+      def switch_account
+        if impersonating?
+          return render json: { success: false, message: 'Switching companies is not available while impersonating.' }, status: :forbidden
+        end
+
+        target = current_user.company_accounts.find { |u| u.id == params[:user_id].to_i }
+        unless target
+          return render json: { success: false, message: 'That company is not available to you.' }, status: :not_found
+        end
+
+        tokens = JsonWebToken.generate_token_pair(target)
+        target.update_column(:last_sign_in_at, Time.current)
+        LoginActivity.record_login(user_id: target.id, user_type: 'User', ip_address: request.remote_ip, user_agent: request.user_agent)
+        set_refresh_token_cookie(tokens[:refresh_token])
+
+        render json: {
+          success: true,
+          token: tokens[:access_token],
+          refreshToken: tokens[:refresh_token],
+          user: build_user_response(target),
+          requires_location_selection: requires_location_selection?(target)
         }, status: :ok
       end
 

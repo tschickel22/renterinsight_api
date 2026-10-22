@@ -124,6 +124,7 @@ module McpTools
     def cost_fields(project)
       {
         budget: project.budget_amount&.to_f, actual_cost: project.actual_cost&.to_f,
+        committed_cost: project.committed_cost.to_f,
         labor: project.labor_cost&.to_f, materials: project.materials_cost&.to_f,
         subcontractor: project.subcontractor_cost&.to_f, other: project.other_cost&.to_f,
         over_budget: project.budget_amount ? project.over_budget? : nil,

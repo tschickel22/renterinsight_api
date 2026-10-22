@@ -21,6 +21,7 @@ class Project < ApplicationRecord
   has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
   has_many :notification_preferences, class_name: 'ProjectNotificationPreference', dependent: :destroy
   has_many :project_cost_items, dependent: :destroy
+  has_many :project_bid_requests, dependent: :destroy
   has_many :project_material_usages, dependent: :destroy
   has_many :project_documents, dependent: :destroy
 
@@ -56,6 +57,8 @@ class Project < ApplicationRecord
     current = current_phase
     return { error: 'No current phase set' } unless current
     return { error: 'Current phase is already completed' } if current.status == 'completed'
+    return linked_phase_error(current) if linked_phase_error(current)
+    return { error: current.price_hold_message } if current.status == 'not_started' && current.price_hold_message
 
     # Complete the current phase
     current.mark_complete!(completed_by: completed_by)
@@ -67,7 +70,7 @@ class Project < ApplicationRecord
                                .first
 
     if next_phase
-      next_phase.mark_in_progress!
+      next_phase.mark_in_progress! unless next_phase.price_hold_message
       self.current_phase_id = next_phase.id
     else
       # All phases done — project is complete
@@ -86,6 +89,10 @@ class Project < ApplicationRecord
   def set_phase_status!(phase, new_status, changed_by: nil)
     return { error: 'Phase not found in this project' } unless phase.project_id == id
     return { error: 'Invalid status' } unless ProjectPhase::STATUSES.include?(new_status)
+    return linked_phase_error(phase) if linked_phase_error(phase)
+    if phase.status == 'not_started' && new_status.in?(%w[in_progress completed]) && (held = phase.price_hold_message)
+      return { error: held }
+    end
 
     old_status = phase.status
 
@@ -157,6 +164,7 @@ class Project < ApplicationRecord
     # Find the most recently completed phase
     last_completed = phases.where(status: 'completed').order(completed_at: :desc).first
     return { error: 'No completed phases to undo' } unless last_completed
+    return linked_phase_error(last_completed) if linked_phase_error(last_completed)
 
     # Find the current in-progress phase (the one that was started after the completion)
     current_in_progress = phases.find_by(status: 'in_progress')
@@ -195,6 +203,7 @@ class Project < ApplicationRecord
   def skip_phase!(phase, skipped_by: nil)
     return { error: 'Phase not found in this project' } unless phase.project_id == id
     return { error: 'Cannot skip a required phase' } if phase.is_required?
+    return linked_phase_error(phase) if linked_phase_error(phase)
     return { error: 'Phase is already completed' } if phase.status == 'completed'
 
     phase.update!(
@@ -210,7 +219,7 @@ class Project < ApplicationRecord
                                  .order(:position)
                                  .first
       if next_phase
-        next_phase.mark_in_progress!
+        next_phase.mark_in_progress! unless next_phase.price_hold_message
         update!(current_phase_id: next_phase.id)
       else
         update!(status: 'completed', actual_completion_date: Date.current, current_phase_id: nil)
@@ -247,7 +256,7 @@ class Project < ApplicationRecord
 
   def start!
     first_phase = project_phases.order(:position).first
-    return unless first_phase && first_phase.status == 'not_started'
+    return unless first_phase && first_phase.status == 'not_started' && first_phase.price_hold_message.nil?
 
     first_phase.mark_in_progress!
     update!(current_phase_id: first_phase.id, started_at: Date.current)
@@ -264,6 +273,15 @@ class Project < ApplicationRecord
 
   def progress_display
     "#{completed_phase_count}/#{phase_count}"
+  end
+
+  # A phase a linked installer company is running takes its status from them
+  # (E68 step 5d); only the sync may change it here.
+  def linked_phase_error(phase)
+    return nil if Current.project_link_sync
+
+    name = phase.linked_installer_name
+    name && { error: "#{phase.name} is run by #{name}. Its status comes from them." }
   end
 
   def customer_display_name
@@ -284,8 +302,11 @@ class Project < ApplicationRecord
   # COST TRACKING
   # ============================================================================
 
+  # Actual cost is what has been incurred: approved, paid or disputed lines.
+  # Pending lines (an awarded bid, a linked installer's fee) are committed
+  # but not yet spent, and are reported apart (committed_cost).
   def recalculate_costs!
-    items = project_cost_items.not_deleted
+    items = project_cost_items.not_deleted.where.not(status: 'pending')
     totals = items.group(:cost_type).sum(:amount)
 
     update_columns(
@@ -297,9 +318,20 @@ class Project < ApplicationRecord
     )
   end
 
+  # Awarded but not yet billed.
+  def committed_cost
+    project_cost_items.not_deleted.where(status: 'pending').sum(:amount)
+  end
+
+  # What the job will cost once everything committed is billed.
+  def projected_cost
+    (actual_cost || 0) + committed_cost
+  end
+
+  # Budget left after what is spent and what is committed.
   def budget_variance
     return nil unless budget_amount
-    budget_amount - (actual_cost || 0)
+    budget_amount - projected_cost
   end
 
   def budget_variance_percentage
@@ -309,7 +341,7 @@ class Project < ApplicationRecord
 
   def over_budget?
     return false unless budget_amount
-    (actual_cost || 0) > budget_amount
+    projected_cost > budget_amount
   end
 
   private

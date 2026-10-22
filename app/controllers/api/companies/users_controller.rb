@@ -118,7 +118,7 @@ module Api
         
         if result[:success]
           invitation = result[:invitation]
-          @user = User.find_by(email: invitation.email)
+          @user = @company.users.find_by(email: invitation.email)
           
           render json: {
             success: true,

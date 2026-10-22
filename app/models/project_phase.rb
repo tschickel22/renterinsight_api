@@ -19,6 +19,7 @@ class ProjectPhase < ApplicationRecord
   validates :name, presence: true
   validates :position, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :status, presence: true, inclusion: { in: STATUSES }
+  validate :not_held_for_price, on: :update
 
   # Scopes
   scope :ordered, -> { order(:position) }
@@ -132,12 +133,63 @@ class ProjectPhase < ApplicationRecord
   end
 
   def recalculate_costs!
-    update_column(:actual_cost, project_cost_items.not_deleted.sum(:amount))
+    # Incurred only; pending (committed) lines are reported apart.
+    update_column(:actual_cost, project_cost_items.not_deleted.where.not(status: 'pending').sum(:amount))
   end
 
   after_save :notify_status_change, if: :saved_change_to_status?
+  # A phase handed to or from a linked installer company follows the other
+  # side (E68 step 5d). The job decides which fields cross in which direction.
+  after_commit :sync_linked_phase, on: :update, if: :linked_sync_change?
+
+  SYNCED_FIELDS = %w[status started_at completed_at estimated_start_date estimated_completion_date].freeze
+
+  # The installer company running this dealer phase, while the hand-off is
+  # live. Its status comes from them.
+  def linked_installer_name
+    link = ProjectLinkPhase.joins(:project_link).where(dealer_phase_id: id, project_links: { status: 'accepted' }).first&.project_link
+    link&.installer_company&.name
+  end
+
+  # On the installer's side of a priced job (E68 step 6): why this phase
+  # can't start yet, while a price or change order waits for the dealer.
+  def price_hold_message
+    map = ProjectLinkPhase.includes(project_link: :dealer_company).find_by(installer_phase_id: id)
+    pl = map&.project_link
+    return nil unless pl&.accepted? && !pl.legacy_price?
+
+    dealer = pl.dealer_company.name
+    if (held = pl.hold_for(map.dealer_phase_id))
+      "#{name} can't start until #{dealer} approves #{held.price? ? 'the price' : held.label.downcase}."
+    elsif !pl.price_agreed?
+      "#{name} can't start until #{dealer} approves a price for the job."
+    end
+  end
+
+  # Would this save start a phase that isn't started yet?
+  def starting?
+    status_was == 'not_started' && status.in?(%w[in_progress completed])
+  end
 
   private
+
+  def not_held_for_price
+    return unless will_save_change_to_status? && starting?
+
+    msg = price_hold_message
+    errors.add(:base, msg) if msg
+  end
+
+  def linked_sync_change?
+    return false if Current.project_link_sync
+
+    (saved_changes.keys & SYNCED_FIELDS).any? &&
+      ProjectLinkPhase.where(dealer_phase_id: id).or(ProjectLinkPhase.where(installer_phase_id: id)).exists?
+  end
+
+  def sync_linked_phase
+    ProjectLinkSyncJob.perform_later(id)
+  end
 
   def notify_status_change
     ProjectNotificationService.notify_phase_change(self, status_before_last_save, status)
