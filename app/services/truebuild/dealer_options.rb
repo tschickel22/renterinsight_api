@@ -13,6 +13,11 @@ module Truebuild
   # built in memory beside the book's, in every color set the model offers.
   # Hidden colors drop out, except one already picked on the sheet in front
   # of the rep.
+  #
+  # A factory book can carry one color as several options, one per series
+  # (Champion's Topeka book has Shutters "Black" seven times). A dealer means
+  # the color, not one series' copy, so hiding or renaming a color covers
+  # every copy of it in its set (key_for).
   class DealerOptions
     def initialize(company, manufacturer_id)
       @company = company
@@ -24,18 +29,34 @@ module Truebuild
       @colors ||= @company.dealer_colors.where(manufacturer_id: @manufacturer_id, kind: 'color', status: 'active').includes(:group).to_a
     end
 
-    # Book colors the dealer hid.
-    def hidden_ids
-      @hidden_ids ||= requests.select { |r| r.action == 'hide' }.map(&:catalog_option_id).to_set
+    # A color's set and name: what its copies across series share. Nil for
+    # anything that is not a color in a set.
+    def self.key_for(option)
+      set = option.kind == 'color' ? option.metadata.to_h['color_set'].presence : nil
+      set && [set, option.name.to_s.strip.downcase]
     end
 
-    # { option_id => the dealer's name } for book options they renamed.
-    def names
-      @names ||= requests.select { |r| r.action == 'rename' }.to_h { |r| [r.catalog_option_id, r.name] }
+    # Every copy of a factory color in its set (just the option itself when
+    # it is not a color in a set).
+    def self.twins(option)
+      key = key_for(option)
+      return CatalogOption.where(id: option.id) unless key
+
+      CatalogOption.platform.where(manufacturer_id: option.manufacturer_id, kind: 'color')
+                   .where("metadata->>'color_set' = ?", key[0]).where('LOWER(TRIM(name)) = ?', key[1])
+    end
+
+    # Did the dealer take this book color off their lists?
+    def hidden?(option)
+      hidden_ids.include?(option.id) || ((key = self.class.key_for(option)) && hidden_keys.include?(key))
+    end
+
+    def renamed?(option)
+      names.key?(option.id) || ((key = self.class.key_for(option)) && name_keys.key?(key))
     end
 
     def name_for(option)
-      names[option.id] || option.name
+      names[option.id] || ((key = self.class.key_for(option)) && name_keys[key]) || option.name
     end
 
     # A line's name, as DealBuild.option_label writes it, in the dealer's words.
@@ -48,8 +69,8 @@ module Truebuild
     # rows: a model's offered book rows (OptionSource.offered). keep_ids:
     # options to keep though hidden (picked on the sheet).
     def apply(rows, keep_ids: [])
-      hidden = hidden_ids - keep_ids.to_set
-      rows = rows.reject { |op| hidden.include?(op.catalog_option_id) } if hidden.any?
+      keep = keep_ids.to_set
+      rows = rows.reject { |op| !keep.include?(op.catalog_option_id) && hidden?(op.option) } if hidden_ids.any?
       sets = rows.filter_map { |op| DealBuild.choice_set(op.option) }.to_set
       return rows if sets.empty? || colors.empty?
 
@@ -135,7 +156,7 @@ module Truebuild
     def self.hide!(company:, option_id:, user: nil, deal: nil, note: nil)
       option = CatalogOption.platform.find_by(id: option_id, kind: 'color')
       raise ArgumentError, 'That is not a factory color' unless option
-      return if company.catalog_option_requests.in_force.exists?(action: 'hide', catalog_option_id: option.id)
+      return if company.catalog_option_requests.in_force.exists?(action: 'hide', catalog_option_id: twins(option).select(:id))
 
       company.catalog_option_requests.create!(manufacturer_id: option.manufacturer_id, option: option, action: 'hide',
                                               color_set: DealBuild.choice_set(option), deal: deal, requested_by: user,
@@ -143,7 +164,9 @@ module Truebuild
     end
 
     def self.unhide!(company:, option_id:, user: nil)
-      withdraw(company.catalog_option_requests.in_force.where(action: 'hide', catalog_option_id: option_id), user)
+      option = CatalogOption.find_by(id: option_id)
+      ids = option ? twins(option).select(:id) : option_id
+      withdraw(company.catalog_option_requests.in_force.where(action: 'hide', catalog_option_id: ids), user)
     end
 
     # The dealer's name for an option. Their own color is simply renamed; a
@@ -159,7 +182,7 @@ module Truebuild
       end
 
       CatalogOptionRequest.transaction do
-        withdraw(company.catalog_option_requests.in_force.where(action: 'rename', catalog_option_id: option.id), user)
+        withdraw(company.catalog_option_requests.in_force.where(action: 'rename', catalog_option_id: twins(option).select(:id)), user)
         next nil if name.blank? || name == option.name
 
         company.catalog_option_requests.create!(manufacturer_id: option.manufacturer_id, option: option, action: 'rename',
@@ -189,8 +212,26 @@ module Truebuild
 
     private
 
+    def hidden_ids
+      @hidden_ids ||= requests.select { |r| r.action == 'hide' }.map(&:catalog_option_id).to_set
+    end
+
+    def hidden_keys
+      @hidden_keys ||= requests.select { |r| r.action == 'hide' }.filter_map { |r| r.option && self.class.key_for(r.option) }.to_set
+    end
+
+    # { option_id => the dealer's name } for book options they renamed.
+    def names
+      @names ||= requests.select { |r| r.action == 'rename' }.to_h { |r| [r.catalog_option_id, r.name] }
+    end
+
+    def name_keys
+      @name_keys ||= requests.select { |r| r.action == 'rename' }
+                             .filter_map { |r| (key = r.option && self.class.key_for(r.option)) && [key, r.name] }.to_h
+    end
+
     def requests
-      @requests ||= @company.catalog_option_requests.in_force.where(manufacturer_id: @manufacturer_id).order(:created_at).to_a
+      @requests ||= @company.catalog_option_requests.in_force.where(manufacturer_id: @manufacturer_id).includes(:option).order(:created_at).to_a
     end
   end
 end

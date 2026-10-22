@@ -221,8 +221,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
           { id: op.catalog_option_id, name: own.name_for(op.option), kind: op.option.kind, standard: op.is_standard && dealer_cost.nil?,
             color_set: Truebuild::DealBuild.choice_set(op.option),
             # The dealer's own changes (E85): their color, their name (the book's kept), their cost and price.
-            dealer_color: op.option.dealer_color?, book_name: (op.option.name if own.names.key?(op.catalog_option_id)),
-            hidden: own.hidden_ids.include?(op.catalog_option_id),
+            dealer_color: op.option.dealer_color?, book_name: (op.option.name if own.renamed?(op.option)),
+            hidden: own.hidden?(op.option),
             factory_cost: op.dealer_cost&.to_f, dealer_cost_set: dealer_cost.present?,
             your_price: prices.manual_retail(op.option)&.to_f,
             # What the dealer charges for it now, so an editor starts from the real figure.

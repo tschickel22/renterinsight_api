@@ -405,7 +405,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def price_list_option(op, prices, own)
     o = op.option
     req = prices.request_for(op)
-    { id: op.id, kind: 'option', option_id: o.id, name: own.name_for(o), book_name: (o.name if own.names.key?(o.id)),
+    { id: op.id, kind: 'option', option_id: o.id, name: own.name_for(o), book_name: (o.name if own.renamed?(o)),
       group: o.group&.name, factory_code: o.factory_code, applies_to: applies_to_words(op), standard: op.is_standard,
       factory_cost: op.dealer_cost&.to_f, suggested_retail: op.suggested_retail&.to_f,
       your_cost: req&.suggested_value&.to_f, cost_status: req && STATUS_WORDS[req.status], your_price: prices.manual_retail(o)&.to_f }
@@ -423,18 +423,18 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   # Every color set the book's factory uses: its colors (hidden or not), and
-  # the dealer's own colors in it.
+  # the dealer's own colors in it. A color the book carries once per series
+  # is listed once (DealerOptions.key_for); hiding it hides every copy.
   def color_list(book, own)
     in_book = CatalogOption.where(id: book.option_prices.select(:catalog_option_id)).platform.where(kind: 'color', status: 'active')
-                           .where("metadata->>'color_set' IS NOT NULL").order(:name).to_a
-    statuses = @company.catalog_option_requests.in_force.where(manufacturer_id: book.manufacturer_id).index_by { |r| [r.action, r.catalog_option_id] }
+                           .where("metadata->>'color_set' IS NOT NULL").order(:id).to_a
     sets = in_book.group_by { |o| o.metadata['color_set'] }.map do |set, options|
+      colors = options.uniq { |o| Truebuild::DealerOptions.key_for(o) }.sort_by { |o| own.name_for(o).to_s.downcase }
       { set: set,
-        colors: options.map { |o| { id: o.id, name: own.name_for(o), book_name: (o.name if own.names.key?(o.id)), factory_code: o.factory_code,
-                                    hidden: own.hidden_ids.include?(o.id), status: (r = statuses[['hide', o.id]]) && STATUS_WORDS[r.status] } },
+        colors: colors.map { |o| { id: o.id, name: own.name_for(o), book_name: (o.name if own.renamed?(o)), factory_code: o.factory_code,
+                                   hidden: own.hidden?(o) } },
         yours: own.colors.select { |o| o.metadata.to_h['color_set'] == set }.map do |o|
-          { id: o.id, name: o.name, factory_code: o.factory_code, cost: o.metadata['cost']&.to_f, retail: o.metadata['retail']&.to_f,
-            status: (r = statuses[['add', o.id]]) && STATUS_WORDS[r.status] }
+          { id: o.id, name: o.name, factory_code: o.factory_code, cost: o.metadata['cost']&.to_f, retail: o.metadata['retail']&.to_f }
         end }
     end
     { book: { id: book.id, name: book.name, manufacturer_id: book.manufacturer_id }, sets: sets.sort_by { |x| x[:set].to_s } }

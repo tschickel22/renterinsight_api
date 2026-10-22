@@ -167,6 +167,30 @@ RSpec.describe 'Dealer price list and colors', type: :request do
     expect(shingle_names(sheet_for(company, headers), headers)).not_to include('Driftwood')
   end
 
+  it 'lists a color the book carries once per series once, and hides or renames every copy' do
+    # Champion's books file each color again for every series.
+    copy = CatalogOption.create!(group: exterior, manufacturer: mfr, key: 'exterior--black-weatherwood-aspire', name: 'Black Weatherwood',
+                                 kind: 'color', metadata: { 'color_set' => 'Shingles' })
+    CatalogOptionPrice.create!(price_book: book, option: copy, is_standard: true, series: 'Aspire')
+
+    get "/api/v1/truebuild_pricing/price_list?book_id=#{book.id}&kind=color", headers: headers
+    shingles = body['sets'].find { |s| s['set'] == 'Shingles' }
+    expect(shingles['colors'].map { |c| c['name'] }).to eq(['Black Weatherwood', 'Dual Black'])
+
+    # Hidden from the list it was shown by, every copy leaves the Deal Sheet.
+    shown = shingles['colors'].first['id']
+    post "/api/v1/truebuild_pricing/colors/#{shown}/hide", headers: headers
+    path = sheet_for(company, headers)
+    expect(shingle_names(path, headers)).to eq(['Dual Black'])
+
+    req = company.catalog_option_requests.find_by(action: 'hide')
+    post "/api/admin/catalog_option_requests/#{req.id}/apply", headers: admin, params: {}.to_json
+    expect([weatherwood.reload.status, copy.reload.status]).to eq(%w[discontinued discontinued])
+
+    delete "/api/v1/truebuild_pricing/colors/#{shown}/hide", headers: headers
+    expect(response).to have_http_status(:no_content)
+  end
+
   it 'lists the price list by factory book with the dealer figures, and refuses another dealer\'s color' do
     post '/api/v1/truebuild_pricing/price_list/remember', headers: headers,
                                                           params: { kind: 'option', price_id: dishwasher.prices.first.id, price: 450, name: 'Dishwasher SS' }.to_json
