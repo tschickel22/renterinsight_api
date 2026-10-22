@@ -75,6 +75,10 @@ class Api::V1::WebsitesController < ApplicationController
     per_page = [per_page, 200].min
     @websites = @websites.offset((page - 1) * per_page).limit(per_page)
 
+    # Which sites carry an events calendar or lot rent, so the list's menu offers
+    # those editors only where there is something to edit.
+    sections = Website.editable_sections_for(@websites.pluck(:id))
+
     # Return with dual meta
     render json: {
       items: @websites.includes(:company_domains).as_json(
@@ -86,7 +90,7 @@ class Api::V1::WebsitesController < ApplicationController
         # with no address, or a published address pointing at an unpublished site, both look
         # finished from here otherwise.
         methods: [:domain_status, :public_url, :platform_host]
-      ),
+      ).map { |item| item.merge('editable_sections' => sections[item['id']] || []) },
       meta: {
         total: filtered_count,
         page: page,
