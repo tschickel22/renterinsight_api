@@ -40,9 +40,11 @@ module Truebuild
       sets = offered_sets(build)
       chosen = build.lines.select { |l| l.kind == 'option' && !l.tbd }.index_by(&:catalog_option_id)
       skips = build.color_skips
+      names = DealerOptions.new(build.company, build.variant.manufacturer_id)
       sets.map do |set, options|
         pick = options.find { |o| chosen[o.id] }
-        name = pick && (pick.name.to_s.start_with?("#{set}:") ? pick.name.to_s.sub("#{set}:", '').strip : pick.name)
+        written = pick && names.name_for(pick).to_s
+        name = pick && (written.start_with?("#{set}:") ? written.sub("#{set}:", '').strip : written)
         row = { 'set' => set, 'choice' => name, 'code' => pick&.factory_code }
         # Marked "Not on this home": said so on the PO instead of "Not chosen yet".
         row['skipped'] = true if pick.nil? && skips.include?(set)
@@ -53,7 +55,9 @@ module Truebuild
     def self.offered_sets(build)
       variant = build.variant
       book = OptionSource.current_for(variant)
-      rows = OptionSource.offered(book, variant, construction: build.construction).select { |op| op.option.status == 'active' }
+      # The dealer's own colors count, and a color they hid still counts once picked.
+      picked = build.lines.select { |l| l.kind == 'option' }.filter_map(&:catalog_option_id)
+      rows = OptionSource.for_dealer(build.company, book, variant, construction: build.construction, keep_ids: picked)
       rows.map(&:option).uniq.group_by { |o| DealBuild.choice_set(o) }.except(nil)
     end
 

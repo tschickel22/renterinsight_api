@@ -9,13 +9,17 @@
 #   GET   /api/admin/catalog_price_books/:id/corrections
 #   GET   /api/admin/catalog_price_requests?status=open&book_id=
 #   POST  /api/admin/catalog_price_requests/:id/apply     { value?, reason? }
+#   POST  /api/admin/catalog_price_requests/:id/keep      { note? }   for that dealer only (their cost stays theirs)
 #   POST  /api/admin/catalog_price_requests/:id/dismiss   { note? }
+#   GET   /api/admin/catalog_option_requests?status=open  dealers' added colors, hidden colors and names (E85)
+#   POST  /api/admin/catalog_option_requests/:id/apply|keep|dismiss   { note? }
 class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
   before_action :require_platform_admin!
   before_action :set_book, only: %i[prices update_price corrections]
-  before_action :set_request, only: %i[apply dismiss]
+  before_action :set_request, only: %i[apply keep dismiss]
+  before_action :set_option_request, only: %i[apply_option keep_option dismiss_option]
 
-  rescue_from Truebuild::PriceCorrector::Invalid do |e|
+  rescue_from Truebuild::PriceCorrector::Invalid, Truebuild::OptionRequests::Invalid do |e|
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
@@ -82,8 +86,11 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
   end
 
   # Applies the dealer's figure (or the admin's) to the book.
+  # Also from dealer_only: kept for one dealer, then made everyone's.
   def apply
-    return render json: { error: "This request is #{@price_request.status}" }, status: :unprocessable_entity unless @price_request.status == 'open'
+    unless CatalogPriceRequest::OVERRIDING.include?(@price_request.status)
+      return render json: { error: "This request is #{@price_request.status}" }, status: :unprocessable_entity
+    end
 
     target = @price_request.target
     return render json: { error: 'That price is no longer in the book' }, status: :unprocessable_entity unless target
@@ -96,11 +103,43 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
     render json: { request: request_json(@price_request.reload) }
   end
 
-  def dismiss
+  # The dealer's figure stays theirs; the book is not changed.
+  def keep
     return render json: { error: "This request is #{@price_request.status}" }, status: :unprocessable_entity unless @price_request.status == 'open'
+
+    resolve!(@price_request, 'dealer_only', params[:note])
+    render json: { request: request_json(@price_request.reload) }
+  end
+
+  # Turned down: a cost the dealer set goes back to the book's for them too.
+  def dismiss
+    unless CatalogPriceRequest::OVERRIDING.include?(@price_request.status)
+      return render json: { error: "This request is #{@price_request.status}" }, status: :unprocessable_entity
+    end
 
     resolve!(@price_request, 'dismissed', params[:note])
     render json: { request: request_json(@price_request.reload) }
+  end
+
+  def option_requests
+    scope = CatalogOptionRequest.includes(:company, :manufacturer, :requested_by, option: :group).order(created_at: :desc)
+    scope = scope.where(status: params[:status]) if params[:status].present?
+    render json: { requests: scope.limit(200).map { |r| option_request_json(r) } }
+  end
+
+  def apply_option
+    Truebuild::OptionRequests.new(@option_request, user: original_user).apply!(note: params[:note])
+    render json: { request: option_request_json(@option_request.reload) }
+  end
+
+  def keep_option
+    Truebuild::OptionRequests.new(@option_request, user: original_user).keep!(note: params[:note])
+    render json: { request: option_request_json(@option_request.reload) }
+  end
+
+  def dismiss_option
+    Truebuild::OptionRequests.new(@option_request, user: original_user).dismiss!(note: params[:note])
+    render json: { request: option_request_json(@option_request.reload) }
   end
 
   private
@@ -115,6 +154,22 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
     @price_request = CatalogPriceRequest.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
+  end
+
+  def set_option_request
+    @option_request = CatalogOptionRequest.find(params[:id])
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
+  def option_request_json(r)
+    o = r.option
+    meta = o&.metadata.to_h
+    { id: r.id, action: r.action, status: r.status, label: r.label, color_set: r.color_set, name: r.name,
+      option: o && { id: o.id, name: o.name, factory_code: o.factory_code, group: o.group&.name, dealer_color: o.dealer_color?,
+                     cost: meta['cost']&.to_f, retail: meta['retail']&.to_f },
+      manufacturer: r.manufacturer&.name, company: r.company&.name, deal_id: r.deal_id, requested_by: r.requested_by&.name,
+      note: r.note, resolution_note: r.resolution_note, resolved_at: r.resolved_at, created_at: r.created_at }
   end
 
   # Closes the request and tells the dealer who sent it.

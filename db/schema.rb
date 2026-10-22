@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_21_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_22_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1604,6 +1604,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_21_210000) do
     t.index ["catalog_price_book_id"], name: "index_catalog_option_prices_on_catalog_price_book_id"
   end
 
+  create_table "catalog_option_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.bigint "catalog_option_id", null: false
+    t.string "action", null: false
+    t.string "color_set"
+    t.string "name"
+    t.text "note"
+    t.bigint "deal_id"
+    t.bigint "requested_by_id"
+    t.string "status", default: "open", null: false
+    t.bigint "resolved_by_id"
+    t.datetime "resolved_at"
+    t.text "resolution_note"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_option_id"], name: "index_catalog_option_requests_on_catalog_option_id"
+    t.index ["company_id", "status"], name: "index_catalog_option_requests_on_company_id_and_status"
+    t.index ["company_id"], name: "index_catalog_option_requests_on_company_id"
+    t.index ["deal_id"], name: "index_catalog_option_requests_on_deal_id"
+    t.index ["manufacturer_id"], name: "index_catalog_option_requests_on_manufacturer_id"
+    t.index ["requested_by_id"], name: "index_catalog_option_requests_on_requested_by_id"
+    t.index ["resolved_by_id"], name: "index_catalog_option_requests_on_resolved_by_id"
+    t.index ["status"], name: "index_catalog_option_requests_on_status"
+  end
+
   create_table "catalog_option_rules", force: :cascade do |t|
     t.bigint "manufacturer_id", null: false
     t.bigint "catalog_option_id", null: false
@@ -1643,7 +1669,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_21_210000) do
     t.jsonb "metadata", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "company_id"
     t.index ["catalog_option_group_id"], name: "index_catalog_options_on_catalog_option_group_id"
+    t.index ["company_id"], name: "index_catalog_options_on_company_id", where: "(company_id IS NOT NULL)"
     t.index ["manufacturer_id", "factory_code"], name: "index_catalog_options_on_manufacturer_id_and_factory_code"
     t.index ["manufacturer_id", "key"], name: "index_catalog_options_on_manufacturer_id_and_key", unique: true
     t.index ["manufacturer_id"], name: "index_catalog_options_on_manufacturer_id"
@@ -1771,6 +1799,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_21_210000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["catalog_price_book_id"], name: "index_catalog_price_requests_on_catalog_price_book_id"
+    t.index ["company_id", "target_type", "target_id"], name: "idx_on_company_id_target_type_target_id_6e54570cf7"
     t.index ["company_id"], name: "index_catalog_price_requests_on_company_id"
     t.index ["deal_id"], name: "index_catalog_price_requests_on_deal_id"
     t.index ["requested_by_id"], name: "index_catalog_price_requests_on_requested_by_id"
@@ -9030,6 +9059,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_21_210000) do
   add_foreign_key "catalog_option_prices", "catalog_options"
   add_foreign_key "catalog_option_prices", "catalog_plan_variants"
   add_foreign_key "catalog_option_prices", "catalog_price_books"
+  add_foreign_key "catalog_option_requests", "catalog_options"
+  add_foreign_key "catalog_option_requests", "companies"
+  add_foreign_key "catalog_option_requests", "deals"
+  add_foreign_key "catalog_option_requests", "manufacturers"
+  add_foreign_key "catalog_option_requests", "users", column: "requested_by_id"
+  add_foreign_key "catalog_option_requests", "users", column: "resolved_by_id"
   add_foreign_key "catalog_option_rules", "catalog_options"
   add_foreign_key "catalog_option_rules", "catalog_options", column: "target_option_id"
   add_foreign_key "catalog_option_rules", "manufacturers"

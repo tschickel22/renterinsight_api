@@ -55,6 +55,14 @@ module Truebuild
       scope.order(Arel.sql('published_at DESC NULLS LAST, id DESC'))
     end
 
+    # A model's active options as this dealer sees them on a Deal Sheet: the
+    # book's rows, less the colors they hid (unless picked: keep_ids), plus
+    # their own colors (DealerOptions).
+    def for_dealer(company, book, variant, construction: nil, keep_ids: [])
+      rows = offered(book, variant, construction: construction).select { |op| op.option.status == 'active' }
+      DealerOptions.new(company, variant.manufacturer_id).apply(rows, keep_ids: keep_ids)
+    end
+
     # The rows of a book that apply to this model.
     def offered(book, variant, construction: nil, option_ids: nil)
       return [] unless book
