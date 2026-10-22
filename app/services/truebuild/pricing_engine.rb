@@ -10,6 +10,10 @@ module Truebuild
   #   retail = each part marked up by the dealer's most specific rule;
   #            options with no dealer rule use the factory's suggested retail
   #
+  # A cost the dealer set on their price list (DealerPrices) replaces the
+  # book's for them, and their own colors and option names (DealerOptions)
+  # price and read as they set them.
+  #
   # The breakdown includes cost. Only dealer staff may see it; anything a
   # buyer sees must come from #retail_only.
   class PricingEngine
@@ -56,6 +60,8 @@ module Truebuild
       @options_cost_book = book || OptionSource.current_for(variant) || @cost_book
       @options_book = book || OptionSource.book_for(company, variant) || @book
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
+      @dealer_prices = DealerPrices.new(company)
+      @dealer_options = DealerOptions.new(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
                       .select { |r| r.location_id.nil? || r.location_id == location&.id }
       @warnings = []
@@ -84,17 +90,19 @@ module Truebuild
       return unpriced_base_line if !vp && @variant.unpriced?
       raise ArgumentError, "#{@variant.model_number} has no price in #{@cost_book.name}" unless vp
 
-      gross = vp.base_cost.to_d
+      gross = @dealer_prices.base_cost(vp)
       discount = (gross * @terms.program_discount_pct.to_d / 100).round(2)
       cost = gross - discount
+      own = @dealer_prices.cost_for(vp)
       rule = rule_for(:base)
       retail = rule ? rule.apply(retail_basis(vp) || cost) : nil
       @warnings << 'No markup rule covers this home, so it has no retail price. Add a markup rule.' unless rule
       {
         kind: 'base', label: "#{@variant.catalog_plan.name} (#{@variant.model_number})",
         cost: money(cost), retail: money(retail),
-        detail: { net_base_price: money(vp.net_base_price), required_adders: vp.required_adders,
-                  program_discount: money(discount), rule: describe(rule) }
+        detail: { net_base_price: money(own || vp.net_base_price), required_adders: vp.required_adders,
+                  program_discount: money(discount), rule: describe(rule),
+                  factory_net_base_price: (money(vp.net_base_price) if own), dealer_cost_set: own.present? }.compact
       }
     end
 
@@ -115,7 +123,7 @@ module Truebuild
       return nil if @book == @cost_book
 
       vp = @book.variant_prices.find_by(catalog_plan_variant_id: @variant.id) || cost_vp
-      gross = vp.base_cost.to_d
+      gross = @dealer_prices.base_cost(vp)
       gross - (gross * @terms.program_discount_pct.to_d / 100).round(2)
     end
 
@@ -126,6 +134,8 @@ module Truebuild
       retail_prices = @options_book == @options_cost_book ? prices : offered(@options_book)
       @option_ids.filter_map do |id|
         price = most_specific(prices.select { |op| op.catalog_option_id == id })
+        # The dealer's own color: no book row, priced as they set it.
+        price ||= (color = @dealer_options.color(id)) && DealerOptions.row_for(color)
         unless price
           name = CatalogOption.find_by(id: id)&.name || "option #{id}"
           @warnings << "#{name} is not offered on #{@variant.model_number}."
@@ -151,26 +161,32 @@ module Truebuild
     # book's row, which the retail is built from.
     def option_line(price, retail_price = price)
       option = price.option
-      if price.is_standard
-        return { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
+      label = @dealer_options.name_for(option)
+      own = price.persisted? ? @dealer_prices.cost_for(price) : nil
+      if price.is_standard && own.nil?
+        return { kind: 'option', option_id: option.id, label: label, group: option.group.name,
                  cost: 0.0, retail: 0.0, detail: { standard: true } }
       end
-      if price.price_on_request?
-        @warnings << "#{option.name} has no factory price. Quote it by hand."
-        return { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
+      if price.price_on_request? && own.nil?
+        @warnings << "#{label} has no factory price. Quote it by hand."
+        return { kind: 'option', option_id: option.id, label: label, group: option.group.name,
                  cost: nil, retail: nil, detail: { price_on_request: true } }
       end
 
-      cost = price.dealer_cost.to_d
-      basis = retail_price.is_standard ? cost : retail_price.dealer_cost.to_d
+      cost = own || price.dealer_cost.to_d
+      basis = if retail_price.equal?(price) then cost
+              elsif retail_price.is_standard then cost
+              else @dealer_prices.cost_for(retail_price) || retail_price.dealer_cost.to_d
+              end
       rule = rule_for(:option, option)
       retail, source =
         if rule then [rule.apply(basis), describe(rule)]
         elsif retail_price.suggested_retail then [retail_price.suggested_retail.to_d, "factory suggested retail"]
         else [basis, 'no markup']
         end
-      { kind: 'option', option_id: option.id, label: option.name, group: option.group.name,
-        cost: money(cost), retail: money(retail), detail: { rule: source, factory_code: option.factory_code } }
+      { kind: 'option', option_id: option.id, label: label, group: option.group.name,
+        cost: money(cost), retail: money(retail),
+        detail: { rule: source, factory_code: option.factory_code, dealer_cost_set: (true if own), dealer_color: (true if option.dealer_color?) }.compact }
     end
 
     # ---- freight -------------------------------------------------------

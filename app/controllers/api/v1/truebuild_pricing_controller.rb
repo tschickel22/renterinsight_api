@@ -5,6 +5,20 @@
 # markup rules, and a preview of what any model and options cost and sell for.
 # The catalog itself is platform data (Api::Admin::CatalogPriceBooksController);
 # everything here is this company's own layer on top of it.
+#
+# Their price list (backlog E85), by factory book: their own price for any
+# home or option, their cost when the factory's is wrong (sent to the
+# platform admin too), their names for options, their own colors and the
+# factory colors they hide.
+#
+#   GET    /api/v1/truebuild_pricing/price_list?book_id=&kind=base|option|color&search=&group=&page=
+#   POST   /api/v1/truebuild_pricing/price_list/remember   { kind: base|option, price_id, price?, cost?, name?, note? }
+#   POST   /api/v1/truebuild_pricing/colors                { manufacturer_id, color_set, name, factory_code?, cost?, retail?, replaces_id? }
+#   PATCH  /api/v1/truebuild_pricing/colors/:id            { name?, factory_code?, cost?, retail? }   their own color
+#   DELETE /api/v1/truebuild_pricing/colors/:id
+#   POST   /api/v1/truebuild_pricing/colors/:id/hide       a factory color
+#   DELETE /api/v1/truebuild_pricing/colors/:id/hide
+#   GET    /api/v1/truebuild_pricing/changes                what they sent the platform admin, and what came of it
 class Api::V1::TruebuildPricingController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -13,7 +27,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   before_action :set_update, only: %i[show_update accept_update decline_update]
   # A price change re-prices the site's Design Your Home list before a buyer asks.
   after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update
-                                          create_addon update_addon destroy_addon]
+                                          create_addon update_addon destroy_addon remember_price]
 
   TERM_FIELDS = %i[price_update_policy price_display program_discount_pct margin_floor_pct round_retail_to buyer_view
                    sale_discount_pct dealer_savings_pct preferred_payment_pct factory_po_hide_prices website_designer].freeze + DealerCatalogTerm::FREIGHT
@@ -259,7 +273,188 @@ class Api::V1::TruebuildPricingController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # GET /api/v1/truebuild_pricing/price_list
+  def price_list
+    return unless authorize_action!('company_settings', 'read')
+
+    book = CatalogPriceBook.published.find_by(id: params[:book_id])
+    return render json: { error: 'Choose a published price book' }, status: :not_found unless book
+
+    prices = Truebuild::DealerPrices.new(@company)
+    own = Truebuild::DealerOptions.new(@company, book.manufacturer_id)
+    return render json: color_list(book, own) if params[:kind] == 'color'
+
+    page = [params[:page].to_i, 1].max
+    per_page = [(params[:per_page] || 50).to_i, 200].min
+    q = params[:search].present? ? "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%" : nil
+    if params[:kind] == 'option'
+      scope = book.option_prices.joins(option: :group).where(catalog_options: { company_id: nil }).where.not(catalog_options: { kind: 'color' })
+                  .includes(:variant, option: :group)
+      scope = scope.where(catalog_options: { catalog_option_group_id: params[:group] }) if params[:group].present?
+      scope = scope.where('catalog_options.name ILIKE :q OR catalog_options.factory_code ILIKE :q', q: q) if q
+      total = scope.count
+      rows = scope.order('catalog_option_groups.position, catalog_option_groups.name, LOWER(catalog_options.name), catalog_option_prices.id')
+                  .offset((page - 1) * per_page).limit(per_page).map { |op| price_list_option(op, prices, own) }
+      groups = CatalogOptionGroup.where(id: book.option_prices.joins(:option).select('catalog_options.catalog_option_group_id'))
+                                 .order(:position, :name).map { |g| { id: g.id, name: g.name } }
+    else
+      scope = book.variant_prices.joins(variant: :catalog_plan).includes(variant: :catalog_plan)
+      scope = scope.where('catalog_plan_variants.model_number ILIKE :q OR catalog_plans.name ILIKE :q OR catalog_plans.series ILIKE :q', q: q) if q
+      total = scope.count
+      rows = scope.order('catalog_plans.series, catalog_plans.name, catalog_plan_variants.model_number')
+                  .offset((page - 1) * per_page).limit(per_page).map { |vp| price_list_base(vp, prices) }
+      groups = []
+    end
+    render json: { book: { id: book.id, name: book.name, manufacturer_id: book.manufacturer_id }, rows: rows, groups: groups,
+                   meta: { total: total, page: page, per_page: per_page, total_pages: (total.to_f / per_page).ceil } }
+  end
+
+  # POST /api/v1/truebuild_pricing/price_list/remember
+  def remember_price
+    return unless authorize_action!('company_settings', 'update')
+
+    row = (params[:kind] == 'option' ? CatalogOptionPrice : CatalogVariantPrice)
+          .joins(:price_book).merge(CatalogPriceBook.published).find_by(id: params[:price_id])
+    return render json: { error: 'Not found' }, status: :not_found unless row
+
+    target = row.is_a?(CatalogVariantPrice) ? row.variant : row.option
+    ActiveRecord::Base.transaction do
+      Truebuild::DealerPrices.set_retail!(company: @company, target: target, value: params[:price]) if params.key?(:price)
+      if params.key?(:cost)
+        label = row.is_a?(CatalogVariantPrice) ? "#{target.catalog_plan.name} #{target.model_number} base price" : "#{target.name} (#{row.price_book.name})"
+        Truebuild::DealerPrices.set!(company: @company, row: row, value: params[:cost], label: label, user: current_user, note: params[:note])
+      end
+      if params.key?(:name) && row.is_a?(CatalogOptionPrice)
+        Truebuild::DealerOptions.rename!(company: @company, option: target, name: params[:name], user: current_user, note: params[:note])
+      end
+    end
+    fresh = Truebuild::DealerPrices.new(@company)
+    render json: row.is_a?(CatalogVariantPrice) ? price_list_base(row, fresh) : price_list_option(row, fresh, Truebuild::DealerOptions.new(@company, row.option.manufacturer_id))
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/truebuild_pricing/colors
+  def create_color
+    return unless authorize_action!('company_settings', 'update')
+
+    option = Truebuild::DealerOptions.add_color!(
+      company: @company, manufacturer_id: params[:manufacturer_id], color_set: params[:color_set].to_s, name: params[:name],
+      factory_code: params[:factory_code], cost: params[:cost], retail: params[:retail], replaces_id: params[:replaces_id].presence,
+      user: current_user, note: params[:note]
+    )
+    render json: { id: option.id, name: option.name }, status: :created
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # PATCH /api/v1/truebuild_pricing/colors/:id
+  def update_color
+    return unless authorize_action!('company_settings', 'update')
+
+    option = @company.dealer_colors.find(params[:id])
+    Truebuild::DealerOptions.update_color!(option, params.permit(:name, :factory_code, :cost, :retail).to_h)
+    head :no_content
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # DELETE /api/v1/truebuild_pricing/colors/:id
+  def destroy_color
+    return unless authorize_action!('company_settings', 'update')
+
+    Truebuild::DealerOptions.remove_color!(@company.dealer_colors.find(params[:id]), user: current_user)
+    head :no_content
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
+  # POST /api/v1/truebuild_pricing/colors/:id/hide
+  def hide_color
+    return unless authorize_action!('company_settings', 'update')
+
+    Truebuild::DealerOptions.hide!(company: @company, option_id: params[:id], user: current_user, note: params[:note])
+    head :no_content
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # DELETE /api/v1/truebuild_pricing/colors/:id/hide
+  def unhide_color
+    return unless authorize_action!('company_settings', 'update')
+
+    Truebuild::DealerOptions.unhide!(company: @company, option_id: params[:id], user: current_user)
+    head :no_content
+  end
+
+  # GET /api/v1/truebuild_pricing/changes
+  def changes
+    return unless authorize_action!('company_settings', 'read')
+
+    price = @company.catalog_price_requests.where.not(status: 'withdrawn').includes(:requested_by, :price_book).order(created_at: :desc).limit(100)
+                    .map { |r| { id: "price-#{r.id}", kind: 'price', label: r.label, field: r.field, from: r.current_value&.to_f, to: r.suggested_value&.to_f,
+                                 status: r.status, note: r.note, resolution_note: r.resolution_note, requested_by: r.requested_by&.name,
+                                 book: r.price_book&.name, created_at: r.created_at, resolved_at: r.resolved_at } }
+    option = @company.catalog_option_requests.where.not(status: 'withdrawn').includes(:requested_by, :option, :manufacturer).order(created_at: :desc).limit(100)
+                     .map { |r| { id: "option-#{r.id}", kind: r.action, label: r.label, status: r.status, note: r.note,
+                                  resolution_note: r.resolution_note, requested_by: r.requested_by&.name, book: r.manufacturer&.name,
+                                  created_at: r.created_at, resolved_at: r.resolved_at } }
+    render json: { changes: (price + option).sort_by { |c| c[:created_at] }.reverse.first(100) }
+  end
+
   private
+
+  STATUS_WORDS = { 'open' => 'Waiting on review', 'dealer_only' => 'Kept for you', 'applied' => 'Fixed for everyone',
+                   'dismissed' => 'Turned down' }.freeze
+
+  def price_list_base(vp, prices)
+    v = vp.variant
+    req = prices.request_for(vp)
+    { id: vp.id, kind: 'base', variant_id: v.id, model_number: v.model_number, plan: v.catalog_plan.name, series: v.catalog_plan.series,
+      size: [v.width_ft, v.length_ft].all? ? "#{v.width_ft}' x #{v.length_ft}'" : nil,
+      factory_cost: vp.net_base_price&.to_f, your_cost: req&.suggested_value&.to_f, cost_status: req && STATUS_WORDS[req.status],
+      your_price: prices.manual_retail(v)&.to_f }
+  end
+
+  def price_list_option(op, prices, own)
+    o = op.option
+    req = prices.request_for(op)
+    { id: op.id, kind: 'option', option_id: o.id, name: own.name_for(o), book_name: (o.name if own.names.key?(o.id)),
+      group: o.group&.name, factory_code: o.factory_code, applies_to: applies_to_words(op), standard: op.is_standard,
+      factory_cost: op.dealer_cost&.to_f, suggested_retail: op.suggested_retail&.to_f,
+      your_cost: req&.suggested_value&.to_f, cost_status: req && STATUS_WORDS[req.status], your_price: prices.manual_retail(o)&.to_f }
+  end
+
+  # Which homes a row prices.
+  def applies_to_words(op)
+    parts = []
+    parts << op.variant.model_number if op.variant
+    parts << op.series if op.series.present?
+    parts << "#{op.min_length_ft || '?'}-#{op.max_length_ft || '?'} ft long" if op.min_length_ft || op.max_length_ft
+    parts << "#{op.width_ft} ft wide" if op.width_ft
+    parts << op.section_type if op.section_type.present?
+    parts.empty? ? 'Every home' : parts.join(' · ')
+  end
+
+  # Every color set the book's factory uses: its colors (hidden or not), and
+  # the dealer's own colors in it.
+  def color_list(book, own)
+    in_book = CatalogOption.where(id: book.option_prices.select(:catalog_option_id)).platform.where(kind: 'color', status: 'active')
+                           .where("metadata->>'color_set' IS NOT NULL").order(:name).to_a
+    statuses = @company.catalog_option_requests.in_force.where(manufacturer_id: book.manufacturer_id).index_by { |r| [r.action, r.catalog_option_id] }
+    sets = in_book.group_by { |o| o.metadata['color_set'] }.map do |set, options|
+      { set: set,
+        colors: options.map { |o| { id: o.id, name: own.name_for(o), book_name: (o.name if own.names.key?(o.id)), factory_code: o.factory_code,
+                                    hidden: own.hidden_ids.include?(o.id), status: (r = statuses[['hide', o.id]]) && STATUS_WORDS[r.status] } },
+        yours: own.colors.select { |o| o.metadata.to_h['color_set'] == set }.map do |o|
+          { id: o.id, name: o.name, factory_code: o.factory_code, cost: o.metadata['cost']&.to_f, retail: o.metadata['retail']&.to_f,
+            status: (r = statuses[['add', o.id]]) && STATUS_WORDS[r.status] }
+        end }
+    end
+    { book: { id: book.id, name: book.name, manufacturer_id: book.manufacturer_id }, sets: sets.sort_by { |x| x[:set].to_s } }
+  end
 
   def warm_model_list
     TruebuildModelListWarmJob.perform_later(@company.id) if response.successful?

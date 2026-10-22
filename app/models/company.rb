@@ -163,6 +163,10 @@ class Company < ApplicationRecord
   has_many :truebuild_designs, dependent: :destroy
   has_many :deal_home_builds, dependent: :destroy
   has_many :catalog_price_requests, dependent: :destroy
+  # Before dealer_colors: a request holds its option (foreign key).
+  has_many :catalog_option_requests, dependent: :destroy
+  # The dealer's own colors (backlog E85), seen by no other dealer.
+  has_many :dealer_colors, class_name: 'CatalogOption', dependent: :destroy
   has_many :truebuild_addons, dependent: :destroy
 
   # Website Builder Associations

@@ -41,6 +41,10 @@ module Truebuild
       # A platform admin corrected one of its books since (Truebuild::PriceCorrector).
       books = [build.price_book, build.cost_book, build.options_book].compact.uniq
       return true if books.any? { |b| (at = b.metadata.to_h['corrected_at']).present? && Time.zone.parse(at) > build.priced_at }
+      # The dealer changed their price list, names or colors, or the admin decided on one of those.
+      company = build.company
+      return true if [company.dealer_markup_rules, company.catalog_price_requests, company.catalog_option_requests, company.dealer_colors]
+                     .any? { |scope| (at = scope.maximum(:updated_at)) && at > build.priced_at }
 
       changed = build.deal.deal_products.maximum(:updated_at)
       changed.present? && changed > build.priced_at + 1.second
@@ -432,13 +436,17 @@ module Truebuild
         if line.kind == 'base'
           d = source[:detail] || {}
           meta['base'] = { 'net_base_price' => d[:net_base_price], 'required_adders' => d[:required_adders],
-                           'program_discount' => d[:program_discount] }.deep_stringify_keys
+                           'program_discount' => d[:program_discount], 'factory_net_base_price' => d[:factory_net_base_price] }.compact.deep_stringify_keys
         end
         line.unit_cost = source[:cost] unless meta['set_cost']
         line.unit_retail = source[:retail] unless meta['set_retail']
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
+        # The dealer's own cost from their price list, and their name for the option (E85).
+        source.dig(:detail, :dealer_cost_set) ? meta['dealer_cost_set'] = true : meta.delete('dealer_cost_set')
         if line.kind == 'option' && line.option
-          line.label = self.class.option_label(line.option)
+          renamed = dealer_options.names.key?(line.option.id)
+          renamed ? meta['book_name'] = line.option.name : meta.delete('book_name')
+          line.label = dealer_options.label_for(line.option)
           # A code corrected in the price book reaches open sheets (and their factory PO).
           line.factory_code = line.option.factory_code if line.option.factory_code.present?
         end
@@ -684,12 +692,17 @@ module Truebuild
       end
     end
 
+    # The dealer's names and colors for this home's factory (backlog E85).
+    def dealer_options
+      @dealer_options ||= DealerOptions.new(@build.company, @build.variant.manufacturer_id)
+    end
+
     def add_line(**attrs)
       @build.lines.create!(position: next_position, **attrs)
     end
 
     def add_option_line(option)
-      add_line(kind: 'option', option: option, label: self.class.option_label(option), group_name: option.group&.name, factory_code: option.factory_code,
+      add_line(kind: 'option', option: option, label: dealer_options.label_for(option), group_name: option.group&.name, factory_code: option.factory_code,
                unit: DealHomeBuildLine.unit_for(option.name), tax_category: 'factory_option')
     end
 

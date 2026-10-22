@@ -20,6 +20,11 @@
 #   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
 #   POST   /api/v1/deals/:deal_id/home_build/lines/:id/report_price   { field: price|cost, suggested_value, note }
+#   POST   /api/v1/deals/:deal_id/home_build/remember         { line_id | option_id, price?, cost?, name?, note? }
+#                                                             the dealer's own price, cost or name on every deal (E85)
+#   POST   /api/v1/deals/:deal_id/home_build/colors           { color_set, name, factory_code?, cost?, retail?, replaces_id?, note? }
+#                                                             a color of the dealer's own, picked on this sheet
+#   POST   /api/v1/deals/:deal_id/home_build/colors/hide      { option_id } drop a factory color from the dealer's lists
 #   GET    /api/v1/deals/:deal_id/home_build/suppliers                suppliers for the factory PO, the likely one first
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order           { supplier_id | supplier_name, expected_delivery_date?, notes? }
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order/:po_id/refresh   rewrite a draft PO from the sheet
@@ -197,8 +202,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
     variant = @build.variant
     book = Truebuild::OptionSource.current_for(variant)
-    rows = Truebuild::OptionSource.offered(book, variant, construction: @build.construction).select { |op| op.option.status == 'active' }
     chosen = @build.lines.where(kind: 'option').pluck(:catalog_option_id).to_set
+    rows = Truebuild::OptionSource.for_dealer(@company, book, variant, construction: @build.construction, keep_ids: chosen.to_a)
+    own = Truebuild::DealerOptions.new(@company, variant.manufacturer_id)
+    prices = Truebuild::DealerPrices.new(@company)
     ids = rows.map(&:catalog_option_id).uniq
     rules = CatalogOptionRule.approved.where(catalog_option_id: ids).pluck(:catalog_option_id, :rule_type, :target_option_id)
                              .group_by(&:first)
@@ -209,9 +216,15 @@ class Api::V1::DealHomeBuildsController < ApplicationController
                      .sort_by { |g, _| [g&.position.to_i, g&.name.to_s] }.map do |group, ops|
       { id: group&.id, name: group&.name, selection_type: group&.selection_type, required: group&.required,
         options: most_specific(ops).map do |op|
-          { id: op.catalog_option_id, name: op.option.name, kind: op.option.kind, standard: op.is_standard,
+          dealer_cost = op.persisted? ? prices.cost_for(op) : nil
+          { id: op.catalog_option_id, name: own.name_for(op.option), kind: op.option.kind, standard: op.is_standard && dealer_cost.nil?,
             color_set: Truebuild::DealBuild.choice_set(op.option),
-            cost: op.dealer_cost&.to_f, suggested_retail: op.suggested_retail&.to_f, factory_code: op.option.factory_code,
+            # The dealer's own changes (E85): their color, their name (the book's kept), their cost and price.
+            dealer_color: op.option.dealer_color?, book_name: (op.option.name if own.names.key?(op.catalog_option_id)),
+            hidden: own.hidden_ids.include?(op.catalog_option_id),
+            factory_cost: op.dealer_cost&.to_f, dealer_cost_set: dealer_cost.present?,
+            your_price: prices.manual_retail(op.option)&.to_f,
+            cost: (dealer_cost || op.dealer_cost)&.to_f, suggested_retail: op.suggested_retail&.to_f, factory_code: op.option.factory_code,
             includes: Array(op.option.package_items).map(&:to_s),
             unit: DealHomeBuildLine.unit_for(op.option.name), chosen: chosen.include?(op.catalog_option_id),
             rules: rules.fetch(op.catalog_option_id, []).map { |_, type, target| { type: type, option_id: target } } }
@@ -447,7 +460,107 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: { error: 'Not found' }, status: :not_found
   end
 
+  # Saves the dealer's own price, cost or name for a sheet line or an order
+  # form option, for every deal from now on, then reprices this sheet. A cost
+  # also goes to the platform admin to correct the book for every dealer; a
+  # name for a factory option goes to them too. Blank goes back to the book.
+  def remember
+    return unless authorize_action!('deals', 'update')
+
+    line = params[:line_id].present? ? @build.lines.find(params[:line_id]) : nil
+    option = line ? line.option : CatalogOption.find_by(id: params[:option_id])
+    home = line&.kind == 'base'
+    return render json: { error: 'Choose a home or factory option' }, status: :unprocessable_entity unless home || option
+    if option && !home && !offered_option?(option.id) && !line
+      return render json: { error: 'That option is not offered on this home' }, status: :unprocessable_entity
+    end
+    if option&.dealer_color? && option.company_id != @company.id
+      return render json: { error: 'Not found' }, status: :not_found
+    end
+
+    Truebuild::DealBuild.assert_editable!(@build)
+    variant = @build.variant
+    ActiveRecord::Base.transaction do
+      if params.key?(:price)
+        Truebuild::DealerPrices.set_retail!(company: @company, target: home ? variant : option, value: params[:price])
+      end
+      if params.key?(:cost)
+        if option&.dealer_color?
+          Truebuild::DealerOptions.update_color!(option, cost: params[:cost])
+        else
+          row = home ? book_row_for(line) : book_row_for_option(option.id)
+          raise ArgumentError, 'This is not from a price book, so it has no factory cost' unless row
+
+          Truebuild::DealerPrices.set!(company: @company, row: row, value: params[:cost], user: current_user, deal: @deal, note: params[:note],
+                                       label: home ? "#{variant.catalog_plan.name} #{variant.model_number} base price" : "#{option.name} on #{variant.model_number}")
+        end
+      end
+      if params.key?(:name) && option && !home
+        Truebuild::DealerOptions.rename!(company: @company, option: option, name: params[:name], user: current_user, deal: @deal, note: params[:note])
+      end
+    end
+    # The line's one-deal figures give way to the dealer's saved ones.
+    cleared = [('set_retail' if params.key?(:price)), ('set_cost' if params.key?(:cost))].compact
+    line.update!(metadata: line.metadata.to_h.except(*cleared)) if line && cleared.any?
+    service = Truebuild::DealBuild.new(@build).reprice!
+    render json: build_json(@build.reload, service.warnings)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # A color the factory offers that the book lacks, typed on the sheet: saved
+  # as the dealer's own (every sheet with that color set lists it after),
+  # sent to the platform admin, and picked on this sheet.
+  def create_color
+    return unless authorize_action!('deals', 'update')
+
+    Truebuild::DealBuild.assert_editable!(@build)
+    color_set = params[:color_set].to_s
+    offered = Truebuild::OptionSource.for_dealer(@company, Truebuild::OptionSource.current_for(@build.variant), @build.variant,
+                                                 construction: @build.construction)
+    set_ids = offered.select { |op| Truebuild::DealBuild.choice_set(op.option) == color_set }.map(&:catalog_option_id)
+    return render json: { error: "#{color_set} is not a color set on this home" }, status: :unprocessable_entity if set_ids.empty?
+    if params[:replaces_id].present? && !set_ids.include?(params[:replaces_id].to_i)
+      return render json: { error: 'The color it replaces must be in the same set' }, status: :unprocessable_entity
+    end
+
+    option = Truebuild::DealerOptions.add_color!(
+      company: @company, manufacturer_id: @build.variant.manufacturer_id, color_set: color_set, name: params[:name],
+      factory_code: params[:factory_code], cost: params[:cost], retail: params[:retail], replaces_id: params[:replaces_id].presence,
+      user: current_user, deal: @deal, note: params[:note]
+    )
+    service = Truebuild::DealBuild.new(@build)
+    service.add_option(option.id)
+    render json: build_json(@build.reload, service.warnings).merge(color: { id: option.id, name: option.name }), status: :created
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # Drops a factory color from the dealer's lists (it stays picked where it
+  # was picked) and tells the platform admin.
+  def hide_color
+    return unless authorize_action!('deals', 'update')
+
+    option = CatalogOption.platform.find_by(id: params[:option_id], kind: 'color', manufacturer_id: @build.variant.manufacturer_id)
+    return render json: { error: 'That is not a factory color for this home' }, status: :unprocessable_entity unless option
+
+    Truebuild::DealerOptions.hide!(company: @company, option_id: option.id, user: current_user, deal: @deal, note: params[:note])
+    head :no_content
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
+
+  def book_row_for_option(option_id)
+    variant = @build.variant
+    book = @build.options_book || Truebuild::OptionSource.current_for(variant)
+    return nil unless book
+
+    most_specific(Truebuild::OptionSource.offered(book, variant, construction: @build.construction, option_ids: [option_id]).to_a).first
+  end
 
   # The price book row that priced a line: the home's base, or the option's
   # most specific row in the book its options come from.
@@ -458,11 +571,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       book = @build.cost_book || @build.price_book
       book&.variant_prices&.find_by(catalog_plan_variant_id: variant.id)
     when 'option'
-      book = @build.options_book || Truebuild::OptionSource.current_for(variant)
-      return nil unless book && line.catalog_option_id
-
-      rows = Truebuild::OptionSource.offered(book, variant, construction: @build.construction, option_ids: [line.catalog_option_id])
-      most_specific(rows.to_a).first
+      line.catalog_option_id && book_row_for_option(line.catalog_option_id)
     end
   end
 
@@ -497,7 +606,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   def offered_option?(option_id)
     book = Truebuild::OptionSource.current_for(@build.variant)
-    Truebuild::OptionSource.offered(book, @build.variant, construction: @build.construction, option_ids: [option_id.to_i]).any?
+    Truebuild::OptionSource.for_dealer(@company, book, @build.variant, construction: @build.construction)
+                           .any? { |op| op.catalog_option_id == option_id.to_i }
   end
 
   # One row per option: the row for this model beats a size band beats a general row.
@@ -559,6 +669,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       cost: l.cost&.to_f, retail: l.retail&.to_f, standard: l.is_standard, tbd: l.tbd, no_charge: l.no_charge,
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, set_cost: l.metadata['set_cost'] == true, not_offered: l.metadata['not_offered'] == true,
       from_products: l.metadata['from_products'] == true,
+      dealer_cost_set: l.metadata['dealer_cost_set'] == true, book_name: l.metadata['book_name'], dealer_color: l.option&.dealer_color? == true,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id,
       # What a package holds ("PACKAGE 2" alone says nothing to a buyer).
