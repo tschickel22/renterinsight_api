@@ -174,6 +174,19 @@ RSpec.describe 'Product tours', type: :request do
       expect(response).to have_http_status(:not_found)
     end
 
+    it 'shows a platform admin proxying as a dealer only what the dealer gets' do
+      admin = make_user(role: 'platform_admin')
+      expect(tours_json(admin)['tours'].map { |t| t['id'] }).to include(draft.id)
+
+      proxied = auth(admin).merge('X-Impersonated-User-ID' => user.id.to_s)
+      get '/api/v1/tours', headers: proxied
+      ids = JSON.parse(response.body)['tours'].map { |t| t['id'] }
+      expect(ids).to include(tour.id)
+      expect(ids).not_to include(draft.id)
+      get "/api/v1/tours/#{draft.id}", headers: proxied
+      expect(response).to have_http_status(:not_found)
+    end
+
     it 'shows them to platform admins, flagged' do
       listed = tours_json(make_user(role: 'platform_admin'))['tours'].find { |t| t['id'] == draft.id }
       expect(listed['approved']).to eq(false)

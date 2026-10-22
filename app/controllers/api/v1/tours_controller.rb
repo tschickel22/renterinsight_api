@@ -15,14 +15,14 @@ module Api
         # Global master switch: when paused, end users get no tours. Platform
         # admins still do, so the tours can be tested and fixed while paused.
         paused = PlatformSetting.tours_paused?
-        return render(json: { tours: [], tours_paused: true }) if paused && !platform_admin_request?
+        return render(json: { tours: [], tours_paused: true }) if paused && !admin_view?
 
         completions = current_user.user_tour_completions.index_by(&:tour_id)
         completed_ids = completions.values.select(&:completed?).map(&:tour_id)
 
         # Dealers only get tours a person has played and approved; admins see
         # the rest too, flagged, so they can test and approve them.
-        base = platform_admin_request? ? Tour.active : Tour.active.approved
+        base = admin_view? ? Tour.active : Tour.active.approved
         scope = params[:include_completed] == 'true' ? base : base.where.not(id: completed_ids)
         scope = scope.where(knowledge_module_id: Knowledge::Module.find_by!(key: params[:module]).id) if params[:module].present?
 
@@ -232,6 +232,13 @@ module Api
         admin&.platform_admin? || admin&.super_admin?
       end
 
+      # Which tours to offer. A platform admin proxying as a dealer gets the
+      # dealer's tours (approved only, none while paused), so proxying shows
+      # what the dealer sees.
+      def admin_view?
+        platform_admin_request? && !impersonating?
+      end
+
       # ?raw=true (platform admins only) returns the stored copy with its
       # {{brand}} tokens intact, so the recorder saves them back unchanged.
       # The company being viewed (a platform admin switched into a dealer sees
@@ -250,7 +257,7 @@ module Api
 
       def set_tour
         # Platform admins can open an inactive tour to test or edit it.
-        scope = platform_admin_request? ? Tour.all : Tour.active.approved
+        scope = admin_view? ? Tour.all : Tour.active.approved
         @tour = scope.find_by(id: params[:id])
         render json: { error: 'tour not found' }, status: :not_found unless @tour
       end
