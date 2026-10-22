@@ -21,6 +21,10 @@ RSpec.describe 'Linked installer pricing', type: :request do
   let(:stranger) { admin(stranger_co, 'x@else.example') }
   let(:vendor) { Contractor.create!(company: dealer_co, name: 'Summit Install (vendor)', email: 'boss@install.example', status: 'active') }
   let!(:location) { installer_co.locations.first || installer_co.locations.create!(name: 'Yard', active: true) }
+  # Inviting needs the Linked Installers add-on, and the invited email must
+  # already be an admin here.
+  let!(:linked_addon) { TenantModuleOverride.create!(company: dealer_co, module_key: 'management.linked_companies', is_enabled: true) }
+  before { boss }
 
   let(:project) do
     dealer_co.projects.create!(name: 'Diaz home', status: 'active', owner: dealer, customer_name: 'Maria Diaz',
