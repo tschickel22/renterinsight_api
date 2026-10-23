@@ -90,12 +90,16 @@ module Truebuild
                              suggested_retail: meta['retail'].presence&.to_d, is_standard: cost.nil? || cost.zero?)
     end
 
-    # The color sets a manufacturer's book colors use, each with its options:
-    # a dealer's new color in a set is filed in the group of the first.
+    # The color sets a manufacturer's book uses, each with its options: a
+    # dealer's new color in a set is filed in the group of the first. A set
+    # is either color options (color_set) or standard choices named for it,
+    # "3 Tab Shingles: Black Weatherwood" (Dutch Housing's Topeka book), as
+    # DealBuild.choice_set reads them.
     def self.sets(manufacturer_id)
-      CatalogOption.platform.where(manufacturer_id: manufacturer_id, kind: 'color', status: 'active')
-                   .where("metadata->>'color_set' IS NOT NULL").includes(:group).order(:id).to_a
-                   .group_by { |o| o.metadata['color_set'] }
+      CatalogOption.platform.where(manufacturer_id: manufacturer_id, status: 'active')
+                   .where("(kind = 'color' AND metadata->>'color_set' IS NOT NULL) OR kind = 'standard'")
+                   .includes(:group).order(:id).to_a
+                   .group_by { |o| DealBuild.choice_set(o) }.except(nil)
     end
 
     # Adds a color of the dealer's own to a set and sends it to the platform
@@ -154,8 +158,8 @@ module Truebuild
 
     # Hides a book color from the dealer's lists and sends it to the admin.
     def self.hide!(company:, option_id:, user: nil, deal: nil, note: nil)
-      option = CatalogOption.platform.find_by(id: option_id, kind: 'color')
-      raise ArgumentError, 'That is not a factory color' unless option
+      option = CatalogOption.platform.find_by(id: option_id)
+      raise ArgumentError, 'That is not a factory color' unless option && DealBuild.choice_set(option)
       return if company.catalog_option_requests.in_force.exists?(action: 'hide', catalog_option_id: twins(option).select(:id))
 
       company.catalog_option_requests.create!(manufacturer_id: option.manufacturer_id, option: option, action: 'hide',

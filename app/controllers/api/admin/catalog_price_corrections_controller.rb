@@ -95,7 +95,7 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
     target = @price_request.target
     return render json: { error: 'That price is no longer in the book' }, status: :unprocessable_entity unless target
 
-    value = params.key?(:value) ? params[:value] : @price_request.suggested_value
+    value = @price_request.book_value_for(params.key?(:value) ? params[:value] : @price_request.suggested_value, target)
     reason = params[:reason].presence || "Reported by #{@price_request.company.name}#{@price_request.note.present? ? ": #{@price_request.note}" : ''}"
     Truebuild::PriceCorrector.new(book: @price_request.price_book, user: original_user)
                              .apply(target, { @price_request.book_field => value }, reason: reason, request: @price_request)
