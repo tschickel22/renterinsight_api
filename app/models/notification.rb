@@ -97,6 +97,8 @@ class Notification < ApplicationRecord
 
     # SMS / Communications notifications
     sms_reply_received: { category: 'communications', priority: 'high', title: 'SMS Reply Received' },
+    # A text from someone not in the CRM became a lead (ColdTextHandler).
+    sms_new_lead: { category: 'crm', priority: 'high', title: 'New Lead by Text' },
     email_reply_received: { category: 'communications', priority: 'high', title: 'Email Reply Received' },
     sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' },
     email_cap_alert: { category: 'system', priority: 'normal', title: 'Email Usage Alert' },
@@ -147,6 +149,7 @@ class Notification < ApplicationRecord
     mention_received
     approval_required
     sms_reply_received
+    sms_new_lead
     email_reply_received
     email_connection_broken
     campaign_paused_sender

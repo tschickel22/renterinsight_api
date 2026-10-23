@@ -343,9 +343,24 @@ module Webhooks
         end
 
       else
-        Rails.logger.warn "[TwilioWebhook] No matching outbound SMS found for #{from_number}. Logging as unmatched."
+        # Not a reply to anything we sent: someone already in the CRM by this
+        # phone, or a new lead routed per the dealer's setting. Keywords stay
+        # out of it (handled above), and a failure still keeps the message.
+        cold = nil
+        if company && !(stop_keywords + start_keywords + %w[HELP INFO]).include?(stripped_body)
+          begin
+            cold = ColdTextHandler.new(company: company, twilio_account: twilio_account, from: from_number, to: to_number,
+                                       body: body, message_sid: message_sid).call
+            Rails.logger.info "[TwilioWebhook] Cold text from #{from_number} -> #{cold.record.class.name} ##{cold.record.id}" \
+                              "#{cold.created_lead ? ' (new lead)' : ''}"
+          rescue StandardError => e
+            Rails.logger.error "[TwilioWebhook] Cold text handling failed for #{from_number}: #{e.class}: #{e.message}"
+          end
+        end
 
-        if company
+        Rails.logger.warn "[TwilioWebhook] No matching outbound SMS found for #{from_number}. Logging as unmatched." unless cold
+
+        if company && !cold
           Communication.create!(
             company_id:   company.id,
             communicable: nil,

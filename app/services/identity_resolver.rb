@@ -87,8 +87,13 @@ class IdentityResolver
     end
   end
 
+  # The last ten digits on both sides, so +1 (352) 555-1234 from Twilio is
+  # the (352) 555-1234 a rep typed. A shorter number compares whole.
   def phone_sql(column = 'phone')
-    "regexp_replace(COALESCE(#{column}, ''), '[^0-9]', '', 'g') = ?"
+    digits = "regexp_replace(COALESCE(#{column}, ''), '[^0-9]', '', 'g')"
+    return "#{digits} = ?" if phone.length < 10
+
+    "right(#{digits}, 10) = right(?, 10)"
   end
 
   def lead_matches
