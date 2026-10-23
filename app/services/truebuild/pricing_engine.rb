@@ -38,8 +38,9 @@ module Truebuild
     # the dealer's quote-only add-ons too (never for a buyer).
     # freight_miles: plant to homesite, when known (a deal sheet). assume_freight:
     # price freight from the stated assumptions when the dealer set none.
+    # surcharge: a Deal Sheet's own figure for the home's required adders.
     def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false,
-                   freight_miles: nil, assume_freight: false)
+                   freight_miles: nil, assume_freight: false, surcharge: nil)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
@@ -47,6 +48,7 @@ module Truebuild
       @quote = quote
       @freight_miles = freight_miles
       @assume_freight = assume_freight
+      @surcharge = surcharge&.to_d
       @location = location
       @construction = construction
       # Cost always follows the factory's current book: that is what the
@@ -97,9 +99,11 @@ module Truebuild
       return unpriced_base_line if !vp && @variant.unpriced?
       raise ArgumentError, "#{@variant.model_number} has no price in #{@cost_book.name}" unless vp
 
-      gross = @dealer_prices.base_cost(vp)
+      gross = @dealer_prices.base_cost(vp, surcharge: @surcharge)
       discount = (gross * @terms.program_discount_pct.to_d / 100).round(2)
       cost = gross - discount
+      # What applies without a deal's own figure: the dealer's price list, else the book.
+      list_surcharge = @dealer_prices.surcharge_for(vp) || DealerPrices.book_surcharge(vp)
       own = @dealer_prices.cost_for(vp)
       rule = rule_for(:base)
       retail = rule ? rule.apply(retail_basis(vp) || cost) : nil
@@ -108,6 +112,8 @@ module Truebuild
         kind: 'base', label: "#{@variant.catalog_plan.name} (#{@variant.model_number})",
         cost: money(cost), retail: money(retail),
         detail: { net_base_price: money(own || vp.net_base_price), required_adders: vp.required_adders,
+                  surcharge: money(@surcharge || list_surcharge), book_surcharge: money(list_surcharge),
+                  dealer_surcharge_set: @dealer_prices.surcharge_for(vp).present?,
                   program_discount: money(discount), rule: describe(rule),
                   factory_net_base_price: (money(vp.net_base_price) if own), dealer_cost_set: own.present? }.compact
       }
@@ -130,7 +136,7 @@ module Truebuild
       return nil if @book == @cost_book
 
       vp = @book.variant_prices.find_by(catalog_plan_variant_id: @variant.id) || cost_vp
-      gross = @dealer_prices.base_cost(vp)
+      gross = @dealer_prices.base_cost(vp, surcharge: @surcharge)
       gross - (gross * @terms.program_discount_pct.to_d / 100).round(2)
     end
 

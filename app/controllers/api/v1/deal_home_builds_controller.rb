@@ -20,7 +20,7 @@
 #   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
 #   POST   /api/v1/deals/:deal_id/home_build/lines/:id/report_price   { field: price|cost, suggested_value, note }
-#   POST   /api/v1/deals/:deal_id/home_build/remember         { line_id | option_id, price?, cost?, name?, note? }
+#   POST   /api/v1/deals/:deal_id/home_build/remember         { line_id | option_id, price?, cost?, surcharge? (home), name?, note? }
 #                                                             the dealer's own price, cost or name on every deal (E85)
 #   POST   /api/v1/deals/:deal_id/home_build/colors           { color_set, name, factory_code?, cost?, retail?, replaces_id?, note? }
 #                                                             a color of the dealer's own, picked on this sheet
@@ -278,8 +278,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
 
     line = @build.lines.find(params[:id])
-    attrs = params.permit(:quantity, :unit, :tbd, :no_charge, :tax_category, :notes, :unit_retail, :label, :group_name, :unit_cost).to_h
+    attrs = params.permit(:quantity, :unit, :tbd, :no_charge, :tax_category, :notes, :unit_retail, :label, :group_name, :unit_cost, :surcharge).to_h
     attrs['unit_retail'] = nil if params.key?(:unit_retail) && params[:unit_retail].blank?
+    attrs['surcharge'] = nil if params.key?(:surcharge) && params[:surcharge].blank?
     service = Truebuild::DealBuild.new(@build)
     service.update_line(line, attrs)
     render json: build_json(@build.reload, service.warnings)
@@ -442,7 +443,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
     line = @build.lines.find(params[:id])
     field = params[:field].to_s
-    return render json: { error: 'field must be price or cost' }, status: :unprocessable_entity unless CatalogPriceRequest::FIELDS.include?(field)
+    return render json: { error: 'field must be price or cost' }, status: :unprocessable_entity unless %w[price cost].include?(field)
 
     target = book_row_for(line)
     unless target
@@ -500,12 +501,19 @@ class Api::V1::DealHomeBuildsController < ApplicationController
                                        label: home ? "#{variant.catalog_plan.name} #{variant.model_number} base price" : "#{option.name} on #{variant.model_number}")
         end
       end
+      if params.key?(:surcharge) && home
+        row = book_row_for(line)
+        raise ArgumentError, 'This home is not from a price book, so it has no surcharge' unless row
+
+        Truebuild::DealerPrices.set_surcharge!(company: @company, row: row, value: params[:surcharge], user: current_user, deal: @deal,
+                                               note: params[:note], label: "#{variant.catalog_plan.name} #{variant.model_number} surcharge")
+      end
       if params.key?(:name) && option && !home
         Truebuild::DealerOptions.rename!(company: @company, option: option, name: params[:name], user: current_user, deal: @deal, note: params[:note])
       end
     end
     # The line's one-deal figures give way to the dealer's saved ones.
-    cleared = [('set_retail' if params.key?(:price)), ('set_cost' if params.key?(:cost))].compact
+    cleared = [('set_retail' if params.key?(:price)), ('set_cost' if params.key?(:cost)), ('set_surcharge' if params.key?(:surcharge))].compact
     line.update!(metadata: line.metadata.to_h.except(*cleared)) if line && cleared.any?
     service = Truebuild::DealBuild.new(@build).reprice!
     render json: build_json(@build.reload, service.warnings)
@@ -548,8 +556,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def hide_color
     return unless authorize_action!('deals', 'update')
 
-    option = CatalogOption.platform.find_by(id: params[:option_id], kind: 'color', manufacturer_id: @build.variant.manufacturer_id)
-    return render json: { error: 'That is not a factory color for this home' }, status: :unprocessable_entity unless option
+    option = CatalogOption.platform.find_by(id: params[:option_id], manufacturer_id: @build.variant.manufacturer_id)
+    unless option && Truebuild::DealBuild.choice_set(option)
+      return render json: { error: 'That is not a factory color for this home' }, status: :unprocessable_entity
+    end
 
     Truebuild::DealerOptions.hide!(company: @company, option_id: option.id, user: current_user, deal: @deal, note: params[:note])
     head :no_content
@@ -654,7 +664,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_street: @deal.delivery_street,
                     delivery_city: @deal.delivery_city, delivery_state: @deal.delivery_state,
                     delivery_zip: @deal.delivery_zip, location_state: @deal.location&.state },
-      books: { base: build.price_book&.name, cost: build.cost_book&.name, options: build.options_book&.name },
+      books: { base: build.price_book&.name, cost: build.cost_book&.name, options: build.options_book&.name, cost_id: build.cost_book_id },
       totals: build.totals,
       discounts: build.discounts,
       freight_miles_set: build.freight_miles_set,
@@ -672,7 +682,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     { id: l.id, kind: l.kind, option_id: l.catalog_option_id, addon_id: l.truebuild_addon_id, group: l.group_name, label: l.label,
       factory_code: l.factory_code, quantity: l.quantity.to_f, unit: l.unit, unit_cost: l.unit_cost&.to_f, unit_retail: l.unit_retail&.to_f,
       cost: l.cost&.to_f, retail: l.retail&.to_f, standard: l.is_standard, tbd: l.tbd, no_charge: l.no_charge,
-      tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, set_cost: l.metadata['set_cost'] == true, not_offered: l.metadata['not_offered'] == true,
+      tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, set_cost: l.metadata['set_cost'] == true, set_surcharge: l.metadata.key?('set_surcharge'), not_offered: l.metadata['not_offered'] == true,
       from_products: l.metadata['from_products'] == true,
       dealer_cost_set: l.metadata['dealer_cost_set'] == true, book_name: l.metadata['book_name'], dealer_color: l.option&.dealer_color? == true,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],

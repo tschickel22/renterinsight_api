@@ -241,7 +241,8 @@ module Truebuild
     # attrs: quantity, unit, tbd, no_charge, tax_category, notes; unit_retail
     # and unit_cost set this line's price and cost (kept through repricing
     # until cleared with nil); label and group_name only on custom and
-    # template lines.
+    # template lines; surcharge, on the home, replaces the book's required
+    # adders for this deal (nil goes back to the book's).
     def update_line(line, attrs)
       guard!
       attrs = attrs.to_h.symbolize_keys
@@ -258,6 +259,9 @@ module Truebuild
       end
       meta = line.metadata.to_h
       meta['notes'] = attrs[:notes] if attrs.key?(:notes)
+      if line.kind == 'base' && attrs.key?(:surcharge)
+        attrs[:surcharge].blank? ? meta.delete('set_surcharge') : meta['set_surcharge'] = attrs[:surcharge].to_d.round(2).to_f
+      end
       if attrs.key?(:unit_retail)
         changes[:unit_retail] = attrs[:unit_retail]
         %w[custom template].include?(line.kind) || attrs[:unit_retail].nil? ? meta.delete('set_retail') : meta['set_retail'] = true
@@ -411,9 +415,10 @@ module Truebuild
     end
 
     def engine(option_ids:, addon_ids:)
+      surcharge = @build.lines.find_by(kind: 'base')&.metadata.to_h['set_surcharge']
       result = PricingEngine.new(company: @build.company, variant: @build.variant, option_ids: option_ids, addon_ids: addon_ids,
                                  location: @build.location, construction: @build.construction, quote: true,
-                                 freight_miles: freight_miles, assume_freight: true).call
+                                 freight_miles: freight_miles, assume_freight: true, surcharge: surcharge).call
       # The engine's margin check is for its own sum; the build checks its own totals.
       @warnings = result.warnings.reject { |w| w.start_with?('Margin ') || w.include?(' is not offered on ') }
       result
@@ -446,6 +451,7 @@ module Truebuild
         if line.kind == 'base'
           d = source[:detail] || {}
           meta['base'] = { 'net_base_price' => d[:net_base_price], 'required_adders' => d[:required_adders],
+                           'surcharge' => d[:surcharge], 'book_surcharge' => d[:book_surcharge], 'dealer_surcharge_set' => d[:dealer_surcharge_set],
                            'program_discount' => d[:program_discount], 'factory_net_base_price' => d[:factory_net_base_price] }.compact.deep_stringify_keys
         end
         line.unit_cost = source[:cost] unless meta['set_cost']
@@ -699,20 +705,18 @@ module Truebuild
     # when the group is single-choice. A color is one of its set only: Carpet
     # and Linoleum share Flooring, and picking a carpet keeps the linoleum.
     def alternatives(option)
-      if (set = option.metadata.to_h['color_set'].presence)
-        return CatalogOption.where(manufacturer_id: option.manufacturer_id, kind: 'color')
-                            .where("metadata->>'color_set' = ?", set).where.not(id: option.id)
+      if option.metadata.to_h['color_set'].blank? && option.group&.selection_type == 'single'
+        return CatalogOption.where(manufacturer_id: option.manufacturer_id, catalog_option_group_id: option.catalog_option_group_id)
+                            .where.not(id: option.id).where("metadata->>'color_set' IS NULL")
       end
+      return CatalogOption.none unless (set = self.class.choice_set(option))
 
-      others = CatalogOption.where(manufacturer_id: option.manufacturer_id, catalog_option_group_id: option.catalog_option_group_id)
-                            .where.not(id: option.id)
-      return others.where("metadata->>'color_set' IS NULL") if option.group&.selection_type == 'single'
-
-      if (set = self.class.choice_set(option))
-        others.where(kind: 'standard').where('name ILIKE ?', "#{ActiveRecord::Base.sanitize_sql_like(set)}:%")
-      else
-        CatalogOption.none
-      end
+      # Both shapes of a set: color options (a dealer's own colors are these)
+      # and standard choices named "Set: Choice", so picking either kind
+      # replaces the other.
+      CatalogOption.where(manufacturer_id: option.manufacturer_id).where.not(id: option.id)
+                   .where("(kind = 'color' AND metadata->>'color_set' = :set) OR (kind = 'standard' AND name ILIKE :named)",
+                          set: set, named: "#{ActiveRecord::Base.sanitize_sql_like(set)}:%")
     end
 
     # The dealer's names and colors for this home's factory (backlog E85).

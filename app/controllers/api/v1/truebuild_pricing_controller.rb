@@ -12,7 +12,7 @@
 # options, their own colors and the factory colors they hide.
 #
 #   GET    /api/v1/truebuild_pricing/price_list?book_id=&kind=base|option|color&search=&group=&page=
-#   POST   /api/v1/truebuild_pricing/price_list/remember   { kind: base|option, price_id, price?, cost?, name?, note? }
+#   POST   /api/v1/truebuild_pricing/price_list/remember   { kind: base|option, price_id, price?, cost?, surcharge? (base), name?, note? }
 #   POST   /api/v1/truebuild_pricing/colors                { manufacturer_id, color_set, name, factory_code?, cost?, retail?, replaces_id? }
 #   PATCH  /api/v1/truebuild_pricing/colors/:id            { name?, factory_code?, cost?, retail? }   their own color
 #   DELETE /api/v1/truebuild_pricing/colors/:id
@@ -323,6 +323,10 @@ class Api::V1::TruebuildPricingController < ApplicationController
         label = row.is_a?(CatalogVariantPrice) ? "#{target.catalog_plan.name} #{target.model_number} base price" : "#{target.name} (#{row.price_book.name})"
         Truebuild::DealerPrices.set!(company: @company, row: row, value: params[:cost], label: label, user: current_user, note: params[:note])
       end
+      if params.key?(:surcharge) && row.is_a?(CatalogVariantPrice)
+        Truebuild::DealerPrices.set_surcharge!(company: @company, row: row, value: params[:surcharge], user: current_user, note: params[:note],
+                                               label: "#{target.catalog_plan.name} #{target.model_number} surcharge")
+      end
       if params.key?(:name) && row.is_a?(CatalogOptionPrice)
         Truebuild::DealerOptions.rename!(company: @company, option: target, name: params[:name], user: current_user, note: params[:note])
       end
@@ -396,10 +400,12 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def price_list_base(vp, prices)
     v = vp.variant
     req = prices.request_for(vp)
+    sreq = prices.surcharge_request_for(vp)
     { id: vp.id, kind: 'base', variant_id: v.id, model_number: v.model_number, plan: v.catalog_plan.name, series: v.catalog_plan.series,
       size: [v.width_ft, v.length_ft].all? ? "#{v.width_ft}' x #{v.length_ft}'" : nil,
       factory_cost: vp.net_base_price&.to_f, your_cost: req&.suggested_value&.to_f, cost_status: req && STATUS_WORDS[req.status],
-      your_price: prices.manual_retail(v)&.to_f }
+      factory_surcharge: Truebuild::DealerPrices.book_surcharge(vp).to_f, your_surcharge: sreq&.suggested_value&.to_f,
+      surcharge_status: sreq && STATUS_WORDS[sreq.status], your_price: prices.manual_retail(v)&.to_f }
   end
 
   def price_list_option(op, prices, own)
@@ -425,14 +431,17 @@ class Api::V1::TruebuildPricingController < ApplicationController
   # Every color set the book's factory uses: its colors (hidden or not), and
   # the dealer's own colors in it. A color the book carries once per series
   # is listed once (DealerOptions.key_for); hiding it hides every copy.
+  # A set is color options (color_set) or standard choices named for it,
+  # "3 Tab Shingles: Black Weatherwood"; a named choice shows as its color.
   def color_list(book, own)
-    in_book = CatalogOption.where(id: book.option_prices.select(:catalog_option_id)).platform.where(kind: 'color', status: 'active')
-                           .where("metadata->>'color_set' IS NOT NULL").order(:id).to_a
-    sets = in_book.group_by { |o| o.metadata['color_set'] }.map do |set, options|
-      colors = options.uniq { |o| Truebuild::DealerOptions.key_for(o) }.sort_by { |o| own.name_for(o).to_s.downcase }
+    in_book = CatalogOption.where(id: book.option_prices.select(:catalog_option_id)).platform.where(status: 'active')
+                           .where("(kind = 'color' AND metadata->>'color_set' IS NOT NULL) OR kind = 'standard'").order(:id).to_a
+    sets = in_book.group_by { |o| Truebuild::DealBuild.choice_set(o) }.except(nil).map do |set, options|
+      shown = ->(o) { own.name_for(o).to_s.sub(/\A#{Regexp.escape(set)}:\s*/i, '') }
+      colors = options.uniq { |o| Truebuild::DealerOptions.key_for(o) || o.id }.sort_by { |o| shown.call(o).downcase }
       { set: set,
-        colors: colors.map { |o| { id: o.id, name: own.name_for(o), book_name: (o.name if own.renamed?(o)), factory_code: o.factory_code,
-                                   hidden: own.hidden?(o) } },
+        colors: colors.map { |o| { id: o.id, name: shown.call(o), book_name: (o.name if own.renamed?(o)), factory_code: o.factory_code,
+                                   hidden: own.hidden?(o) ? true : false } },
         yours: own.colors.select { |o| o.metadata.to_h['color_set'] == set }.map do |o|
           { id: o.id, name: o.name, factory_code: o.factory_code, cost: o.metadata['cost']&.to_f, retail: o.metadata['retail']&.to_f }
         end }

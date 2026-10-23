@@ -94,6 +94,39 @@ RSpec.describe 'Dealer price list and colors', type: :request do
     expect(base_line['unit_cost']).to eq(51_200.0)
   end
 
+  it "prices a dealer's own surcharge for them alone until the admin applies it to the book's total" do
+    base_price.update!(required_adders: [{ 'label' => 'Steel', 'amount' => 1200 }])
+    path = sheet_for(company, headers)
+    other_path = sheet_for(other, headers_for(other))
+    get path, headers: headers
+    book_cost = base_line['unit_cost']
+
+    post '/api/v1/truebuild_pricing/price_list/remember', headers: headers,
+                                                          params: { kind: 'base', price_id: base_price.id, surcharge: '1800' }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(body).to include('factory_surcharge' => 1200.0, 'your_surcharge' => 1800.0, 'surcharge_status' => 'Waiting on review')
+
+    get path, headers: headers
+    expect(base_line['unit_cost']).to eq(book_cost + 600)
+    expect(base_line['base']).to include('surcharge' => 1800.0, 'book_surcharge' => 1800.0, 'dealer_surcharge_set' => true)
+    get other_path, headers: headers_for(other)
+    expect(base_line['unit_cost']).to eq(book_cost)
+
+    # From the sheet, for every deal: replaces it, never stacks a second one.
+    get path, headers: headers
+    post "#{path}/remember", headers: headers, params: { line_id: base_line['id'], surcharge: 2000 }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(base_line['unit_cost']).to eq(book_cost + 800)
+    expect(company.catalog_price_requests.where(field: 'surcharge', status: 'open').count).to eq(1)
+
+    request = company.catalog_price_requests.find_by(field: 'surcharge', status: 'open')
+    post "/api/admin/catalog_price_requests/#{request.id}/apply", headers: admin, params: {}.to_json
+    expect(response).to have_http_status(:ok)
+    expect(base_price.reload.total_base_price).to eq(49_645 + 2000)
+    get other_path, headers: headers_for(other)
+    expect(base_line['unit_cost']).to eq(book_cost + 800)
+  end
+
   it 'keeps a cost for one dealer, or turns it down and puts them back on the book' do
     path = sheet_for(company, headers)
     get "#{path}/options", headers: headers
@@ -119,6 +152,34 @@ RSpec.describe 'Dealer price list and colors', type: :request do
     get path, headers: headers
     # Back on the factory cost; their own selling price is theirs and stays.
     expect(lines.find { |l| l['option_id'] == dishwasher.id }).to include('unit_cost' => 340.0, 'unit_retail' => 425.0)
+  end
+
+  # Dutch Housing's Topeka book names its finishes as standard choices,
+  # "3 Tab Shingles: Black Weatherwood", not color options (deal 446).
+  it 'adds a color to a set of named standard choices, and picking either kind replaces the other' do
+    named = %w[Black\ Weatherwood Desert\ Tan].map do |color|
+      CatalogOption.create!(group: exterior, manufacturer: mfr, key: "3-tab--#{color.parameterize}", name: "3 Tab Shingles: #{color}",
+                            kind: 'standard').tap { |o| CatalogOptionPrice.create!(price_book: book, option: o, dealer_cost: 0, is_standard: true) }
+    end
+    path = sheet_for(company, headers)
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: named.first.id }.to_json
+    expect(lines.map { |l| l['label'] }).to include('3 Tab Shingles: Black Weatherwood')
+
+    post "#{path}/colors", headers: headers, params: { color_set: '3 Tab Shingles', name: 'Charcoal' }.to_json
+    expect(response).to have_http_status(:created)
+    shingles = lines.map { |l| l['label'] }.grep(/3 Tab Shingles/)
+    expect(shingles).to eq(['3 Tab Shingles: Charcoal'])
+
+    post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: named.last.id }.to_json
+    expect(lines.map { |l| l['label'] }.grep(/3 Tab Shingles/)).to eq(['3 Tab Shingles: Desert Tan'])
+
+    # The price list's Colors tab lists the set, and a factory choice in it can be hidden.
+    post "/api/v1/truebuild_pricing/colors/#{named.first.id}/hide", headers: headers
+    expect(response).to have_http_status(:no_content)
+    get '/api/v1/truebuild_pricing/price_list', headers: headers, params: { book_id: book.id, kind: 'color' }
+    set = body['sets'].find { |x| x['set'] == '3 Tab Shingles' }
+    expect(set['colors'].map { |c| [c['name'], c['hidden']] }).to contain_exactly(['Black Weatherwood', true], ['Desert Tan', false])
+    expect(set['yours'].map { |c| c['name'] }).to eq(['Charcoal'])
   end
 
   it 'splits Black Weatherwood into two colors for this dealer, picks one, and the admin applies it for everyone' do

@@ -25,14 +25,30 @@ module Truebuild
       overrides[[row.class.name, row.id]]
     end
 
+    # The dealer's surcharge for a home's row (every deal), or nil to use the book's.
+    def surcharge_for(vp)
+      surcharge_overrides[vp.id]&.suggested_value
+    end
+
+    def surcharge_request_for(vp)
+      surcharge_overrides[vp.id]
+    end
+
     # A home's base cost from its row: the dealer's base price, if they set
     # one, plus the same required adders the book adds.
-    def base_cost(vp)
+    # surcharge: a Deal Sheet's own figure for the adders, ahead of the
+    # dealer's price list figure, ahead of the book's.
+    def base_cost(vp, surcharge: nil)
       own = cost_for(vp)
-      return vp.base_cost.to_d unless own
+      surcharge ||= surcharge_for(vp)
+      return vp.base_cost.to_d unless own || surcharge
 
-      adders = vp.total_base_price ? vp.total_base_price.to_d - vp.net_base_price.to_d : vp.required_adders.sum { |a| a['amount'].to_d }
-      own.to_d + adders
+      (own || vp.net_base_price).to_d + (surcharge || self.class.book_surcharge(vp)).to_d
+    end
+
+    # The required adders the book puts on the factory base.
+    def self.book_surcharge(vp)
+      vp.total_base_price ? vp.total_base_price.to_d - vp.net_base_price.to_d : vp.required_adders.sum { |a| a['amount'].to_d }
     end
 
     # Sets (or with a blank value, clears) the dealer's cost for a row and
@@ -57,6 +73,29 @@ module Truebuild
       end
     rescue ArgumentError, TypeError => e
       raise ArgumentError, e.message.start_with?('invalid value') ? "#{value} is not an amount" : e.message
+    end
+
+    # Sets (or with a blank value, clears) the dealer's surcharge for a home's
+    # row on every deal and sends it to the platform admin, like a cost. A
+    # figure equal to the book's just clears.
+    def self.set_surcharge!(company:, row:, value:, label:, user: nil, deal: nil, note: nil)
+      book_value = book_surcharge(row)
+      value = value.presence && BigDecimal(value.to_s.delete(',$'))
+      raise ArgumentError, 'A surcharge cannot be negative' if value&.negative?
+
+      CatalogPriceRequest.transaction do
+        company.catalog_price_requests.where(target_type: row.class.name, target_id: row.id, field: 'surcharge')
+               .where(status: CatalogPriceRequest::OVERRIDING)
+               .find_each { |r| r.update!(status: 'withdrawn', resolved_at: Time.current, resolved_by: user) }
+        next nil if value.nil? || value.round(2) == book_value.round(2)
+
+        company.catalog_price_requests.create!(
+          price_book: row.price_book, target_type: row.class.name, target_id: row.id, field: 'surcharge',
+          current_value: book_value, suggested_value: value, note: note.presence, label: label, deal: deal, requested_by: user
+        )
+      end
+    rescue TypeError, ArgumentError => e
+      raise ArgumentError, e.message.start_with?('A surcharge') ? e.message : "#{value} is not an amount"
     end
 
     # The dealer's own selling price for a home (a variant) or an option,
@@ -98,6 +137,10 @@ module Truebuild
     # Oldest first, so a row's latest figure wins the index.
     def overrides
       @overrides ||= @company.catalog_price_requests.overriding.order(:created_at).index_by { |r| [r.target_type, r.target_id] }
+    end
+
+    def surcharge_overrides
+      @surcharge_overrides ||= @company.catalog_price_requests.overriding_surcharge.order(:created_at).index_by(&:target_id)
     end
   end
 end
