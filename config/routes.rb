@@ -520,6 +520,9 @@ Rails.application.routes.draw do
       end
 
       # ==================== COMPANY LABELS ====================
+      # Who gets texts that answer nothing the dealer sent (ColdTextHandler).
+      get 'company/unmatched_texts', to: 'unmatched_texts#show'
+      put 'company/unmatched_texts', to: 'unmatched_texts#update'
       scope path: 'company', controller: 'labels' do
         get    'labels',         action: :show
         put    'labels',         action: :update

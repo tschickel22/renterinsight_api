@@ -15,7 +15,9 @@ class Lead < ApplicationRecord
   ORIGIN_INTAKE_FORM = 'intake_form'
   ORIGIN_API         = 'api'
   ORIGIN_FACEBOOK    = 'facebook_lead_ads'
-  INBOUND_ORIGINS    = [ORIGIN_INTAKE_FORM, ORIGIN_API, ORIGIN_FACEBOOK].freeze
+  # A cold text to the dealer's own or provisioned number (ColdTextHandler).
+  ORIGIN_SMS         = 'sms'
+  INBOUND_ORIGINS    = [ORIGIN_INTAKE_FORM, ORIGIN_API, ORIGIN_FACEBOOK, ORIGIN_SMS].freeze
 
   def self.reportable_config
     {

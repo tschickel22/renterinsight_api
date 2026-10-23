@@ -73,6 +73,7 @@ class NotificationPreference < ApplicationRecord
 
     # Communications notifications
     sms_reply_received: { in_app: true, email: true, sms: false, push: true },
+    sms_new_lead: { in_app: true, email: true, sms: false, push: true },
     email_reply_received: { in_app: true, email: false, sms: false, push: true },
     email_connection_broken: { in_app: true, email: true, sms: false, push: false },
     campaign_paused_sender: { in_app: true, email: true, sms: false, push: false },
