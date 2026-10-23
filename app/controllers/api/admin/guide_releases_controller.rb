@@ -12,8 +12,14 @@ module Api
 
       # GET /api/admin/guide/releases
       def index
-        snapshots = Knowledge::Snapshot.where(source: Guide::ReleaseWatcher::SOURCE)
-                                       .order(snapshot_at: :desc).limit(20)
+        builds = Knowledge::Snapshot.where(source: Guide::ReleaseWatcher::SOURCE)
+        recent = builds.order(snapshot_at: :desc).limit(20).to_a
+        # Staging records a build every deploy, so items still waiting for
+        # review fall out of the newest 20 within a day. Keep their builds
+        # listed until they are dealt with, or nobody can reach them.
+        waiting = builds.where.not(id: recent.map(&:id))
+                        .where(id: Knowledge::ChangeQueueItem.pending.select(:knowledge_snapshot_id))
+        snapshots = (recent + waiting.to_a).sort_by(&:snapshot_at).reverse
         items = Knowledge::ChangeQueueItem.where(knowledge_snapshot_id: snapshots.map(&:id))
                                           .order(:created_at)
                                           .group_by(&:knowledge_snapshot_id)
