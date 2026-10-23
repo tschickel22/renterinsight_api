@@ -39,9 +39,16 @@ WORKDIR /rails
 # month costs more per year than the disk does. fonts-liberation is not
 # optional: Chrome with no fonts lays text out wrongly, and layout decides what
 # our own SEO checks see.
+#
+# libreoffice-writer-nogui turns an uploaded Word file into a PDF for
+# agreements (DocumentConversionService). It was never installed here, so
+# every .docx upload on Render failed with "No such file or directory -
+# libreoffice". The Carlito and Caladea fonts measure the same as Calibri and
+# Cambria, Word's defaults; without them a converted page reflows.
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y ca-certificates curl libjemalloc2 libvips poppler-utils sqlite3 qpdf \
-      chromium chromium-driver fonts-liberation && \
+      chromium chromium-driver fonts-liberation \
+      libreoffice-writer-nogui fonts-crosextra-carlito fonts-crosextra-caladea && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Set production environment

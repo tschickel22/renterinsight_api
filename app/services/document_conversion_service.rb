@@ -3,7 +3,7 @@
 # Converts document files (DOCX, DOC) to PDF using LibreOffice headless
 # Requires: libreoffice installed on the system
 #   Ubuntu/WSL: sudo apt-get install libreoffice-writer
-#   Render: Add to Dockerfile or use buildpack
+#   Render: installed by the Dockerfile (libreoffice-writer-nogui)
 class DocumentConversionService
   LIBREOFFICE_BIN = ENV.fetch('LIBREOFFICE_PATH', 'libreoffice')
   TIMEOUT_SECONDS = 30
@@ -29,8 +29,11 @@ class DocumentConversionService
       end
 
       # Convert using LibreOffice headless
+      # A profile of its own in the temp dir: the server user's home may not
+      # be writable, and two conversions sharing one profile fail.
       cmd = [
         LIBREOFFICE_BIN,
+        "-env:UserInstallation=file://#{tmp_dir}/profile",
         '--headless',
         '--convert-to', 'pdf',
         '--outdir', tmp_dir,
