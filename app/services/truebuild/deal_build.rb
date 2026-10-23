@@ -154,7 +154,8 @@ module Truebuild
       result&.lines.to_a.each do |l|
         case l[:kind]
         when 'base' then add_line(kind: 'base', label: l[:label], tax_category: 'home')
-        when 'freight' then add_line(kind: 'freight', label: l[:label], tax_category: 'delivery') unless @build.source == 'lot'
+        # A home on the lot still has to get to the homesite, so it gets freight too.
+        when 'freight' then add_line(kind: 'freight', label: l[:label], tax_category: 'delivery')
         when 'option' then add_option_line(CatalogOption.find(l[:option_id]))
         # Quote-only add-ons are the rep's to add, not every build's.
         when 'addon'
@@ -204,7 +205,17 @@ module Truebuild
       line
     end
 
-    # Miles from the plant to the homesite; nil goes back to the estimate.
+    # Freight to the homesite on a sheet that has none (one started on a lot
+    # home before lot homes got freight, or a rep who removed it).
+    def add_freight
+      guard!
+      line = @build.lines.find_by(kind: 'freight') ||
+             add_line(kind: 'freight', label: 'Freight to homesite', tax_category: 'delivery')
+      reprice!
+      line
+    end
+
+    # Miles from the plant (or the lot) to the homesite; nil goes back to the estimate.
     def set_freight_miles(miles)
       guard!
       @build.update!(freight_miles: miles.presence&.to_i, freight_miles_set: miles.present?)
@@ -400,10 +411,9 @@ module Truebuild
     end
 
     def engine(option_ids:, addon_ids:)
-      lot = @build.source == 'lot'
       result = PricingEngine.new(company: @build.company, variant: @build.variant, option_ids: option_ids, addon_ids: addon_ids,
                                  location: @build.location, construction: @build.construction, quote: true,
-                                 freight_miles: (freight_miles unless lot), assume_freight: !lot).call
+                                 freight_miles: freight_miles, assume_freight: true).call
       # The engine's margin check is for its own sum; the build checks its own totals.
       @warnings = result.warnings.reject { |w| w.start_with?('Margin ') || w.include?(' is not offered on ') }
       result
@@ -500,7 +510,7 @@ module Truebuild
         trade_allowance: deal.trade_allowance.to_f, trade_payoff: deal.trade_payoff.to_f, tax: tax.except(:rules, :note),
         contract_total: contract_total&.round(2)&.to_f, down_payment: deal.down_payment.to_f,
         additional_payment: deal.try(:additional_payment).to_f, unpaid_balance: unpaid&.round(2)&.to_f,
-        delivery_point: deal.try(:delivery_point), freight_miles: (@build.freight_miles unless @build.source == 'lot'),
+        delivery_point: deal.try(:delivery_point), freight_miles: @build.freight_miles,
         freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
     end
 
@@ -550,13 +560,16 @@ module Truebuild
       { 'savings' => savings, 'sale' => sale, 'preferred' => preferred, 'other' => d['other_amount'].to_d.round(2) }
     end
 
-    # The rep's miles, else the estimate from the plant to the homesite (kept
-    # on the build), else the dealer's default in the engine.
+    # The rep's miles, else the estimate from the plant (or, for a home on the
+    # lot, from the lot) to the homesite (kept on the build), else the
+    # dealer's default in the engine.
     def freight_miles
       if @build.freight_miles_set
         @freight_note = 'Entered on this deal'
         return @build.freight_miles
       end
+      return lot_freight_miles if @build.source == 'lot'
+
       est = Freight.estimate_miles(@build.variant, @build.deal)
       if est
         @build.update_column(:freight_miles, est.first) if @build.freight_miles != est.first
@@ -567,6 +580,16 @@ module Truebuild
         @freight_note = 'No homesite address yet: using your default miles'
         nil
       end
+    end
+
+    # A lot home travels from the lot, not the plant, so the dealer's default
+    # (plant) miles would overstate it. With no homesite yet it is 0 miles
+    # until the rep enters them or adds the delivery address.
+    def lot_freight_miles
+      est = Freight.estimate_lot_miles(@build.vehicle, @build.deal)
+      miles, @freight_note = est || [0, 'No homesite address yet: enter the miles from your lot']
+      @build.update_column(:freight_miles, miles) if @build.freight_miles != miles
+      miles
     end
 
     def tag_of(dp) = dp.notes.to_s[TAG, 1]

@@ -16,7 +16,7 @@
 #   GET    /api/v1/deals/:deal_id/home_build/models          priced models the dealer can build
 #   GET    /api/v1/deals/:deal_id/home_build/options         the model's options by group
 #   POST   /api/v1/deals/:deal_id/home_build/reprice
-#   POST   /api/v1/deals/:deal_id/home_build/lines           { kind: option|addon|template|custom, ... }
+#   POST   /api/v1/deals/:deal_id/home_build/lines           { kind: option|addon|template|freight|custom, ... }
 #   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
 #   POST   /api/v1/deals/:deal_id/home_build/lines/:id/report_price   { field: price|cost, suggested_value, note }
@@ -260,10 +260,12 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       service.add_addon(params[:addon_id])
     when 'template'
       service.add_template(params[:template_type], params[:template_id])
+    when 'freight'
+      service.add_freight
     when 'custom'
       service.add_custom(**params.permit(:label, :unit_retail, :unit_cost, :quantity, :unit, :tax_category, :group_name).to_h.symbolize_keys)
     else
-      return render json: { error: 'kind must be option, addon, template or custom' }, status: :unprocessable_entity
+      return render json: { error: 'kind must be option, addon, template, freight or custom' }, status: :unprocessable_entity
     end
     render json: build_json(@build.reload, service.warnings), status: :created
   rescue ActiveRecord::RecordNotFound

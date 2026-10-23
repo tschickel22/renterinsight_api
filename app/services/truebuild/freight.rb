@@ -35,6 +35,23 @@ module Truebuild
       [(ZipPoint.miles(from, to) * ROAD_FACTOR).round, "#{factory.name} to #{where} (#{to_zip}), estimated"]
     end
 
+    # Road miles from the lot the home sits on to the homesite: the home's own
+    # lot zip, else its location's, else the deal's location's, else the
+    # dealer's. Only the delivery address counts as the homesite here.
+    # => [miles, how] or nil.
+    def self.estimate_lot_miles(vehicle, deal)
+      to_zip = deal.try(:delivery_zip).presence
+      return nil unless to_zip
+
+      from_zip = [vehicle.try(:location_zip), vehicle.try(:location)&.zip_code, deal.try(:location)&.zip_code,
+                  deal.try(:company)&.zip_code].find(&:present?)
+      from = from_zip && ZipPoint.call(from_zip)
+      to = ZipPoint.call(to_zip)
+      return nil unless from && to
+
+      [(ZipPoint.miles(from, to) * ROAD_FACTOR).round, "Your lot (#{from_zip}) to the delivery address (#{to_zip}), estimated"]
+    end
+
     def initialize(terms:, variant:, miles: nil)
       @terms = terms
       @variant = variant
