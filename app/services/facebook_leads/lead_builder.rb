@@ -6,8 +6,14 @@ module FacebookLeads
   # Page. Shared by the live webhook (ProcessFacebookLeadJob) and the history
   # import (FacebookLeads::Import), so a lead reads the same however it came in.
   class LeadBuilder
+    # Keys are compared normalized (normalize_key), so "Full Name" and
+    # "full_name" are one. 'name' and 'your_name': a form that asks its own
+    # Name question instead of Facebook's built-in one (Factory Direct's did,
+    # and 33 leads came in nameless with the name in the notes).
     DEFAULT_FIELD_MAPPING = {
       'full_name'    => 'full_name',
+      'name'         => 'full_name',
+      'your_name'    => 'full_name',
       'first_name'   => 'first_name',
       'last_name'    => 'last_name',
       'email'        => 'email',
@@ -138,7 +144,12 @@ module FacebookLeads
     # or label, and whatever is left is kept as a question-and-answer pair.
     # Nothing is dropped unless the dealer chose Ignore.
     def route_fields(parsed, mapping)
-      mapping = (mapping.presence || {}).transform_keys { |k| k.to_s.downcase }
+      # Normalized too: a dealer maps "Best point of contact?" while Facebook
+      # may send it without the question mark.
+      mapping = (mapping.presence || {}).to_h.each_with_object({}) do |(k, v), h|
+        h[k.to_s.downcase] = v
+        h[normalize_key(k)] ||= v
+      end
       lead_cfs = @company.custom_fields.active.for_module('leads').to_a
 
       attrs = {}
@@ -147,7 +158,8 @@ module FacebookLeads
       cf_consumed = []
 
       parsed.each do |fb_field, value|
-        target = mapping[fb_field].to_s.presence || DEFAULT_FIELD_MAPPING[fb_field]
+        target = (mapping[fb_field] || mapping[normalize_key(fb_field)]).to_s.presence ||
+                 DEFAULT_FIELD_MAPPING[normalize_key(fb_field)]
 
         next if target == IGNORE_TARGET
 
