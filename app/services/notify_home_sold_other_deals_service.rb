@@ -24,19 +24,20 @@ class NotifyHomeSoldOtherDealsService
     vehicle_label = build_vehicle_label(@won_deal.vehicle)
 
     losing_deals.find_each do |losing|
-      recipient = losing.owner || losing.primary_salesperson
-      next if recipient.nil?
-
-      NotificationService.create(
-        recipient: recipient,
-        notification_type: :home_sold_choose_new_home,
-        notifiable: losing,
-        actor: Current.user,
-        message: build_message(vehicle_label, losing.customer_display_name),
-        deliver_now: true,
-        company_id: losing.company_id,
-        location_id: losing.location_id
-      )
+      # The owner (or salesperson) and the deal's followers (backlog E86).
+      recipients = ([losing.owner || losing.primary_salesperson] + losing.followers.select(&:active?)).compact.uniq
+      recipients.each do |recipient|
+        NotificationService.create(
+          recipient: recipient,
+          notification_type: :home_sold_choose_new_home,
+          notifiable: losing,
+          actor: Current.user,
+          message: build_message(vehicle_label, losing.customer_display_name),
+          deliver_now: true,
+          company_id: losing.company_id,
+          location_id: losing.location_id
+        )
+      end
     end
   end
 
@@ -47,7 +48,7 @@ class NotifyHomeSoldOtherDealsService
         .where(stage: OPEN_STAGES)
         .where.not(id: @won_deal.id)
         .where(deleted_at: nil)
-        .includes(:owner, :primary_salesperson)
+        .includes(:owner, :primary_salesperson, :followers)
   end
 
   def build_vehicle_label(vehicle)

@@ -34,6 +34,15 @@ module InboundEmail
       send_email_notification(user, outbound)
       send_sms_notification(user)
       broadcast_toast(user)
+
+      # Followers hear about it too (backlog E86). Their copy goes to their own
+      # address, not the mailbox the original email was sent from.
+      follower_recipients(user).each do |follower|
+        create_in_app_notification(follower)
+        send_email_notification(follower, nil)
+        send_sms_notification(follower)
+        broadcast_toast(follower)
+      end
     rescue => e
       Rails.logger.error "[ReplyNotifier] Failed: #{e.class}: #{e.message}"
       nil
@@ -81,6 +90,12 @@ module InboundEmail
           md && md[1]
         end
       end
+    end
+
+    def follower_recipients(already)
+      return [] unless @entity.respond_to?(:followers)
+
+      @entity.followers.select(&:active?).reject { |u| u.id == already.id }
     end
 
     def owner_fallback

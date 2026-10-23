@@ -7,6 +7,7 @@ module Api
       # concern so all three CRM entities behave identically.
       include MergeableRecords
       include PersonNameSearch
+      include FollowedRecords
 
       before_action :set_company_scope
       before_action :set_contact, only: [:show, :update, :destroy, :tags, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status, :documents, :upload_documents]
@@ -28,8 +29,9 @@ module Api
                         else
                           location_ids = permission_service.accessible_location_ids
                           if location_ids.any?
-                            # Strict location filtering - only assigned locations
-                            @company.contacts.where(location_id: location_ids)
+                            # Strict location filtering - only assigned locations,
+                            # plus any they follow (backlog E86)
+                            or_followed(@company.contacts, @company.contacts.where(location_id: location_ids))
                           else
                             @company.contacts
                           end
@@ -77,7 +79,7 @@ module Api
         page = (params[:page] || 1).to_i
         per_page = (params[:per_page] || 50).to_i
         per_page = [per_page, 200].min  # Cap at 200
-        @contacts = @contacts.includes(:account, :tags).offset((page - 1) * per_page).limit(per_page)
+        @contacts = @contacts.includes(:account, :tags, :followers).offset((page - 1) * per_page).limit(per_page)
 
         render json: {
           items: @contacts.map { |contact| contact_json(contact) },
@@ -884,9 +886,8 @@ module Api
         scope = scope.where(department: f[:department]) if f[:department].present?
         scope = scope.with_email if f[:has_email].to_s == 'true'
         scope = scope.with_phone if f[:has_phone].to_s == 'true'
-        if f[:owner_id].present?
-          scope = f[:owner_id].to_s == 'null' ? scope.where(owner_id: nil) : scope.where(owner_id: f[:owner_id])
-        end
+        # Owner (several, or 'unassigned'/'null'), follower and "mine", as the list.
+        scope = apply_follower_filters(scope, f)
         if f[:search].present?
           scope = scope.where(
             person_name_where('contacts', extra: %w[email phone title department]),
@@ -948,7 +949,7 @@ module Api
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
             # Include contacts in assigned locations OR unassigned contacts (NULL location_id)
-            @company.contacts.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+            or_followed(@company.contacts, @company.contacts.where("location_id IN (?) OR location_id IS NULL", location_ids)).find(params[:id])
           else
             @company.contacts.find(params[:id])
           end
@@ -1059,9 +1060,8 @@ module Api
         # unassigned. Previously ignored, which made the "Owner" dropdown on
         # the contacts list decorative (and made the new "default to my
         # contacts" behavior look broken).
-        if params[:owner_id].present?
-          contacts = params[:owner_id] == 'null' ? contacts.where(owner_id: nil) : contacts.where(owner_id: params[:owner_id])
-        end
+        # Owner (several, or 'unassigned'/'null'), follower and "mine".
+        contacts = apply_follower_filters(contacts)
 
         # Tag filtering
         if params[:tag_ids].present?
@@ -1133,6 +1133,7 @@ module Api
           notes: contact.notes,
           ownerId: contact.owner_id,
           owner: contact.owner ? { id: contact.owner.id, name: contact.owner.name, email: contact.owner.email } : nil,
+          followers: contact.followers_json,
           # Marketing consent as recorded, distinct from the opt-out flags above:
           # those say "stop", this says whether they ever said "start". Carried
           # forward from the lead on conversion (MarketingConsentTransfer), so a

@@ -29,7 +29,7 @@ module Migrations
     # is checked with a HEAD request instead.
     class Loader
       SYSTEM = 'ghl'
-      STEPS = %w[setup vendors leads customers deals projects notes communications activities consent tags tasks documents media].freeze
+      STEPS = %w[setup vendors leads customers deals followers projects notes communications activities consent tags tasks documents media].freeze
       QUIET = { skip_notifications: true, skip_webhooks: true, skip_activity_tracking: true, skip_workflows: true }.freeze
 
       attr_reader :report
@@ -156,6 +156,42 @@ module Migrations
         record.update_columns(cols) if cols.any?
       rescue ArgumentError
         nil
+      end
+
+      # GHL followers (backlog E86) onto the leads, accounts, contacts and deals
+      # already loaded. Additive: never removes a follower someone added in
+      # DealerTide, and no notices (QUIET). Runs on its own for a top-up:
+      # STEPS=followers.
+      def load_followers
+        each_followable do |type, ghl_id, emails, owner_email|
+          next if emails.blank?
+
+          record_id = id_for(type, ghl_id)
+          record = record_id && followable_scope(type).find_by(id: record_id)
+          next @report[:followers][:record_not_loaded] += 1 unless record
+
+          owner = owner_email.present? ? owner_id(owner_email) : record.owner_id
+          user_ids = emails.filter_map { |e| owner_id(e) } - [owner, record.owner_id].compact
+          added = record.add_followers!(user_ids)
+          @report[:followers][added.any? ? :"#{type}_followed" : :already_following] += 1
+          @report[:followers][:followers_added] += added.size
+        rescue StandardError => e
+          fail_record("followers:#{type}", ghl_id, e)
+        end
+      end
+
+      def each_followable
+        @data['leads'].each { |l| yield 'lead', l['ghl_id'], l['follower_emails'], l['owner_email'] }
+        @data['accounts'].each do |a|
+          yield 'account', a['ghl_id'], a['follower_emails'], a['owner_email']
+          a['contacts'].each { |c| yield 'contact', c['ghl_id'], c['follower_emails'], c['owner_email'] || a['owner_email'] }
+        end
+        @data['deals'].each { |d| yield 'deal', d['ghl_id'], d['follower_emails'], d['owner_email'] }
+      end
+
+      def followable_scope(type)
+        { 'lead' => @company.leads, 'account' => @company.accounts,
+          'contact' => @company.contacts, 'deal' => @company.deals }.fetch(type)
       end
 
       def owner_id(email)

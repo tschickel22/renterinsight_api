@@ -4,6 +4,7 @@ class Contact < ApplicationRecord
   include ActivityTrackable
   include LocationAware
   include NotifiableContact
+  include Followable
   include WebhookNotifiable
   include Reportable
   include WorkflowRunCancellable

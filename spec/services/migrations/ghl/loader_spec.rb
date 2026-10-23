@@ -153,4 +153,24 @@ RSpec.describe Migrations::Ghl::Loader, type: :service do
     expect(lead.reload.last_name).to eq('Changed')
     expect(result[:edited].size).to eq(1)
   end
+
+  it 'brings GHL followers over without telling anyone, skipping the owner, and tops up on its own' do
+    kev = company.users.create!(email: 'kev@dealer.example', first_name: 'Kev', last_name: 'Two', password: 'secret123',
+                                status: 'active', role: 'sales_rep')
+    load!
+    expect(company.leads.sole.followers).to be_empty
+
+    data['leads'][0]['follower_emails'] = ['kev@dealer.example', 'rep@dealer.example', 'gone@dealer.example']
+    data['accounts'][0]['follower_emails'] = ['kev@dealer.example']
+    data['accounts'][0]['contacts'][0]['follower_emails'] = ['kev@dealer.example']
+    data['deals'][0]['follower_emails'] = ['kev@dealer.example']
+    result = described_class.new(company: company, data: data, batch: 'b2', dry_run: false, log: StringIO.new,
+                                 steps: %w[followers]).run
+
+    expect(result[:errors]).to be_empty
+    expect([company.leads.sole, company.accounts.sole, company.contacts.sole, company.deals.sole].map(&:followers))
+      .to all(eq([kev]))
+    expect(result[:report][:followers][:followers_added]).to eq(4)
+    expect(Notification.where(notification_type: 'follower_added').count).to eq(0)
+  end
 end

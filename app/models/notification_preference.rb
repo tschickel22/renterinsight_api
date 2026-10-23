@@ -39,6 +39,10 @@ class NotificationPreference < ApplicationRecord
     task_due_soon: { in_app: true, email: true, sms: false, push: false },
     task_overdue: { in_app: true, email: true, sms: false, push: true },
     activity_reminder: { in_app: true, email: false, sms: false, push: true },
+    follower_added: { in_app: true, email: false, sms: false },
+    followed_record_assigned: { in_app: true, email: false, sms: false },
+    lead_status_changed: { in_app: true, email: false, sms: false },
+    followed_record_activity: { in_app: true, email: false, sms: false },
 
     # Sales notifications
     deal_assigned: { in_app: true, email: false, sms: false, push: false },

@@ -4,6 +4,7 @@ class Account < ApplicationRecord
   include Communicable
   include LocationAware
   include NotifiableAccount
+  include Followable
   include WebhookNotifiable
   include Reportable
   include WorkflowRunCancellable
@@ -197,6 +198,7 @@ class Account < ApplicationRecord
       'tags' => tags.pluck(:name),
       'source_name' => source&.name,
       'owner_name' => owner&.name,
+      'followers' => followers_json,
       'total_deal_value' => total_deal_value,
       'open_deals_count' => open_deals_count,
       'activity_score' => activity_score
