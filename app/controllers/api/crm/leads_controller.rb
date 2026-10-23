@@ -5,6 +5,7 @@ module Api
       # concern so all three CRM entities behave identically.
       include MergeableRecords
       include PersonNameSearch
+      include FollowedRecords
 
       before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent]
@@ -115,7 +116,7 @@ module Api
         # Count AFTER filters (for pagination)
         filtered_count = leads.count
         
-        leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags)
+        leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags, :followers)
         leads = apply_index_sort(leads, params[:sort], params[:order])
         
         # Pagination
@@ -194,7 +195,7 @@ module Api
           # in-use statuses only appear when they actually hold leads.
           next if total.zero? && !active_configured_keys.include?(status_key)
 
-          card_leads = scope.includes(:source, :owner, :vehicle, :lead_scores, :tags)
+          card_leads = scope.includes(:source, :owner, :vehicle, :lead_scores, :tags, :followers)
                             .order(Arel.sql('last_activity_at DESC NULLS LAST'))
                             .limit(per_column)
                             .to_a
@@ -941,6 +942,11 @@ module Api
             # 5c. CARRY TRUEBUILD DESIGNS AND THE BUYER'S PORTAL LOGIN FORWARD
             Truebuild::ConversionCarry.call(lead: @lead, contact: contact, account: account, deal: deal)
 
+            # 5d. CARRY FOLLOWERS FORWARD (backlog E86). No notices: they were
+            # already following this person.
+            follower_ids = @lead.follower_ids_list
+            [account, contact, deal].compact.each { |rec| rec.add_followers!(follower_ids, by: current_user) }
+
             # 6. MARK LEAD AS CONVERTED
             @lead.update!(
               is_converted: true,
@@ -1081,7 +1087,8 @@ module Api
                   else
                     location_ids = permission_service.accessible_location_ids
                     if location_ids.any?
-                      @company.leads.where(is_converted: [false, nil], location_id: location_ids)
+                      open_leads = @company.leads.where(is_converted: [false, nil])
+                      or_followed(open_leads, open_leads.where(location_id: location_ids))
                     else
                       @company.leads.where(is_converted: [false, nil])
                     end
@@ -1156,21 +1163,18 @@ module Api
                   end
         end
 
-        if filters[:owner_id].present?
-          # 'unassigned' sentinel matches leads with no owner; numeric ids filter to that owner.
-          scope = filters[:owner_id].to_s == 'unassigned' ? scope.where(owner_id: nil) : scope.where(owner_id: filters[:owner_id])
-        end
+        # Owner (several, or 'unassigned'), follower and "mine" (owned or
+        # followed). See FollowedRecords.
+        scope = apply_follower_filters(scope, filters)
 
         # Status and source were filtered in the browser on the loaded page
         # only, so the total, the later pages and "select all matching" all
-        # ignored them. 'all' is the dropdown's no-filter value.
-        if filters[:status].present? && filters[:status].to_s != 'all'
-          scope = scope.where(status: filters[:status].to_s)
-        end
+        # ignored them. Both take a comma list; 'all' is the no-filter value.
+        statuses = list_param(filters[:status])
+        scope = scope.where(status: statuses) if statuses.any?
 
-        if filters[:source_id].present? && filters[:source_id].to_s != 'all'
-          scope = scope.where(source_id: filters[:source_id])
-        end
+        source_ids = list_param(filters[:source_id])
+        scope = scope.where(source_id: source_ids) if source_ids.any?
 
         # Address. State is a two-letter code from the dropdown (or a comma
         # list); city is a contains match; zip is a prefix so "802" reaches an
@@ -1313,7 +1317,8 @@ module Api
             location_ids = permission_service.accessible_location_ids
             Rails.logger.info "[LeadsController#set_lead] User has location scope - accessible_location_ids: #{location_ids.inspect}"
             if location_ids.any?
-              @company.leads.includes(:source, :owner, :vehicle).where(location_id: location_ids).find(params[:id])
+              or_followed(@company.leads, @company.leads.where(location_id: location_ids))
+                .includes(:source, :owner, :vehicle).find(params[:id])
             else
               @company.leads.includes(:source, :owner, :vehicle).find(params[:id])
             end
@@ -1519,6 +1524,7 @@ module Api
           source:    (l.source ? { id: l.source.id, name: l.source.name } : nil),
           ownerId:   l.owner_id,
           owner:     owner_data,
+          followers: l.followers_json,
           isConverted: l.respond_to?(:is_converted) ? l.is_converted : false,
           convertedAt: l.respond_to?(:converted_at) ? l.converted_at : nil,
           convertedToAccountId: l.respond_to?(:converted_account_id) ? l.converted_account_id : nil,

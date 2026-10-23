@@ -6,6 +6,7 @@ module Api
       # Find & merge duplicates. Endpoints and survivorship live in the
       # concern so all three CRM entities behave identically.
       include MergeableRecords
+      include FollowedRecords
       before_action :set_company_scope
       before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals contacts insights score communications_rollup]
 
@@ -21,9 +22,10 @@ module Api
           else
             location_ids = permission_service.accessible_location_ids
             if location_ids.any?
-              # Include accounts in assigned locations OR unassigned accounts (NULL location_id)
-              @company.accounts.where(is_deleted: [false, nil])
-                              .where("location_id IN (?) OR location_id IS NULL", location_ids)
+              # Include accounts in assigned locations OR unassigned accounts (NULL location_id),
+              # plus any they follow (backlog E86)
+              live = @company.accounts.where(is_deleted: [false, nil])
+              or_followed(live, live.where("location_id IN (?) OR location_id IS NULL", location_ids))
             else
               @company.accounts.where(is_deleted: [false, nil])
             end
@@ -35,14 +37,16 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         @accounts = @accounts.for_current_location
         
-        @accounts = @accounts.includes(:tags, :source, :owner)
+        @accounts = @accounts.includes(:tags, :source, :owner, :followers)
         
         # Apply filters (except search)
-        @accounts = @accounts.where(account_type: params[:account_type]) if params[:account_type].present?
-        @accounts = @accounts.where(rating: params[:rating]) if params[:rating].present?
-        @accounts = @accounts.where(status: params[:status]) if params[:status].present?
-        @accounts = @accounts.where(owner_id: params[:owner_id]) if params[:owner_id].present? && params[:owner_id] != 'null'
-        @accounts = @accounts.where(owner_id: nil) if params[:owner_id] == 'null'
+        # Type, rating and status take one value or a comma list.
+        %i[account_type rating status].each do |key|
+          values = list_param(params[key])
+          @accounts = @accounts.where(key => values) if values.any?
+        end
+        # Owner (several, or 'unassigned'/'null'), follower and "mine".
+        @accounts = apply_follower_filters(@accounts)
         
         # Count stats BEFORE search filter (stats tiles should show ALL accounts)
         all_accounts_count = @accounts.count
@@ -922,8 +926,9 @@ module Api
         @account = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            # Include accounts in assigned locations OR unassigned accounts (NULL location_id)
-            @company.accounts.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+            # Include accounts in assigned locations OR unassigned accounts (NULL location_id),
+            # plus any they follow (backlog E86)
+            or_followed(@company.accounts, @company.accounts.where("location_id IN (?) OR location_id IS NULL", location_ids)).find(params[:id])
           else
             @company.accounts.find(params[:id])
           end

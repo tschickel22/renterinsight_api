@@ -241,8 +241,32 @@ class InboundInquiryAbsorber
     )
 
     send_repeat_inquiry_email(record, notify_user, inbound_name: inbound_name, match_type: match_type)
+    notify_followers_of_inquiry(record, notify_user, name: name, noun: noun, inbound_name: inbound_name, match_type: match_type)
   rescue => e
     Rails.logger.error "[InboundInquiryAbsorber] notify_repeat_inquiry failed for #{match_type} #{record.id}: #{e.class} - #{e.message}"
+  end
+
+  # Followers (backlog E86) get the same email and a bell notice, but not a
+  # task of their own: the follow-up belongs to the person above.
+  def notify_followers_of_inquiry(record, notified, name:, noun:, inbound_name:, match_type:)
+    return unless record.respond_to?(:followers)
+
+    record.followers.select(&:active?).each do |follower|
+      next if follower.id == notified.id
+
+      NotificationService.create(
+        recipient: follower,
+        notification_type: :followed_record_activity,
+        notifiable: record,
+        message: "Repeat inquiry on existing #{noun.downcase} #{name} via #{@source_label}",
+        deliver_now: true,
+        company_id: @company.id,
+        location_id: record.try(:location_id)
+      )
+      send_repeat_inquiry_email(record, follower, inbound_name: inbound_name, match_type: match_type)
+    end
+  rescue => e
+    Rails.logger.error "[InboundInquiryAbsorber] follower notice failed for #{match_type} #{record.id}: #{e.class} - #{e.message}"
   end
 
   # Who hears about a repeat inquiry, first match wins:

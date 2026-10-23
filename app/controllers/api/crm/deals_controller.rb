@@ -4,6 +4,7 @@ module Api
       before_action :set_company_scope
       before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
       include PostedDealChanges
+      include FollowedRecords
       # An edit to an approved deal posts the difference and updates its invoice.
       around_action :keep_posted_deal_in_step, only: [:update]
 
@@ -21,11 +22,13 @@ module Api
         
         unless current_user.effective_admin? || view_scope == 'all'
           # Default to "My Deals" for non-admin users
-          deals = deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?', 
-                             current_user.id, current_user.id, current_user.email)
+          # Deals they follow count as theirs too (backlog E86).
+          deals = deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?',
+                              current_user.id, current_user.id, current_user.email)
+                       .or(deals.followed_by(current_user.id))
         end
         
-        deals = deals.includes(:account, :contact, :co_applicant_contact, :territory, :user, :location, :deal_products, :commission_plan)
+        deals = deals.includes(:account, :contact, :co_applicant_contact, :territory, :user, :location, :deal_products, :commission_plan, :followers)
         deals = apply_sort(deals)
 
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
@@ -39,8 +42,9 @@ module Api
         # Filter by contact if provided
         deals = deals.where(contact_id: params[:contact_id]) if params[:contact_id].present?
         
-        # Filter by stage if provided
-        deals = deals.where(stage: params[:stage]) if params[:stage].present?
+        # Filter by stage if provided (one, or a comma list)
+        stages = list_param(params[:stage])
+        deals = deals.where(stage: stages) if stages.any?
         
         # Filter by territory if provided
         deals = deals.where(territory_id: params[:territory_id]) if params[:territory_id].present?
@@ -48,11 +52,9 @@ module Api
         # Filter by owner if provided
         deals = deals.where(user_id: params[:user_id]) if params[:user_id].present?
 
-        # Filter by deal owner (owner_id), matching the frontend's Owner filter.
-        # 'null' = unassigned.
-        if params[:owner_id].present?
-          deals = params[:owner_id] == 'null' ? deals.where(owner_id: nil) : deals.where(owner_id: params[:owner_id])
-        end
+        # Owner (several, or 'unassigned'/'null'), follower and "mine" (owned
+        # or followed). See FollowedRecords.
+        deals = apply_follower_filters(deals)
 
         # Filter by status
         case params[:status]
@@ -179,13 +181,12 @@ module Api
           # Default to "My Deals" for non-admin users
           company_deals = company_deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?',
                                              current_user.id, current_user.id, current_user.email)
+                                       .or(company_deals.followed_by(current_user.id))
         end
 
-        # Filter by deal owner (owner_id), matching the index/list Owner filter.
-        # 'null' = unassigned.
-        if params[:owner_id].present?
-          company_deals = params[:owner_id] == 'null' ? company_deals.where(owner_id: nil) : company_deals.where(owner_id: params[:owner_id])
-        end
+        # The same owner / follower / mine filters as the list, so the tiles
+        # agree with it.
+        company_deals = apply_follower_filters(company_deals)
 
         # Overall metrics
         total_value = company_deals.open.sum(:value)
@@ -679,7 +680,7 @@ module Api
       def deals_in_location_scope
         base = if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
-          location_ids.any? ? @company.deals.where(location_id: location_ids) : @company.deals
+          location_ids.any? ? or_followed(@company.deals, @company.deals.where(location_id: location_ids)) : @company.deals
         else
           @company.deals
         end
@@ -768,7 +769,7 @@ module Api
         @deal = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            @company.deals.where(location_id: location_ids).find(params[:id])
+            or_followed(@company.deals, @company.deals.where(location_id: location_ids)).find(params[:id])
           else
             @company.deals.find(params[:id])
           end
@@ -935,6 +936,7 @@ module Api
           userName: deal.user&.name,
           ownerId: deal.owner_id,
           owner: deal.owner ? { id: deal.owner.id, name: deal.owner.name, email: deal.owner.email } : nil,
+          followers: deal.followers_json,
           primarySalespersonId: deal.primary_salesperson_id,
           
           # Deal Participants (for commission calculation)

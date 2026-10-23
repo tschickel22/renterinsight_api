@@ -584,7 +584,24 @@ class IntakeSubmission < ApplicationRecord
     # ALWAYS send email for intake form leads, regardless of user notification
     # preferences. This is a direct lead notification the dealer configured.
     send_intake_lead_email(lead, form, notified_user, is_update: is_update)
-    
+
+    # Followers of an existing lead hear about the new submission too
+    # (backlog E86): a bell notice and the same email, no task of their own.
+    lead.followers.select(&:active?).each do |follower|
+      next if follower.id == notified_user.id
+
+      NotificationService.create(
+        recipient: follower,
+        notification_type: :followed_record_activity,
+        notifiable: lead,
+        message: "#{lead.first_name} #{lead.last_name} submitted '#{form.name}' again".squish,
+        deliver_now: true,
+        company_id: form.company_id,
+        location_id: lead.location_id
+      )
+      send_intake_lead_email(lead, form, follower, is_update: is_update)
+    end
+
     Rails.logger.info "Created activity #{activity.id} and sent full notification for lead #{lead.id} to user #{notified_user.email}"
   rescue => e
     Rails.logger.error "Failed to create activity/notification for lead #{lead.id}: #{e.message}"

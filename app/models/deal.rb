@@ -4,6 +4,7 @@ class Deal < ApplicationRecord
   include Buyable
   include LocationAware
   include NotifiableDeal
+  include Followable
   include WebhookNotifiable
   include Reportable
   include WorkflowRunCancellable

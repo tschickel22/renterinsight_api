@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_22_120100) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_23_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6539,6 +6539,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_22_120100) do
     t.index ["vehicle_id"], name: "index_quotes_on_vehicle_id"
   end
 
+  create_table "record_followers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "followable_type", null: false
+    t.bigint "followable_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_record_followers_on_company_id"
+    t.index ["followable_type", "followable_id", "user_id"], name: "index_record_followers_unique", unique: true
+    t.index ["user_id", "followable_type", "followable_id"], name: "index_record_followers_on_user"
+  end
+
   create_table "recurring_bills", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -9518,6 +9531,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_22_120100) do
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "deal_home_builds", on_delete: :nullify
   add_foreign_key "quotes", "locations"
+  add_foreign_key "record_followers", "companies"
+  add_foreign_key "record_followers", "users"
   add_foreign_key "recurring_bills", "chart_of_accounts", column: "expense_account_id"
   add_foreign_key "recurring_bills", "chart_of_accounts", column: "payment_account_id"
   add_foreign_key "recurring_bills", "companies"

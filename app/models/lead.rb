@@ -5,6 +5,7 @@ class Lead < ApplicationRecord
   include Communicable
   include LocationAware
   include NotifiableLead
+  include Followable
   include WebhookNotifiable
   include Reportable
   include WorkflowRunCancellable

@@ -40,15 +40,16 @@ module Truebuild
     end
 
     def notify(deal, design, message)
-      recipient = deal.owner || deal.user
-      return unless recipient
-
-      NotificationService.create(
-        recipient: recipient, notification_type: :deal_sheet_buyer_design, notifiable: deal,
-        title: 'A buyer saved a design', message: message,
-        action_url: "/deals/#{deal.id}?tab=home_build", action_text: 'Open the Deal Sheet',
-        company_id: deal.company_id, location_id: deal.location_id, metadata: { 'truebuild_design_id' => design.id }
-      )
+      # The owner (or legacy rep) and the deal's followers (backlog E86).
+      recipients = ([deal.owner || deal.user] + deal.followers.select(&:active?)).compact.uniq
+      recipients.each do |recipient|
+        NotificationService.create(
+          recipient: recipient, notification_type: :deal_sheet_buyer_design, notifiable: deal,
+          title: 'A buyer saved a design', message: message,
+          action_url: "/deals/#{deal.id}?tab=home_build", action_text: 'Open the Deal Sheet',
+          company_id: deal.company_id, location_id: deal.location_id, metadata: { 'truebuild_design_id' => design.id }
+        )
+      end
     rescue StandardError => e
       Rails.logger.warn("[DesignToDeal] notice for deal #{deal.id}: #{e.message}")
     end

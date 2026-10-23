@@ -60,6 +60,11 @@ class Notification < ApplicationRecord
     task_due_soon: { category: 'crm', priority: 'high', title: 'Task Due Soon' },
     task_overdue: { category: 'crm', priority: 'urgent', title: 'Task Overdue' },
     activity_reminder: { category: 'crm', priority: 'normal', title: 'Activity Reminder' },
+    # Followers (backlog E86)
+    follower_added: { category: 'crm', priority: 'normal', title: 'You Are Now a Follower' },
+    followed_record_assigned: { category: 'crm', priority: 'normal', title: 'A Record You Follow Was Reassigned' },
+    lead_status_changed: { category: 'crm', priority: 'normal', title: 'Lead Status Changed' },
+    followed_record_activity: { category: 'crm', priority: 'high', title: 'Activity on a Record You Follow' },
     
     # Sales notifications
     deal_assigned: { category: 'sales', priority: 'high', title: 'Deal Assigned to You' },

@@ -1816,6 +1816,10 @@ Rails.application.routes.draw do
       end
 
       # ==================== ACCOUNTS ====================
+      # Followers on a lead, account, contact or deal (backlog E86)
+      get 'followers', to: 'followers#show'
+      put 'followers', to: 'followers#update'
+
       resources :accounts do
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being

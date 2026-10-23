@@ -294,6 +294,24 @@ module Webhooks
           end
         end
 
+        # Followers of the record hear about the reply in-app too (backlog E86).
+        # The phone forward below stays with the rep who sent the text.
+        if communicable.respond_to?(:followers)
+          contact_label = communicable.respond_to?(:display_name) ? communicable.display_name : from_number
+          communicable.followers.select(&:active?).each do |follower|
+            next if follower.id == notify_user_id.to_i
+
+            NotificationService.create(
+              recipient:         follower,
+              notification_type: :sms_reply_received,
+              notifiable:        inbound_comm,
+              message:           "SMS reply from #{contact_label}: #{body&.truncate(120)}",
+              company_id:        company&.id,
+              action_text:       'View Conversation'
+            )
+          end
+        end
+
         # Forward reply to the user who originally sent the SMS
         # Generates a tokenized reply link so they can respond without logging in
         forward_to_id = sender_user_id || assigned_user_id
