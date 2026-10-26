@@ -846,6 +846,9 @@ class DashboardMetricsService
           project_phase_tasks: { status: 'pending', company_id: @company.id },
           projects: { status: 'active', is_deleted: [false, nil] }
         )
+        # A phase run by a linked installer is ticked off there (E68).
+        .where.not(project_phase_id: ProjectLinkPhase.joins(:project_link)
+                                                     .where(project_links: { status: 'accepted' }).select(:dealer_phase_id))
         .includes(project_phase: :project)
         .order('projects.created_at DESC, project_phases.position ASC, project_phase_tasks.position ASC')
         .limit(20)
@@ -872,6 +875,43 @@ class DashboardMetricsService
   rescue StandardError => e
     Rails.logger.error "[ProjectPhaseTasks] Error: #{e.message}"
     { tasks: [], total: 0 }
+  end
+
+  # ==================== JOBS SUMMARY (installer dashboard, E68) ====================
+  # Returns: { active_jobs, waiting_from_dealers, starting_this_week,
+  #            behind_schedule, completed_in_range, coming_up, drill_down_url, waiting_url }
+  # Phases are the work: starting this week means an unstarted phase due to
+  # start in the next 7 days, behind means one past its estimated completion.
+  def jobs_summary
+    today = Date.current
+    projects = @company.projects.where(is_deleted: [false, nil])
+    projects = projects.where(location_id: Current.location_id) if location_filtered?
+    active = projects.where(status: 'active')
+    open_phases = ProjectPhase.where(project_id: active.select(:id)).where.not(status: %w[completed skipped])
+
+    coming_up = open_phases.where.not(estimated_start_date: nil)
+                           .where('project_phases.estimated_start_date <= ?', today + 14)
+                           .includes(:project).order(:estimated_start_date, :position).limit(6).to_a
+    dealers = ProjectLink.where(installer_project_id: coming_up.map(&:project_id), status: %w[accepted done])
+                         .includes(:dealer_company).to_h { |pl| [pl.installer_project_id, pl.dealer_company.name] }
+
+    {
+      active_jobs: active.count,
+      waiting_from_dealers: ProjectLink.where(installer_company_id: @company.id, status: 'offered').count,
+      starting_this_week: open_phases.where(status: 'not_started', estimated_start_date: today..(today + 7)).count,
+      behind_schedule: open_phases.where('project_phases.estimated_completion_date < ?', today).count,
+      completed_in_range: projects.where(status: 'completed',
+                                         actual_completion_date: @date_range[:start_date]..@date_range[:end_date]).count,
+      coming_up: coming_up.map do |ph|
+        {
+          project_id: ph.project_id, project_name: ph.project.name, phase_name: ph.name, status: ph.status,
+          start_date: ph.estimated_start_date, late: ph.estimated_completion_date.present? && ph.estimated_completion_date < today,
+          dealer: dealers[ph.project_id]
+        }
+      end,
+      drill_down_url: '/deals/projects',
+      waiting_url: '/linked-companies?view=jobs'
+    }
   end
 
   # ==================== UPCOMING TASKS CARD ====================
