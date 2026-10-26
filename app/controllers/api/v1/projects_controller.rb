@@ -422,6 +422,12 @@ module Api
         task = phase.project_phase_tasks.find_by(id: params[:task_id])
         return render(json: { error: 'Task not found' }, status: :not_found) unless task
 
+        # A phase run by a linked installer (E68) follows the installer's
+        # copy, tasks included.
+        if (installer = phase.linked_installer_name)
+          return render json: { error: "#{phase.name} is run by #{installer}. Its tasks are ticked off there." }, status: :unprocessable_entity
+        end
+
         # Ticking a task starts its phase, so a phase on a price hold
         # (E68 step 6) refuses before the task changes.
         if task.status != 'completed' && phase.status == 'not_started' && (held = phase.price_hold_message)

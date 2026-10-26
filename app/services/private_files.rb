@@ -205,6 +205,19 @@ module PrivateFiles
     ref(k)
   end
 
+  # Copy a stored file into another folder (another company's, when a file
+  # crosses a company link), so each company owns and can delete its own copy.
+  # @return [Hash] { ref:, key: }
+  def copy(value, folder:)
+    b, k = locate(value)
+    raise Forbidden, 'not a stored file' unless k
+
+    new_key = "#{folder}/#{Time.current.strftime('%Y%m%d%H%M%S')}_#{SecureRandom.hex(8)}#{File.extname(k)}"
+    client.copy_object(bucket: bucket, key: new_key, copy_source: "#{b}/#{ERB::Util.url_encode(k).gsub('%2F', '/')}",
+                       metadata_directive: 'COPY')
+    { ref: ref(new_key), key: new_key }
+  end
+
   # Apply `url` to the named keys of each attachment hash, for JSON.
   def presign_attachments(list, *fields, **opts)
     Array(list).map do |att|

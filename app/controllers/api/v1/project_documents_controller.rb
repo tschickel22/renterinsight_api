@@ -38,7 +38,9 @@ module Api
                      title description category file_url file_name file_size
                      content_type metadata created_at updated_at]
           ),
-          meta: { total_count: total_count, page: page, per_page: per_page }
+          meta: { total_count: total_count, page: page, per_page: per_page,
+                  # The other company on a linked job (E68), for "Shared with ..."
+                  link_partner: ProjectLinkDocuments.partner(@project) }
         }
       end
 
@@ -87,10 +89,16 @@ module Api
             file_name: file.original_filename,
             file_size: s3_result[:size],
             content_type: s3_result[:content_type],
-            metadata: params[:metadata] || {}
+            metadata: (params[:metadata].respond_to?(:to_unsafe_h) ? params[:metadata].to_unsafe_h : {})
+                        .except('link_copy_of', 'link_copy_id', 'link_from', 'project_link_id').deep_stringify_keys
           )
+          # On a linked job (E68): installer photos go to the dealer unless
+          # unticked; anything else crosses only when marked.
+          shared = params.key?(:shared) ? ActiveModel::Type::Boolean.new.cast(params[:shared]) : ProjectLinkDocuments.share_by_default?(@document)
+          @document.metadata = @document.metadata.merge('link_shared' => true) if shared
 
           if @document.save
+            ProjectLinkDocumentJob.perform_later(@document.id) if shared
             render json: @document.as_json(
               only: %i[id project_id documentable_type documentable_id uploaded_by_id
                        title description category file_url file_name file_size
@@ -110,6 +118,14 @@ module Api
       # PATCH/PUT /api/v1/projects/:project_id/documents/:id
       def update
         return unless authorize_action!('projects', 'update')
+
+        if params.key?(:shared)
+          begin
+            ProjectLinkDocuments.set_shared!(@document, ActiveModel::Type::Boolean.new.cast(params[:shared]))
+          rescue ArgumentError => e
+            return render json: { error: e.message }, status: :unprocessable_entity
+          end
+        end
 
         if @document.update(document_update_params)
           render json: @document.as_json(
@@ -131,6 +147,8 @@ module Api
         PrivateFiles.delete(@document.file_url.presence || @document.file_s3_key)
 
         @document.update!(is_deleted: true)
+        # Its copy on a linked job goes too (E68).
+        ProjectLinkDocumentJob.perform_later(@document.id) if @document.metadata&.dig('link_copy_id')
         render json: { message: 'Document deleted' }
       end
 
