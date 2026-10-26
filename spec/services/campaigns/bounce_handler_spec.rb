@@ -97,6 +97,19 @@ RSpec.describe Campaigns::BounceHandler do
       email = base_email(subject: 'Re: Welcome', body_text: "Thanks, looking forward to it!")
       expect(described_class.classify(email)).to eq(:real_reply)
     end
+
+    # Any inbox is full of these. Each one used to count as a hard bounce.
+    it 'returns :real_reply for an ordinary notification from a noreply sender' do
+      email = base_email(from: 'noreply@notifications.example.com', subject: 'Your weekly summary',
+                         body_text: 'Here is what happened this week.')
+      expect(described_class.classify(email)).to eq(:real_reply)
+    end
+
+    it 'still treats a noreply sender with a bounce subject as a bounce' do
+      email = base_email(from: 'no-reply@example.com', subject: 'Undeliverable: Welcome',
+                         body_text: '550 5.1.1 user unknown')
+      expect(described_class.classify(email)).to eq(:bounce_hard)
+    end
   end
 
   describe '.process' do
@@ -130,6 +143,17 @@ RSpec.describe Campaigns::BounceHandler do
 
       expect(CampaignSuppression.where(company_id: company.id, email_address: 'recipient@example.com')).to exist
       expect(CampaignEvent.where(campaign_id: campaign.id, event_type: 'bounced_async')).to exist
+    end
+
+    it 'on bounce_hard for a test send: marks the send but never suppresses the tester' do
+      enrollment.update!(metadata: { 'test_send' => 'true' })
+      email = base_email(from: 'mailer-daemon@example.com', subject: 'Undeliverable: Welcome',
+                         body_text: '550 user unknown')
+      result = described_class.process(token: "campaign-#{send_record.id}", parsed_email: email)
+      expect(result.classification).to eq(:bounce_hard)
+      expect(send_record.reload.bounce_type).to eq('hard')
+      expect(CampaignSuppression.where(company_id: company.id)).not_to exist
+      expect(enrollment.reload.status).not_to eq('bounced')
     end
 
     it 'on bounce_soft: increments retry_count in metadata, no suppression created, creates bounced_async event' do

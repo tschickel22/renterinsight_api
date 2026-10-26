@@ -36,6 +36,19 @@ RSpec.describe Campaigns::InboundBounceHarvester do
       expect(described_class.resolve_token(parsed, company_id: company.id)).to eq("campaign-#{send_record.id}")
     end
 
+    # 2026-10-26: a test send to the sender's own address, then any bounce-looking
+    # message in their inbox (addressed to them, as everything there is) was
+    # pinned on that test send and suppressed their address.
+    it "never takes the mailbox owner's own address as the bounced recipient" do
+      own = CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id, recipient_type: "User",
+                                       recipient_id: user.id, email_address_snapshot: user.email)
+      CampaignSend.create!(company_id: company.id, campaign_id: campaign.id, campaign_step_id: step.id,
+                           campaign_enrollment_id: own.id, sent_at: 5.minutes.ago)
+      parsed = { headers: "To: #{user.email}", subject: "Delivery Status Notification (Failure)",
+                 body_text: "Something could not be delivered.", to: user.email }
+      expect(described_class.resolve_token(parsed, company_id: company.id, mailbox_address: user.email)).to be_nil
+    end
+
     it "ignores our own reply+ / infra addresses in the recipient fallback" do
       parsed = { headers: "", subject: "x", body_text: "noise reply+campaign-#{send_record.id}@mail.renterinsight.com",
                  to: "" }
