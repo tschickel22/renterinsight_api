@@ -23,6 +23,8 @@ class AgreementAuditLog < ApplicationRecord
   ACTION_ATTACHMENT_REMOVED = 'attachment_removed'
   ACTION_SIGNER_ADDED = 'signer_added'
   ACTION_SIGNER_REMOVED = 'signer_removed'
+  ACTION_SIGNER_UPDATED = 'signer_updated'
+  ACTION_DELIVERY_FAILED = 'delivery_failed'
 
   scope :for_agreement, ->(agreement_id) { where(agreement_id: agreement_id).order(created_at: :asc) }
   scope :by_action, ->(action) { where(action: action) if action.present? }

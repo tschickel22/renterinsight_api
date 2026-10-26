@@ -1,38 +1,29 @@
 class SendAgreementJob < ApplicationJob
   queue_as :default
 
-  def perform(agreement_id)
+  # signer_id re-sends one signer's invite on an agreement already out for
+  # signature (their address or number was corrected). Without it, this is the
+  # first send to everyone.
+  def perform(agreement_id, signer_id = nil)
     agreement = Agreement.includes(:company, :location, :agreement_signers, :prepared_by).find_by(id: agreement_id)
     return unless agreement
-    return unless agreement.status == Agreement::STATUS_SENT
+
+    if signer_id
+      return unless Agreement::ACTIVE_STATUSES.include?(agreement.status)
+      signers = agreement.agreement_signers.where(id: signer_id).where.not(status: [AgreementSigner::STATUS_SIGNED, AgreementSigner::STATUS_DECLINED])
+    else
+      return unless agreement.status == Agreement::STATUS_SENT
+      signers = agreement.agreement_signers
+    end
 
     branding = load_branding(agreement)
     frontend_base = frontend_url(agreement)
 
-    agreement.agreement_signers.each do |signer|
+    signers.each do |signer|
       next if signer.is_cc?
-
-      signing_link = "#{frontend_base}#{signer.signing_url}"
-
-      begin
-        # Email (always sent unless delivery_method is 'sms' only)
-        if agreement.delivery_method != 'sms'
-          send_signing_email(agreement, signer, signing_link, branding)
-        end
-
-        # SMS (sent when delivery_method is 'sms' or 'both')
-        if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
-          send_signing_sms(agreement, signer, signing_link, branding)
-        end
-
-        # Push to the portal app, in addition to whatever channel above. A
-        # signing request is what the portal app exists for, and it only lands
-        # if the signer has actually installed it.
-        PortalPushService.document_to_sign(agreement: agreement, signer: signer)
-      rescue => e
-        Rails.logger.error("[SendAgreementJob] Failed to send to #{signer.email}: #{e.message}\n#{e.backtrace.first(3).join("\n")}")
-      end
+      deliver_invite(agreement, signer, "#{frontend_base}#{signer.signing_url}", branding)
     end
+    return if signer_id
 
     # Notify CC recipients (email-only, no signing link needed)
     agreement.agreement_signers.cc_recipients.each do |cc|
@@ -45,6 +36,46 @@ class SendAgreementJob < ApplicationJob
   end
 
   private
+
+  # Each channel stands alone. A blocked email address once stopped the text and
+  # the portal push to that same signer, because all three ran in one rescue and
+  # email goes first. Whatever fails is kept on the signer so the agreement page
+  # shows it.
+  def deliver_invite(agreement, signer, signing_link, branding)
+    failures = {}
+
+    # Email (always sent unless delivery_method is 'sms' only)
+    if agreement.delivery_method != 'sms'
+      self.class.attempt(failures, 'email') { send_signing_email(agreement, signer, signing_link, branding) }
+    end
+
+    # SMS (sent when delivery_method is 'sms' or 'both')
+    if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
+      self.class.attempt(failures, 'sms') { send_signing_sms(agreement, signer, signing_link, branding) }
+    end
+
+    # Push to the portal app, in addition to whatever channel above. A signing
+    # request is what the portal app exists for, and it only lands if the signer
+    # has actually installed it, so it never counts as a failed delivery.
+    begin
+      PortalPushService.document_to_sign(agreement: agreement, signer: signer)
+    rescue => e
+      Rails.logger.error("[SendAgreementJob] Portal push failed for signer #{signer.id}: #{e.message}")
+    end
+
+    signer.record_delivery!(failures, kind: 'invite')
+  end
+
+  # Runs one channel's send, which returns CommunicationService's { success:, error: }
+  # or raises (a suppressed address raises), and notes the reason if it failed.
+  # Shared with SendAgreementReminderJob.
+  def self.attempt(failures, channel)
+    result = yield
+    failures[channel] = result[:error].presence || 'Not sent' unless result.is_a?(Hash) && result[:success]
+  rescue => e
+    Rails.logger.error("[SendAgreementJob] #{channel} failed: #{e.message}")
+    failures[channel] = e.message
+  end
 
   # ── Email to signer ──────────────────────────────────────────────────
 
@@ -71,6 +102,7 @@ class SendAgreementJob < ApplicationJob
     else
       Rails.logger.error("[SendAgreementJob] ❌ Email failed for #{signer.email}: #{result[:error]}")
     end
+    result
   end
 
   # ── SMS to signer ────────────────────────────────────────────────────
@@ -96,6 +128,7 @@ class SendAgreementJob < ApplicationJob
     else
       Rails.logger.error("[SendAgreementJob] ❌ SMS failed for #{signer.phone}: #{result[:error]}")
     end
+    result
   end
 
   # ── CC notification ──────────────────────────────────────────────────

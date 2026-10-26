@@ -15,49 +15,51 @@ class SendAgreementReminderJob < ApplicationJob
     frontend_base = sender.send(:frontend_url, agreement)
     signing_link = "#{frontend_base}#{signer.signing_url}"
 
+    # Each channel stands alone, so a blocked email address no longer stops the
+    # text (a suppressed address raises rather than returning an error).
+    attempted = []
+    failures = {}
+
+    # Email reminder
+    if agreement.delivery_method != 'sms'
+      attempted << 'email'
+      SendAgreementJob.attempt(failures, 'email') { as_result(send_reminder_email(agreement, signer, signing_link, branding)) }
+    end
+
+    # SMS reminder
+    if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
+      attempted << 'sms'
+      SendAgreementJob.attempt(failures, 'sms') { as_result(send_reminder_sms(agreement, signer, signing_link, branding)) }
+    end
+
+    # Push rides alongside rather than counting as a delivery channel: the
+    # reminder record tracks email/SMS, and a signer with no portal app must
+    # not make an email-only reminder look like it failed.
     begin
-      results = []  # Track [success, error] for each attempted channel
-
-      # Email reminder
-      if agreement.delivery_method != 'sms'
-        results << send_reminder_email(agreement, signer, signing_link, branding)
-      end
-
-      # SMS reminder
-      if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
-        results << send_reminder_sms(agreement, signer, signing_link, branding)
-      end
-
-      # Push rides alongside rather than counting as a delivery channel: the
-      # reminder record tracks email/SMS, and a signer with no portal app must
-      # not make an email-only reminder look like it failed.
       PortalPushService.document_signature_reminder(agreement: agreement, signer: signer)
-
-      any_success = results.any? { |success, _| success }
-      last_error = results.select { |success, _| !success }.map { |_, err| err }.last
-
-      # Mark the reminder record based on actual delivery result
-      reminder = agreement.agreement_reminders
-                   .where(agreement_signer_id: signer.id, status: 'pending')
-                   .order(created_at: :desc).first
-
-      if any_success
-        reminder&.update(sent_at: Time.current, status: 'sent')
-      else
-        reminder&.update(status: 'failed', error_message: last_error || 'All delivery channels failed')
-      end
-
     rescue => e
-      Rails.logger.error("[SendAgreementReminderJob] Failed for signer #{signer.email}: #{e.message}\n#{e.backtrace.first(3).join("\n")}")
+      Rails.logger.error("[SendAgreementReminderJob] Portal push failed for signer #{signer.id}: #{e.message}")
+    end
 
-      reminder = agreement.agreement_reminders
-                   .where(agreement_signer_id: signer.id, status: 'pending')
-                   .order(created_at: :desc).first
-      reminder&.update(status: 'failed', error_message: e.message)
+    signer.record_delivery!(failures, kind: 'reminder')
+
+    # Mark the reminder record based on actual delivery result
+    reminder = agreement.agreement_reminders
+                 .where(agreement_signer_id: signer.id, status: 'pending')
+                 .order(created_at: :desc).first
+
+    if attempted.any? && failures.size < attempted.size
+      reminder&.update(sent_at: Time.current, status: 'sent')
+    else
+      reminder&.update(status: 'failed', error_message: failures.values.last || 'All delivery channels failed')
     end
   end
 
   private
+
+  def as_result((success, error))
+    { success: success, error: error }
+  end
 
   def send_reminder_email(agreement, signer, signing_link, branding)
     subject = "Reminder: Please sign \"#{agreement.title}\""

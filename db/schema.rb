@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_23_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_26_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -418,6 +418,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_23_120000) do
     t.string "signature_hash"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.text "delivery_error"
+    t.datetime "delivery_error_at"
     t.index ["access_token"], name: "index_agreement_signers_on_access_token", unique: true
     t.index ["agreement_id", "role"], name: "idx_agr_signers_agreement_role"
     t.index ["agreement_id"], name: "index_agreement_signers_on_agreement_id"
