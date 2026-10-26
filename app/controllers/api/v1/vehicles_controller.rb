@@ -55,23 +55,7 @@ module Api
         # The RBAC scope is expanded with sharing-group peers so a sales rep
         # assigned to Evangeline still sees Homes To Geaux inventory when
         # those two locations share a lot (see Company#expand_with_inventory_peers).
-        vehicles = if current_user.uses_rbac?
-          if current_user.effective_admin?  # Use RBAC-aware admin check
-            @company.vehicles.active
-          else
-            location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
-            if location_ids.any?
-              # Strict location filtering - assigned locations + sharing-group
-              # peers, plus location-less catalog rows (orderable factory
-              # models / Champion IMS) that any user in the company should see.
-              @company.vehicles.active.where("location_id IN (?) OR #{catalog_passthrough}", location_ids)
-            else
-              @company.vehicles.active
-            end
-          end
-        else
-          @company.vehicles.active
-        end
+        vehicles = rbac_visible_vehicles(catalog_passthrough)
 
         # Apply location filter - skip if 'all_locations' param sent.
         # The selected location is expanded with sharing-group peers (cross-sell
@@ -1069,7 +1053,13 @@ module Api
 
       # GET /api/v1/vehicles/export
       def export
-        vehicles = @company.vehicles.active
+        return unless authorize_action!('inventory', 'read')
+
+        # Same location rule as the inventory list, so an export never holds
+        # homes the person cannot see there.
+        vehicles = rbac_visible_vehicles(
+          "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))"
+        )
 
         # Apply location filter - selected location is expanded with sharing-group
         # peers so the export matches what the user sees in the inventory list.
@@ -1086,27 +1076,35 @@ module Api
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?
         vehicles = vehicles.search(params[:search]) if params[:search].present?
         
+        columns = [
+          'Inventory ID',
+          'Type',
+          'Year',
+          'Make',
+          'Model',
+          'Status',
+          'Sale Price',
+          'Rent Price',
+          'VIN/Serial',
+          'City',
+          'State',
+          'Date Added'
+        ]
+
+        # Logged and watermarked like every other export. Monitored, not limited.
+        export = ImportExport::ExportRecorder.record!(
+          company: @company, user: current_user, module_type: 'inventory', row_count: vehicles.count,
+          scope: 'all_matching', columns: columns, ip: request.remote_ip,
+          filters: params.permit(:type, :status, :year, :make, :model, :search).to_h
+        )
+
         # Generate CSV
         require 'csv'
         csv_data = CSV.generate(headers: true) do |csv|
-          # Headers
-          csv << [
-            'Inventory ID',
-            'Type',
-            'Year',
-            'Make',
-            'Model',
-            'Status',
-            'Sale Price',
-            'Rent Price',
-            'VIN/Serial',
-            'City',
-            'State',
-            'Date Added'
-          ]
-          
-          # Data rows
-          vehicles.each do |vehicle|
+          csv << columns + [ImportExport::Exporter::WATERMARK_LABEL]
+
+          # Data rows, in batches so a large lot does not sit in memory at once
+          vehicles.find_each do |vehicle|
             csv << [
               vehicle.inventory_id,
               vehicle.listing_type,
@@ -1119,7 +1117,8 @@ module Api
               vehicle.is_rv? ? vehicle.vin : vehicle.serial_number,
               vehicle.location_city,
               vehicle.location_state,
-              vehicle.created_at&.strftime('%Y-%m-%d')
+              vehicle.created_at&.strftime('%Y-%m-%d'),
+              export.watermark_token
             ]
           end
         end
@@ -1330,6 +1329,20 @@ module Api
       end
 
       private
+
+      # RBAC: location-tier users see their assigned locations plus
+      # sharing-group peers, plus the location-less catalog rows
+      # (catalog_passthrough) any user in the company should see. Shared by
+      # #index and #export.
+      def rbac_visible_vehicles(catalog_passthrough)
+        base = @company.vehicles.active
+        return base unless current_user.uses_rbac? && !current_user.effective_admin?
+
+        location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
+        return base if location_ids.empty?
+
+        base.where("location_id IN (?) OR #{catalog_passthrough}", location_ids)
+      end
 
       # Every key in the update payload is a media field (images / floorplans /
       # tour URLs) — with an optional explicit status='available_to_order' that

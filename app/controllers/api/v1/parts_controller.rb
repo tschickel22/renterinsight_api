@@ -505,11 +505,19 @@ module Api
 
         export_type = params[:export_type] || 'all_locations'
 
+        # Logged and watermarked like every other export. Monitored, not limited.
+        export = ImportExport::ExportRecorder.record!(
+          company: @company, user: current_user, module_type: 'parts', row_count: parts.count,
+          scope: 'all_matching', ip: request.remote_ip,
+          filters: params.permit(:category_id, :active, :with_stock, :search, :export_type).to_h
+        )
+        ref = export.watermark_token
+
         # Generate CSV based on export type
         csv_data = if export_type == 'current_location'
-          generate_current_location_csv(parts)
+          generate_current_location_csv(parts, ref)
         else
-          generate_all_locations_csv(parts)
+          generate_all_locations_csv(parts, ref)
         end
 
         filename = export_type == 'current_location' ? 
@@ -530,7 +538,8 @@ module Api
         render json: { error: 'Part not found' }, status: :not_found
       end
 
-      def generate_current_location_csv(parts)
+      # ref: the export's watermark, stamped on the header and every part row.
+      def generate_current_location_csv(parts, ref)
         current_location = Current.location_id ? Location.find_by(id: Current.location_id) : nil
         
         CSV.generate(headers: true) do |csv|
@@ -574,7 +583,8 @@ module Api
             'Reserved',
             'Inventory Value',
             'Active',
-            'Created At'
+            'Created At',
+            ImportExport::Exporter::WATERMARK_LABEL
           ]
 
           parts.each do |part|
@@ -608,13 +618,14 @@ module Api
               reserved,
               value,
               part.active ? 'Yes' : 'No',
-              part.created_at.strftime('%Y-%m-%d %H:%M:%S')
+              part.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+              ref
             ]
           end
         end
       end
 
-      def generate_all_locations_csv(parts)
+      def generate_all_locations_csv(parts, ref)
         CSV.generate(headers: true) do |csv|
           csv << [
             'SKU',
@@ -638,7 +649,8 @@ module Api
             'Total Available (All Locations)',
             'Total Value (All Locations)',
             'Active',
-            'Created At'
+            'Created At',
+            ImportExport::Exporter::WATERMARK_LABEL
           ]
 
           parts.each do |part|
@@ -670,7 +682,8 @@ module Api
                   part.total_available,
                   part.inventory_value,
                   part.active ? 'Yes' : 'No',
-                  part.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                  part.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                  ref
                 ]
               end
             else
@@ -697,7 +710,8 @@ module Api
                 0,
                 0,
                 part.active ? 'Yes' : 'No',
-                part.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                part.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                ref
               ]
             end
           end
