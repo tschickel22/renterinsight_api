@@ -38,6 +38,28 @@ RSpec.describe 'Dashboard jobs summary', type: :request do
       .to eq([['Diaz home', 'Set', true], ['Diaz home', 'Finish', false]])
   end
 
+  it 'sends the Project Status card the phases its active projects are in, with days per phase' do
+    a = job('Diaz home')
+    set = a.project_phases.create!(company: company, name: 'Set', position: 0, status: 'in_progress')
+    a.project_phases.create!(company: company, name: 'Finish', position: 1, status: 'not_started')
+    a.update_columns(current_phase_id: set.id)
+    b = job('Lee home')
+    done = b.project_phases.create!(company: company, name: 'Set', position: 0, status: 'completed',
+                                    started_at: 4.days.ago, completed_at: 2.days.ago)
+    fin = b.project_phases.create!(company: company, name: 'Finish', position: 1, status: 'in_progress')
+    b.update_columns(current_phase_id: fin.id)
+
+    get '/api/v1/dashboard/metrics/project_velocity', headers: h
+    expect(response).to have_http_status(:ok), response.body
+    expect(data['total_projects']).to eq(2)
+    expect(data['phases']).to eq([
+      { 'name' => 'Set', 'phase_key' => 'set', 'count' => 1, 'avg_days_in_phase' => 2.0 },
+      { 'name' => 'Finish', 'phase_key' => 'finish', 'count' => 1, 'avg_days_in_phase' => 0.0 }
+    ])
+    expect(data['drill_down_url']).to eq('/deals/projects')
+    expect(done).to be_present
+  end
+
   it 'leaves out dealer tasks under a phase a linked installer runs' do
     project = dealer_co.projects.create!(name: 'Dealer job', status: 'active', owner: User.create!(
       email: 'pat@summit.example', first_name: 'P', last_name: 'Q', password: 'Pass1234!', company_id: dealer_co.id, role: 'company_admin', status: 'active'
