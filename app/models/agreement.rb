@@ -77,6 +77,9 @@ class Agreement < ApplicationRecord
   STATUS_VOIDED = 'voided'
   STATUS_DECLINED = 'declined'
 
+  # Out for signature: someone still has to sign.
+  ACTIVE_STATUSES = [STATUS_SENT, STATUS_VIEWED, STATUS_PARTIALLY_SIGNED].freeze
+
   # Callbacks
   after_save :trigger_webhooks, if: :saved_change_to_status?
   after_create :log_creation

@@ -125,6 +125,31 @@ class AgreementSigner < ApplicationRecord
     "/sign/#{access_token}"
   end
 
+  # The invite and reminder jobs report each signer's send here. failures is
+  # { 'email' => 'reason', ... } for every channel that did not go out. A failure
+  # stays on the signer (and in the audit log) until a later send gets through on
+  # every channel it tried.
+  def record_delivery!(failures, kind:)
+    if failures.empty?
+      update_columns(delivery_error: nil, delivery_error_at: nil) if delivery_error.present?
+      return
+    end
+
+    message = failures.map { |channel, reason| "#{channel == 'sms' ? 'Text' : channel.capitalize}: #{reason}" }.join(' | ')
+    update_columns(delivery_error: message, delivery_error_at: Time.current)
+    AgreementAuditLog.log!(
+      agreement, AgreementAuditLog::ACTION_DELIVERY_FAILED,
+      agreement_signer: self,
+      metadata: { kind: kind, failures: failures }.deep_stringify_keys
+    )
+  end
+
+  # Moving the invite to a new address or number retires the old link, since it
+  # went to wherever the old one points. Only an unsigned signer can be changed.
+  def rotate_access_token!
+    update!(access_token: SecureRandom.urlsafe_base64(32))
+  end
+
   def requires_signature?
     [ROLE_SIGNER, ROLE_COUNTER_SIGNER, ROLE_PREPARER].include?(role)
   end

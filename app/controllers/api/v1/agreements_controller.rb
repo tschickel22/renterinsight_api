@@ -348,6 +348,14 @@ module Api
 
         signer = @agreement.agreement_signers.find(params[:signer_id])
 
+        unless Agreement::ACTIVE_STATUSES.include?(@agreement.status)
+          return render json: { error: 'Reminders can only be sent while the agreement is out for signature' }, status: :unprocessable_entity
+        end
+        unless signer.requires_signature? && !signer.is_cc? &&
+               [AgreementSigner::STATUS_PENDING, AgreementSigner::STATUS_VIEWED].include?(signer.status)
+          return render json: { error: "#{signer.name} has nothing left to sign" }, status: :unprocessable_entity
+        end
+
         @agreement.agreement_reminders.create!(
           agreement_signer: signer,
           scheduled_at: Time.current,
@@ -1048,16 +1056,49 @@ module Api
       def update_signer
         return unless authorize_action!('agreements', 'update')
 
-        unless @agreement.can_edit?
-          return render json: { error: 'Signers can only be updated in draft status' }, status: :unprocessable_entity
+        signer = @agreement.agreement_signers.find(params[:signer_id])
+
+        if @agreement.can_edit?
+          if signer.update(signer_params)
+            render json: agreement_json(@agreement.reload, detailed: true)
+          else
+            render json: { errors: signer.errors.full_messages }, status: :unprocessable_entity
+          end
+          return
         end
 
-        signer = @agreement.agreement_signers.find(params[:signer_id])
-        if signer.update(signer_params)
-          render json: agreement_json(@agreement.reload, detailed: true)
-        else
-          render json: { errors: signer.errors.full_messages }, status: :unprocessable_entity
+        # Out for signature: a signer who has not signed yet can have a wrong or
+        # dead address corrected. Role and order stay put, since the document's
+        # fields are already placed for them.
+        unless Agreement::ACTIVE_STATUSES.include?(@agreement.status)
+          return render json: { error: 'Signers can only be changed while the agreement is a draft or out for signature' }, status: :unprocessable_entity
         end
+        if [AgreementSigner::STATUS_SIGNED, AgreementSigner::STATUS_DECLINED].include?(signer.status)
+          return render json: { error: "#{signer.name} has already #{signer.status}, so their details can't be changed" }, status: :unprocessable_entity
+        end
+
+        before = signer.slice(:name, :email, :phone)
+        signer.assign_attributes(params.require(:signer).permit(:name, :email, :phone))
+        changed = signer.changed & %w[name email phone]
+        return render json: agreement_json(@agreement.reload, detailed: true) if changed.empty?
+
+        reach_changed = (changed & %w[email phone]).any?
+        AgreementSigner.transaction do
+          signer.save!
+          # The old link went to the old address; retire it.
+          signer.rotate_access_token! if reach_changed
+        end
+
+        AgreementAuditLog.log!(
+          @agreement, AgreementAuditLog::ACTION_SIGNER_UPDATED,
+          agreement_signer: signer, performed_by: current_user,
+          metadata: { changes: changed.to_h { |f| [f, { 'from' => before[f], 'to' => signer[f] }] }, resent: reach_changed }
+        )
+        SendAgreementJob.perform_later(@agreement.id, signer.id) if reach_changed
+
+        render json: agreement_json(@agreement.reload, detailed: true)
+      rescue ActiveRecord::RecordInvalid => e
+        render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Signer not found' }, status: :not_found
       end
@@ -1175,7 +1216,9 @@ module Api
       end
 
       def set_agreement
-        @agreement = @company.agreements.active.find(params[:id])
+        # The nested signer and attachment routes name it :agreement_id; reading only
+        # :id made every one of them answer "Agreement not found".
+        @agreement = @company.agreements.active.find(params[:agreement_id] || params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Agreement not found' }, status: :not_found
       end
@@ -1384,7 +1427,9 @@ module Api
                 signature_method: s.signature_method,
                 signing_url: s.signing_url,
                 signable_type: s.signable_type,
-                signable_id: s.signable_id
+                signable_id: s.signable_id,
+                delivery_error: s.delivery_error,
+                delivery_error_at: s.delivery_error_at
               }
             },
             attachments: agreement.agreement_attachments.map { |a|
