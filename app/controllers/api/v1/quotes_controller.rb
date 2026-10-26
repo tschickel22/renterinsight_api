@@ -521,9 +521,17 @@ module Api
         quotes = quotes.by_status(params[:status]) if params[:status].present?
         quotes = quotes.search(params[:search]) if params[:search].present?
         
+        # Logged and watermarked like every other export. Monitored, not limited.
+        columns = ['Quote Number', 'Status', 'Account', 'Contact', 'Deal', 'Subtotal', 'Tax Rate', 'Tax', 'Total', 'Valid Until', 'Created Date']
+        export = ImportExport::ExportRecorder.record!(
+          company: @company, user: current_user, module_type: 'quotes', row_count: quotes.count,
+          scope: 'all_matching', columns: columns, ip: request.remote_ip,
+          filters: params.permit(:account_id, :contact_id, :customer_id, :status, :search).to_h
+        )
+
         # Generate CSV
         csv_data = CSV.generate(headers: true) do |csv|
-          csv << ['Quote Number', 'Status', 'Account', 'Contact', 'Deal', 'Subtotal', 'Tax Rate', 'Tax', 'Total', 'Valid Until', 'Created Date']
+          csv << columns + [ImportExport::Exporter::WATERMARK_LABEL]
           
           quotes.includes(:deal).find_each do |quote|
             csv << [
@@ -537,7 +545,8 @@ module Api
               quote.tax,
               quote.total,
               quote.valid_until,
-              quote.created_at.strftime('%Y-%m-%d')
+              quote.created_at.strftime('%Y-%m-%d'),
+              export.watermark_token
             ]
           end
         end

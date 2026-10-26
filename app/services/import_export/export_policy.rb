@@ -13,10 +13,15 @@ module ImportExport
     SETTING_SCOPE = 'Company'
 
     # Platform defaults. Any key may be overridden per tenant.
+    #
+    # Exports are monitored, not limited, by default (Tom, 2026-10-26: it is
+    # the customer's data). Every export is still logged, watermarked and
+    # alerted on above the threshold; the daily limit and row cap stay
+    # available as per-tenant overrides.
     DEFAULTS = {
       'allow_json'         => false,  # machine-ingestion format, off by default
-      'daily_export_limit' => 3,      # exports per user per rolling 24h (0 = unlimited)
-      'max_export_rows'    => 25_000, # hard cap on one export (0 = unlimited)
+      'daily_export_limit' => 0,      # exports per user per rolling 24h (0 = unlimited)
+      'max_export_rows'    => 0,      # hard cap on one export (0 = unlimited)
       'alert_row_threshold' => 1_000  # notify the platform above this (0 = never)
     }.freeze
 

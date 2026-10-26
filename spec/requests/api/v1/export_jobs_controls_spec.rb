@@ -125,7 +125,68 @@ RSpec.describe 'Api::V1 ExportJobs controls', type: :request do
       body = JSON.parse(response.body)
       expect(body['allowed_formats']).to contain_exactly('csv', 'xlsx')
       expect(body['acknowledgement_text']).to be_present
-      expect(body['remaining_today']).to eq(ImportExport::ExportPolicy::DEFAULTS['daily_export_limit'])
+      # Unlimited by default: monitored, not limited.
+      expect(body['remaining_today']).to be_nil
+      expect(body['max_export_rows']).to eq(0)
+    end
+  end
+
+  describe 'default limits' do
+    it 'lets a user export as often as they like when the tenant has no override' do
+      4.times { post_export }
+
+      expect(response).to have_http_status(:created)
+      expect(ExportJob.count).to eq(4)
+    end
+  end
+
+  # List pages and reports build their CSV in the browser from every page of
+  # the list's own endpoint; this records it and hands back the watermark.
+  describe 'POST /record' do
+    def post_record(overrides = {})
+      body = { module_type: 'leads', row_count: 1234, scope: 'all_matching',
+               filters: { status: 'new', search: 'smith' }, columns: ['First Name', 'Email'] }.merge(overrides)
+      post '/api/v1/export_jobs/record', params: body, headers: headers, as: :json
+    end
+
+    it 'records the export and returns a watermark' do
+      post_record
+
+      expect(response).to have_http_status(:created)
+      job = ExportJob.last
+      expect(JSON.parse(response.body)['watermark_token']).to eq(job.watermark_token)
+      expect(job.watermark_token).to match(/\AEXP-[0-9A-F]{16}\z/)
+      expect(job.company_id).to eq(company.id)
+      expect(job.user_id).to eq(user.id)
+      expect(job.row_count).to eq(1234)
+      expect(job.status).to eq('completed')
+      expect(job.filters).to include('status' => 'new', 'search' => 'smith', 'export_scope' => 'all_matching')
+      expect(job.selected_fields).to eq(['First Name', 'Email'])
+    end
+
+    it 'writes the activity log' do
+      expect { post_record }.to change {
+        ActivityLog.where(company_id: company.id, action: 'export_downloaded').count
+      }.by(1)
+    end
+
+    it 'is never refused by a tenant limit' do
+      Setting.set(ImportExport::ExportPolicy::SETTING_SCOPE, company.id,
+                  ImportExport::ExportPolicy::SETTING_KEY, { 'daily_export_limit' => 1, 'max_export_rows' => 10 })
+
+      2.times { post_record }
+      expect(response).to have_http_status(:created)
+      expect(ExportJob.count).to eq(2)
+    end
+
+    it 'alerts the platform above the threshold and not below it' do
+      expect { post_record(row_count: 1_000) }.to have_enqueued_mail(ExportAlertMailer, :large_export)
+      expect { post_record(row_count: 999) }.not_to have_enqueued_mail(ExportAlertMailer, :large_export)
+    end
+
+    it 'requires a module' do
+      post_record(module_type: '')
+      expect(response).to have_http_status(:unprocessable_entity)
     end
   end
 end
