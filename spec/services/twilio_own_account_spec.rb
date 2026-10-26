@@ -133,6 +133,20 @@ RSpec.describe 'A dealer\'s own Twilio account' do
       expect(company.sms_provisioning_mode).to eq('dedicated')
     end
 
+    it 'clears the note that incoming texts go elsewhere when reconnecting' do
+      existing = own_number
+      existing.update!(metadata: existing.metadata.merge('inbound_to' => 'previous_sms_url',
+                                                         'inbound_switched_at' => '2026-10-21T19:28:26Z'))
+      allow(numbers).to receive(:list).and_return([double(sid: 'PNown', sms_url: 'https://old.example.com/sms')])
+      allow(number).to receive(:update)
+
+      TwilioProvisioningService.connect_own_number(company, account_sid: own_sid, auth_token: 'dealertoken',
+                                                            phone_number: '+13525588888')
+
+      expect(company.reload.twilio_account.metadata).not_to include('inbound_to', 'inbound_switched_at')
+      expect(company.twilio_account.metadata).to include('previous_sms_url' => 'https://old.example.com/sms')
+    end
+
     it 'refuses a number that is not on their account' do
       allow(numbers).to receive(:list).and_return([])
 

@@ -179,7 +179,9 @@ class TwilioProvisioningService
     account.assign_attributes(
       phone_number: number, phone_number_sid: phone.sid, status: 'active', provisioned_at: Time.current,
       sub_account_sid: account_sid, auth_token: auth_token,
-      metadata: (account.metadata || {}).merge('own_account' => true, 'messaging_service_sid' => messaging_service_sid.presence,
+      # Incoming texts are ours again, so drop any note that they go elsewhere.
+      metadata: (account.metadata || {}).except('inbound_to', 'inbound_switched_at')
+                                        .merge('own_account' => true, 'messaging_service_sid' => messaging_service_sid.presence,
                                                'previous_sms_url' => previous_sms_url).compact
     )
     account.save!
