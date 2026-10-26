@@ -8,11 +8,38 @@
 # when the dealer changes it. Dealer to installer: estimated dates only (either
 # company can move the install dates). The last change wins, and both
 # companies' link log says who moved what.
+#
+# Tasks: the dealer's own tasks under a handed-off phase follow the
+# installer's copies of them (linked_task_id), and a phase the installer
+# finishes finishes the dealer's tasks still open under it. Tasks the
+# installer adds stay in the installer's company.
 class ProjectLinkSync
   DATE_FIELDS = %w[estimated_start_date estimated_completion_date].freeze
 
   def initialize(phase)
     @phase = phase
+  end
+
+  # An installer's copy of a dealer task was ticked off or reopened.
+  def self.task(task)
+    return unless task&.linked_task_id
+
+    map = ProjectLinkPhase.includes(project_link: :company_link).find_by(installer_phase_id: task.project_phase_id)
+    pl = map&.project_link
+    return unless pl&.accepted? && pl.company_link.active?
+
+    dealer_task = ProjectPhaseTask.find_by(id: task.linked_task_id, project_phase_id: map.dealer_phase_id)
+    return unless dealer_task && dealer_task.status != task.status
+
+    Current.set(project_link_sync: true) do
+      if task.status == 'completed'
+        dealer_task.update!(status: 'completed', completed_at: task.completed_at || Time.current, completed_by: nil)
+      else
+        dealer_task.reopen!
+      end
+    end
+    verb = task.status == 'completed' ? 'done' : 'reopened'
+    pl.company_link.log!('synced', "#{pl.installer_company.name}: #{dealer_task.name} #{verb}", company: pl.installer_company, project_link: pl)
   end
 
   def run
@@ -45,6 +72,7 @@ class ProjectLinkSync
       dst.reload
       dst.update_columns(started_at: src.started_at, completed_at: src.completed_at)
       changed << "#{dst.name} is now #{src.status.humanize.downcase}"
+      finish_tasks(dst, src) if src.status == 'completed'
     end
     changed.concat(copy_dates(src, dst))
     log(pl, pl.installer_company, changed)
@@ -55,6 +83,14 @@ class ProjectLinkSync
     src = map.dealer_phase
     dst = map.installer_phase.reload
     log(map.project_link, map.project_link.dealer_company, copy_dates(src, dst))
+  end
+
+  # The installer says the phase is finished, so the dealer's tasks under it
+  # are too, whether or not the installer ticked each one.
+  def finish_tasks(dst, src)
+    dst.project_phase_tasks.pending.find_each do |t|
+      t.update!(status: 'completed', completed_at: src.completed_at || Time.current, completed_by: nil)
+    end
   end
 
   def copy_dates(src, dst)

@@ -127,7 +127,8 @@ module Api
           templates: {
             starter: PlatformModule.template_modules(:starter),
             professional: PlatformModule.template_modules(:professional),
-            enterprise: PlatformModule.template_modules(:enterprise)
+            enterprise: PlatformModule.template_modules(:enterprise),
+            installer: PlatformModule.template_modules(:installer)
           }
         }
       end

@@ -7,6 +7,8 @@ class ProjectPhaseTask < ApplicationRecord
   belongs_to :company
   belongs_to :completed_by, class_name: 'User', optional: true
   belongs_to :assigned_to, class_name: 'User', optional: true
+  # On an installer's copy of a linked job: the dealer's task it came from (E68).
+  belongs_to :linked_task, class_name: 'ProjectPhaseTask', optional: true
 
   # assigned_to_id comes from the client; it must be one of this company's users.
   validate :assigned_to_in_company, if: -> { assigned_to_id.present? && will_save_change_to_assigned_to_id? }
@@ -16,6 +18,9 @@ class ProjectPhaseTask < ApplicationRecord
 
   validates :name, presence: true
   validates :status, inclusion: { in: STATUSES }
+
+  after_commit :sync_linked_task, on: :update,
+               if: -> { linked_task_id.present? && saved_change_to_status? && !Current.project_link_sync }
 
   scope :ordered,           -> { order(:position) }
   scope :pending,           -> { where(status: 'pending') }
@@ -40,6 +45,10 @@ class ProjectPhaseTask < ApplicationRecord
   end
 
   private
+
+  def sync_linked_task
+    ProjectLinkTaskSyncJob.perform_later(id)
+  end
 
   def assigned_to_in_company
     return if User.where(id: assigned_to_id, company_id: company_id).exists?

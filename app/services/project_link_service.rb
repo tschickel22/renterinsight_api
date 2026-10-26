@@ -115,6 +115,7 @@ class ProjectLinkService
     end
     CompanyLinkNotifier.job_answered(pl)
     CompanyLinkNotifier.change_requested(request) if request
+    ProjectLinkDocuments.share_marked_for(pl)
     pl
   end
 
@@ -423,7 +424,7 @@ class ProjectLinkService
         visible_to_client: false, notify_client_on_start: false, notify_client_on_complete: false
       )
       dph.project_phase_tasks.order(:position).each do |t|
-        iph.project_phase_tasks.create!(company_id: @company.id, name: t.name, position: t.position, is_required: t.is_required,
+        iph.project_phase_tasks.create!(company_id: @company.id, linked_task_id: t.id, name: t.name, position: t.position, is_required: t.is_required,
                                         status: t.status == 'completed' ? 'completed' : 'pending', completed_at: t.completed_at,
                                         estimated_days: t.estimated_days, estimated_start_date: t.estimated_start_date,
                                         estimated_completion_date: t.estimated_completion_date, visible_to_client: false)

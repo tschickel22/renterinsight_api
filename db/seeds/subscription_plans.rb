@@ -6,7 +6,7 @@
 
 puts "Seeding subscription plans..."
 
-# Define the three default plans
+# Define the default plans
 plans_data = [
   {
     name: 'starter',
@@ -67,6 +67,26 @@ plans_data = [
     is_popular: false,
     position: 3,
     modules: PlatformModule.template_modules(:enterprise)
+  },
+  {
+    name: 'installer',
+    display_name: 'Installer Edition',
+    description: 'For install companies: jobs from linked dealers and your own, crews and subcontractors, bids, billing and your own books.',
+    category: 'professional',
+    zoho_plan_code: 'DMS_INSTALLER',
+    pricing_monthly: 399,
+    pricing_annual: 3990,
+    max_users: 25,
+    max_storage_gb: 100,
+    max_locations: 5,
+    max_api_calls: 25000,
+    trial_enabled: false,
+    trial_days: 0,
+    setup_fee: 0,
+    is_active: true,
+    is_popular: false,
+    position: 4,
+    modules: PlatformModule.template_modules(:installer)
   }
 ]
 

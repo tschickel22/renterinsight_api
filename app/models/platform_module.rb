@@ -195,6 +195,17 @@ class PlatformModule
       management.reports management.commissions management.tags management.tasks 
       management.calendar management.contractors management.projects management.workflows management.territories management_ai_reports
       admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks admin.platform
+    ].freeze,
+    # The Installer Edition (E68 step 7): an install company's jobs, crews,
+    # bids, billing and books. No leads, deals, inventory or marketing. Linked
+    # Installers is not in it: an installer gets that page from the dealer's
+    # link (ModuleAccessService#linked_installer?) and does not invite others.
+    installer: %w[
+      crm.accounts crm.contacts
+      finance.agreements finance.invoices finance.documents finance.accounting
+      service.operations
+      management.reports management.tags management.tasks management.calendar management.contractors management.projects
+      admin.settings admin.users admin.locations
     ].freeze
   }.freeze
   

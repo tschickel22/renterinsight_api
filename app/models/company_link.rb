@@ -5,7 +5,7 @@
 # accepts from inside the installer's company, which fixes installer_company.
 class CompanyLink < ApplicationRecord
   STATUSES = %w[invited active ended].freeze
-  AGREEMENT_VERSION = '2026-10-17'
+  AGREEMENT_VERSION = '2026-10-26' # photos and files marked shared now cross too
 
   belongs_to :dealer_company, class_name: 'Company'
   belongs_to :installer_company, class_name: 'Company', optional: true

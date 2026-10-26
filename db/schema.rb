@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_26_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5941,9 +5941,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_26_120000) do
     t.integer "estimated_days"
     t.date "estimated_start_date"
     t.date "estimated_completion_date"
+    t.bigint "linked_task_id"
     t.index ["assigned_to_id"], name: "index_project_phase_tasks_on_assigned_to_id"
     t.index ["company_id"], name: "index_project_phase_tasks_on_company_id"
     t.index ["completed_by_id"], name: "index_project_phase_tasks_on_completed_by_id"
+    t.index ["linked_task_id"], name: "index_project_phase_tasks_on_linked_task_id"
     t.index ["project_phase_id", "position"], name: "idx_project_phase_tasks_phase_position"
     t.index ["project_phase_id"], name: "index_project_phase_tasks_on_project_phase_id"
   end

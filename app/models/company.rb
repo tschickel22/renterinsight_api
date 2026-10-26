@@ -259,9 +259,10 @@ class Company < ApplicationRecord
   validates :subscription_tier, inclusion: { in: %w[free starter professional enterprise], allow_nil: true }
 
   # Industry classification — drives label defaults and module visibility
-  INDUSTRIES = %w[manufactured_housing rv property_management storage saas].freeze
+  INDUSTRIES = %w[manufactured_housing installer rv property_management storage saas].freeze
   INDUSTRY_OPTIONS = {
     'manufactured_housing' => 'Manufactured Housing',
+    'installer'            => 'Home Installer',
     'rv'                   => 'RV Dealer',
     'property_management'  => 'Property Management',
     'storage'              => 'Storage',
@@ -904,7 +905,9 @@ class Company < ApplicationRecord
   end
 
   def seed_mh_finance_defaults
-    return unless industry == 'manufactured_housing'
+    # An installer keeps its own books (E68 step 7), so it gets the chart too.
+    # The Max Advance allowances below are for selling homes, so not those.
+    return unless industry.in?(%w[manufactured_housing installer])
 
     # 1. Chart of Accounts (idempotent MH chart).
     begin
@@ -917,6 +920,8 @@ class Company < ApplicationRecord
 
     # 2. Max Advance company allowance defaults (21st Mortgage-derived). Lenders created
     #    afterward inherit these via Lender#after_create automatically.
+    return nil unless industry == 'manufactured_housing'
+
     begin
       CompanyAllowanceDefault.seed_defaults(self)
       Rails.logger.info "✅ [Company#seed_mh_finance_defaults] Allowance defaults seeded for Company #{id}"
@@ -1233,7 +1238,7 @@ class Company < ApplicationRecord
   # Industry Label System
   # ====================
 
-  LABEL_DEFAULTS = {
+  BASE_LABEL_DEFAULTS = {
     'manufactured_housing' => {
       'vehicle'       => 'Home',
       'vehicles'      => 'Homes',
@@ -1405,6 +1410,17 @@ class Company < ApplicationRecord
       'projects'       => 'Projects'
     }.freeze
   }.freeze
+
+  # An install company (E68 step 7) works on the same homes as a manufactured
+  # housing dealer, so it keeps those words, but its projects are jobs and the
+  # companies it is linked to are dealers.
+  LABEL_DEFAULTS = BASE_LABEL_DEFAULTS.merge(
+    'installer' => BASE_LABEL_DEFAULTS['manufactured_housing'].merge(
+      'project'          => 'Job',
+      'projects'         => 'Jobs',
+      'linked_companies' => 'Linked Dealers'
+    ).freeze
+  ).freeze
 
   def label_defaults
     LABEL_DEFAULTS[industry] || LABEL_DEFAULTS['manufactured_housing']
