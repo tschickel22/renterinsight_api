@@ -177,6 +177,9 @@ class Api::V1::DashboardController < ApplicationController
       service.recent_activities
     when 'project_phase_tasks'
       service.project_phase_tasks
+    when 'jobs_summary'
+      return unless authorize_action!('projects', 'read')
+      service.jobs_summary
     when 'upcoming_tasks'
       # Upcoming tasks
       service.upcoming_tasks
