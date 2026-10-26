@@ -370,7 +370,11 @@ Rails.application.routes.draw do
 
       resources :export_jobs, only: %i[index show create] do
         member { get :download }
-        collection { get :policy }
+        collection do
+          get :policy
+          # List and report exports are built in the browser; this records them.
+          post :record
+        end
       end
       scope path: 'import_export', controller: 'import_export_metadata' do
         get 'modules',                       action: :modules

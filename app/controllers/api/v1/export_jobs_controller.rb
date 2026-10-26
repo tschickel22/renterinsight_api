@@ -98,6 +98,31 @@ module Api
         render json: serialize(job), status: :created
       end
 
+      # POST /api/v1/export_jobs/record
+      # Records an export a list page or report built in the browser, and
+      # returns the watermark the browser stamps on every row. The rows came
+      # from the list's own endpoints, so RBAC and location scoping already
+      # decided what was in them. Monitored, never refused (see
+      # ImportExport::ExportRecorder). No data_import_export permission
+      # either; anyone who can see a list can export what they see.
+      def record
+        module_type = params[:module_type].to_s.strip
+        return render json: { error: 'module_type required' }, status: :unprocessable_entity if module_type.blank?
+
+        job = ImportExport::ExportRecorder.record!(
+          company: @company,
+          user: current_user,
+          module_type: module_type,
+          row_count: params[:row_count],
+          scope: params[:scope],
+          filters: params[:filters].is_a?(ActionController::Parameters) ? params[:filters].to_unsafe_h : {},
+          columns: params[:columns].is_a?(Array) ? params[:columns] : [],
+          ip: request.remote_ip
+        )
+
+        render json: { id: job.id, watermark_token: job.watermark_token }, status: :created
+      end
+
       # GET /api/v1/export_jobs/:id/download
       def download
         return unless authorize_action!('data_import_export', 'read')
