@@ -104,6 +104,8 @@ module Api
 
       # POST /api/v1/reports/run
       def run
+        return unless authorize_report_module!(params[:module_key])
+
         # Convert ActionController::Parameters to plain hash so ReportEngine
         # can safely call .with_indifferent_access on nested objects.
         raw_filters = params[:filters]
@@ -118,7 +120,8 @@ module Api
           page:        params[:page] || 1,
           per_page:    params[:per_page] || 50,
           company_id:  @company.id,
-          location_id: (defined?(Current) && Current.respond_to?(:location_id) ? Current.location_id : nil)
+          location_id: (defined?(Current) && Current.respond_to?(:location_id) ? Current.location_id : nil),
+          user:        current_user
         )
         render json: result
       rescue => e
@@ -190,6 +193,7 @@ module Api
       def export
         @report = @company.reports.active.find(params[:id])
         cfg = @report.config || {}
+        return unless authorize_report_module!(cfg['module_key'] || @report.module_key)
 
         result = ReportEngine.run(
           module:      cfg['module_key'] || @report.module_key,
@@ -200,7 +204,8 @@ module Api
           page:        1,
           per_page:    ReportEngine::MAX_PER_PAGE,
           company_id:  @company.id,
-          location_id: Current.location_id
+          location_id: Current.location_id,
+          user:        current_user
         )
 
         headers_row = result[:columns].map { |c| c[:label] }.join(',')
@@ -221,16 +226,37 @@ module Api
       end
 
       # GET /api/v1/reports/modules
+      # Only the modules this person can read in the app.
       def modules
-        render json: ReportEngine.modules_list
+        render json: ReportEngine.modules_list.select { |m| can_read_report_module?(m[:key]) }
       end
 
       # GET /api/v1/reports/fields
       def fields
+        return unless authorize_report_module!(params[:module_key])
+
         render json: ReportEngine.field_definitions(params[:module_key], @company.id)
       end
 
       private
+
+      # A report reads the same records as the module's own list, so it needs
+      # the same read permission. Reports used to need none, which let anyone
+      # in the company report on journal entries, bills or bank transactions.
+      def authorize_report_module!(module_key)
+        resource = ReportEngine.read_resource_for(module_key)
+        unless resource
+          render json: { error: "Unknown report module: #{module_key}" }, status: :unprocessable_entity
+          return false
+        end
+
+        authorize_action!(resource, 'read')
+      end
+
+      def can_read_report_module?(module_key)
+        resource = ReportEngine.read_resource_for(module_key)
+        resource.present? && can?(resource, 'read')
+      end
 
       def set_report
         @report = @company.reports.active.find(params[:id])

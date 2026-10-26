@@ -32,7 +32,8 @@ module ImportExport
       fields  = ModuleRegistry.fields_for(@job.module_type, company_id: @company.id, for_export: true)
       keys    = (@job.selected_fields.presence || fields.map { |f| f[:key] }).map(&:to_s)
       keys    = ExportPolicy.filter_keys(keys)
-      scope   = apply_filters(@company.public_send(cfg[:scope]), @job.filters)
+      scope   = apply_filters(VisibleRecords.restrict(@company.public_send(cfg[:scope]), user: @job.user, module_key: @job.module_type),
+                              @job.filters)
 
       # Eager-load associations that will be resolved to display names
       includes_list = keys.filter_map do |k|

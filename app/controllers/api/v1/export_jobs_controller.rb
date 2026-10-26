@@ -36,8 +36,15 @@ module Api
       def create
         return unless authorize_action!('data_import_export', 'create')
 
-        unless ImportExport::ModuleRegistry.config_for(params[:module_type])
+        module_cfg = ImportExport::ModuleRegistry.config_for(params[:module_type])
+        unless module_cfg
           return render json: { error: "Unknown module: #{params[:module_type]}" }, status: :unprocessable_entity
+        end
+
+        # Import/Export access alone is not enough: the person must also be
+        # able to read the module itself, as its own list requires.
+        if module_cfg[:read_resource]
+          return unless authorize_action!(module_cfg[:read_resource], 'read')
         end
 
         format = params[:format].presence || 'csv'

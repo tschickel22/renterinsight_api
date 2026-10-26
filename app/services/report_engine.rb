@@ -1,22 +1,24 @@
 class ReportEngine
   MAX_PER_PAGE = 500
 
+  # read_resource is the RBAC resource the module's own list checks. A report
+  # may never show someone more than that list would.
   MODULE_DEFINITIONS = [
-    { key: "leads",           model: "Lead",          category: "crm" },
-    { key: "contacts",        model: "Contact",       category: "crm" },
-    { key: "accounts",        model: "Account",       category: "crm" },
-    { key: "deals",           model: "Deal",          category: "crm" },
-    { key: "invoices",        model: "Invoice",       category: "finance" },
-    { key: "payments",        model: "Payment",       category: "finance" },
-    { key: "parts",           model: "Part",          category: "inventory" },
-    { key: "service_tickets", model: "ServiceTicket", category: "operations" },
-    { key: "warranty_claims", model: "WarrantyClaim", category: "operations" },
-    { key: "units",           model: "Unit",          category: "inventory" },
-    { key: "properties",      model: "Property",      category: "inventory" },
-    { key: "vehicles",         model: "Vehicle",        category: "inventory" },
-    { key: "journal_entries",  model: "JournalEntry",   category: "accounting" },
-    { key: "bills",            model: "Bill",           category: "accounting" },
-    { key: "bank_transactions",model: "BankTransaction", category: "accounting" }
+    { key: "leads",           model: "Lead",          category: "crm", read_resource: "leads" },
+    { key: "contacts",        model: "Contact",       category: "crm", read_resource: "crm" },
+    { key: "accounts",        model: "Account",       category: "crm", read_resource: "crm" },
+    { key: "deals",           model: "Deal",          category: "crm", read_resource: "deals" },
+    { key: "invoices",        model: "Invoice",       category: "finance", read_resource: "finance" },
+    { key: "payments",        model: "Payment",       category: "finance", read_resource: "finance" },
+    { key: "parts",           model: "Part",          category: "inventory", read_resource: "inventory" },
+    { key: "service_tickets", model: "ServiceTicket", category: "operations", read_resource: "service" },
+    { key: "warranty_claims", model: "WarrantyClaim", category: "operations", read_resource: "service" },
+    { key: "units",           model: "Unit",          category: "inventory", read_resource: "inventory" },
+    { key: "properties",      model: "Property",      category: "inventory", read_resource: "inventory" },
+    { key: "vehicles",         model: "Vehicle",        category: "inventory", read_resource: "inventory" },
+    { key: "journal_entries",  model: "JournalEntry",   category: "accounting", read_resource: "journal_entries" },
+    { key: "bills",            model: "Bill",           category: "accounting", read_resource: "bills" },
+    { key: "bank_transactions",model: "BankTransaction", category: "accounting", read_resource: "bank_accounts_accounting" }
   ].freeze
 
   # { "leads" => Lead, ... } — silently drops modules whose model class
@@ -30,6 +32,10 @@ class ReportEngine
         next
       end
     end
+  end
+
+  def self.read_resource_for(module_key)
+    MODULE_DEFINITIONS.find { |m| m[:key] == module_key.to_s }&.dig(:read_resource)
   end
 
   def self.modules_list
@@ -98,6 +104,9 @@ class ReportEngine
 
     scope = klass.all
     scope = scope.where(company_id: company_id) if company_id.present? && klass.column_names.include?("company_id")
+    # The controller passes the signed-in user; their location access narrows
+    # the rows exactly as the module's list does.
+    scope = VisibleRecords.restrict(scope, user: params[:user], module_key: params[:module]) if params.key?(:user)
     scope = klass.apply_report_filters(scope, filters)
 
     total       = scope.count
