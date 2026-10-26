@@ -1957,36 +1957,38 @@ class DashboardMetricsService
   end
 
   # ==================== PROJECT VELOCITY ====================
+  # Returns: { phases: [{ name, phase_key, count, avg_days_in_phase }],
+  #            total_projects, completed_count, drill_down_url }
+  # The shape ProjectVelocityCard reads. It used to send by_phase and
+  # avg_days_per_phase, which the card never read, so it always showed
+  # "No project data available".
   def project_velocity
-    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
-
     projects_scope = @company.projects.where(is_deleted: [false, nil])
     projects_scope = projects_scope.where(location_id: Current.location_id) if location_filtered?
-
     active_scope = projects_scope.where(status: 'active')
-    active_count = active_scope.count
 
+    # Where active projects are now: each one's current phase, in phase order.
     by_phase = ProjectPhase.joins('INNER JOIN projects ON projects.current_phase_id = project_phases.id')
-                           .where(projects: { id: active_scope.pluck(:id) })
+                           .where(projects: { id: active_scope.select(:id) })
                            .group('project_phases.name')
-                           .count
-                           .map { |name, count| { phase_name: name, count: count } }
+                           .order(Arel.sql('MIN(project_phases.position)'))
+                           .pluck(Arel.sql('project_phases.name'), Arel.sql('COUNT(*)'))
 
-    avg_pairs = ProjectPhase.where(company_id: @company.id, status: 'completed')
-                            .where.not(started_at: nil, completed_at: nil)
-                            .group(:name)
-                            .pluck(:name, Arel.sql('AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) / 86400.0)'))
-
-    avg_days_per_phase = avg_pairs.map { |name, avg| { phase_name: name, avg_days: avg.to_f.round(1) } }
-
-    completed_count = projects_scope.where(status: 'completed').where(actual_completion_date: @date_range[:start_date]..@date_range[:end_date]).count
+    # How long each phase takes, from phases finished anywhere in the company.
+    avg_days = ProjectPhase.where(company_id: @company.id, status: 'completed', name: by_phase.map(&:first))
+                           .where.not(started_at: nil).where.not(completed_at: nil)
+                           .group(:name)
+                           .pluck(:name, Arel.sql('AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) / 86400.0)'))
+                           .to_h
 
     {
-      by_phase: by_phase,
-      avg_days_per_phase: avg_days_per_phase,
-      completed_count: completed_count,
-      active_count: active_count,
-      drill_down_url: '/projects'
+      phases: by_phase.map do |name, count|
+        { name: name, phase_key: name.parameterize(separator: '_'), count: count, avg_days_in_phase: avg_days[name].to_f.round(1) }
+      end,
+      total_projects: active_scope.count,
+      completed_count: projects_scope.where(status: 'completed')
+                                     .where(actual_completion_date: @date_range[:start_date]..@date_range[:end_date]).count,
+      drill_down_url: '/deals/projects'
     }
   end
 

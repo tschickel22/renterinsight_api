@@ -260,7 +260,7 @@ class Api::V1::DashboardController < ApplicationController
       return unless authorize_action!('deals', 'read')
       service.sales_velocity
     when 'project_velocity'
-      return unless authorize_action!('leads', 'read')
+      return unless authorize_action!('projects', 'read')
       service.project_velocity
     when 'business_health_summary'
       return unless authorize_action!('leads', 'read')
