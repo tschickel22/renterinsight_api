@@ -384,31 +384,36 @@ class Api::V1::CampaignsController < ApplicationController
     # let the admin type any address they want to receive the test at.
     owner_mode = @campaign.try(:owner_identity?)
 
-    if @campaign.email_channel?
+    # The STEP's channel decides, not the campaign's: a mixed campaign keeps
+    # channel 'email' and carries its texts as SMS steps, so testing a text
+    # step went down the email path and never used a phone number.
+    email_step = step.email_channel?
+
+    if email_step
       unless owner_mode
         return render(json: { error: 'No valid email connection for this campaign' }, status: :unprocessable_entity) if @campaign.resolve_email_connection.nil?
       end
       test_address = params[:test_email].to_s.strip.presence || current_user.email
       return render(json: { error: 'Enter a test email address' }, status: :unprocessable_entity) if test_address.blank?
     else
-      return render(json: { error: 'No active SMS number for this company' }, status: :unprocessable_entity) if @campaign.resolve_sms_sender.nil?
-      test_address = current_user.try(:phone)
-      return render(json: { error: 'Your user has no phone number on file for SMS test' }, status: :unprocessable_entity) if test_address.blank?
+      return render(json: { error: 'No active SMS number for this company' }, status: :unprocessable_entity) if @campaign.resolve_sms_sender_for_step.nil?
+      test_address = params[:test_phone].to_s.strip.presence || current_user.try(:phone)
+      return render(json: { error: 'Enter a phone number for the test text' }, status: :unprocessable_entity) if test_address.blank?
     end
 
     metadata = { 'test_send' => 'true', 'sent_by_user_id' => current_user.id }
     # Signal to CampaignSender to skip the per-recipient owner resolution
     # and send via platform SES for this one enrollment. Only meaningful for
     # Owner-mode campaigns — everyone else already has a resolved connection.
-    metadata['test_platform_send'] = 'true' if owner_mode && @campaign.email_channel?
+    metadata['test_platform_send'] = 'true' if owner_mode && email_step
 
     enrollment = CampaignEnrollment.find_or_initialize_by(
       campaign_id: @campaign.id, recipient_type: 'User', recipient_id: current_user.id
     )
     enrollment.assign_attributes(
       company_id: @company.id, status: 'pending', current_step_index: step_index,
-      email_address_snapshot: @campaign.email_channel? ? test_address : nil,
-      sms_phone_snapshot: @campaign.sms_channel? ? test_address : nil,
+      email_address_snapshot: email_step ? test_address : nil,
+      sms_phone_snapshot: email_step ? nil : test_address,
       metadata: metadata
     )
     enrollment.save!
@@ -416,7 +421,7 @@ class Api::V1::CampaignsController < ApplicationController
     sender = Campaigns::CampaignSender.new(enrollment: enrollment)
     result = sender.deliver_current_step
     if result
-      render json: { success: true, recipient: test_address, channel: @campaign.channel, step_position: step.position, step_subject: step.subject }
+      render json: { success: true, recipient: test_address, channel: step.effective_channel, step_position: step.position, step_subject: step.subject }
     else
       last_send = enrollment.campaign_sends.order(created_at: :desc).first
       err = last_send&.metadata.is_a?(Hash) ? last_send.metadata['error'] : nil
@@ -428,7 +433,7 @@ class Api::V1::CampaignsController < ApplicationController
       render json: {
         success: false,
         recipient: test_address,
-        channel: @campaign.channel,
+        channel: step.effective_channel,
         error: TEST_SEND_FAILURE_MESSAGES[reason] || reason.presence || 'Send failed (check email connection)'
       }
     end
@@ -543,7 +548,9 @@ class Api::V1::CampaignsController < ApplicationController
 
     base_url = Messaging::TrackingUrl.base
 
-    if @campaign.email_channel?
+    # Step channel, not campaign channel: a mixed campaign's text steps were
+    # previewed as empty emails.
+    if step.email_channel?
       rendered = Messaging::EmailRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: fake_send, company: @company, base_url: base_url

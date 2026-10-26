@@ -64,6 +64,41 @@ RSpec.describe 'Api::V1::Campaigns Phase B endpoints', type: :request do
     end
   end
 
+  # A mixed campaign keeps channel 'email' and carries its texts as SMS steps.
+  # Preview and test send used to branch on the campaign channel, so a text
+  # step was previewed as an empty email and tested without a phone number.
+  describe 'text steps in a mixed campaign' do
+    let!(:sms_step) do
+      campaign.campaign_steps.create!(position: 1, channel: 'sms', sms_body: 'Hi {{first_name}}, quick check in.')
+    end
+
+    it 'previews the text step as SMS' do
+      get "/api/v1/campaigns/#{campaign.id}/preview", params: { step_id: sms_step.id }, headers: headers
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body['channel']).to eq('sms')
+      expect(body['body']).to include('Hi Sample, quick check in.')
+    end
+
+    it 'test sends the text step to the phone number typed in' do
+      TwilioAccount.create!(company_id: company.id, phone_number: "+1720555#{rand(1000..9999)}",
+                            phone_number_sid: "PN#{SecureRandom.hex(16)}", status: 'active')
+      sender = instance_double(Campaigns::CampaignSender, deliver_current_step: true)
+      allow(Campaigns::CampaignSender).to receive(:new).and_return(sender)
+
+      post "/api/v1/campaigns/#{campaign.id}/test_send", headers: headers,
+           params: { step_id: sms_step.id, test_phone: '+13035550123', test_email: 'ignored@example.com' }.to_json
+
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body['channel']).to eq('sms')
+      expect(body['recipient']).to eq('+13035550123')
+      enrollment = CampaignEnrollment.find_by(campaign_id: campaign.id, recipient_type: 'User', recipient_id: user.id)
+      expect(enrollment.sms_phone_snapshot).to eq('+13035550123')
+      expect(enrollment.email_address_snapshot).to be_nil
+    end
+  end
+
   describe 'POST /api/v1/campaigns/ai_generate' do
     it 'requires a prompt' do
       post '/api/v1/campaigns/ai_generate', headers: headers, params: {}.to_json

@@ -337,11 +337,14 @@ module Campaigns
       return '' if sender.blank? && biz_name.blank?
 
       lines = []
+      # The sender_cta card prints these details on every branded email, so they
+      # are only written into the body for plain-text emails. Asking for both
+      # printed the signature twice (campaign 41, 2026-10-26).
       if sender['signature'].present?
-        lines << "Sender's email signature (use this verbatim at the end of email bodies):"
+        lines << "Sender's email signature (only for emails WITHOUT a sender_cta block; the card already shows it):"
         lines << sender['signature']
       elsif sender['full_name'].present?
-        lines << '  - Build a sign-off at the bottom of email bodies, in this order (omit blank fields, but always end with the business name):'
+        lines << '  - Sign-off for emails WITHOUT a sender_cta block only (the card already shows these), in this order (omit blank fields, but always end with the business name):'
         lines << "      Name: #{sender['full_name']}"
         lines << "      Title: #{sender['title']}" if sender['title'].present?
         lines << "      Phone: #{sender['phone']}" if sender['phone'].present?
@@ -496,7 +499,7 @@ module Campaigns
         - Use merge tags: {{first_name}}, {{last_name}}, {{full_name}}, {{rep_name}}, {{rep_email}}, {{company.name}}, {{public_inventory_url}}, {{unsubscribe_url}}.
         - Match the brand voice from context.company.brand_voice when set; lean on context.company.business_description / target_audience / unique_value_props for what to say.
         - When referring to the sender's own business in copy, use context.company.display_name (NOT {{company_name}}, which is reserved for the recipient's company).
-        - Never use placeholders like "[Your name]". If context.sender.signature is present, use it verbatim at the end of email bodies. Otherwise build a sign-off from context.sender.full_name + title + phone + display_name (omit blank pieces, but the business display_name MUST be in the sign-off — that's how the recipient knows who's reaching out). For SMS use first name only.
+        - Never use placeholders like "[Your name]". In emails that include a `sender_cta` block, that card IS the signature: it prints the sender's name, title, email, phone and business at send time. So close the last text block with the sender's first name only, and NEVER add a text block (or lines) carrying the sender's full name, phone, email, title or business name as a sign-off. Writing one prints the signature twice. Only when an email omits `sender_cta` (plain text style): if context.sender.signature is present use it verbatim, otherwise build a sign-off from context.sender.full_name + title + phone + display_name (omit blank pieces, but display_name MUST be in it). For SMS use first name only.
         - If context.sender.booking_url is present and the step's CTA is to schedule/demo/tour/talk live: prefer a button block `{ type: "button", text: "Book a time" | "View my calendar", href: booking_url }`. For inline links inside text blocks, use `<a href="booking_url">Book here</a>` — never expose the raw URL in email. For SMS, include the raw URL with framing text. Don't shove it into every step.
 
         CADENCE:
