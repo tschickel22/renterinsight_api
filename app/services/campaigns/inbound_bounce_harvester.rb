@@ -48,7 +48,8 @@ module Campaigns
       result = Result.empty
       Array(messages).each do |parsed|
         result.scanned += 1
-        outcome = dispatch_message(parsed, company_id: connection.user&.company_id)
+        outcome = dispatch_message(parsed, company_id: connection.user&.company_id,
+                                   mailbox_address: connection.email_address)
         next unless outcome
         result.handled += 1
         result.bounces += 1 if %i[bounce_hard bounce_soft].include?(outcome)
@@ -64,11 +65,11 @@ module Campaigns
     # resolve the campaign send it belongs to, hand it to BounceHandler.
     # parsed: { headers:, from:, subject:, body_text:, content_type:, to: }
     # Returns the classification symbol when handled, nil otherwise.
-    def self.dispatch_message(parsed, company_id: nil)
+    def self.dispatch_message(parsed, company_id: nil, mailbox_address: nil)
       classification = Campaigns::BounceHandler.classify(parsed)
       return nil if classification == :real_reply
 
-      token = resolve_token(parsed, company_id: company_id)
+      token = resolve_token(parsed, company_id: company_id, mailbox_address: mailbox_address)
       return nil unless token
 
       res = Campaigns::BounceHandler.process(token: token, parsed_email: parsed)
@@ -76,20 +77,20 @@ module Campaigns
     end
 
     # "campaign-<id>" token from the raw message, or a recipient-match fallback.
-    def self.resolve_token(parsed, company_id: nil)
+    def self.resolve_token(parsed, company_id: nil, mailbox_address: nil)
       blob = "#{parsed[:headers]} #{parsed[:subject]} #{parsed[:body_text]}"
       if (m = blob.match(CAMPAIGN_TOKEN_RE) || blob.match(LOOSE_TOKEN_RE))
         return "campaign-#{m[1]}"
       end
 
-      send_id = fallback_send_id_for_recipient(parsed, company_id: company_id)
+      send_id = fallback_send_id_for_recipient(parsed, company_id: company_id, mailbox_address: mailbox_address)
       send_id ? "campaign-#{send_id}" : nil
     end
 
     # When the token is stripped, find the most recent campaign send to any
     # address named in the message (the bounced recipient), scoped to the
     # sending user's company and a recent window.
-    def self.fallback_send_id_for_recipient(parsed, company_id: nil)
+    def self.fallback_send_id_for_recipient(parsed, company_id: nil, mailbox_address: nil)
       blob = "#{parsed[:body_text]} #{parsed[:headers]} #{parsed[:to]}"
       addrs = blob.scan(EMAIL_RE).map { |a| a.downcase.strip }.uniq
       # Drop our own reply address so the bounce is attributed to the recipient rather
@@ -98,6 +99,9 @@ module Campaigns
       # "bounced recipient", matching every recent send to it.
       our_domain = ReplyToAddressService.mail_domain.to_s.downcase
       addrs.reject! { |a| a.include?('reply+') || (our_domain.present? && a.end_with?("@#{our_domain}")) }
+      # The mailbox owner's own address is on everything in their inbox, so it
+      # is never the bounced recipient. Left in, it matched their own test sends.
+      addrs.delete(mailbox_address.to_s.downcase.strip) if mailbox_address.present?
       return nil if addrs.empty?
 
       scope = CampaignSend

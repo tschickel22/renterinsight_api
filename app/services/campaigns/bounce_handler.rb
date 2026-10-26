@@ -7,12 +7,14 @@ module Campaigns
       /message\/delivery-status/i
     ].freeze
 
+    # Not noreply@ / no-reply@: half of any inbox is notifications from
+    # noreply senders, and each one was taken for a hard bounce. On 2026-10-26
+    # that suppressed the sender's own address after a test send. A real NDR
+    # from a noreply sender still has a bounce subject or a DSN content type.
     BOUNCE_FROM_PATTERNS = [
       /\bmailer-daemon\b/i,
       /\bpostmaster@/i,
-      /\bbounces?@/i,
-      /\bnoreply@/i,
-      /\bno-reply@/i
+      /\bbounces?@/i
     ].freeze
 
     BOUNCE_SUBJECT_PATTERNS = [
@@ -119,9 +121,17 @@ module Campaigns
       :real_reply
     end
 
+    # A test send goes to the person who pressed the button. Whatever comes back,
+    # it must not suppress their address or flag their record.
+    def self.test_send?(send)
+      meta = send.campaign_enrollment&.metadata
+      meta.is_a?(Hash) && meta['test_send'].to_s == 'true'
+    end
+
     def self.handle_hard_bounce(send, parsed_email)
       ActiveRecord::Base.transaction do
         send.update!(bounced_at: Time.current, bounce_type: 'hard') if send.bounced_at.nil?
+        next if test_send?(send)
 
         recipient_email = send.campaign_enrollment&.email_address_snapshot.to_s.downcase.strip
         if recipient_email.present?
