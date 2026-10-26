@@ -5,19 +5,21 @@ module ImportExport
   # Field discovery is dynamic — it introspects ActiveRecord columns and
   # merges in custom fields, so adding a column auto-exposes it to import/export.
   class ModuleRegistry
+    # read_resource is the RBAC resource the module's own list checks. An
+    # export may never show someone more than that list would.
     MODULES = {
-      'accounts'        => { model: 'Account',       scope: :accounts,        match_fields: %w[name email],            label: 'Accounts',        supports_images: true  },
-      'contacts'        => { model: 'Contact',       scope: :contacts,        match_fields: %w[email],                 label: 'Contacts',        supports_images: true  },
-      'leads'           => { model: 'Lead',          scope: :leads,           match_fields: %w[email phone],           label: 'Leads',           supports_images: false },
-      'deals'           => { model: 'Deal',          scope: :deals,           match_fields: %w[name],                  label: 'Deals',           supports_images: false },
+      'accounts'        => { model: 'Account',       scope: :accounts,        match_fields: %w[name email],            label: 'Accounts',        supports_images: true, read_resource: 'crm' },
+      'contacts'        => { model: 'Contact',       scope: :contacts,        match_fields: %w[email],                 label: 'Contacts',        supports_images: true, read_resource: 'crm' },
+      'leads'           => { model: 'Lead',          scope: :leads,           match_fields: %w[email phone],           label: 'Leads',           supports_images: false, read_resource: 'leads' },
+      'deals'           => { model: 'Deal',          scope: :deals,           match_fields: %w[name],                  label: 'Deals',           supports_images: false, read_resource: 'deals' },
       # NOTE: 'vehicles' (Homes) intentionally excluded — handled by the existing
       # dedicated vehicle importer which already supports image uploads.
-      'parts'           => { model: 'Part',          scope: :parts,           match_fields: %w[sku barcode],           label: 'Parts',           supports_images: true  },
-      'service_tickets' => { model: 'ServiceTicket', scope: :service_tickets, match_fields: %w[ticket_number],         label: 'Service Tickets', supports_images: true  },
-      'quotes'          => { model: 'Quote',         scope: :quotes,          match_fields: %w[quote_number],          label: 'Quotes',          supports_images: false },
-      'invoices'        => { model: 'Invoice',       scope: :invoices,        match_fields: %w[invoice_number],        label: 'Invoices',        supports_images: false },
+      'parts'           => { model: 'Part',          scope: :parts,           match_fields: %w[sku barcode],           label: 'Parts',           supports_images: true, read_resource: 'inventory' },
+      'service_tickets' => { model: 'ServiceTicket', scope: :service_tickets, match_fields: %w[ticket_number],         label: 'Service Tickets', supports_images: true, read_resource: 'service' },
+      'quotes'          => { model: 'Quote',         scope: :quotes,          match_fields: %w[quote_number],          label: 'Quotes',          supports_images: false, read_resource: 'finance' },
+      'invoices'        => { model: 'Invoice',       scope: :invoices,        match_fields: %w[invoice_number],        label: 'Invoices',        supports_images: false, read_resource: 'finance' },
       'budget_lines'    => { model: 'BudgetLine',    scope: :budget_lines,    match_fields: %w[account_number],        label: 'Budget Lines',    supports_images: false,
-                             requires_context: true, context_params: %w[budget_id] }
+                             requires_context: true, context_params: %w[budget_id], read_resource: 'budgets' }
     }.freeze
 
     EXCLUDED_COLUMN_PATTERNS = [

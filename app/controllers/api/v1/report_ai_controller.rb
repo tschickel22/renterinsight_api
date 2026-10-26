@@ -93,10 +93,23 @@ module Api
           # so company-wide digest counts match company-wide query results
           effective_location_id = params[:all_locations] == 'true' ? nil : Current.location_id
 
+          # Same rule as the report builder: only modules the person can read,
+          # narrowed to the locations their lists show.
+          resource = ReportEngine.read_resource_for(query_params[:module])
+          unless resource && can?(resource, 'read')
+            return render json: {
+              explanation: "You don't have access to #{query_params[:module].to_s.humanize.downcase}, so I can't report on it.",
+              query: nil,
+              data: nil,
+              usage: ai_report_usage
+            }
+          end
+
           report_data = ReportEngine.run(
             query_params.merge(
               company_id: @company.id,
-              location_id: effective_location_id
+              location_id: effective_location_id,
+              user: current_user
             )
           )
 
