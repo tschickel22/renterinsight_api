@@ -24,6 +24,8 @@ class CampaignStep < ApplicationRecord
   before_validation :inherit_channel_from_campaign
   before_save :ensure_footer_unsubscribe   # email channel only
   before_save :ensure_sms_stop_footer      # sms channel only
+  # People already waiting on this step move with an edit to its timing.
+  after_update_commit :reschedule_waiting_enrollments, if: :timing_changed?
 
   def email_channel? = effective_channel == 'email'
   def sms_channel?   = effective_channel == 'sms'
@@ -116,5 +118,16 @@ class CampaignStep < ApplicationRecord
       return
     end
     self.sms_body = sms_body + suffix
+  end
+
+  def timing_changed?
+    (saved_changes.keys & %w[wait_days wait_hours send_at]).any?
+  end
+
+  def reschedule_waiting_enrollments
+    was = ->(attr) { saved_changes.key?(attr) ? saved_changes[attr].first : self[attr] }
+    Campaigns::StepRescheduler.new(
+      self, previous: { wait_days: was.call('wait_days'), wait_hours: was.call('wait_hours'), send_at: was.call('send_at') }
+    ).call
   end
 end
