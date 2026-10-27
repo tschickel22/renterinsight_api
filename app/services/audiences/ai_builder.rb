@@ -119,7 +119,7 @@ module Audiences
     end
 
     def build_context(source_type)
-      schema = Audiences::FieldSchema.for_source_type(source_type)
+      schema = Audiences::FieldSchema.for_source_type(source_type, company: @company)
       {
         'company' => { 'name' => @company.name },
         'source_type' => source_type,
