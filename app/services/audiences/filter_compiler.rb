@@ -35,10 +35,13 @@ module Audiences
                    manual_exclude_ids: nil,
                    exclude_active_campaign_enrollees: false,
                    exclude_active_nurture_enrollees: false,
-                   channel: 'email')
+                   channel: 'email',
+                   sms_consent_acknowledged: false)
       @company = company
       @source_type = source_type
+      # 'email', 'sms', or 'mixed' for a campaign whose steps both email and text.
       @channel = channel.to_s.presence || 'email'
+      @sms_consent_acknowledged = ActiveModel::Type::Boolean.new.cast(sms_consent_acknowledged)
       @filter_tree = filter_tree.is_a?(Hash) ? filter_tree.deep_stringify_keys : {}
       @exclude_filter_tree = exclude_filter_tree.is_a?(Hash) ? exclude_filter_tree.deep_stringify_keys : nil
       @manual_include_ids = Array(manual_include_ids).map(&:to_i).reject(&:zero?)
@@ -81,6 +84,7 @@ module Audiences
       end
 
       base = apply_email_reachability(base) if @channel == 'email'
+      base = apply_any_channel_reachability(base) if @channel == 'mixed'
 
       base
     end
@@ -107,6 +111,25 @@ module Audiences
     #
     # AudienceEnroller keeps its own per-record guards. Those are the backstop for an address
     # that goes bad between building an audience and sending to it.
+    # A campaign that both emails and texts can reach someone on either. Keeping only
+    # the emailable left out every lead with just a phone number, so its texts never
+    # went to the people most likely to need them. A phone counts when the person opted
+    # in to texts, or when written consent was acknowledged for this audience (the same
+    # rule CampaignSender#sms_opt_in_ok? applies to each text).
+    def apply_any_channel_reachability(relation)
+      klass = relation.klass
+      return relation unless klass.column_names.include?('email') && klass.column_names.include?('phone')
+
+      table = klass.table_name
+      emailable = apply_email_reachability(klass.unscoped.where(company_id: @company.id)).select(:id)
+      textable = klass.unscoped.where(company_id: @company.id).where.not(phone: [nil, ''])
+      unless @sms_consent_acknowledged
+        col = %w[opt_in_sms sms_opt_in].find { |c| klass.column_names.include?(c) }
+        textable = col ? textable.where(col => true) : textable.none
+      end
+      relation.where("#{table}.id IN (?) OR #{table}.id IN (?)", emailable, textable.select(:id))
+    end
+
     def apply_email_reachability(relation)
       klass = relation.klass
       return relation unless klass.column_names.include?('email')

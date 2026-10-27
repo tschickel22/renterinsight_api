@@ -107,6 +107,14 @@ class Campaign < ApplicationRecord
 
   def sends_sms?   = active_step_channels.include?('sms')
 
+  # How the audience decides who can be reached: 'mixed' when the steps both
+  # email and text, so a person with only a phone (or only an email) still
+  # gets the steps they can receive.
+  def audience_channel
+    chans = active_step_channels
+    chans.include?('email') && chans.include?('sms') ? 'mixed' : channel
+  end
+
   # Dated steps that cannot send as written: a date already past, or one
   # earlier than a dated step before it (steps run in order, so it would be
   # reached late and skipped).

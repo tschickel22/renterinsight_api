@@ -195,7 +195,8 @@ module Campaigns
         manual_exclude_ids: @audience.try(:manual_exclude_ids),
         exclude_active_campaign_enrollees: @audience.try(:exclude_active_campaign_enrollees),
         exclude_active_nurture_enrollees: @audience.try(:exclude_active_nurture_enrollees),
-        channel: @campaign.channel
+        channel: @campaign.audience_channel,
+        sms_consent_acknowledged: @audience.try(:sms_compliance_override?) || false
       ).scope
       @campaign.sms_channel? ? scope_for_sms_compliance(scope) : scope
     rescue Audiences::FilterCompiler::CompilationError => e
