@@ -11,10 +11,23 @@ class IntakeForm < ApplicationRecord
   # Shown beside the marketing consent checkbox when a dealer has not written
   # their own. Deliberately plain: it names who is sending, what they will send,
   # and how to stop, which is what a consent record has to be able to prove was
-  # on screen. {{company}} is the only substitution.
-  DEFAULT_MARKETING_CONSENT_TEXT =
-    'Yes, {{company}} may email and text me about homes, offers and events. ' \
-    'I can unsubscribe at any time.'
+  # on screen. {{company}} is the only substitution. What they will send
+  # depends on the business: a software company does not send home offers.
+  DEFAULT_MARKETING_CONSENT_TEXTS = {
+    'manufactured_housing' => 'homes, offers and events',
+    'installer'            => 'its services and offers',
+    'rv'                   => 'RVs, offers and events',
+    'saas'                 => 'its products, updates and offers',
+    'property_management'  => 'rentals, availability and community news',
+    'storage'              => 'storage units, availability and offers'
+  }.transform_values { |about| "Yes, {{company}} may email and text me about #{about}. I can unsubscribe at any time." }.freeze
+  DEFAULT_MARKETING_CONSENT_TEXT = DEFAULT_MARKETING_CONSENT_TEXTS['manufactured_housing']
+  OTHER_MARKETING_CONSENT_TEXT =
+    'Yes, {{company}} may email and text me about its products, services and offers. I can unsubscribe at any time.'
+
+  def self.default_marketing_consent_text(industry)
+    DEFAULT_MARKETING_CONSENT_TEXTS.fetch(industry.to_s, OTHER_MARKETING_CONSENT_TEXT)
+  end
 
   belongs_to :company
   belongs_to :source, class_name: 'Source', foreign_key: 'source_id', optional: true
@@ -124,7 +137,9 @@ class IntakeForm < ApplicationRecord
     json['marketing_consent'] = {
       'enabled' => marketing_consent?,
       'text' => resolved_marketing_consent_text,
-      'version' => marketing_consent_version
+      'version' => marketing_consent_version,
+      # What a blank wording box means for this company, for the editor's placeholder.
+      'default_text' => default_marketing_consent_text
     }
     json['hideName'] = json['hide_name']
     json['hideDescription'] = json['hide_description']
@@ -195,8 +210,12 @@ class IntakeForm < ApplicationRecord
   # submit time, and copied onto the submission, so a later edit cannot rewrite
   # what somebody already agreed to.
   def resolved_marketing_consent_text
-    text = marketing_consent_text.presence || DEFAULT_MARKETING_CONSENT_TEXT
+    text = marketing_consent_text.presence || default_marketing_consent_text
     text.gsub('{{company}}', company&.name.to_s.presence || 'this dealership')
+  end
+
+  def default_marketing_consent_text
+    self.class.default_marketing_consent_text(company&.industry)
   end
 
   def marketing_consent?
@@ -209,7 +228,7 @@ class IntakeForm < ApplicationRecord
   # person saw. Blank and the default count as the same wording.
   def bump_marketing_consent_version
     return if new_record? || !will_save_change_to_marketing_consent_text?
-    was, now = attribute_change_to_be_saved(:marketing_consent_text).map { |t| t.presence || DEFAULT_MARKETING_CONSENT_TEXT }
+    was, now = attribute_change_to_be_saved(:marketing_consent_text).map { |t| t.presence || default_marketing_consent_text }
     return if was.strip == now.strip
     n = marketing_consent_version.to_s[/\d+/].to_i
     self.marketing_consent_version = "v#{n + 1}"
