@@ -99,7 +99,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       manual_exclude_ids: audience&.manual_exclude_ids,
       exclude_active_campaign_enrollees: audience&.exclude_active_campaign_enrollees || false,
       exclude_active_nurture_enrollees: audience&.exclude_active_nurture_enrollees || false,
-      channel: @campaign.channel
+      channel: @campaign.audience_channel,
+      sms_consent_acknowledged: audience&.sms_compliance_override? || false
     ).scope
 
     sample = scope.limit(20).map do |r|
@@ -231,7 +232,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       manual_exclude_ids: audience.try(:manual_exclude_ids),
       exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
       exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees,
-      channel: @campaign.channel
+      channel: @campaign.audience_channel,
+      sms_consent_acknowledged: audience.sms_compliance_override?
     ).count
     audience.update!(estimated_count: count, estimated_at: Time.current)
   rescue Audiences::FilterCompiler::CompilationError => e
