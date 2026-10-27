@@ -34,6 +34,7 @@ class IntakeForm < ApplicationRecord
 
   before_create :generate_public_id
   before_save :save_rotation
+  before_save :bump_marketing_consent_version
   after_save :update_submission_count
 
   validates :name, presence: true
@@ -203,6 +204,16 @@ class IntakeForm < ApplicationRecord
   end
 
   private
+
+  # A new wording is a new version, so a consent record can say which one a
+  # person saw. Blank and the default count as the same wording.
+  def bump_marketing_consent_version
+    return if new_record? || !will_save_change_to_marketing_consent_text?
+    was, now = attribute_change_to_be_saved(:marketing_consent_text).map { |t| t.presence || DEFAULT_MARKETING_CONSENT_TEXT }
+    return if was.strip == now.strip
+    n = marketing_consent_version.to_s[/\d+/].to_i
+    self.marketing_consent_version = "v#{n + 1}"
+  end
 
   # Only this company's active users join the rotation; anything else in the
   # request is dropped. The list is updated in place, so a play sharing it
