@@ -828,7 +828,7 @@ class Api::V1::CampaignsController < ApplicationController
 
     render json: {
       source_type: source_type,
-      fields: Audiences::FieldSchema.for_source_type(source_type),
+      fields: Audiences::FieldSchema.for_source_type(source_type, company: @company),
       operator_labels: Audiences::FieldSchema.operators_with_labels
     }
   end

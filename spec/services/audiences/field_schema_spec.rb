@@ -16,6 +16,33 @@ RSpec.describe Audiences::FieldSchema do
       expect(described_class.for_source_type('Account')).to eq(described_class::ACCOUNT_FIELDS)
     end
 
+    context 'with a company' do
+      let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}", industry: 'manufactured_housing') }
+      let(:other) { Company.create!(name: "Co-#{SecureRandom.hex(4)}", industry: 'manufactured_housing') }
+      let(:source_field) { described_class.for_source_type('Lead', company: company).find { |f| f[:key] == 'source_name' } }
+
+      it "offers the company's own lead sources, turned-off ones included, as a list" do
+        Source.create!(company_id: company.id, name: 'Website', is_active: true)
+        Source.create!(company_id: company.id, name: 'Facebook', is_active: false)
+        Source.create!(company_id: other.id, name: 'Not ours', is_active: true)
+
+        expect(source_field[:type]).to eq('select')
+        expect(source_field[:options]).to eq(%w[Facebook Website])
+        expect(source_field[:operators]).to include('equals', 'in', 'contains')
+      end
+
+      it 'stays a text box when the company has no sources' do
+        expect(source_field[:type]).to eq('string')
+        expect(source_field).not_to have_key(:options)
+      end
+
+      it 'leaves the shared field list alone' do
+        Source.create!(company_id: company.id, name: 'Website', is_active: true)
+        source_field
+        expect(described_class::LEAD_FIELDS.find { |f| f[:key] == 'source_name' }[:type]).to eq('string')
+      end
+    end
+
     it 'returns [] for unknown source_type' do
       expect(described_class.for_source_type('Foo')).to eq([])
     end

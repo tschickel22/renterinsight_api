@@ -84,12 +84,25 @@ module Audiences
       'tags_any_of' => 'has any of these tags'
     }.freeze
 
-    def self.for_source_type(source_type)
-      case source_type
-      when 'Lead' then LEAD_FIELDS
-      when 'Contact' then CONTACT_FIELDS
-      when 'Account' then ACCOUNT_FIELDS
-      else []
+    # With a company, Lead source becomes a pick list of that company's
+    # sources (turned-off ones too, since older leads still carry them), so
+    # nobody has to type a source name exactly. 'contains' stays for audiences
+    # saved before the list.
+    def self.for_source_type(source_type, company: nil)
+      fields =
+        case source_type
+        when 'Lead' then LEAD_FIELDS
+        when 'Contact' then CONTACT_FIELDS
+        when 'Account' then ACCOUNT_FIELDS
+        else []
+        end
+      return fields unless company
+
+      names = nil
+      fields.map do |f|
+        next f unless f[:key] == 'source_name'
+        names ||= Source.where(company_id: company.id).where.not(name: [nil, '']).distinct.order(:name).pluck(:name)
+        names.any? ? f.merge(type: 'select', options: names) : f
       end
     end
 
