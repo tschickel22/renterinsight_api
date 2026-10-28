@@ -3,6 +3,8 @@
 require 'rails_helper'
 
 RSpec.describe "Public CampaignTracking", type: :request do
+  include ActiveJob::TestHelper
+
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
   let(:user) do
     User.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: "T", last_name: "U",
@@ -19,6 +21,14 @@ RSpec.describe "Public CampaignTracking", type: :request do
   let(:cs) { CampaignSend.create!(company_id: company.id, campaign_id: campaign.id, campaign_step_id: step.id, campaign_enrollment_id: enrollment.id) }
 
   describe "GET /t/:token" do
+    around do |ex|
+      was = ActiveJob::Base.queue_adapter
+      ActiveJob::Base.queue_adapter = :test
+      ex.run
+    ensure
+      ActiveJob::Base.queue_adapter = was
+    end
+
     let!(:token) do
       CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/landing")
     end
@@ -30,9 +40,39 @@ RSpec.describe "Public CampaignTracking", type: :request do
       token.reload
       expect(token.click_count).to eq(1)
       expect(token.first_clicked_at).to be_present
+      # The send is counted a few seconds later, once a scanner burst would show.
+      expect(cs.reload.click_count).to eq(0)
+      perform_enqueued_jobs
       cs.reload
       expect(cs.click_count).to eq(1)
       expect(cs.clicked_at).to be_present
+    end
+
+    # Campaign 42: Defender and Proofpoint opened every link in the email within
+    # the same second. None of that is a person.
+    it "does not count a security scanner opening every link at once" do
+      other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
+      get "/t/#{token.token}"
+      get "/t/#{other.token}"
+      expect(response.location).to eq("https://example.com/book")
+      perform_enqueued_jobs
+
+      cs.reload
+      expect(cs.clicked_at).to be_nil
+      expect(cs.click_count).to eq(0)
+      expect(cs.metadata["scanner_clicks"]).to eq(2)
+    end
+
+    it "counts a person clicking a second link later" do
+      other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
+      get "/t/#{token.token}"
+      perform_enqueued_jobs
+      travel 30.seconds do
+        get "/t/#{other.token}"
+        perform_enqueued_jobs
+      end
+
+      expect(cs.reload.click_count).to eq(2)
     end
 
     it "redirects to fallback URL when token is unknown" do

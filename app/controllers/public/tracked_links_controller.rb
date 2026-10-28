@@ -36,8 +36,15 @@ module Public
       campaign_token = CampaignLinkToken.find_by(token: params[:token])
       if campaign_token
         campaign_token.record_click!
-        # A click implies an open (see CampaignSend.record_click_for_communication).
-        CampaignSend.record_click_for_send(campaign_token.campaign_send, url: campaign_token.target_url)
+        # Counted a few seconds later, so a security scanner opening every link
+        # in the email at once is not reported as a person clicking (and does not
+        # fire click workflows). See CountCampaignClickJob.
+        begin
+          CountCampaignClickJob.set(wait: CountCampaignClickJob::DELAY)
+                               .perform_later(campaign_token.id, Time.current.to_f)
+        rescue StandardError => e
+          Rails.logger.error "[TrackedLinks] could not queue click count: #{e.message}"
+        end
         redirect_to campaign_token.target_url, allow_other_host: true
         return
       end
