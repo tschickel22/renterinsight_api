@@ -151,10 +151,15 @@ module Api
           subscription_plan_id = params.dig(:tenant, :subscription_plan_id)
           billing_cycle = params.dig(:tenant, :billing_cycle)
           
-          if @tenant.update(tenant_params.except(
+          attrs = tenant_params.except(
             :subscription_plan_id, :billing_cycle, :start_trial,
             :owner_email, :owner_first_name, :owner_last_name, :owner_phone
-          ))
+          )
+          # The monthly allowances have no "platform default" to fall back to
+          # (the columns are NOT NULL), so a blank field leaves them as they are.
+          %i[email_monthly_limit sms_monthly_limit].each { |k| attrs.delete(k) if attrs.key?(k) && attrs[k].blank? }
+
+          if @tenant.update(attrs)
             subscription_error = nil
             
             # Update subscription if plan_id provided
@@ -659,6 +664,9 @@ module Api
           # Blank clears the override and falls back to the platform default.
           :daily_campaign_email_cap,
           :daily_campaign_sms_cap,
+          # Monthly allowances (EmailCapService, SmsCapService). 0 means unlimited.
+          :email_monthly_limit,
+          :sms_monthly_limit,
           :industry,               # Industry classification — drives labels + module visibility
           # New subscription params (extracted separately in create)
           :subscription_plan_id,
@@ -674,6 +682,15 @@ module Api
                     .count
       rescue StandardError => e
         Rails.logger.warn("[TenantsController] usage count failed for #{tenant.id}/#{channel}: #{e.message}")
+        nil
+      end
+
+      # Counted the same way the monthly caps count, so "sent this month" is the
+      # number the cap is actually compared against.
+      def monthly_count
+        yield
+      rescue StandardError => e
+        Rails.logger.warn("[TenantsController] monthly usage count failed: #{e.message}")
         nil
       end
 
@@ -700,6 +717,8 @@ module Api
           effective_daily_campaign_email_cap: tenant.effective_daily_campaign_email_cap,
           effective_daily_campaign_sms_cap: tenant.effective_daily_campaign_sms_cap,
           sms_cap_applies: Messaging::TenantSendCap.applies_to?(company: tenant, channel: 'sms'),
+          email_monthly_limit: tenant.email_monthly_limit,
+          sms_monthly_limit: tenant.sms_monthly_limit,
           created_at: tenant.created_at,
           updated_at: tenant.updated_at
         }
@@ -708,6 +727,10 @@ module Api
           base[:campaign_sends_last_24h] = {
             email: campaign_sends_last_24h(tenant, 'email'),
             sms: campaign_sends_last_24h(tenant, 'sms')
+          }
+          base[:sent_this_month] = {
+            email: monthly_count { EmailCapService.current_period_count(tenant) },
+            sms: monthly_count { SmsUsageLog.current_period_count(tenant) }
           }
         end
         
