@@ -99,6 +99,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       manual_exclude_ids: audience&.manual_exclude_ids,
       exclude_active_campaign_enrollees: audience&.exclude_active_campaign_enrollees || false,
       exclude_active_nurture_enrollees: audience&.exclude_active_nurture_enrollees || false,
+      own_campaign_id: @campaign.id,
       channel: @campaign.audience_channel,
       sms_consent_acknowledged: audience&.sms_compliance_override? || false
     ).scope
@@ -232,6 +233,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       manual_exclude_ids: audience.try(:manual_exclude_ids),
       exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
       exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees,
+      own_campaign_id: @campaign.id,
       channel: @campaign.audience_channel,
       sms_consent_acknowledged: audience.sms_compliance_override?
     ).count

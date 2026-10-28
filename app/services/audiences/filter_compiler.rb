@@ -35,6 +35,7 @@ module Audiences
                    manual_exclude_ids: nil,
                    exclude_active_campaign_enrollees: false,
                    exclude_active_nurture_enrollees: false,
+                   own_campaign_id: nil,
                    channel: 'email',
                    sms_consent_acknowledged: false)
       @company = company
@@ -48,6 +49,10 @@ module Audiences
       @manual_exclude_ids = Array(manual_exclude_ids).map(&:to_i).reject(&:zero?)
       @exclude_active_campaign_enrollees = ActiveModel::Type::Boolean.new.cast(exclude_active_campaign_enrollees)
       @exclude_active_nurture_enrollees = ActiveModel::Type::Boolean.new.cast(exclude_active_nurture_enrollees)
+      # The campaign this audience belongs to. "Active in other campaigns" must not
+      # count its own enrollments, or once it starts every recipient it is sending
+      # to drops out of its own audience (campaign 42's members list fell to 33).
+      @own_campaign_id = own_campaign_id
     end
 
     def scope
@@ -71,7 +76,8 @@ module Audiences
         active_campaign_recipient_ids = CampaignEnrollment
           .where(status: %w[pending active])
           .where(recipient_type: @source_type)
-          .select(:recipient_id)
+        active_campaign_recipient_ids = active_campaign_recipient_ids.where.not(campaign_id: @own_campaign_id) if @own_campaign_id
+        active_campaign_recipient_ids = active_campaign_recipient_ids.select(:recipient_id)
         base = base.where.not(id: active_campaign_recipient_ids)
       end
 

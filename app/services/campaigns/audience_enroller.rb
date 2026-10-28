@@ -195,9 +195,15 @@ module Campaigns
         manual_exclude_ids: @audience.try(:manual_exclude_ids),
         exclude_active_campaign_enrollees: @audience.try(:exclude_active_campaign_enrollees),
         exclude_active_nurture_enrollees: @audience.try(:exclude_active_nurture_enrollees),
+        own_campaign_id: @campaign.id,
         channel: @campaign.audience_channel,
         sms_consent_acknowledged: @audience.try(:sms_compliance_override?) || false
       ).scope
+      # Anyone already enrolled here, in any status, is skipped below anyway;
+      # dropping them in SQL keeps a running dynamic campaign from walking its
+      # whole existing audience on every scheduler tick.
+      scope = scope.where.not(id: CampaignEnrollment.where(campaign_id: @campaign.id, recipient_type: source_type)
+                                                    .select(:recipient_id))
       @campaign.sms_channel? ? scope_for_sms_compliance(scope) : scope
     rescue Audiences::FilterCompiler::CompilationError => e
       Rails.logger.error "[AudienceEnroller] filter compile failed for #{source_type}: #{e.message}"
