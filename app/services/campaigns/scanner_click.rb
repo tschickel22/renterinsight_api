@@ -7,12 +7,53 @@ module Campaigns
   # different links opened within the same second, 17 seconds to 3 minutes after
   # sending, while Vimeo recorded almost no views.
   #
-  # A person cannot open two different links in an email within a couple of
-  # seconds, so that burst is the one signal treated as a scanner. Anything less
-  # clear (a single early click, two links some seconds apart) is still counted.
+  # A person cannot open two different links in an email within a few seconds,
+  # so that burst is the first signal treated as a scanner. Scanners also come
+  # back: on campaign 42 the same email was re-checked one link at a time
+  # minutes after the burst, so a later click from the network the burst came
+  # from is the scanner too. Anything less clear (a lone click from a new
+  # address, two links well apart) is still counted as a person.
   module ScannerClick
-    # Link click times are stored to the second, so this allows for rounding.
-    BURST_WINDOW = 2.seconds
+    # Measured bursts spread over up to 5 seconds; click times are stored to the
+    # second, so this also allows for rounding.
+    BURST_WINDOW = 5.seconds
+    MAX_REMEMBERED_NETWORKS = 10
+    # Campaign 42's re-checks came 3 to 5 minutes after the burst. Matching the
+    # network only for a while keeps a person behind the same office address as
+    # an on-site scanner from being hidden for good.
+    REVISIT_WINDOW = 15.minutes
+
+    # The visitor's own address. Requests reach us through Render's Cloudflare
+    # edge, so request.remote_ip is a Cloudflare address, the same for everyone.
+    def self.client_ip(request)
+      cf = request.headers['CF-Connecting-IP'].to_s.strip
+      return cf if cf.present?
+
+      forwarded = request.headers['X-Forwarded-For'].to_s.split(',').first.to_s.strip
+      forwarded.presence || request.remote_ip
+    end
+
+    # /24 for IPv4, /64 for IPv6: a scanner's re-check rarely comes from the
+    # exact same address, but it comes from the same block.
+    def self.network(ip)
+      return nil if ip.blank?
+
+      addr = IPAddr.new(ip)
+      addr.mask(addr.ipv4? ? 24 : 64).to_s
+    rescue IPAddr::InvalidAddressError
+      nil
+    end
+
+    def self.known_scanner_network?(send, ip, at = Time.current)
+      net = network(ip)
+      return false if net.blank?
+
+      meta = send.metadata || {}
+      last = meta['scanner_last_click_at'].presence && Time.zone.parse(meta['scanner_last_click_at'])
+      return false if last.nil? || at - last > REVISIT_WINDOW
+
+      Array(meta['scanner_networks']).include?(net)
+    end
 
     def self.burst?(token, at)
       from = at - BURST_WINDOW

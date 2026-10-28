@@ -63,6 +63,59 @@ RSpec.describe "Public CampaignTracking", type: :request do
       expect(cs.metadata["scanner_clicks"]).to eq(2)
     end
 
+    # Campaign 42: after the burst, the scanner re-checked one link minutes later.
+    it "does not count the scanner coming back from the same network" do
+      other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
+      scanner = { "CF-Connecting-IP" => "40.94.31.5" }
+      get "/t/#{token.token}", headers: scanner
+      get "/t/#{other.token}", headers: scanner
+      perform_enqueued_jobs
+      expect(cs.reload.metadata["scanner_networks"]).to eq(["40.94.31.0"])
+
+      travel 3.minutes do
+        get "/t/#{token.token}", headers: { "CF-Connecting-IP" => "40.94.31.77" }
+        perform_enqueued_jobs
+      end
+      expect(cs.reload.clicked_at).to be_nil
+      expect(cs.metadata["scanner_clicks"]).to eq(3)
+    end
+
+    it "counts a person on a different network after a scanner burst" do
+      other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
+      get "/t/#{token.token}", headers: { "CF-Connecting-IP" => "40.94.31.5" }
+      get "/t/#{other.token}", headers: { "CF-Connecting-IP" => "40.94.31.5" }
+      perform_enqueued_jobs
+
+      travel 3.minutes do
+        get "/t/#{token.token}", headers: { "CF-Connecting-IP" => "73.14.200.9" }
+        perform_enqueued_jobs
+      end
+      expect(cs.reload.click_count).to eq(1)
+    end
+
+    it "counts the scanner's network again once the re-check window has passed" do
+      other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
+      get "/t/#{token.token}", headers: { "CF-Connecting-IP" => "40.94.31.5" }
+      get "/t/#{other.token}", headers: { "CF-Connecting-IP" => "40.94.31.5" }
+      perform_enqueued_jobs
+
+      travel 1.hour do
+        get "/t/#{token.token}", headers: { "CF-Connecting-IP" => "40.94.31.5" }
+        perform_enqueued_jobs
+      end
+      expect(cs.reload.click_count).to eq(1)
+    end
+
+    it "treats links opened 4 seconds apart as a scanner" do
+      other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
+      get "/t/#{token.token}"
+      travel 4.seconds do
+        get "/t/#{other.token}"
+      end
+      perform_enqueued_jobs
+      expect(cs.reload.clicked_at).to be_nil
+    end
+
     it "counts a person clicking a second link later" do
       other = CampaignLinkToken.create!(campaign_id: campaign.id, campaign_send_id: cs.id, target_url: "https://example.com/book")
       get "/t/#{token.token}"

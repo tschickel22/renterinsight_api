@@ -41,7 +41,8 @@ module Public
         # fire click workflows). See CountCampaignClickJob.
         begin
           CountCampaignClickJob.set(wait: CountCampaignClickJob::DELAY)
-                               .perform_later(campaign_token.id, Time.current.to_f)
+                               .perform_later(campaign_token.id, Time.current.to_f,
+                                              Campaigns::ScannerClick.client_ip(request))
         rescue StandardError => e
           Rails.logger.error "[TrackedLinks] could not queue click count: #{e.message}"
         end
