@@ -64,6 +64,7 @@ class User < ApplicationRecord
   validates :email, uniqueness: { case_sensitive: false, conditions: -> { where(primary_user_id: nil) } }, unless: :primary_user_id?
   validates :email, uniqueness: { case_sensitive: false, scope: :company_id }, if: :primary_user_id?
   validate :linked_account_shape, if: :primary_user_id?
+  validate :company_has_a_free_seat, if: :taking_a_seat?
   validates :first_name, presence: true, if: -> { name.blank? }
   validates :password, length: { minimum: 6 }, if: -> { password.present? }
 
@@ -455,6 +456,23 @@ class User < ApplicationRecord
   end
 
   private
+
+  # Every way a user becomes active in a company (added, invited and accepted,
+  # reactivated, restored, moved) passes through here, so max_users holds no
+  # matter which screen or job did it.
+  def taking_a_seat?
+    return false if company_id.nil? || status != 'active' || deleted_at.present?
+    return false if Company::NON_SEAT_ROLES.include?(role)
+
+    new_record? || will_save_change_to_status? || will_save_change_to_deleted_at? ||
+      will_save_change_to_company_id? || will_save_change_to_role?
+  end
+
+  def company_has_a_free_seat
+    return if company.nil? || company.can_add_user?
+
+    errors.add(:base, company.user_limit_message)
+  end
 
   def linked_account_shape
     root = primary_user

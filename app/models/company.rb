@@ -780,8 +780,14 @@ class Company < ApplicationRecord
     users.where(deleted_at: nil).count
   end
   
+  # Users who take a seat against max_users. Platform staff reach every company
+  # and buyers sign in to the portal, so neither uses one of the dealer's seats.
+  NON_SEAT_ROLES = %w[platform_admin super_admin client].freeze
+
   def active_users_count
-    users.where(deleted_at: nil, status: 'active').count
+    users.where(deleted_at: nil, status: 'active')
+         .where('users.role IS NULL OR users.role NOT IN (?)', NON_SEAT_ROLES)
+         .count
   end
   
   def leads_count
@@ -1083,11 +1089,18 @@ class Company < ApplicationRecord
   end
   
   # Subscription management helpers
-  def can_add_user?
-    return true if subscription_tier == 'enterprise'
-    return true if max_users.nil?
-    
-    active_users_count < max_users
+  # pending: seats already promised to invitations that have not been accepted.
+  # A max_users of 0 or blank means no limit. The tier is deliberately ignored:
+  # almost every tenant is 'enterprise', and exempting it left the number Tom
+  # sets on the tenant screen meaning nothing.
+  def can_add_user?(pending: 0)
+    return true if max_users.nil? || max_users <= 0
+
+    active_users_count + pending < max_users
+  end
+
+  def user_limit_message
+    "#{name} has #{active_users_count} of #{max_users} users. Deactivate a user, or ask DealerTide to raise the limit."
   end
   
   def can_add_location?
@@ -1098,8 +1111,7 @@ class Company < ApplicationRecord
   end
   
   def remaining_user_slots
-    return Float::INFINITY if subscription_tier == 'enterprise'
-    return Float::INFINITY if max_users.nil?
+    return Float::INFINITY if max_users.nil? || max_users <= 0
     
     max_users - active_users_count
   end
