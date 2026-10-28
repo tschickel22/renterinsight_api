@@ -157,7 +157,11 @@ module Campaigns
 
       raw = Hash.new { |h, k| h[k] = [] }
 
-      CampaignLinkToken.where(campaign_send_id: send_meta.keys)
+      # Only emails with a counted click: a send whose clicks were all an email
+      # security scanner (Campaigns::ScannerClick) has clicked_at left empty, and
+      # listing its links would contradict the Clicked figure above.
+      counted = @campaign.campaign_sends.where(id: send_meta.keys).where.not(clicked_at: nil).select(:id)
+      CampaignLinkToken.where(campaign_send_id: counted)
                        .where('click_count > 0')
                        .pluck(:campaign_send_id, :target_url, :click_count, :last_clicked_at)
                        .each do |sid, url, cc, lc|
