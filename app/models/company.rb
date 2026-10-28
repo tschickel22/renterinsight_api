@@ -322,6 +322,12 @@ class Company < ApplicationRecord
     daily_campaign_sms_cap || Messaging::TenantSendCap::DEFAULT_SMS_CAP
   end
 
+  # Monthly allowances (EmailCapService, SmsCapService). 0 means unlimited; a
+  # negative number would read as unlimited too, so it is refused rather than
+  # silently lifting the cap.
+  validates :email_monthly_limit, :sms_monthly_limit,
+            numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+
   # Fiscal year validation (1-12 for January-December)
   validates :fiscal_year_start_month, 
             inclusion: { in: 1..12 }, 
