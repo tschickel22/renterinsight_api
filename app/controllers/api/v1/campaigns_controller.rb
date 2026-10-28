@@ -848,6 +848,7 @@ class Api::V1::CampaignsController < ApplicationController
       exclude_filter_tree: ca.exclude_filter_tree,
       exclude_active_campaign_enrollees: ca.try(:exclude_active_campaign_enrollees) || false,
       exclude_active_nurture_enrollees: ca.try(:exclude_active_nurture_enrollees) || false,
+      own_campaign_id: @campaign.id,
       channel: @campaign.audience_channel,
       sms_consent_acknowledged: ca.sms_compliance_override?
     )
@@ -856,6 +857,14 @@ class Api::V1::CampaignsController < ApplicationController
     # Exclude manually excluded IDs
     excluded_ids = Array(ca.manual_exclude_ids).map(&:to_i).reject(&:zero?)
     scope = scope.where.not(id: excluded_ids) if excluded_ids.any?
+
+    # Where everyone who fits stands with THIS campaign, so the count explains
+    # itself: "773 receiving it, 30 bounced, 3 not enrolled yet".
+    in_campaign = CampaignEnrollment.where(campaign_id: @campaign.id, recipient_type: ca.source_type,
+                                           recipient_id: scope.select(:id))
+    in_campaign = in_campaign.where("metadata->>'test_send' IS DISTINCT FROM 'true'")
+    by_status = in_campaign.group(:status).count
+    breakdown = { this_campaign: by_status, not_enrolled: [scope.count - by_status.values.sum, 0].max }
 
     # Search
     if params[:search].present?
@@ -873,12 +882,13 @@ class Api::V1::CampaignsController < ApplicationController
     per_page = [(params[:per_page] || 25).to_i, 200].min
     records = scope.offset((page - 1) * per_page).limit(per_page).to_a
 
-    enrollment_map = load_enrollment_data(records.map(&:id), ca.source_type)
+    enrollment_map = load_enrollment_data(records.map(&:id), ca.source_type, own_campaign_id: @campaign.id)
     items = records.map { |r| campaign_member_row(r, ca.source_type, enrollment_map[r.id] || []) }
 
     render json: {
       items: items,
-      meta: { total: total, page: page, per_page: per_page, total_pages: (total.to_f / per_page).ceil }
+      meta: { total: total, page: page, per_page: per_page, total_pages: (total.to_f / per_page).ceil,
+              breakdown: breakdown }
     }
   rescue Audiences::FilterCompiler::CompilationError => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -982,18 +992,28 @@ class Api::V1::CampaignsController < ApplicationController
 
   # Batch-load active campaign + nurture enrollments for the given record ids,
   # keyed by record id, to avoid N+1 queries when building member rows.
-  def load_enrollment_data(record_ids, source_type)
+  # own_campaign_id: this campaign's enrollment is listed whatever its status
+  # (bounced, unsubscribed), flagged this_campaign, so a member who bounced
+  # does not read as never having been sent anything.
+  def load_enrollment_data(record_ids, source_type, own_campaign_id: nil)
     return {} if record_ids.empty?
 
     result = Hash.new { |h, k| h[k] = [] }
 
-    CampaignEnrollment
-      .where(recipient_type: source_type, recipient_id: record_ids, status: %w[pending active])
+    enrollments = CampaignEnrollment.where(recipient_type: source_type, recipient_id: record_ids)
+    enrollments = if own_campaign_id
+                    enrollments.where(status: %w[pending active]).or(enrollments.where(campaign_id: own_campaign_id))
+                  else
+                    enrollments.where(status: %w[pending active])
+                  end
+    enrollments
+      .where("campaign_enrollments.metadata->>'test_send' IS DISTINCT FROM 'true'")
       .includes(:campaign)
       .each do |ce|
         result[ce.recipient_id] << {
           type: 'campaign', id: ce.campaign_id,
-          name: ce.campaign&.name || 'Unknown Campaign', status: ce.status
+          name: ce.campaign&.name || 'Unknown Campaign', status: ce.status,
+          this_campaign: ce.campaign_id == own_campaign_id
         }
       end
 
