@@ -337,16 +337,18 @@ module Api
         users = current_company.users.where(id: user_ids)
 
         updated_count = 0
+        refused = []
         users.each do |user|
           if user.update(status: 'active')
             updated_count += 1
+          else
+            refused << user.errors.full_messages.to_sentence
           end
         end
 
-        render json: {
-          message: "#{updated_count} user(s) activated successfully",
-          updated_count: updated_count
-        }
+        message = "#{updated_count} user(s) activated successfully"
+        message += ". #{refused.size} not activated: #{refused.uniq.join(' ')}" if refused.any?
+        render json: { message: message, updated_count: updated_count, not_activated: refused.size }
       end
 
       # POST /api/v1/users/bulk_deactivate

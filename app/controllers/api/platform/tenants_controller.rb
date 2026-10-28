@@ -769,6 +769,9 @@ module Api
             max_users: tenant.max_users,
             max_storage_gb: tenant.max_storage_gb,
             users_count: tenant.users.count,
+            # What max_users is enforced against: active users, not counting
+            # platform admins or portal buyers.
+            seats_used: tenant.active_users_count,
             users_remaining: tenant.remaining_user_slots,
             zoho_subscription_id: tenant.zoho_subscription_id,
             zoho_customer_id: tenant.zoho_customer_id,

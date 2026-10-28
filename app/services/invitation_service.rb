@@ -78,6 +78,15 @@ class InvitationService
       end
     end
 
+    # Refuse up front rather than at acceptance, so the admin hears it and the
+    # invitee never gets a link that cannot work. Invitations still pending
+    # count, or ten invites could be sent against one free seat.
+    if invitation_type == 'company_user' && @company
+      pending = Invitation.active.where(company_id: @company.id, invitation_type: 'company_user')
+      pending = pending.where.not(email: normalized_email) if normalized_email.present?
+      raise Error, @company.user_limit_message unless @company.can_add_user?(pending: pending.count)
+    end
+
     # Normalize location_ids to array of integers
     normalized_location_ids = normalize_location_ids(location_ids)
     
