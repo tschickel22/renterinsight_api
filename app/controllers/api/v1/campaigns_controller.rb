@@ -73,6 +73,7 @@ class Api::V1::CampaignsController < ApplicationController
 
   def show
     return unless authorize_action!('campaigns', 'read')
+    @campaign.refresh_stats! if @campaign.status.in?(%w[running paused completed])
     render json: campaign_json(@campaign, full: true)
   end
 
@@ -572,6 +573,7 @@ class Api::V1::CampaignsController < ApplicationController
 
   def stats
     return unless authorize_action!('campaigns', 'read')
+    @campaign.refresh_stats! if @campaign.status.in?(%w[running paused completed])
     render json: @campaign.stats_cache.presence || default_stats
   end
 

@@ -92,6 +92,46 @@ class Campaign < ApplicationRecord
     nil
   end
 
+  # The figures behind the campaign Overview tab, kept in stats_cache.
+  #
+  # Rates are per EMAIL, so open and click counts are divided by emails sent,
+  # not by every message (texts cannot be opened or clicked). The people_*
+  # figures count recipients, matching the Recipients tab, which a multi-step
+  # campaign's email counts never can.
+  def compute_stats
+    sends = campaign_sends.real
+    emails = sends.joins(:campaign_step).where(campaign_steps: { channel: 'email' })
+    enrollments = campaign_enrollments.real
+    {
+      'total_sent'     => sends.where.not(sent_at: nil).count,
+      'emails_sent'    => emails.where.not(campaign_sends: { sent_at: nil }).count,
+      'delivered'      => sends.delivered.count,
+      'opened'         => sends.where.not(opened_at: nil).count,
+      'clicked'        => sends.where.not(clicked_at: nil).count,
+      'replied'        => sends.where.not(replied_at: nil).count,
+      'bounced'        => sends.where.not(bounced_at: nil).count,
+      'recipients'     => sends.distinct.count(:campaign_enrollment_id),
+      'people_opened'  => sends.where.not(opened_at: nil).distinct.count(:campaign_enrollment_id),
+      'people_clicked' => sends.where.not(clicked_at: nil).distinct.count(:campaign_enrollment_id),
+      'unsubscribed'   => enrollments.where(status: 'unsubscribed').count,
+      # Count by goal_met_at, not status: 'track' goals record a conversion while the
+      # enrollment stays active, so status alone would undercount them.
+      'goals_met'      => enrollments.where.not(goal_met_at: nil).count,
+      'failed'         => enrollments.where(status: 'failed').count,
+      'updated_at'     => Time.current.iso8601
+    }
+  end
+
+  # The rollup job refreshes every 15 minutes; a page view refreshes a copy
+  # older than a minute, so the Overview tab matches the live Recipients tab.
+  def refresh_stats!(max_age: 1.minute)
+    updated = stats_cache.is_a?(Hash) && stats_cache['updated_at'].present? && Time.zone.parse(stats_cache['updated_at'])
+    return stats_cache if updated && updated > max_age.ago
+
+    update_column(:stats_cache, compute_stats)
+    stats_cache
+  end
+
   def mixed_channel?
     step_channels = campaign_steps.pluck(:channel).compact.uniq
     step_channels.length > 1
