@@ -217,7 +217,11 @@ module Messaging
     def resolve_sender_user
       case @campaign.try(:from_identity_type).to_s
       when 'User'
-        User.find_by(id: @campaign.from_identity_id, company_id: @company.id)
+        # A platform admin can send from another tenant's campaign (the mailbox
+        # lookup, Campaign#identity_user_mailbox, already allows it). Scoping
+        # them out here left the card reading just the company name.
+        User.find_by(id: @campaign.from_identity_id, company_id: @company.id) ||
+          User.platform_admins.find_by(id: @campaign.from_identity_id)
       when 'Owner'
         owner_id = @recipient.try(:owner_id) || @recipient.try(:owner)&.id
         return nil if owner_id.blank?

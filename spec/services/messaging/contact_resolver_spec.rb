@@ -33,6 +33,17 @@ RSpec.describe Messaging::ContactResolver do
       expect(out[:phone]).to eq('(303) 555-0100')
     end
 
+    it "ignores a sender's location that belongs to another company" do
+      other = Company.create!(name: 'Other Dealer')
+      foreign = Location.create!(company: other, name: 'Other Lot', phone: '(999) 999-9999', address_line1: '1 Elsewhere')
+      user = double('User', first_name: 'Tom', last_name: 'S', title: 'CEO', email: 'tom@acme.test', phone: nil, typed_signature: nil, booking_url: nil, primary_location: foreign, location: nil, locations: nil)
+      out = described_class.new(sender_user: user, campaign: double('Campaign', location: nil), company: company).resolve
+      expect(out[:name]).to eq('Tom S')
+      expect(out[:phone]).to eq('(555) 111-2222')
+      expect(out[:address]).to eq('100 Corp Way')
+      expect(out[:location_name]).to eq('Acme MH')
+    end
+
     it 'falls to company when no sender_user and no location' do
       camp = double('Campaign', location: nil)
       out = described_class.new(sender_user: nil, campaign: camp, company: company).resolve
