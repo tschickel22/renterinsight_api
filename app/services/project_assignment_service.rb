@@ -26,6 +26,7 @@ class ProjectAssignmentService
     @company = project.company
     @actor = actor
     @owner_notices = []
+    @user_notices = []
     @task_assigned_vendor_ids = Set.new
   end
 
@@ -48,6 +49,7 @@ class ProjectAssignmentService
       attrs[:assigned_to_id] = changes[:user]&.id if changes.key?(:user)
       @project.update!(attrs) if attrs.any?
       note_owner(changes[:vendor], old_vendor_id, nil)
+      note_user(changes[:user], old_user_id, nil) if changes.key?(:user)
 
       if apply_to_phases
         @project.project_phases.where.not(status: %w[completed skipped]).ordered.each do |phase|
@@ -85,7 +87,10 @@ class ProjectAssignmentService
       # never emails a contractor.
       raise ActiveRecord::Rollback if preview
     end
-    send_owner_notices unless preview
+    unless preview
+      send_owner_notices
+      ProjectNotices.employee_assigned(@project, @user_notices, actor: @actor)
+    end
     result
   end
 
@@ -96,6 +101,14 @@ class ProjectAssignmentService
     return if vendor.nil? || vendor.id == old_vendor_id
 
     @owner_notices << [vendor, phase]
+  end
+
+  # An employee given the project or a phase hears about it (E87): one notice
+  # per person listing what they got.
+  def note_user(user, old_user_id, phase)
+    return if user.nil? || user.id == old_user_id
+
+    @user_notices << [user, phase]
   end
 
   def send_owner_notices
@@ -114,6 +127,7 @@ class ProjectAssignmentService
     attrs[:assigned_to_id] = changes[:user]&.id if changes.key?(:user)
     phase.update!(attrs) if attrs.any?
     note_owner(changes[:vendor], old_vendor_id, phase) if changes.key?(:vendor)
+    note_user(changes[:user], old_user_id, phase) if changes.key?(:user)
     return unless apply_to_tasks
 
     phase.project_phase_tasks.includes(:contractor_assignments).each do |task|

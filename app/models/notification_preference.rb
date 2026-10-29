@@ -79,10 +79,30 @@ class NotificationPreference < ApplicationRecord
     campaign_paused_sender: { in_app: true, email: true, sms: false, push: false },
     sms_cap_alert: { in_app: true, email: true, sms: false },
 
-    # Project / Contractor notifications
+    # Project / Contractor / Installer notifications (E87). Anything that waits
+    # on this person, or answers something they sent, defaults to email and
+    # text: nobody watches the bell, and a job offer that sits unread costs the
+    # dealer a week. Each is the person's to switch off in Notification Center.
+    # FYI events stay in the app. Review Updates lists the open ones whatever
+    # these say.
     contractor_task_assigned: { in_app: true, email: true, sms: false, push: true },
-    contractor_review_submitted: { in_app: true, email: true, sms: false, push: false },
-    contractor_review_revision: { in_app: true, email: true, sms: false, push: false }
+    contractor_review_submitted: { in_app: true, email: true, sms: true, push: false },
+    contractor_review_revision: { in_app: true, email: true, sms: false, push: false },
+    contractor_invoice_submitted: { in_app: true, email: true, sms: true, push: false },
+    project_bid_submitted: { in_app: true, email: true, sms: true, push: false },
+    project_assigned: { in_app: true, email: true, sms: true, push: true },
+    project_link_request: { in_app: true, email: true, sms: true, push: false },
+    project_job_offered: { in_app: true, email: true, sms: true, push: true },
+    project_job_answered: { in_app: true, email: true, sms: true, push: false },
+    project_job_taken_back: { in_app: true, email: true, sms: false, push: false },
+    project_installer_bill: { in_app: true, email: true, sms: true, push: false },
+    project_rate_card: { in_app: true, email: true, sms: true, push: false },
+    project_rate_card_decided: { in_app: true, email: true, sms: true, push: false },
+    project_change_order: { in_app: true, email: true, sms: true, push: false },
+    project_change_decided: { in_app: true, email: true, sms: true, push: false },
+    project_review_nudge: { in_app: false, email: true, sms: false, push: false },
+    company_link: { in_app: true, email: false, sms: false },
+    project_link: { in_app: true, email: false, sms: false }
   }.freeze
 
   # Get or create preference for user and notification type

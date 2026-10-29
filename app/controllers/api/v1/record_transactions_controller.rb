@@ -15,6 +15,8 @@ class Api::V1::RecordTransactionsController < ApplicationController
   #   category_account_id: ID of expense or revenue GL account
   #   payment_account_id: ID of cash/bank GL account
   #   vendor_name / customer_name: optional
+  #   vendor_id: optional (expense; names the vendor on the project's cost line)
+  #   project_phase_id: optional (expense; the phase of project_id it was for)
   #   contact_id: optional (the customer on income, picked from contacts)
   #   project_id: optional (the job it was spent on or received for; its deal
   #               rides along, and its deal's customer when no contact is given)
@@ -67,8 +69,19 @@ class Api::V1::RecordTransactionsController < ApplicationController
 
     # Name the customer the way the project and its deal show them. A deal can
     # carry a typed customer name that differs from its linked contact.
+    vendor = nil
+    if type == 'expense'
+      vendor = @company.vendors.find_by(id: params[:vendor_id]) if params[:vendor_id].present?
+      vendor ||= @company.vendors.where('LOWER(name) = ?', params[:vendor_name].to_s.strip.downcase).first if params[:vendor_name].present?
+    end
+    phase_id = nil
+    if params[:project_phase_id].present?
+      phase_id = project&.project_phases&.where(id: params[:project_phase_id])&.pick(:id)
+      return render json: { error: 'That phase is not on the project picked' }, status: :unprocessable_entity unless phase_id
+    end
+
     party_name = if type == 'expense'
-                   params[:vendor_name]
+                   params[:vendor_name].presence || vendor&.name
                  else
                    params[:customer_name].presence || picked_contact&.full_name ||
                      project&.customer_display_name.presence&.then { |n| n == 'Unknown' ? nil : n } ||
@@ -95,6 +108,12 @@ class Api::V1::RecordTransactionsController < ApplicationController
       source_type: 'quick_entry',
       posted_by: current_user
     )
+    if type == 'expense'
+      je.job_cost_vendor = vendor
+      je.job_cost_phase_id = phase_id
+      # The cost line already shows the vendor; its description is what it was for.
+      je.job_cost_description = [user_memo, ref && "Ref #{ref}"].compact.join(' ').presence || category_account.name
+    end
 
     if type == 'expense'
       # DEBIT expense, CREDIT cash/bank

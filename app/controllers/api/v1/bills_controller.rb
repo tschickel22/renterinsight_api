@@ -376,7 +376,7 @@ class Api::V1::BillsController < ApplicationController
     permitted = params.require(:bill).permit(
       :vendor_id, :supplier_id, :contact_id, :location_id, :vendor_name,
       :bill_date, :due_date, :status, :payment_terms,
-      :tax_amount, :memo, :notes, :reference_number, :ap_account_id, :project_id,
+      :tax_amount, :memo, :notes, :reference_number, :ap_account_id, :project_id, :project_phase_id,
       bill_line_items_attributes: [
         :id, :chart_of_account_id, :amount, :description,
         :location_id, :department, :project_id, :position, :_destroy

@@ -36,7 +36,7 @@ class Notification < ApplicationRecord
   # Validations
   validates :recipient_type, :recipient_id, :notification_type, :category, :title, :message, presence: true
   validates :priority, inclusion: { in: %w[urgent high normal low] }
-  validates :category, inclusion: { in: %w[service crm sales finance system broadcast communications ai] }
+  validates :category, inclusion: { in: %w[service crm sales finance system broadcast communications ai projects] }
   
   # Notification types with their default settings
   TYPES = {
@@ -105,18 +105,31 @@ class Notification < ApplicationRecord
     email_connection_broken: { category: 'communications', priority: 'urgent', title: 'Email Connection Needs Reconnection' },
     campaign_paused_sender: { category: 'communications', priority: 'urgent', title: 'Campaign Paused: Sender Needs Attention' },
 
-    # Project / Contractor notifications
-    contractor_review_submitted: { category: 'service', priority: 'high', title: 'Contractor Submitted for Review' },
-    contractor_review_approved: { category: 'service', priority: 'normal', title: 'Work Approved' },
-    contractor_review_revision: { category: 'service', priority: 'high', title: 'Revision Requested' },
-    contractor_review_rejected: { category: 'service', priority: 'normal', title: 'Work Rejected' },
-    contractor_task_assigned: { category: 'service', priority: 'high', title: 'New Task Assignment' },
-    project_phase_completed: { category: 'service', priority: 'normal', title: 'Project Phase Completed' },
-    contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' },
-    contractor_invoice_submitted: { category: 'finance', priority: 'high', title: 'Contractor Invoice Submitted' },
-    project_bid_submitted: { category: 'service', priority: 'high', title: 'Bid Received' },
-    company_link: { category: 'service', priority: 'high', title: 'Linked Company' },
-    project_link: { category: 'service', priority: 'high', title: 'Linked Job' },
+    # Project / Contractor / Installer notifications. Their own group in
+    # Notification Center (E87), so a dealer or installer can choose email and
+    # text for each without wading through service tickets.
+    contractor_review_submitted: { category: 'projects', priority: 'high', title: 'Contractor Submitted for Review' },
+    contractor_review_approved: { category: 'projects', priority: 'normal', title: 'Work Approved' },
+    contractor_review_revision: { category: 'projects', priority: 'high', title: 'Revision Requested' },
+    contractor_review_rejected: { category: 'projects', priority: 'normal', title: 'Work Rejected' },
+    contractor_task_assigned: { category: 'projects', priority: 'high', title: 'New Task Assignment' },
+    project_phase_completed: { category: 'projects', priority: 'normal', title: 'Project Phase Completed' },
+    contractor_work_log_added: { category: 'projects', priority: 'low', title: 'Work Log Entry Added' },
+    contractor_invoice_submitted: { category: 'projects', priority: 'high', title: 'Contractor Invoice Submitted' },
+    project_bid_submitted: { category: 'projects', priority: 'high', title: 'Bid Received' },
+    project_assigned: { category: 'projects', priority: 'high', title: 'Project Work Assigned to You' },
+    project_link_request: { category: 'projects', priority: 'high', title: 'Link Request From a Dealer' },
+    project_job_offered: { category: 'projects', priority: 'high', title: 'New Job From a Dealer' },
+    project_job_answered: { category: 'projects', priority: 'high', title: 'Installer Accepted or Declined a Job' },
+    project_job_taken_back: { category: 'projects', priority: 'high', title: 'Job Taken Back' },
+    project_installer_bill: { category: 'projects', priority: 'high', title: 'Bill From Your Installer' },
+    project_rate_card: { category: 'projects', priority: 'high', title: 'Rate Card to Review' },
+    project_rate_card_decided: { category: 'projects', priority: 'normal', title: 'Your Rate Card Was Decided' },
+    project_change_order: { category: 'projects', priority: 'high', title: 'Change Order or Quote to Approve' },
+    project_change_decided: { category: 'projects', priority: 'normal', title: 'Your Change Order Was Decided' },
+    project_review_nudge: { category: 'projects', priority: 'normal', title: 'Project Items Still Waiting' },
+    company_link: { category: 'projects', priority: 'high', title: 'Linked Company' },
+    project_link: { category: 'projects', priority: 'high', title: 'Linked Job' },
 
     # AI connector oversight (backlog E53): an AI app hit the daily record
     # limit, or kept being refused. In-app only; not push eligible.
@@ -158,6 +171,8 @@ class Notification < ApplicationRecord
     contractor_task_assigned
     contractor_review_submitted
     contractor_review_revision
+    project_assigned
+    project_job_offered
   ].freeze
 
   def self.push_eligible?(notification_type)

@@ -701,6 +701,19 @@ Rails.application.routes.draw do
       get 'workflow_field_options', to: 'workflow_field_options#index'
 
       # ==================== PROJECTS ====================
+      # Review Updates: project work waiting on someone (E87)
+      resources :review_items, only: %i[index] do
+        collection { get :counts }
+        member do
+          post :seen
+          post :reopen
+        end
+      end
+
+      # Bids & Quotes across every project (E87)
+      get 'bids_board', to: 'bids_board#index'
+      get 'bids_board/counts', to: 'bids_board#counts'
+
       # Dealer and installer company links, and the jobs handed across (E68 step 5)
       resources :company_links, only: %i[index create] do
         member do
@@ -3667,6 +3680,9 @@ Rails.application.routes.draw do
         member do
           post :submit
           post :decline
+          # Files sent with the bid (E87)
+          post 'files', action: :upload_file
+          delete 'files/:file_id', action: :remove_file
         end
       end
 

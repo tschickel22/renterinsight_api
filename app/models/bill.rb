@@ -35,6 +35,7 @@ class Bill < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
   validate :project_belongs_to_company, if: -> { project_id.present? && will_save_change_to_project_id? }
+  validate :phase_belongs_to_project, if: -> { project_phase_id.present? && (will_save_change_to_project_phase_id? || will_save_change_to_project_id?) }
   validate :total_covers_payments, if: -> { will_save_change_to_total_amount? && persisted? }
 
   before_validation :compute_totals
@@ -47,6 +48,10 @@ class Bill < ApplicationRecord
   after_update :sync_project_cost_items, if: -> { saved_change_to_status? || saved_change_to_total_amount? }
   # Declared after the posting callbacks, so the bill's entry exists by now.
   after_save :sync_project_job_cost
+  # A contractor or installer invoice waits in Review Updates as a draft bill
+  # (E87); approving, voiding or deleting it from anywhere closes that item.
+  after_commit :close_review_items, on: :update, if: -> { saved_change_to_status? || saved_change_to_is_deleted? }
+  after_commit -> { ProjectNotices.close!(subject: self, resolution: 'deleted', by: Current.user) }, on: :destroy
   after_update :refresh_posted_je, if: -> { journal_entry_id.present? && !saved_change_to_journal_entry_id? && status != 'void' }
 
   scope :active, -> { where(is_deleted: false) }
@@ -377,7 +382,10 @@ class Bill < ApplicationRecord
     linked.each do |item|
       if wanted.key?(item.project_id)
         amount = wanted.delete(item.project_id)
-        item.update!(amount: amount, vendor_id: vendor_id) if item.amount.to_d != amount || item.vendor_id != vendor_id
+        phase_id = phase_for(item.project_id)
+        if item.amount.to_d != amount || item.vendor_id != vendor_id || (phase_id && item.project_phase_id != phase_id)
+          item.update!(amount: amount, vendor_id: vendor_id, project_phase_id: phase_id || item.project_phase_id)
+        end
       else
         item.update!(is_deleted: true)
       end
@@ -391,7 +399,9 @@ class Bill < ApplicationRecord
         company_id: company_id,
         project_id: project_id,
         vendor_id: vendor_id,
-        cost_type: vendor&.vendor_type == 'contractor' ? 'subcontractor' : (vendor&.vendor_type == 'supplier' ? 'materials' : 'other'),
+        vendor_name: vendor&.name,
+        project_phase_id: phase_for(project_id),
+        cost_type: ProjectCostItem.cost_type_for_vendor(vendor),
         description: "Bill #{bill_number} from #{vendor_display_name}".truncate(250),
         invoice_number: reference_number,
         amount: amount,
@@ -403,8 +413,30 @@ class Bill < ApplicationRecord
     end
   end
 
+  def close_review_items
+    return if status == 'draft' && !is_deleted?
+
+    resolution = if is_deleted? then 'deleted'
+                 elsif status == 'void' then 'voided'
+                 else 'approved'
+                 end
+    ProjectNotices.close!(subject: self, kinds: %w[contractor_invoice installer_bill], resolution: resolution,
+                          by: Current.user || 'Accounting')
+  end
+
   def project_belongs_to_company
     errors.add(:project_id, 'is not one of your projects') unless company.projects.where(id: project_id).exists?
+  end
+
+  # The phase picked in the header applies to the header's project (E87).
+  def phase_for(cost_project_id)
+    project_phase_id if project_phase_id.present? && cost_project_id == project_id
+  end
+
+  def phase_belongs_to_project
+    return if project_id.present? && ProjectPhase.where(id: project_phase_id, project_id: project_id).exists?
+
+    errors.add(:project_phase_id, 'is not a phase of the project picked')
   end
 
   def resolve_ap_account

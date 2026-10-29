@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_29_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1016,6 +1016,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
     t.bigint "project_id"
     t.string "source"
     t.jsonb "submission", default: {}, null: false
+    t.bigint "project_phase_id"
     t.index ["accounting_import_id"], name: "index_bills_on_accounting_import_id", where: "(accounting_import_id IS NOT NULL)"
     t.index ["ap_account_id"], name: "index_bills_on_ap_account_id"
     t.index ["company_id", "bill_number"], name: "index_bills_on_company_id_and_bill_number", unique: true, where: "(bill_number IS NOT NULL)"
@@ -1028,6 +1029,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
     t.index ["location_id"], name: "index_bills_on_location_id"
     t.index ["payment_journal_entry_id"], name: "index_bills_on_payment_journal_entry_id"
     t.index ["project_id"], name: "index_bills_on_project_id"
+    t.index ["project_phase_id"], name: "index_bills_on_project_phase_id"
     t.index ["vendor_id"], name: "index_bills_on_vendor_id"
   end
 
@@ -5686,6 +5688,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
     t.bigint "created_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.text "award_note"
     t.index ["company_id", "status"], name: "index_project_bid_requests_on_company_id_and_status"
     t.index ["company_id"], name: "index_project_bid_requests_on_company_id"
     t.index ["project_id"], name: "index_project_bid_requests_on_project_id"
@@ -5707,6 +5710,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
     t.bigint "project_cost_item_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "history", default: [], null: false
     t.index ["company_id"], name: "index_project_bids_on_company_id"
     t.index ["project_bid_request_id", "vendor_id"], name: "index_project_bids_on_project_bid_request_id_and_vendor_id", unique: true
     t.index ["project_bid_request_id"], name: "index_project_bids_on_project_bid_request_id"
@@ -6682,6 +6686,35 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_26_150100) do
     t.index ["key"], name: "index_resources_on_key", unique: true
     t.index ["permission_ui_type"], name: "index_resources_on_permission_ui_type"
     t.index ["position"], name: "index_resources_on_position"
+  end
+
+  create_table "review_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_id"
+    t.bigint "project_phase_id"
+    t.string "kind", null: false
+    t.string "subject_type", null: false
+    t.bigint "subject_id", null: false
+    t.boolean "needs_action", default: true, null: false
+    t.string "status", default: "open", null: false
+    t.string "title", null: false
+    t.text "detail"
+    t.string "from_name"
+    t.string "link"
+    t.bigint "assigned_user_id"
+    t.string "resolution"
+    t.bigint "resolved_by_id"
+    t.string "resolved_by_name"
+    t.datetime "resolved_at"
+    t.datetime "nudged_at"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "assigned_user_id", "status"], name: "idx_on_company_id_assigned_user_id_status_11376893a0"
+    t.index ["company_id", "kind", "subject_type", "subject_id"], name: "index_review_items_one_open_per_subject", unique: true, where: "((status)::text = 'open'::text)"
+    t.index ["company_id", "status", "needs_action"], name: "index_review_items_on_company_id_and_status_and_needs_action"
+    t.index ["project_id"], name: "index_review_items_on_project_id"
+    t.index ["subject_type", "subject_id"], name: "index_review_items_on_subject_type_and_subject_id"
   end
 
   create_table "role_permissions", force: :cascade do |t|

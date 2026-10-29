@@ -191,7 +191,12 @@ module Api
         ).distinct.pluck(:contractor_id)
 
         contractor_sent = 0
+        # Who can't be reached, said out loud: an address that bounced before
+        # used to fail here silently while the rows were marked sent (E87).
+        undeliverable = []
         contractor_ids.each do |cid|
+          problem = ProjectNotificationService.undeliverable_reason(::Contractor.find_by(id: cid), @company)
+          undeliverable << problem if problem
           contractor_sent += ProjectNotificationService.dispatch_pending_assignments_for_contractor(cid)
         end
 
@@ -201,7 +206,8 @@ module Api
         render json: {
           flushed: contractor_sent,
           contractor_ids: contractor_ids,
-          reviews_flushed: review_sent
+          reviews_flushed: review_sent,
+          undeliverable: undeliverable
         }
       end
 
@@ -350,7 +356,8 @@ module Api
         new_status = params[:status]
         return render(json: { error: 'Status is required' }, status: :bad_request) if new_status.blank?
 
-        result = @project.set_phase_status!(phase, new_status, changed_by: current_user)
+        result = @project.set_phase_status!(phase, new_status, changed_by: current_user,
+                                            close_open_tasks: ActiveModel::Type::Boolean.new.cast(params[:close_open_tasks]))
 
         if result[:error]
           render json: { error: result[:error] }, status: :unprocessable_entity
@@ -621,13 +628,17 @@ module Api
         template_id = params[:template_id]
         return render(json: { error: 'template_id is required' }, status: :bad_request) if template_id.blank?
 
-        template = @company.project_templates.active.find_by(id: template_id)
-        return render(json: { error: 'Template not found' }, status: :not_found) unless template
-
-        template_phases = template.project_template_phases.order(:position)
+        # 'none': projects not built from a template, above all an installer's
+        # jobs from linked dealers (E87). Their phases come from the dealer, so
+        # the columns are the phase names those projects actually have.
+        untemplated = template_id == 'none'
+        unless untemplated
+          template = @company.project_templates.active.find_by(id: template_id)
+          return render(json: { error: 'Template not found' }, status: :not_found) unless template
+        end
 
         projects = @company.projects.not_deleted
-                           .where(project_template_id: template_id)
+                           .where(project_template_id: untemplated ? nil : template_id)
                            .includes(:project_phases, :location, deal: [:account, :contact])
 
         unless params[:include_completed] == 'true'
@@ -645,6 +656,15 @@ module Api
         per_page    = [(params[:per_page] || 100).to_i, 500].min
         total_count = projects.count
         projects    = projects.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
+
+        # A column per template phase, keyed by position; untemplated projects
+        # line up by phase name instead.
+        template_phases = if untemplated
+          names = projects.flat_map { |pr| pr.project_phases.sort_by(&:position).map(&:name) }.uniq.first(30)
+          names.each_with_index.map { |name, i| ProjectTemplatePhase.new(id: -(i + 1), name: name, position: i) }
+        else
+          template.project_template_phases.order(:position)
+        end
 
         project_rows = projects.map do |project|
           phase_map = {}
@@ -665,7 +685,7 @@ module Api
                   else
                     0
                   end
-            phase_map[ph.position] = { status: ph.status, progress_percent: pct }
+            phase_map[untemplated ? ph.name : ph.position] = { status: ph.status, progress_percent: pct }
           end
 
           deal = project.deal
@@ -682,14 +702,18 @@ module Api
             contact: deal&.contact ? { id: deal.contact.id, full_name: [deal.contact.first_name, deal.contact.last_name].compact.join(' ') } : nil,
             location: project.location ? { id: project.location.id, name: project.location.name } : nil,
             phases: template_phases.map do |tp|
-              pd = phase_map[tp.position] || {}
+              pd = phase_map[untemplated ? tp.name : tp.position] || {}
               { template_phase_id: tp.id, position: tp.position, status: pd[:status] || 'not_started', progress_percent: pd[:progress_percent] || 0 }
             end
           }
         end
 
         render json: {
-          template: { id: template.id, name: template.name, phases: template_phases.as_json(only: %i[id name position color icon]) },
+          template: if untemplated
+                      { id: 'none', name: 'No template', phases: template_phases.map { |tp| { id: tp.id, name: tp.name, position: tp.position, color: nil, icon: nil } } }
+                    else
+                      { id: template.id, name: template.name, phases: template_phases.as_json(only: %i[id name position color icon]) }
+                    end,
           projects: project_rows,
           meta: { total: total_count, page: page, per_page: per_page, total_pages: (total_count.to_f / per_page).ceil }
         }

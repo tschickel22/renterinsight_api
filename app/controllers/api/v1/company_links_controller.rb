@@ -30,7 +30,11 @@ module Api
           agreement_version: CompanyLink::AGREEMENT_VERSION,
           as_dealer: as_dealer.map { |l| link_json(l) },
           as_installer: as_installer.map { |l| link_json(l) },
-          invitations: invitations.map { |l| link_json(l) },
+          # One sign-in can be an admin at several companies (a platform admin,
+          # an owner of two): accepting links the company signed in now, so
+          # say which, and where else the invite could be accepted from (E87).
+          accepting_as: @company.name,
+          invitations: invitations.map { |l| link_json(l).merge(also_admin_at: other_admin_companies(l)) },
           jobs: jobs.map { |pl| job_json(pl) }
         }
       end
@@ -122,6 +126,12 @@ module Api
                            .find_by(id: params[:id]) ||
                 service.invitations_for_me.find_by(id: params[:id])
         render json: { error: 'Not found' }, status: :not_found unless @link
+      end
+
+      def other_admin_companies(link)
+        User.where('LOWER(email) = ?', link.invite_email.to_s.downcase).where(status: 'active').includes(:company)
+            .select { |u| u.company && u.effective_admin? }.map(&:company)
+            .reject { |c| c.id.in?([@company.id, link.dealer_company_id]) }.map(&:name).uniq
       end
 
       def link_json(l)

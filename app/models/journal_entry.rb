@@ -27,6 +27,9 @@ class JournalEntry < ApplicationRecord
   # e.g. converting an opening balance that reports were adding at report
   # time (script/post_opening_balances.rb). Never for new activity.
   attr_accessor :allow_closed_period
+  # Record Expense (E87): who was paid and for which phase, so the project's
+  # cost line names the vendor and takes their type instead of only the memo.
+  attr_accessor :job_cost_vendor, :job_cost_phase_id, :job_cost_description
 
   before_create :assign_entry_number
   before_save :set_fiscal_period
@@ -206,11 +209,13 @@ class JournalEntry < ApplicationRecord
              end
 
     status = source_type == 'quick_entry' ? 'paid' : 'approved'
-    description = (memo.presence || "Journal entry #{entry_number}").truncate(250)
+    description = (job_cost_description.presence || memo.presence || "Journal entry #{entry_number}").truncate(250)
+    vendor_attrs = job_cost_vendor ? { vendor_id: job_cost_vendor.id, vendor_name: job_cost_vendor.name } : {}
     linked.each do |item|
       amount = wanted.delete(item.project_id)
       if amount&.positive?
-        attrs = { amount: amount, date: entry_date, description: description }
+        attrs = { amount: amount, date: entry_date, description: description }.merge(vendor_attrs)
+        attrs[:project_phase_id] = job_cost_phase_id if job_cost_phase_id && phase_on?(item.project_id)
         item.update!(attrs) if attrs.any? { |k, v| item[k] != v }
       else
         item.update!(is_deleted: true)
@@ -222,11 +227,17 @@ class JournalEntry < ApplicationRecord
 
       ProjectCostItem.create!(
         company_id: company_id, project_id: project_id, journal_entry_id: id,
-        cost_type: 'other', description: description, amount: amount, date: entry_date,
+        cost_type: ProjectCostItem.cost_type_for_vendor(job_cost_vendor), description: description, amount: amount, date: entry_date,
         status: status, paid_at: status == 'paid' ? Time.current : nil,
-        metadata: { 'source' => source_type }
+        project_phase_id: job_cost_phase_id && phase_on?(project_id) ? job_cost_phase_id : nil,
+        metadata: { 'source' => source_type },
+        **vendor_attrs
       )
     end
+  end
+
+  def phase_on?(project_id)
+    ProjectPhase.where(id: job_cost_phase_id, project_id: project_id).exists?
   end
 
   def drop_project_job_cost

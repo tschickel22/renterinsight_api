@@ -5,7 +5,8 @@ class ProjectDocument < ApplicationRecord
   include PrivateFileColumns
   private_file_columns :file_url
 
-  CATEGORIES = %w[permit inspection photo contract invoice drawing report checklist other].freeze
+  # bid: a file a contractor sent with their bid (E87), kept on the project.
+  CATEGORIES = %w[permit inspection photo contract invoice drawing report checklist bid other].freeze
 
   belongs_to :company
   belongs_to :project

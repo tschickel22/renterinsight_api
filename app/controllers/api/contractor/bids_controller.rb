@@ -41,6 +41,22 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
+      # POST /api/contractor/bids/:id/files (multipart: file)
+      def upload_file
+        ProjectBidService.new(@bid.company).attach_file!(@bid, params[:file])
+        render json: { bid: bid_json(@bid.reload, detail: true) }, status: :created
+      rescue ProjectBidService::Error => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # DELETE /api/contractor/bids/:id/files/:file_id
+      def remove_file
+        ProjectBidService.new(@bid.company).remove_file!(@bid, params[:file_id])
+        render json: { bid: bid_json(@bid.reload, detail: true) }
+      rescue ProjectBidService::Error => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       private
 
       def set_bid
@@ -76,7 +92,8 @@ module Api
           submitted_at: bid.submitted_at,
           invited_at: bid.invited_at,
           # Once awarded the job is theirs and shows under Projects.
-          project_id: bid.status == 'awarded' ? project.id : nil
+          project_id: bid.status == 'awarded' ? project.id : nil,
+          award_note: bid.status == 'awarded' ? request.award_note : nil
         }
         return json unless detail
 
@@ -85,7 +102,9 @@ module Api
         else
           []
         end
-        json.merge(scope: request.scope, tasks: tasks, notes: bid.notes)
+        # Changes the dealer made to this bid, and why (E87).
+        changes = bid.history.map { |h| h.slice('at', 'by_name', 'reason', 'from', 'to') }
+        json.merge(scope: request.scope, tasks: tasks, notes: bid.notes, files: bid.documents_json, changes: changes)
       end
     end
   end

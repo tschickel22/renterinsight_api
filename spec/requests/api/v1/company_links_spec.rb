@@ -67,8 +67,11 @@ RSpec.describe 'Company links', type: :request do
       post '/api/v1/company_links', headers: h(dealer), params: { vendor_id: vendor.id, email: 'boss@install.example' }.to_json
     }.to have_enqueued_job(CompanyLinkInviteEmailJob)
     id = body.dig('company_link', 'id')
-    expect(Notification.where(recipient: boss, notification_type: 'company_link').count).to eq(1)
-    expect(Notification.where(company_id: dealer_co.id, notification_type: 'company_link')).to be_empty
+    expect(Notification.where(recipient: boss, notification_type: 'project_link_request').count).to eq(1)
+    expect(Notification.where(company_id: dealer_co.id, notification_type: 'project_link_request')).to be_empty
+    # Waits in the installer's Review Updates, not the dealer's.
+    expect(installer_co.review_items.open.pluck(:kind)).to eq(['link_request'])
+    expect(dealer_co.review_items).to be_empty
 
     get '/api/v1/company_links', headers: h(boss)
     expect(body['invitations'].map { |l| l['dealer_company_name'] }).to eq(['Summit Homes'])
@@ -87,6 +90,8 @@ RSpec.describe 'Company links', type: :request do
     expect(link.installer_company).to eq(installer_co)
     expect(link.installer_dealer_account.name).to eq('Summit Homes')
     expect(link.events.pluck(:kind)).to eq(%w[invited accepted])
+    expect(installer_co.review_items.open).to be_empty
+    expect(installer_co.review_items.closed.first.resolution).to eq('accepted')
   end
 
   it 'refuses an invite to an email that is not an admin on the platform, and sends nothing' do
@@ -225,7 +230,10 @@ RSpec.describe 'Company links', type: :request do
     expect(pl.reload.status).to eq('declined')
     expect(finish_phase.reload.assigned_vendor_id).to eq(crew.id)
     expect(ProjectCostItem.exists?(line_id)).to be(false)
-    expect(Notification.where(recipient: dealer, notification_type: 'project_link').last.message).to include('Booked that week')
+    expect(Notification.where(recipient: dealer, notification_type: 'project_job_answered').last.message).to include('Booked that week')
+    # The offer closed on the installer's side; the answer is an FYI on the dealer's.
+    expect(installer_co.review_items.where(kind: 'job_offered', subject: pl).first.status).to eq('closed')
+    expect(dealer_co.review_items.open.where(kind: 'job_answered').first).to have_attributes(needs_action: false, project_id: project.id)
 
     whole = offer!(link, phase: nil, fee: nil)
     expect(project.reload.assigned_vendor_id).to eq(vendor.id)
@@ -331,11 +339,11 @@ RSpec.describe 'Company links', type: :request do
   it 'opens a link notice on the right page for each side' do
     link = link!
     pl = offer!(link)
-    installer_note = Notification.where(recipient: boss, notification_type: 'project_link').last
+    installer_note = Notification.where(recipient: boss, notification_type: 'project_job_offered').last
     expect(installer_note.computed_action_url).to eq('/linked-companies?view=jobs')
     post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
     project.update!(deal_id: nil)
-    dealer_note = Notification.where(recipient: dealer, notification_type: 'project_link').last
+    dealer_note = Notification.where(recipient: dealer, notification_type: 'project_job_answered').last
     expect(dealer_note.computed_action_url).to eq("/deals/projects/#{project.id}")
   end
 end

@@ -86,7 +86,9 @@ class Project < ApplicationRecord
   end
 
   # Set a specific phase to a given status (manual control)
-  def set_phase_status!(phase, new_status, changed_by: nil)
+  # close_open_tasks: completing the phase also ticks off its open tasks
+  # (E87), which the person closing it is asked about.
+  def set_phase_status!(phase, new_status, changed_by: nil, close_open_tasks: false)
     return { error: 'Phase not found in this project' } unless phase.project_id == id
     return { error: 'Invalid status' } unless ProjectPhase::STATUSES.include?(new_status)
     return linked_phase_error(phase) if linked_phase_error(phase)
@@ -110,6 +112,9 @@ class Project < ApplicationRecord
           completed_by_id: changed_by&.id,
           started_at: phase.started_at || now
         )
+        if close_open_tasks
+          phase.project_phase_tasks.where.not(status: 'completed').find_each { |task| task.complete!(by: changed_by) }
+        end
       when 'in_progress'
         phase.update!(
           status: 'in_progress',

@@ -1,5 +1,6 @@
-<%# Platform-branded email frame: logo on the brand color, a white card, and a
-    footer. Colors and logo come from Platform Admin branding (PlatformSetting),
+<%# Platform-branded email frame: logo on white over a brand-color bar, a white
+    card, and a footer. The logo sits on white because the platform logo is
+    itself the brand color and vanished on a brand-color header (2026-10-29). Colors and logo come from Platform Admin branding (PlatformSetting),
     so a rebrand is a settings change. Inline styles only: most email clients
     ignore style blocks. %>
 <!DOCTYPE html>
@@ -16,12 +17,12 @@
                  style="max-width:600px;background:#ffffff;border-radius:10px;overflow:hidden;
                         font-family:<%= @brand_font %>;color:#1f2937;font-size:15px;line-height:1.6;">
             <tr>
-              <td align="center" style="background:<%= @brand_primary %>;padding:26px 20px;">
+              <td align="center" style="background:#ffffff;padding:24px 20px 20px 20px;border-bottom:4px solid <%= @brand_primary %>;">
                 <% if @brand.logo_url.present? %>
                   <img src="<%= @brand.logo_url %>" alt="<%= @brand.name %>" width="180"
                        style="display:block;max-width:180px;height:auto;border:0;">
                 <% else %>
-                  <span style="color:#ffffff;font-size:24px;font-weight:bold;"><%= @brand.name %></span>
+                  <span style="color:<%= @brand_primary %>;font-size:24px;font-weight:bold;"><%= @brand.name %></span>
                 <% end %>
               </td>
             </tr>

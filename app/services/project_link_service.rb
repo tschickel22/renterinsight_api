@@ -155,6 +155,7 @@ class ProjectLinkService
     change.update!(status: 'withdrawn', decided_by: @actor, decided_at: Time.current)
     pl.company_link.log!('change_withdrawn', "#{@company.name} withdrew #{change.label.downcase} on #{pl.scope_label}",
                          company: @company, user: @actor, project_link: pl)
+    CompanyLinkNotifier.change_withdrawn(change)
     change
   end
 
