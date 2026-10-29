@@ -95,7 +95,9 @@ module Api
           mine: open.actionable.for_user(current_user).count,
           all: open.actionable.count,
           mineFyi: open.where(needs_action: false).for_user(current_user).count,
-          allOpen: open.count
+          allOpen: open.count,
+          # Contractor work waiting on the dealer's review (the Contractor work tab).
+          workReviews: ContractorAssignment.where(company_id: @company.id, review_status: 'pending_review').count
         }
       end
     end
