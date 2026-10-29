@@ -57,13 +57,17 @@ module Messaging
 
     # Users have primary_location_id or a UserLocation join — try both
     # patterns so this works across the tenants that migrated at different
-    # times.
+    # times. A platform admin sending for another tenant has their home
+    # location in their own company; its address and phone are not this
+    # tenant's, so it is skipped.
     def sender_location
       return nil unless @sender_user
-      @sender_location ||=
-        @sender_user.try(:primary_location) ||
-        @sender_user.try(:location) ||
-        (@sender_user.try(:locations)&.first)
+      @sender_location ||= begin
+        loc = @sender_user.try(:primary_location) ||
+              @sender_user.try(:location) ||
+              (@sender_user.try(:locations)&.first)
+        loc if loc.nil? || loc.try(:company_id).nil? || loc.company_id == @company.id
+      end
     end
 
     def recipient_location
