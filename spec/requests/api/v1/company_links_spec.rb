@@ -277,6 +277,42 @@ RSpec.describe 'Company links', type: :request do
     expect(copy2.reload.status).to eq('on_hold')
   end
 
+  # E87 retest: an installer's All Jobs showed taken-back copies as
+  # duplicates, and its columns were every phase name pooled together.
+  it "lists an installer's jobs under the dealer template they came from, without taken-back copies" do
+    tpl = dealer_co.project_templates.create!(name: 'Standard set', is_active: true)
+    tpl.project_template_phases.create!(name: 'Deliver', position: 0)
+    tpl.project_template_phases.create!(name: 'Set', position: 1)
+    tpl.project_template_phases.create!(name: 'Finish', position: 2)
+    project.update!(project_template_id: tpl.id)
+    link = link!
+    gone = offer!(link, phase: set_phase, fee: 900)
+    post "/api/v1/project_links/#{gone.id}/accept", headers: h(boss)
+    post "/api/v1/project_links/#{gone.id}/cancel", headers: h(dealer)
+    live = offer!(link, phase: set_phase, fee: 900)
+    post "/api/v1/project_links/#{live.id}/accept", headers: h(boss)
+    copy = live.reload.installer_project
+
+    get '/api/v1/projects/grid', headers: h(boss), params: { template_id: 'none' }
+    expect(body['dealer_templates']).to eq([{ 'id' => "dealer-#{tpl.id}", 'name' => 'Summit Homes: Standard set' }])
+    expect(body['projects']).to be_empty # every job here belongs under the dealer's template
+
+    get '/api/v1/projects/grid', headers: h(boss), params: { template_id: "dealer-#{tpl.id}" }
+    expect(response).to have_http_status(:ok), response.body
+    expect(body['template']['phases'].map { |p| p['name'] }).to eq(%w[Deliver Set Finish])
+    expect(body['projects'].map { |p| p['id'] }).to eq([copy.id])
+    row = body['projects'].first
+    expect(row['phases'].map { |p| p['status'] }).to eq(%w[not_started not_started not_started])
+    expect(row['customer_name']).to eq('Maria Diaz')
+
+    get '/api/v1/projects/grid', headers: h(boss), params: { template_id: "dealer-#{tpl.id}", include_completed: 'true' }
+    expect(body['projects'].size).to eq(2)
+
+    # A company with no jobs from that template can't read it.
+    get '/api/v1/projects/grid', headers: h(stranger), params: { template_id: "dealer-#{tpl.id}" }
+    expect(response).to have_http_status(:not_found)
+  end
+
   it 'keeps each side to its own records' do
     link = link!
     pl = offer!(link)

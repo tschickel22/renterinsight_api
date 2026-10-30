@@ -631,18 +631,33 @@ module Api
         # 'none': projects not built from a template, above all an installer's
         # jobs from linked dealers (E87). Their phases come from the dealer, so
         # the columns are the phase names those projects actually have.
+        #
+        # 'dealer-<id>': an installer's jobs whose dealer project was built from
+        # that dealer template. The columns are the dealer's steps, matched by
+        # phase name (the installer's copies keep the dealer's names).
         untemplated = template_id == 'none'
-        unless untemplated
+        dealer_jobs = dealer_template_jobs
+        by_name = untemplated || template_id.to_s.start_with?('dealer-')
+        projects = @company.projects.not_deleted.includes(:project_phases, :location, deal: [:account, :contact])
+        if untemplated
+          projects = projects.where(project_template_id: nil).where.not(id: dealer_jobs.values.flatten)
+        elsif template_id.to_s.start_with?('dealer-')
+          tid = template_id.to_s.delete_prefix('dealer-').to_i
+          template = ProjectTemplate.find_by(id: tid) if dealer_jobs.key?(tid)
+          return render(json: { error: 'Template not found' }, status: :not_found) unless template
+
+          projects = projects.where(id: dealer_jobs[tid])
+        else
           template = @company.project_templates.active.find_by(id: template_id)
           return render(json: { error: 'Template not found' }, status: :not_found) unless template
+
+          projects = projects.where(project_template_id: template_id)
         end
 
-        projects = @company.projects.not_deleted
-                           .where(project_template_id: untemplated ? nil : template_id)
-                           .includes(:project_phases, :location, deal: [:account, :contact])
-
+        # Active only leaves out finished jobs and cancelled ones (a job a
+        # dealer took back stays as a cancelled copy).
         unless params[:include_completed] == 'true'
-          projects = projects.where.not(status: 'completed')
+          projects = projects.where.not(status: %w[completed cancelled])
         end
 
         projects = projects.where(location_id: params[:location_id]) if params[:location_id].present?
@@ -663,7 +678,7 @@ module Api
           names = projects.flat_map { |pr| pr.project_phases.sort_by(&:position).map(&:name) }.uniq.first(30)
           names.each_with_index.map { |name, i| ProjectTemplatePhase.new(id: -(i + 1), name: name, position: i) }
         else
-          template.project_template_phases.order(:position)
+          template.project_template_phases.order(:position).to_a
         end
 
         # An installer's copy of a dealer's job has no deal: its client is the
@@ -690,7 +705,7 @@ module Api
                   else
                     0
                   end
-            phase_map[untemplated ? ph.name : ph.position] = { status: ph.status, progress_percent: pct }
+            phase_map[by_name ? ph.name : ph.position] = { status: ph.status, progress_percent: pct }
           end
 
           deal = project.deal
@@ -710,7 +725,7 @@ module Api
             dealer_name:           from_dealer[project.id],
             location: project.location ? { id: project.location.id, name: project.location.name } : nil,
             phases: template_phases.map do |tp|
-              pd = phase_map[untemplated ? tp.name : tp.position] || {}
+              pd = phase_map[by_name ? tp.name : tp.position] || {}
               { template_phase_id: tp.id, position: tp.position, status: pd[:status] || 'not_started', progress_percent: pd[:progress_percent] || 0 }
             end
           }
@@ -719,10 +734,14 @@ module Api
         render json: {
           template: if untemplated
                       { id: 'none', name: 'No template', phases: template_phases.map { |tp| { id: tp.id, name: tp.name, position: tp.position, color: nil, icon: nil } } }
+                    elsif by_name
+                      { id: template_id, name: template.name, phases: template_phases.as_json(only: %i[id name position color icon]) }
                     else
                       { id: template.id, name: template.name, phases: template_phases.as_json(only: %i[id name position color icon]) }
                     end,
           projects: project_rows,
+          # The dealer templates this company's jobs came from, for the picker.
+          dealer_templates: dealer_template_options(dealer_jobs),
           meta: { total: total_count, page: page, per_page: per_page, total_pages: (total_count.to_f / per_page).ceil }
         }
       end
@@ -764,6 +783,23 @@ module Api
       end
 
       private
+
+      # Installer side: { dealer template id => [installer project ids] } for
+      # jobs handed over by linked dealers.
+      def dealer_template_jobs
+        ProjectLink.where(installer_company_id: @company.id).where.not(installer_project_id: nil)
+                   .joins(:dealer_project).where.not(projects: { project_template_id: nil })
+                   .pluck('projects.project_template_id', :installer_project_id)
+                   .group_by(&:first).transform_values { |rows| rows.map(&:last) }
+      end
+
+      def dealer_template_options(dealer_jobs)
+        return [] if dealer_jobs.empty?
+
+        ProjectTemplate.where(id: dealer_jobs.keys).includes(:company).map do |t|
+          { id: "dealer-#{t.id}", name: "#{t.company&.name}: #{t.name}" }
+        end.sort_by { |o| o[:name] }
+      end
 
       # Shared scope: pending, unsent contractor assignments on a ProjectPhaseTask
       # in the current @project. Used by pause/resume endpoints.
