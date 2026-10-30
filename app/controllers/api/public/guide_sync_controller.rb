@@ -15,7 +15,7 @@ class Api::Public::GuideSyncController < ApplicationController
     end
 
     since = parse_time(params[:since])
-    render json: { items: help_since(since), tours: tours_since(parse_time(params[:tours_since])) }
+    render json: { items: help_since(since), tours: tours_since(parse_time(params[:tours_since])), videos: videos }
   end
 
   private
@@ -60,6 +60,15 @@ class Api::Public::GuideSyncController < ApplicationController
       drafts['whats_new'] = note.content
     end
     drafts
+  end
+
+  # Every training video with a file (E88). A short list, sent whole each
+  # time; production copies what changed (Guide::TrainingVideoSync).
+  def videos
+    TrainingVideo.where.not(video_url: [nil, '']).ordered.map do |v|
+      v.slice(:uid, :slug, :share_token, :video_url, :poster_url, :captions_url, :updated_at,
+              *Guide::TrainingVideoSync::FIELDS)
+    end
   end
 
   # Tours played and approved on staging, with their steps, so production

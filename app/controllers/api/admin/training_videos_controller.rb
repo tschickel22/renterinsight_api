@@ -16,7 +16,12 @@ module Api
       }.freeze
 
       def index
-        render json: { enabled: TrainingVideo.enabled?, videos: TrainingVideo.ordered.map { |v| v.as_api_json(admin: true) } }
+        stats = TrainingVideoView.group(:training_video_id).pluck(:training_video_id, Arel.sql('COUNT(*)'), Arel.sql('COUNT(completed_at)'))
+                                 .to_h { |id, viewers, done| [id, { viewers: viewers, completed: done }] }
+        render json: {
+          enabled: TrainingVideo.enabled?,
+          videos: TrainingVideo.ordered.map { |v| v.as_api_json(admin: true).merge(stats: stats[v.id] || { viewers: 0, completed: 0 }) }
+        }
       end
 
       def create
@@ -55,7 +60,10 @@ module Api
         when 'video' then @video.update!(video_url: stored[:url], video_key: stored[:key], video_size: stored[:size],
                                          duration_seconds: params[:duration_seconds].presence&.to_i || @video.duration_seconds)
         when 'poster' then @video.update!(poster_url: stored[:url])
-        when 'captions' then @video.update!(captions_url: stored[:url])
+        when 'captions'
+          # The narration, so the help assistant can find what the video says.
+          vtt = File.read(file.respond_to?(:tempfile) ? file.tempfile.path : file.path, encoding: 'UTF-8')
+          @video.update!(captions_url: stored[:url], transcript: TrainingVideo.transcript_from_vtt(vtt))
         end
         render json: { video: @video.as_api_json(admin: true) }
       rescue RuntimeError => e
@@ -84,7 +92,8 @@ module Api
 
       def video_params
         params.require(:video).permit(:title, :slug, :description, :module_key, :position, :duration_seconds,
-                                      :is_published, :share_enabled, chapters: %i[title start])
+                                      :is_published, :share_enabled, chapters: %i[title start],
+                                      covers: { routes: [], markers: [] })
       end
 
       # Wraps an upload so S3 stores captions as text/vtt.

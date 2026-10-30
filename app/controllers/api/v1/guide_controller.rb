@@ -45,13 +45,14 @@ module Api
 
         conversation.append('role' => 'user', 'content' => question, 'at' => Time.current.iso8601)
         conversation.append('role' => 'assistant', 'content' => result.answer, 'at' => Time.current.iso8601,
-                            'articles' => result.articles, 'places' => result.places, 'answered' => result.answered)
+                            'articles' => result.articles, 'places' => result.places, 'videos' => result.videos,
+                            'answered' => result.answered)
         conversation.save!
         meter(question, result, started)
 
         render json: {
           conversation_id: conversation.id, answer: result.answer, articles: result.articles,
-          places: result.places, answered: result.answered, remaining: limits[:remaining] - 1
+          places: result.places, videos: result.videos, answered: result.answered, remaining: limits[:remaining] - 1
         }
       rescue Guide::ClaudeChat::Error => e
         Rails.logger.error("[Guide::Assistant] #{e.message}")
