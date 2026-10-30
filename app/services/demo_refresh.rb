@@ -2,7 +2,8 @@
 
 # Puts a demo company's Workqueue and calendar back to "this morning": buyers
 # viewing homes, brochures opened, emails opened and clicked, a reply waiting,
-# new web leads, tasks due today and meetings this week.
+# new web leads, tasks due today, meetings this week, deals closing, quotes
+# out and invoices overdue.
 #
 # Demo data goes stale because every queue is a time window (48 hours, today,
 # this week) and seeded rows only age. Rather than sliding every date in the
@@ -42,8 +43,11 @@ class DemoRefresh
   }.freeze
 
   CONTACTS = {
-    robert: { first_name: 'Robert', last_name: 'Hayes',  city: 'Castle Rock' },
-    lisa:   { first_name: 'Lisa',   last_name: 'Moreno', city: 'Centennial' },
+    robert:   { first_name: 'Robert',   last_name: 'Hayes',  city: 'Castle Rock' },
+    lisa:     { first_name: 'Lisa',     last_name: 'Moreno', city: 'Centennial' },
+    kevin:    { first_name: 'Kevin',    last_name: 'Novak',  city: 'Brighton' },
+    samantha: { first_name: 'Samantha', last_name: 'Reyes',  city: 'Erie' },
+    greg:     { first_name: 'Greg',     last_name: 'Patel',  city: 'Longmont' },
   }.freeze
 
   class NotAvailable < StandardError; end
@@ -95,6 +99,9 @@ class DemoRefresh
       build_replies
       build_design
       build_activities
+      build_deals
+      build_quotes
+      build_invoices
     end
 
     Setting.set('Company', @company.id, SETTING_KEY,
@@ -402,6 +409,122 @@ class DemoRefresh
                   minutes: 45, where: 'Video call')
 
     insert(LeadActivity, a, :activities)
+  end
+
+  # ─── Deals, quotes, invoices ───────────────────────────────────────
+  #
+  # Kept and reset rather than rebuilt, so deal and invoice numbers stay put
+  # instead of climbing on every refresh. Found by their cast contact.
+
+  # Closing this week, closing this month, and one gone quiet for a month.
+  def build_deals
+    today = @now.to_date
+    plan = {
+      kevin:    { stage: open_stage('negotiation', 'proposal'), close: today + 3, active: 1.day, created: 21.days, vi: 4 },
+      samantha: { stage: open_stage('proposal', 'qualified', 'negotiation'), close: [today + 14, today.end_of_month].min,
+                  active: 2.days, created: 12.days, vi: 5 },
+      greg:     { stage: open_stage('qualified', 'qualification', 'proposal'), close: today + 25, active: 34.days,
+                  created: 60.days, vi: 2 },
+    }
+
+    @deals = plan.to_h do |key, p|
+      contact = CONTACTS[key]
+      vehicle = vehicles.any? ? vehicles[p[:vi] % vehicles.size] : nil
+      price = home_price(vehicle)
+      attrs = {
+        name: "#{contact[:last_name]}, #{contact[:first_name]}", customer_name: "#{contact[:first_name]} #{contact[:last_name]}",
+        stage: p[:stage], expected_close_date: p[:close], actual_close_date: nil, won_at: nil, lost_at: nil, deleted_at: nil,
+        user_id: @user.id, owner_id: @user.id, primary_salesperson_id: @user.id, location_id: location_id,
+        vehicle_id: vehicle&.id, selling_price: price, total_amount: price, unpaid_balance: price,
+        last_activity_at: @now - p[:active], created_at: @now - p[:created], updated_at: @now,
+      }
+      [key, keep_record(@company.deals, { contact_id: @contacts[key] }, attrs,
+                        -> { { deal_number: Deal.new(company_id: @company.id).tap { _1.send(:generate_deal_number) }.deal_number } })]
+    end
+    DealActivity.where(deal_id: @deals.values).delete_all
+    @counts[:deals] += @deals.size
+  end
+
+  # Sent and waiting on the buyer.
+  def build_quotes
+    { kevin: 2.days, samantha: 4.days }.each do |key, sent_ago|
+      deal = @company.deals.find(@deals[key])
+      vehicle = deal.vehicle_id && vehicles.find { _1.id == deal.vehicle_id }
+      price = deal.selling_price.to_f
+      items = [
+        { 'id' => "demo#{key}home", 'description' => vehicle ? home_name(vehicle) : 'New home', 'quantity' => 1,
+          'unit_price' => price.to_s, 'total' => price, 'discount' => 0, 'discount_type' => 'percentage',
+          'category' => 'home', 'taxable' => true, 'notes' => '', 'position' => 0 },
+        { 'id' => "demo#{key}setup", 'description' => 'Delivery and setup', 'quantity' => 1,
+          'unit_price' => '6500.0', 'total' => 6500, 'discount' => 0, 'discount_type' => 'percentage',
+          'category' => 'other', 'taxable' => false, 'notes' => '', 'position' => 1 },
+      ]
+      tax = (price * 0.029).round(2)
+      attrs = {
+        status: 'sent', sent_at: @now - sent_ago, last_sent_at: @now - sent_ago, viewed_at: nil,
+        accepted_at: nil, rejected_at: nil, valid_until: (@now + 12.days).to_date, is_deleted: false, deleted_at: nil,
+        sales_rep_id: @user.id, location_id: location_id, vehicle_id: vehicle&.id&.to_s, items: items,
+        subtotal: price + 6500, tax: tax, total: price + 6500 + tax,
+        created_at: @now - sent_ago - 1.day, updated_at: @now,
+      }
+      keep_record(@company.quotes, { contact_id: @contacts[key], deal_id: @deals[key] }, attrs,
+                  -> { { quote_number: "QUO-#{@now.year}-#{SecureRandom.hex(4).upcase}",
+                         public_token: SecureRandom.urlsafe_base64(32) } })
+      @counts[:quotes] += 1
+    end
+  end
+
+  # Past due and unpaid. Marked overdue already, so the overdue reminder email
+  # (which picks up sent and viewed invoices) never mails the fictional buyer.
+  def build_invoices
+    plan = {
+      robert: { item: 'Deposit balance for home order', amount: 5000, due: 6.days, issued: 36.days },
+      lisa:   { item: 'Skirting repair and winterizing', amount: 485, due: 12.days, issued: 26.days },
+    }
+    plan.each do |key, p|
+      attrs = {
+        status: 'overdue', invoice_date: (@now - p[:issued]).to_date, due_date: (@now - p[:due]).to_date,
+        subtotal: p[:amount], tax_amount: 0, total: p[:amount], amount_paid: 0, amount_credited: 0,
+        amount_due: p[:amount], sent_at: @now - p[:issued], viewed_at: nil, paid_at: nil, is_deleted: false,
+        sales_rep_id: @user.id, location_id: location_id,
+        created_at: @now - p[:issued], updated_at: @now,
+      }
+      id = keep_record(@company.invoices, { contact_id: @contacts[key] }, attrs,
+                       -> { { invoice_number: Invoice.new(company: @company).tap { _1.send(:generate_invoice_number) }.invoice_number,
+                              payment_token: SecureRandom.urlsafe_base64(32), public_token: SecureRandom.urlsafe_base64(32) } })
+      InvoiceItem.where(invoice_id: id).delete_all
+      InvoiceItem.insert_all!([{ invoice_id: id, description: p[:item], quantity: 1, rate: p[:amount], amount: p[:amount],
+                                 position: 0, created_at: @now, updated_at: @now }])
+      @counts[:invoices] += 1
+    end
+  end
+
+  # Updates the record matching `finder`, or inserts it with the extra
+  # one-time attributes (numbers, tokens) when it does not exist yet.
+  def keep_record(scope, finder, attrs, on_create)
+    id = scope.where(finder).order(:id).pick(:id)
+    if id
+      scope.where(id: id).update_all(attrs)
+      id
+    else
+      row = { company_id: @company.id }.merge(finder, attrs, on_create.call)
+      scope.klass.insert_all!([row], returning: %w[id]).rows.first.first
+    end
+  end
+
+  # An open stage from this dealer's own pipeline, preferring the named ones.
+  def open_stage(*preferred)
+    open = @company.pipeline_stage_keys - @company.closed_deal_stage_keys
+    preferred.find { open.include?(_1) } || open.first || @company.default_deal_stage
+  end
+
+  def home_price(vehicle)
+    price = vehicle && %i[sale_price price msrp].filter_map { vehicle.try(_1) }.map(&:to_f).find(&:positive?)
+    price || 129_900
+  end
+
+  def home_name(vehicle)
+    [vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
   end
 
   # ─── Row builders ──────────────────────────────────────────────────

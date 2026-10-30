@@ -119,6 +119,37 @@ RSpec.describe DemoRefresh, type: :service do
     expect(keeper.reload.owner_id).to eq(other_rep.id)
   end
 
+  it 'opens deals closing this week and month, a stale deal, quotes out and invoices overdue' do
+    described_class.new(company: company, user: user).call
+
+    expect(queue_ids('deals_mine').size).to eq(3)
+    expect(queue_ids('deals_closing_week').size).to be >= 1
+    expect(queue_ids('deals_closing_month').size).to be >= 1
+    expect(queue_ids('deals_stale_30d').size).to eq(1)
+    expect(queue_ids('quotes_awaiting_response').size).to eq(2)
+    expect(queue_ids('invoices_overdue').size).to eq(2)
+    expect(queue_ids('deals_mine', as: other_rep)).to be_empty
+
+    # Never in a state the overdue reminder email picks up.
+    expect(company.invoices.where(status: %w[sent viewed])).to be_empty
+    expect(InvoiceItem.where(invoice_id: company.invoices.select(:id)).count).to eq(2)
+  end
+
+  it 'keeps the same deal, quote and invoice numbers across refreshes, and reopens a deal closed in the demo' do
+    described_class.new(company: company, user: user).call
+    numbers = -> { [company.deals.order(:id).pluck(:deal_number), company.quotes.order(:id).pluck(:quote_number),
+                    company.invoices.order(:id).pluck(:invoice_number)] }
+    before = numbers.call
+
+    company.deals.update_all(stage: 'closed_won', won_at: Time.current)
+    company.invoices.update_all(status: 'paid', amount_due: 0)
+    described_class.new(company: company, user: user).call
+
+    expect(numbers.call).to eq(before)
+    expect(queue_ids('deals_mine').size).to eq(3)
+    expect(queue_ids('invoices_overdue').size).to eq(2)
+  end
+
   it 'remembers who pressed it, for the nightly job' do
     described_class.new(company: company, user: user).call
     expect(described_class.last_user_id(company)).to eq(user.id)
