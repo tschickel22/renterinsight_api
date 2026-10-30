@@ -75,7 +75,9 @@ RSpec.describe 'Training video tracking and required training', type: :request d
   it 'finds the moment in a video that answers a question' do
     found = TrainingVideo.search('how do I award a bid')
     expect(found.first.first).to eq(video)
-    expect(found.first.last).to eq(start: 41, label: 'Award')
+    expect(found.first.last).to eq(start: 40, label: 'Award')
+    # No chapter title matches: the narration line itself.
+    expect(TrainingVideo.search('which contractors to pick').first.last).to eq(start: 4, label: 'Ask')
   end
 
   it 'turns captions into a transcript with times' do

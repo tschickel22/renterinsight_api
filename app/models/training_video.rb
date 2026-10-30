@@ -52,17 +52,32 @@ class TrainingVideo < ApplicationRecord
     end.sort_by { |_, score, _| -score }.first(limit).map { |video, _, moment| [video, moment] }
   end
 
-  # { start:, label: } for the chapter or narration line that best matches.
+  # { start:, label: } for the moment that best answers the question: the
+  # narration line that shares the most words with it, counting the title of
+  # the chapter it sits in. Words the video says all the time ("bid" in the
+  # bids video) count for less than the rare one that names the step
+  # ("award"). When the chapter's title matches, start at the chapter, so the
+  # person gets the whole part.
   def moment_for(terms)
+    chaps = Array(chapters).sort_by { |c| c['start'].to_i }
+    chapter_at = ->(at) { chaps.select { |c| c['start'].to_i <= at }.last }
     lines = transcript.to_s.lines.filter_map do |line|
       m = /\A(\d+):(\d{2}) (.+)\z/.match(line.strip)
       m && { start: m[1].to_i * 60 + m[2].to_i, text: m[3] }
     end
-    best = lines.max_by { |l| terms.count { |t| l[:text].downcase.include?(t) } }
-    best = nil if best && terms.none? { |t| best[:text].downcase.include?(t) }
-    chapter = Array(chapters).select { |c| c['start'].to_i <= (best ? best[:start] : 0) }.max_by { |c| c['start'].to_i }
-    chapter ||= Array(chapters).max_by { |c| terms.count { |t| c['title'].to_s.downcase.include?(t) } }
-    { start: best ? [best[:start] - 1, 0].max : chapter&.dig('start').to_i, label: chapter&.dig('title') }
+    weight = terms.to_h { |t| [t, 1.0 / (1 + lines.count { |l| l[:text].downcase.include?(t) })] }
+    hits = ->(text) { terms.sum { |t| text.to_s.downcase.include?(t) ? weight[t] : 0 } }
+    scored = lines.map { |l| [l, hits.call(l[:text]) + 2 * hits.call(chapter_at.call(l[:start])&.dig('title'))] }
+    best, score = scored.max_by { |_, sc| sc }
+    if best.nil? || score.zero?
+      chapter = chaps.max_by { |c| hits.call(c['title']) }
+      chapter = nil if chapter && hits.call(chapter['title']).zero?
+      return { start: chapter&.dig('start').to_i, label: chapter&.dig('title') }
+    end
+
+    chapter = chapter_at.call(best[:start])
+    start = chapter && hits.call(chapter['title']).positive? ? chapter['start'].to_i : [best[:start] - 1, 0].max
+    { start: start, label: chapter&.dig('title') }
   end
 
   # Captions (.vtt) to narration, one "m:ss sentence" per line.
