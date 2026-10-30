@@ -8,7 +8,19 @@ module Api
       # GET /api/v1/workqueue/summary
       def summary
         service = WorkqueueService.new(company: @company, user: current_user)
-        render json: { groups: service.summary }
+        render json: { groups: service.summary, demo_refresh: DemoRefresh.available?(@company) }
+      end
+
+      # POST /api/v1/workqueue/demo_refresh
+      #
+      # Staging demo accounts only (DemoRefresh.available?). Rebuilds the demo
+      # buyers' hot signals, tasks and meetings relative to now, owned by
+      # whoever asked, so a platform admin demoing the account gets a full queue.
+      def demo_refresh
+        return render json: { error: 'Not found' }, status: :not_found unless DemoRefresh.available?(@company)
+
+        result = DemoRefresh.new(company: @company, user: current_user).call
+        render json: { refreshedAt: result[:refreshed_at].iso8601, created: result[:created] }
       end
 
       # GET /api/v1/workqueue/items?queue=leads_mine&page=1&per_page=50&search=...

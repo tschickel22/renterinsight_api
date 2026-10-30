@@ -887,6 +887,7 @@ Rails.application.routes.draw do
       # ==================== WORKQUEUE ====================
       get 'workqueue/summary', to: 'workqueue#summary'
       get 'workqueue/items',   to: 'workqueue#items'
+      post 'workqueue/demo_refresh', to: 'workqueue#demo_refresh'
 
       # Set a record aside while working the queue. Reversible, and undone on
       # its own by anything newer than the dismissal.
