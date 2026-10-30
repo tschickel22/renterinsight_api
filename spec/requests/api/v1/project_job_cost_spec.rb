@@ -34,6 +34,16 @@ RSpec.describe 'Projects on bills, journal lines and job cost reports', type: :r
   end
 
   describe 'a bill for a job' do
+    it 'puts the phase picked in the header on its cost line, with the vendor (E87)' do
+      post '/api/v1/bills', headers: headers, params: {
+        bill: { vendor_id: installer.id, bill_date: Date.current.to_s, status: 'pending', project_id: project.id,
+                project_phase_id: set_phase.id,
+                bill_line_items_attributes: [{ chart_of_account_id: expense.id, amount: 4000, description: 'Set' }] }
+      }.to_json
+      expect(response).to have_http_status(:created), response.body
+      expect(project.project_cost_items.not_deleted.last).to have_attributes(project_phase_id: set_phase.id, vendor_name: 'Smith Set-Up')
+    end
+
     it 'tags its ledger debit with the project and its deal, and adds the job cost once' do
       bill = create_bill
 
@@ -224,6 +234,26 @@ RSpec.describe 'Projects on bills, journal lines and job cost reports', type: :r
       debit = JournalEntryLine.find_by(project_id: project.id)
       expect(debit).to have_attributes(debit_amount: 240, deal_id: deal.id)
       expect(project.project_cost_items.not_deleted.pluck(:amount, :status)).to eq([[240, 'paid']])
+    end
+
+    it "names the vendor on the cost line, takes the vendor's type, and the phase picked (E87)" do
+      record('expense', project_id: project.id, vendor_id: installer.id, vendor_name: installer.name,
+                        project_phase_id: set_phase.id, memo: 'Extra anchors')
+      expect(response).to have_http_status(:created), response.body
+
+      item = project.project_cost_items.not_deleted.last
+      expect(item).to have_attributes(vendor_id: installer.id, vendor_name: 'Smith Set-Up', cost_type: 'subcontractor',
+                                      project_phase_id: set_phase.id, description: 'Extra anchors')
+    end
+
+    it 'finds the vendor by name, and refuses a phase from another project' do
+      installer
+      record('expense', project_id: project.id, vendor_name: 'smith set-up')
+      expect(project.project_cost_items.not_deleted.last.vendor_id).to eq(installer.id)
+
+      stray = other_project.project_phases.create!(company: company, name: 'Other', position: 0)
+      record('expense', project_id: project.id, project_phase_id: stray.id)
+      expect(response).to have_http_status(:unprocessable_entity)
     end
 
     it "names the customer from the list, or from the project's deal" do

@@ -381,8 +381,25 @@ class NotificationService
       # provider refuses it (an unverified SES identity), every notification
       # email for that tenant fails, and until now only the log knew.
       EmailConnectionHealth.flag_system_mail_failure!(notification: notification, recipient: user, error: e)
-      false
+      # The notice itself still matters (an assignment, a job offered), so a
+      # From address the provider won't send for falls back to the platform's
+      # own. The flag above still tells the tenant to fix theirs.
+      unverified_sender?(e) ? send_email_from_platform(notification, user) : false
     end
+  end
+
+  def self.unverified_sender?(error)
+    error.message.to_s.match?(/not verified|unverified/i)
+  end
+
+  def self.send_email_from_platform(notification, user)
+    NotificationMailer.broadcast_notification(user: user, notification: notification, platform_from: true).deliver_now
+    notification.update(email_sent: true, email_sent_at: Time.current)
+    Rails.logger.info "[NotificationService] Email sent to #{user.email} from the platform address: #{notification.title}"
+    true
+  rescue => e
+    Rails.logger.error("[NotificationService] Platform address fallback failed too: #{e.message}")
+    false
   end
   
   def self.frontend_url

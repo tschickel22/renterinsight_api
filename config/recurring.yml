@@ -10,6 +10,11 @@
 #     schedule: at 5am every day
 
 default: &default
+  # Project items waiting a day get one reminder email to whoever owns them (E87).
+  review_item_nudges:
+    class: ReviewItemNudgeJob
+    queue: low
+    schedule: every hour at minute 25
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob
@@ -27,6 +32,12 @@ default: &default
   workflow_retention:
     class: WorkflowRetentionJob
     schedule: every sunday at 3am
+  # Staging demo accounts wake up with fresh hot leads and today's tasks.
+  # A no-op unless DEMO_REFRESH_COMPANY_IDS is set (staging only).
+  demo_refresh:
+    class: DemoRefreshJob
+    queue: low
+    schedule: every day at 5am America/Denver
   # Raw in-app usage events are kept 90 days; the rollups stay (backlog E75).
   guide_prune_events:
     class: Guide::PruneEventsJob

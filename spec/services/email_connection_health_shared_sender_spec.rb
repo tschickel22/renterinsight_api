@@ -211,6 +211,24 @@ RSpec.describe EmailConnectionHealth, 'shared senders' do
       expect(broken_for(company_admin).count).to eq(1)
     end
 
+    # E68/E87 retest: Summit Park's From address was refused, so no assignment
+    # or job email reached anyone while the texts did.
+    it 'still delivers the notice from the platform address, replies going to the company' do
+      refused = double('mail')
+      allow(refused).to receive(:deliver_now).and_raise(StandardError, ses_error)
+      allow(NotificationMailer).to receive(:broadcast_notification).and_call_original
+      allow(NotificationMailer).to receive(:broadcast_notification)
+        .with(user: recipient, notification: notification).and_return(refused)
+
+      expect { expect(NotificationService.send_email(notification, recipient)).to be true }
+        .to change { ActionMailer::Base.deliveries.size }.by(1)
+      sent = ActionMailer::Base.deliveries.last
+      expect(sent.from).to eq([Brand.from_email])
+      expect(sent.reply_to).to eq([owner.email])
+      expect(notification.reload.email_sent_at).to be_present
+      expect(broken_for(company_admin).count).to eq(1) # the company still hears its address is broken
+    end
+
     it 'is not cleared by the other channel recovering' do
       described_class.flag_system_mail_failure!(notification: notification, recipient: recipient, error: ses_error)
 

@@ -19,6 +19,19 @@ class ProjectBid < ApplicationRecord
 
   def answered? = status.in?(%w[submitted declined awarded not_awarded])
 
+  # Files the contractor sent with the bid. They live on the project (its
+  # Documents tab, under the bid's phase) so they outlast the bid request.
+  def documents
+    ProjectDocument.not_deleted.where(company_id: company_id).where("metadata->>'project_bid_id' = ?", id.to_s).order(:created_at)
+  end
+
+  def documents_json
+    documents.map do |d|
+      { id: d.id, name: d.file_name, title: d.title, size: d.file_size, content_type: d.content_type,
+        url: d.file_url_link, created_at: d.created_at }
+    end
+  end
+
   private
 
   def vendor_belongs_to_company

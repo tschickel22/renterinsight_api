@@ -246,6 +246,20 @@ class ProjectNotificationService
     pending.size
   end
 
+  # Why a contractor won't get an emailed notice, or nil when they will:
+  # { contractor_id:, name:, reason: }. Texts still go to consenting numbers.
+  def self.undeliverable_reason(contractor, company)
+    return nil unless contractor
+
+    emails = notice_emails(contractor)
+    reason = if emails.empty?
+      'has no email address on file'
+    elsif (dead = emails.select { |e| CampaignSuppression.unmailable?(company.id, e) }).size == emails.size
+      "can't be emailed at #{dead.to_sentence}: an earlier email to it bounced or was marked as spam"
+    end
+    reason && { contractor_id: contractor.id, name: contractor.name, reason: reason }
+  end
+
   # ── Dispatch pending dealer review notifications inline for a project.
   # @return [Integer] number of reviews processed
   def self.dispatch_pending_reviews_for_project(project_id)
@@ -279,6 +293,101 @@ class ProjectNotificationService
 
     ContractorAssignment.where(id: pending.map(&:id)).update_all(review_notified_at: Time.current)
     pending.size
+  end
+
+  # The contractor won (E87). Email and text, with the dealer's note. The
+  # assignment that follows the award sends its own task email; this one says
+  # why the work arrived.
+  def self.notify_bid_awarded(bid)
+    contractor = bid.vendor
+    request = bid.project_bid_request
+    company = request.company
+    return unless notice_email?(contractor) || notice_phones(contractor).any?
+
+    esc = ->(v) { ERB::Util.html_escape(v.to_s) }
+    amount = ActiveSupport::NumberHelper.number_to_currency(bid.amount)
+    subject = "You got the job: #{request.bidder_label}"
+    sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
+    note_html = request.award_note.present? ? "<p><strong>Note from #{esc.(company.name)}:</strong></p><p style=\"white-space: pre-line;\">#{esc.(request.award_note)}</p>" : ''
+    if notice_email?(contractor)
+      body = <<~HTML
+        <p>Hello #{esc.(notice_greeting(contractor))},</p>
+        <p>#{esc.(company.name)} has awarded you #{esc.(request.bidder_label)} at your bid of #{esc.(amount)}.</p>
+        #{note_html}
+        <p>The work is now in your Contractor Portal under My Assignments.</p>
+        #{sign_in_note}
+        <p>Thank you,<br>#{esc.(company.name)}</p>
+      HTML
+      notice_emails(contractor).each do |to|
+        CommunicationService.send_email(
+          company: company, to: to, subject: subject,
+          body: wrap_html(body, subject, audience: :contractor, login_url: sign_in_url),
+          category: 'project_notification', communicable: bid
+        )
+      end
+    end
+
+    sms = "#{company.name} awarded you #{request.bidder_label} at #{amount}."
+    sms += " Note: #{request.award_note.to_s.squish.truncate(200)}" if request.award_note.present?
+    notice_phones(contractor).each do |phone|
+      CommunicationService.send_sms(
+        company: company, location: request.project.deal&.location, to: phone,
+        body: "#{sms} #{sign_in_url}", category: 'project_notification', communicable: bid
+      )
+    rescue => e
+      Rails.logger.error("[ProjectNotificationService] award SMS failed for bid #{bid.id}: #{e.message}")
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] award notice failed for bid #{bid&.id}: #{e.class}: #{e.message}")
+    nil
+  end
+
+  # Staff changed a bid the contractor sent (E87): they hear what changed and why.
+  def self.notify_bid_changed_by_dealer(bid)
+    change = bid.history.last
+    contractor = bid.vendor
+    return unless change && (notice_email?(contractor) || notice_phones(contractor).any?)
+
+    request = bid.project_bid_request
+    company = request.company
+    esc = ->(v) { ERB::Util.html_escape(v.to_s) }
+    lines = change['to'].keys.map do |k|
+      label = { 'amount' => 'Amount', 'can_start_on' => 'Can start', 'duration_days' => 'Days', 'notes' => 'Notes', 'status' => 'Status' }[k] || k
+      fmt = ->(v) { k == 'amount' && v.present? ? ActiveSupport::NumberHelper.number_to_currency(v) : (v.presence || 'blank') }
+      "#{label}: #{fmt.(change.dig('from', k))} to #{fmt.(change.dig('to', k))}"
+    end
+    subject = "Your bid was updated: #{request.bidder_label}"
+    sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
+    if notice_email?(contractor)
+      body = <<~HTML
+        <p>Hello #{esc.(notice_greeting(contractor))},</p>
+        <p>#{esc.(change['by_name'])} at #{esc.(company.name)} updated your bid on #{esc.(request.bidder_label)}.</p>
+        <ul>#{lines.map { |l| "<li>#{esc.(l)}</li>" }.join}</ul>
+        <p><strong>Reason:</strong> #{esc.(change['reason'])}</p>
+        <p>If this isn't right, open Bid requests in the Contractor Portal and send your bid again.</p>
+        #{sign_in_note}
+        <p>Thank you,<br>#{esc.(company.name)}</p>
+      HTML
+      notice_emails(contractor).each do |to|
+        CommunicationService.send_email(
+          company: company, to: to, subject: subject,
+          body: wrap_html(body, subject, audience: :contractor, login_url: sign_in_url),
+          category: 'project_notification', communicable: bid
+        )
+      end
+    end
+    notice_phones(contractor).each do |phone|
+      CommunicationService.send_sms(
+        company: company, location: request.project.deal&.location, to: phone,
+        body: "#{company.name} updated your bid on #{request.bidder_label}. #{lines.first}. Reason: #{change['reason'].to_s.truncate(120)} #{sign_in_url}",
+        category: 'project_notification', communicable: bid
+      )
+    rescue => e
+      Rails.logger.error("[ProjectNotificationService] bid change SMS failed for bid #{bid.id}: #{e.message}")
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] bid change notice failed for bid #{bid&.id}: #{e.class}: #{e.message}")
+    nil
   end
 
   # ── Contractor given a whole project or phase that has no tasks for them yet
@@ -490,18 +599,14 @@ class ProjectNotificationService
     company = project.company
     recipients = ([project.owner] + company.users.active.where(role: %w[admin company_admin platform_admin manager super_admin]).to_a).compact.uniq
     amount = ActiveSupport::NumberHelper.number_to_currency(bill.total_amount)
-    recipients.each do |user|
-      create_bell_notification(
-        recipient: user,
-        company: company,
-        type: :contractor_invoice_submitted,
-        title: "Invoice from #{contractor.name}",
-        message: "#{contractor.name} submitted an invoice for #{amount} on #{project.name}. It is waiting as draft bill #{bill.bill_number}.",
-        notifiable: bill,
-        actor_type: 'Contractor',
-        actor_id: contractor.id
-      )
-    end
+    text = "#{contractor.name} submitted an invoice for #{amount} on #{project.name}. It is waiting as draft bill #{bill.bill_number}."
+    ProjectNotices.deliver(
+      users: recipients, company: company, type: :contractor_invoice_submitted, notifiable: bill,
+      title: "Invoice from #{contractor.name}", message: text,
+      item: { kind: 'contractor_invoice', subject: bill, title: "Invoice from #{contractor.name}: #{amount}", detail: text,
+              from_name: contractor.name, project: project, phase: bill.try(:project_phase),
+              assigned_user: project.owner, metadata: { amount: bill.total_amount.to_s } }
+    )
   rescue => e
     Rails.logger.error("[ProjectNotificationService] Error announcing invoice: #{e.message}")
   end
@@ -577,15 +682,40 @@ class ProjectNotificationService
       [revised ? "Revised bid from #{name}" : "Bid from #{name}",
        "#{name} bid #{amount} on #{request.work_label}."]
     end
-    recipients.each do |user|
-      create_bell_notification(
-        recipient: user, company: company, type: :project_bid_submitted,
-        title: title, message: message, notifiable: bid,
-        actor_type: 'Contractor', actor_id: bid.vendor_id
-      )
+    ProjectNotices.deliver(
+      users: recipients, company: company, type: :project_bid_submitted, notifiable: bid,
+      title: title, message: message
+    )
+    refresh_bid_review_item(request)
+    if bid.status == 'declined'
+      ProjectNotices.open!(company: company, kind: 'bid_declined', subject: bid, title: title, detail: message,
+                           from_name: name, project: project, phase: request.project_phase,
+                           assigned_user: project.owner || recipients.first)
     end
   rescue => e
     Rails.logger.error("[ProjectNotificationService] Error announcing bid: #{e.message}")
+  end
+
+  # One Review Updates row per open request with bids in, saying how many and
+  # the low one. It closes when the request is awarded or cancelled.
+  def self.refresh_bid_review_item(request)
+    bids = request.bids.to_a
+    submitted = bids.select { |b| b.status == 'submitted' }
+    return if submitted.empty? || !request.open?
+
+    low = submitted.min_by(&:amount)
+    answered = bids.count(&:answered?)
+    money = ->(v) { ActiveSupport::NumberHelper.number_to_currency(v) }
+    detail = "#{submitted.size} #{'bid'.pluralize(submitted.size)} in, #{answered} of #{bids.size} answered. " \
+             "Low bid #{money.(low.amount)} from #{low.vendor.name}."
+    detail += " Bids were due #{request.bids_due_on.strftime('%b %-d')}." if request.bids_due_on
+    ProjectNotices.open!(
+      company: request.company, kind: 'bid_received', subject: request,
+      title: "Bids to award: #{request.work_label}", detail: detail, from_name: low.vendor.name,
+      project: request.project, phase: request.project_phase,
+      assigned_user: request.project.owner || request.company.users.find_by(id: request.created_by_id),
+      link: '/projects/bids', metadata: { bids_in: submitted.size, invited: bids.size, low_bid: low.amount.to_s }
+    )
   end
 
   # The request went to someone else (awarded: true) or was closed.

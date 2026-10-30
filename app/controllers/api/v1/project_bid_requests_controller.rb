@@ -48,7 +48,8 @@ module Api
       end
 
       # POST /api/v1/projects/:project_id/bid_requests/:id/record_bid
-      # A bid staff type in for a contractor: { bid_id, amount, can_start_on, duration_days, notes }
+      # A bid staff type in for a contractor: { bid_id, amount, can_start_on, duration_days, notes, reason }
+      # reason is required to change a bid the contractor sent themselves.
       def record_bid
         return unless authorize_action!('deals', 'update')
 
@@ -56,13 +57,15 @@ module Api
         return render(json: { error: 'Bid not found' }, status: :not_found) unless bid
 
         service.submit!(bid, amount: params[:amount], can_start_on: params[:can_start_on],
-                             duration_days: params[:duration_days], notes: params[:notes], entered_by: current_user)
+                             duration_days: params[:duration_days], notes: params[:notes], entered_by: current_user,
+                             reason: params[:reason])
         render json: { bid_request: request_json(@request.reload) }
       rescue ProjectBidService::Error => e
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
-      # POST /api/v1/projects/:project_id/bid_requests/:id/award { bid_id, notify_others }
+      # POST /api/v1/projects/:project_id/bid_requests/:id/award { bid_id, notify_others, note }
+      # note goes to the winner with the award.
       def award
         return unless authorize_action!('deals', 'update')
 
@@ -70,7 +73,7 @@ module Api
         return render(json: { error: 'Bid not found' }, status: :not_found) unless bid
 
         notify = params.key?(:notify_others) ? ActiveModel::Type::Boolean.new.cast(params[:notify_others]) : true
-        service.award!(@request, bid, notify_others: notify)
+        service.award!(@request, bid, notify_others: notify, note: params[:note])
         render json: { bid_request: request_json(@request.reload) }
       rescue ProjectBidService::Error => e
         render json: { error: e.message }, status: :unprocessable_entity
@@ -124,39 +127,7 @@ module Api
       end
 
       def request_json(request)
-        bids = request.bids.sort_by { |b| [b.amount ? 0 : 1, b.amount.to_d, b.vendor.name.to_s] }
-        lowest = bids.select { |b| b.status.in?(%w[submitted awarded not_awarded]) }.map { |b| b.amount.to_d }.min
-        {
-          id: request.id,
-          title: request.title,
-          scope: request.scope,
-          status: request.status,
-          project_phase_id: request.project_phase_id,
-          phase_name: request.project_phase&.name,
-          bids_due_on: request.bids_due_on,
-          start_wanted_on: request.start_wanted_on,
-          awarded_bid_id: request.awarded_bid_id,
-          awarded_at: request.awarded_at,
-          cancelled_at: request.cancelled_at,
-          created_at: request.created_at,
-          bids: bids.map do |b|
-            {
-              id: b.id,
-              vendor_id: b.vendor_id,
-              vendor_name: b.vendor.name,
-              vendor_email: b.vendor.email,
-              status: b.status,
-              amount: b.amount&.to_f,
-              lowest: lowest.present? && b.amount.present? && b.amount.to_d == lowest && b.status != 'declined',
-              can_start_on: b.can_start_on,
-              duration_days: b.duration_days,
-              notes: b.notes,
-              submitted_at: b.submitted_at,
-              entered_by_name: b.entered_by&.full_name.presence || b.entered_by&.email,
-              project_cost_item_id: b.project_cost_item_id
-            }
-          end
-        }
+        request.as_api_json
       end
     end
   end

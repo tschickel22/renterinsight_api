@@ -155,6 +155,7 @@ class ProjectLinkService
     change.update!(status: 'withdrawn', decided_by: @actor, decided_at: Time.current)
     pl.company_link.log!('change_withdrawn', "#{@company.name} withdrew #{change.label.downcase} on #{pl.scope_label}",
                          company: @company, user: @actor, project_link: pl)
+    CompanyLinkNotifier.change_withdrawn(change)
     change
   end
 
@@ -321,6 +322,10 @@ class ProjectLinkService
     has_costs = project.project_cost_items.not_deleted.exists? ||
                 pl.installer_company.bills.where(project_id: project.id).where.not(status: 'void').exists?
     project.update!(status: has_costs ? 'on_hold' : 'cancelled')
+    # Bids the installer asked for on the job can't be awarded now; leaving
+    # them open kept them on Bids & Quotes with nothing to do (E87 retest).
+    bids = ProjectBidService.new(pl.installer_company)
+    pl.installer_company.project_bid_requests.open.where(project_id: project.id).find_each { |r| bids.cancel!(r) }
   end
 
   def check_dealer_change!(change)

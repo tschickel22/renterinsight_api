@@ -184,7 +184,33 @@ class ProjectTemplate < ApplicationRecord
     # Link deal back to project
     deal.update_column(:project_id, project.id) if deal
 
+    announce_default_owners(project, created_by)
     project
+  end
+
+  # Owners copied from the template hear about it the same way as owners
+  # assigned by hand (E87). A contractor with tasks gets the batched task
+  # email from their ContractorAssignment rows; one given a project or phase
+  # with no tasks for them gets an owner notice. Employees get a project notice.
+  def announce_default_owners(project, created_by)
+    phases = project.project_phases.to_a
+    pairs = []
+    pairs << [project.assigned_to, nil] if project.assigned_to_id && project.assigned_to
+    phases.each { |ph| pairs << [ph.assigned_to, ph] if ph.assigned_to_id && ph.assigned_to }
+    ProjectNotices.employee_assigned(project, pairs, actor: created_by)
+
+    with_tasks = ContractorAssignment.where(assignable_type: 'ProjectPhaseTask',
+                                            assignable_id: ProjectPhaseTask.where(project_phase_id: phases.map(&:id)).select(:id))
+                                     .distinct.pluck(:vendor_id)
+    owners = []
+    owners << [project.assigned_vendor_id, nil] if project.assigned_vendor_id
+    phases.each { |ph| owners << [ph.assigned_vendor_id, ph] if ph.assigned_vendor_id }
+    owners.reject { |vid, _| with_tasks.include?(vid) }.uniq(&:first).each do |vendor_id, phase|
+      vendor = project.company.contractors.active.find_by(id: vendor_id)
+      ProjectNotificationService.notify_contractor_owner_assigned(vendor, project, phase: phase) if vendor
+    end
+  rescue => e
+    Rails.logger.error("[ProjectTemplate] default owner notices for project #{project&.id}: #{e.class}: #{e.message}")
   end
 
   # ============================================================================

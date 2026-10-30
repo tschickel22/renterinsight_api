@@ -160,3 +160,9 @@ CLAUDE.md
 
 # macOS Finder metadata — no leading slash, so it matches at any depth
 .DS_Store
+
+# Scratch-script names above (check_*.rb, fix_*.rb, ...) must never hide app
+# code: check_*.rb hid app/services/check_printing_service.rb, so printing a
+# check 500ed on every server until 2026-10-29. Keep this at the end.
+!/app/**/*.rb
+!/lib/**/*.rb

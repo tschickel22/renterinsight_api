@@ -36,6 +36,7 @@ class LinkRateCardService
 
     card.update!(status: 'withdrawn')
     card.company_link.log!('rate_card_withdrawn', "#{@company.name} withdrew rate card version #{card.version}", company: @company, user: @actor)
+    CompanyLinkNotifier.rate_card_withdrawn(card)
     card
   end
 

@@ -34,6 +34,71 @@ class ProjectBidRequest < ApplicationRecord
     town.present? ? "#{title} in #{town}" : title
   end
 
+  # Where it stands, for the Bids & Quotes tabs (E87).
+  def stage
+    return status unless open?
+
+    bids.any? { |b| b.status == 'submitted' } ? 'ready' : 'waiting'
+  end
+
+  # Shared by the project's Bids tab and the company-wide Bids & Quotes page.
+  def as_api_json(include_project: false)
+    list = bids.sort_by { |b| [b.amount ? 0 : 1, b.amount.to_d, b.vendor.name.to_s] }
+    lowest = list.select { |b| b.status.in?(%w[submitted awarded not_awarded]) }.map { |b| b.amount.to_d }.min
+    json = {
+      id: id,
+      title: title,
+      scope: scope,
+      status: status,
+      stage: stage,
+      project_phase_id: project_phase_id,
+      phase_name: project_phase&.name,
+      bids_due_on: bids_due_on,
+      start_wanted_on: start_wanted_on,
+      overdue: open? && bids_due_on.present? && bids_due_on < Date.current,
+      awarded_bid_id: awarded_bid_id,
+      awarded_at: awarded_at,
+      award_note: award_note,
+      cancelled_at: cancelled_at,
+      created_at: created_at,
+      bids: list.map do |b|
+        {
+          id: b.id,
+          vendor_id: b.vendor_id,
+          vendor_name: b.vendor.name,
+          vendor_email: b.vendor.email,
+          status: b.status,
+          amount: b.amount&.to_f,
+          lowest: lowest.present? && b.amount.present? && b.amount.to_d == lowest && b.status != 'declined',
+          can_start_on: b.can_start_on,
+          duration_days: b.duration_days,
+          notes: b.notes,
+          submitted_at: b.submitted_at,
+          entered_by_name: b.entered_by&.full_name.presence || b.entered_by&.email,
+          # The contractor answered it themselves, so changing it needs a reason.
+          contractor_entered: b.entered_by_id.nil? && b.submitted_at.present?,
+          history: b.history,
+          files: b.documents_json,
+          project_cost_item_id: b.project_cost_item_id
+        }
+      end
+    }
+    return json unless include_project
+
+    budget = project_phase ? project_phase.estimated_budget : project.budget_amount
+    json.merge(
+      project_id: project_id,
+      project_name: project.name,
+      project_number: project.try(:project_number),
+      customer_name: project.customer_display_name,
+      deal_id: project.deal_id,
+      budget: budget&.to_f,
+      responses: list.count(&:answered?),
+      invited: list.size,
+      low_bid: lowest&.to_f
+    )
+  end
+
   private
 
   def links_belong_to_company

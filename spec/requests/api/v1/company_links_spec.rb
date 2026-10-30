@@ -67,8 +67,11 @@ RSpec.describe 'Company links', type: :request do
       post '/api/v1/company_links', headers: h(dealer), params: { vendor_id: vendor.id, email: 'boss@install.example' }.to_json
     }.to have_enqueued_job(CompanyLinkInviteEmailJob)
     id = body.dig('company_link', 'id')
-    expect(Notification.where(recipient: boss, notification_type: 'company_link').count).to eq(1)
-    expect(Notification.where(company_id: dealer_co.id, notification_type: 'company_link')).to be_empty
+    expect(Notification.where(recipient: boss, notification_type: 'project_link_request').count).to eq(1)
+    expect(Notification.where(company_id: dealer_co.id, notification_type: 'project_link_request')).to be_empty
+    # Waits in the installer's Review Updates, not the dealer's.
+    expect(installer_co.review_items.open.pluck(:kind)).to eq(['link_request'])
+    expect(dealer_co.review_items).to be_empty
 
     get '/api/v1/company_links', headers: h(boss)
     expect(body['invitations'].map { |l| l['dealer_company_name'] }).to eq(['Summit Homes'])
@@ -87,6 +90,8 @@ RSpec.describe 'Company links', type: :request do
     expect(link.installer_company).to eq(installer_co)
     expect(link.installer_dealer_account.name).to eq('Summit Homes')
     expect(link.events.pluck(:kind)).to eq(%w[invited accepted])
+    expect(installer_co.review_items.open).to be_empty
+    expect(installer_co.review_items.closed.first.resolution).to eq('accepted')
   end
 
   it 'refuses an invite to an email that is not an admin on the platform, and sends nothing' do
@@ -181,6 +186,17 @@ RSpec.describe 'Company links', type: :request do
     # The dealer moves the install date; the installer's phase follows.
     perform_enqueued_jobs { set_phase.update!(estimated_start_date: Date.new(2026, 11, 20)) }
     expect(iph.reload.estimated_start_date).to eq(Date.new(2026, 11, 20))
+    # The installer hears about it (E87), on its own copy of the phase.
+    moved = installer_co.review_items.open.find_by(kind: 'date_changed', subject: iph)
+    expect(moved).to have_attributes(from_name: 'Summit Homes', needs_action: false)
+    expect(moved.detail).to include('Nov 20, 2026')
+    expect(Notification.where(company_id: installer_co.id, notification_type: 'project_date_changed', recipient: boss)).to exist
+
+    # And the other way: the installer moves the finish date, the dealer is told.
+    perform_enqueued_jobs { iph.reload.update!(estimated_completion_date: Date.new(2026, 11, 24)) }
+    expect(set_phase.reload.estimated_completion_date).to eq(Date.new(2026, 11, 24))
+    expect(dealer_co.review_items.open.find_by(kind: 'date_changed', subject: set_phase)).to have_attributes(from_name: 'Summit Install')
+    expect(Notification.where(company_id: dealer_co.id, notification_type: 'project_date_changed', recipient: dealer)).to exist
 
     allow(ProjectNotificationService).to receive(:notify_phase_change)
     perform_enqueued_jobs { ip.set_phase_status!(iph.reload, 'completed') }
@@ -225,7 +241,10 @@ RSpec.describe 'Company links', type: :request do
     expect(pl.reload.status).to eq('declined')
     expect(finish_phase.reload.assigned_vendor_id).to eq(crew.id)
     expect(ProjectCostItem.exists?(line_id)).to be(false)
-    expect(Notification.where(recipient: dealer, notification_type: 'project_link').last.message).to include('Booked that week')
+    expect(Notification.where(recipient: dealer, notification_type: 'project_job_answered').last.message).to include('Booked that week')
+    # The offer closed on the installer's side; the answer is an FYI on the dealer's.
+    expect(installer_co.review_items.where(kind: 'job_offered', subject: pl).first.status).to eq('closed')
+    expect(dealer_co.review_items.open.where(kind: 'job_answered').first).to have_attributes(needs_action: false, project_id: project.id)
 
     whole = offer!(link, phase: nil, fee: nil)
     expect(project.reload.assigned_vendor_id).to eq(vendor.id)
@@ -241,8 +260,12 @@ RSpec.describe 'Company links', type: :request do
     pl = offer!(link, phase: set_phase, fee: 900)
     post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
     copy = pl.reload.installer_project
+    asked = installer_co.project_bid_requests.create!(project: copy, project_phase: copy.project_phases.first,
+                                                      title: 'Set crew', status: 'open')
     post "/api/v1/project_links/#{pl.id}/cancel", headers: h(dealer)
     expect(copy.reload.status).to eq('cancelled')
+    # Bids the installer asked for on it can't be awarded any more.
+    expect(asked.reload.status).to eq('cancelled')
 
     # Money already spent on it keeps it on the installer's profit report.
     pl2 = offer!(link, phase: finish_phase, fee: 500)
@@ -252,6 +275,56 @@ RSpec.describe 'Company links', type: :request do
                                      amount: 300, quantity: 1, unit_price: 300, date: Date.current, status: 'approved')
     post "/api/v1/project_links/#{pl2.id}/cancel", headers: h(dealer)
     expect(copy2.reload.status).to eq('on_hold')
+  end
+
+  # E87 retest: an installer's All Jobs showed taken-back copies as
+  # duplicates, and its columns were every phase name pooled together.
+  it "lists an installer's jobs under the dealer template they came from, without taken-back copies" do
+    tpl = dealer_co.project_templates.create!(name: 'Standard set', is_active: true)
+    tpl.project_template_phases.create!(name: 'Deliver', position: 0)
+    tpl.project_template_phases.create!(name: 'Set', position: 1)
+    tpl.project_template_phases.create!(name: 'Finish', position: 2)
+    project.update!(project_template_id: tpl.id)
+    link = link!
+    gone = offer!(link, phase: set_phase, fee: 900)
+    post "/api/v1/project_links/#{gone.id}/accept", headers: h(boss)
+    post "/api/v1/project_links/#{gone.id}/cancel", headers: h(dealer)
+    live = offer!(link, phase: set_phase, fee: 900)
+    post "/api/v1/project_links/#{live.id}/accept", headers: h(boss)
+    copy = live.reload.installer_project
+
+    get '/api/v1/projects/grid', headers: h(boss), params: { template_id: 'none' }
+    expect(body['dealer_templates']).to eq([{ 'id' => "dealer-#{tpl.id}", 'name' => 'Summit Homes: Standard set' }])
+    expect(body['projects']).to be_empty # every job here belongs under the dealer's template
+
+    get '/api/v1/projects/grid', headers: h(boss), params: { template_id: "dealer-#{tpl.id}" }
+    expect(response).to have_http_status(:ok), response.body
+    expect(body['template']['phases'].map { |p| p['name'] }).to eq(%w[Deliver Set Finish])
+    expect(body['projects'].map { |p| p['id'] }).to eq([copy.id])
+    row = body['projects'].first
+    expect(row['phases'].map { |p| p['status'] }).to eq(%w[not_started not_started not_started])
+    expect(row['customer_name']).to eq('Maria Diaz')
+
+    get '/api/v1/projects/grid', headers: h(boss), params: { template_id: "dealer-#{tpl.id}", include_completed: 'true' }
+    expect(body['projects'].size).to eq(2)
+
+    # A company with no jobs from that template can't read it.
+    get '/api/v1/projects/grid', headers: h(stranger), params: { template_id: "dealer-#{tpl.id}" }
+    expect(response).to have_http_status(:not_found)
+  end
+
+  # E87 retest: giving a phase to the linked installer's vendor record only
+  # emailed the vendor's address; the installer's own users got no text.
+  it "tells the installer's admins when the dealer makes its vendor a phase owner" do
+    link!
+    post "/api/v1/projects/#{project.id}/assign_phase", headers: h(dealer),
+         params: { phase_id: finish_phase.id, assigned_vendor_id: vendor.id, apply_to_tasks: true }.to_json
+    expect(response).to have_http_status(:ok), response.body
+
+    n = Notification.find_by!(recipient: boss, notification_type: 'project_assigned')
+    expect(n).to have_attributes(company_id: installer_co.id, title: 'Summit Homes assigned you work')
+    expect(n.message).to start_with('Finish on Diaz home')
+    expect(installer_co.review_items.open.find_by(kind: 'assigned').title).to eq('Summit Homes assigned you: Finish on Diaz home')
   end
 
   it 'keeps each side to its own records' do
@@ -331,11 +404,11 @@ RSpec.describe 'Company links', type: :request do
   it 'opens a link notice on the right page for each side' do
     link = link!
     pl = offer!(link)
-    installer_note = Notification.where(recipient: boss, notification_type: 'project_link').last
+    installer_note = Notification.where(recipient: boss, notification_type: 'project_job_offered').last
     expect(installer_note.computed_action_url).to eq('/linked-companies?view=jobs')
     post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
     project.update!(deal_id: nil)
-    dealer_note = Notification.where(recipient: dealer, notification_type: 'project_link').last
+    dealer_note = Notification.where(recipient: dealer, notification_type: 'project_job_answered').last
     expect(dealer_note.computed_action_url).to eq("/deals/projects/#{project.id}")
   end
 end

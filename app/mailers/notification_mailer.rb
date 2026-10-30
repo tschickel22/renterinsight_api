@@ -1,6 +1,8 @@
 # app/mailers/notification_mailer.rb
 class NotificationMailer < ApplicationMailer
-  def broadcast_notification(user:, notification:)
+  # platform_from: send from the platform's own address, with replies going to
+  # the tenant's. Used when the provider refuses the tenant's From address.
+  def broadcast_notification(user:, notification:, platform_from: false)
     @user = user
     @notification = notification
     
@@ -52,11 +54,17 @@ class NotificationMailer < ApplicationMailer
       end
     end
     
-    mail(
-      to: @user.email,
-      from: default_from_address,
-      subject: notification.title
-    )
+    tenant_from = default_from_address
+    if platform_from
+      mail(
+        to: @user.email,
+        from: "#{Brand.from_name} <#{Brand.from_email}>",
+        reply_to: tenant_from,
+        subject: notification.title
+      )
+    else
+      mail(to: @user.email, from: tenant_from, subject: notification.title)
+    end
   end
 
   # Relays the recipient's reply to the rep so they can carry on the conversation straight

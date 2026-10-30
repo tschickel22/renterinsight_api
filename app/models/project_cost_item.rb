@@ -37,6 +37,15 @@ class ProjectCostItem < ApplicationRecord
   validate :links_belong_to_project
 
   scope :not_deleted, -> { where(is_deleted: [false, nil]) }
+
+  # The cost type a vendor's money counts as, from the kind of vendor they are.
+  def self.cost_type_for_vendor(vendor)
+    case vendor&.vendor_type
+    when 'contractor' then 'subcontractor'
+    when 'supplier' then 'materials'
+    else 'other'
+    end
+  end
   scope :by_type, ->(type) { where(cost_type: type) if type.present? }
   scope :by_status, ->(status) { where(status: status) if status.present? }
   scope :by_phase, ->(phase_id) { where(project_phase_id: phase_id) if phase_id.present? }

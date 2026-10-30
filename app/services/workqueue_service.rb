@@ -1307,7 +1307,10 @@ class WorkqueueService
       scope.order(Arel.sql('expected_close_date ASC NULLS LAST'))
     when 'ServiceTicket'
       scope.order(created_at: :desc)
-    when 'Quote', 'Invoice'
+    when 'Quote'
+      # Quotes have no due_date; the date that matters is when the offer lapses.
+      scope.order(Arel.sql('valid_until ASC NULLS LAST'))
+    when 'Invoice'
       scope.order(Arel.sql('due_date ASC NULLS LAST'))
     else
       scope
@@ -1672,7 +1675,7 @@ class WorkqueueService
       priority:         nil,
       badge:            r.status,
       amount:           r.try(:total),
-      due_at:           r.try(:due_date),
+      due_at:           r.valid_until&.to_time,
       last_activity_at: r.updated_at,
       link:             "/finance/quotes/#{r.id}",
     }

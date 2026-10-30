@@ -30,6 +30,22 @@ class PrintedCheck < ApplicationRecord
     status == STATUS_QUEUED
   end
 
+  # The next number nobody has printed on this account. The account's
+  # check_number holds the last one printed (print! writes it), or the
+  # starting number someone typed in Settings before anything printed.
+  def self.next_number_for(bank_account)
+    used = where(bank_account_id: bank_account.id).where("check_number ~ '^[0-9]+$'").maximum(Arel.sql('check_number::bigint'))
+    set = bank_account.check_number.to_i
+    return (set.positive? ? set : 1001) unless used
+
+    [used + 1, set].max
+  end
+
+  # Numbers in start...start+count already printed on this account.
+  def self.taken_numbers(bank_account, start, count)
+    where(bank_account_id: bank_account.id, check_number: (start...(start + count)).map(&:to_s)).pluck(:check_number).sort
+  end
+
   def print!(check_number)
     update!(
       status: STATUS_PRINTED,
