@@ -313,6 +313,20 @@ RSpec.describe 'Company links', type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  # E87 retest: giving a phase to the linked installer's vendor record only
+  # emailed the vendor's address; the installer's own users got no text.
+  it "tells the installer's admins when the dealer makes its vendor a phase owner" do
+    link!
+    post "/api/v1/projects/#{project.id}/assign_phase", headers: h(dealer),
+         params: { phase_id: finish_phase.id, assigned_vendor_id: vendor.id, apply_to_tasks: true }.to_json
+    expect(response).to have_http_status(:ok), response.body
+
+    n = Notification.find_by!(recipient: boss, notification_type: 'project_assigned')
+    expect(n).to have_attributes(company_id: installer_co.id, title: 'Summit Homes assigned you work')
+    expect(n.message).to start_with('Finish on Diaz home')
+    expect(installer_co.review_items.open.find_by(kind: 'assigned').title).to eq('Summit Homes assigned you: Finish on Diaz home')
+  end
+
   it 'keeps each side to its own records' do
     link = link!
     pl = offer!(link)

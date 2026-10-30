@@ -89,6 +89,7 @@ class ProjectAssignmentService
     end
     unless preview
       send_owner_notices
+      tell_linked_installers
       ProjectNotices.employee_assigned(@project, @user_notices, actor: @actor)
     end
     result
@@ -116,6 +117,17 @@ class ProjectAssignmentService
                   .uniq { |vendor, _| vendor.id }
                   .each do |vendor, phase|
       ProjectNotificationService.notify_contractor_owner_assigned(vendor, @project, phase: phase)
+    end
+  end
+
+  # A vendor that is a linked installer company has its own DealerTide users.
+  # The vendor record rarely has text consent, so the email to it was all they
+  # got (E87 retest): its admins hear as users too, email and text by their
+  # own switches.
+  def tell_linked_installers
+    @owner_notices.group_by(&:first).each do |vendor, rows|
+      link = CompanyLink.active.where(dealer_vendor_id: vendor.id).where.not(installer_company_id: nil).first
+      CompanyLinkNotifier.vendor_assigned(link, @project, rows.map(&:last), actor: @actor) if link
     end
   end
 

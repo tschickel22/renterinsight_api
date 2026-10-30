@@ -179,6 +179,24 @@ class CompanyLinkNotifier
                       project: pl.installer_project })
     end
 
+    # The dealer made the linked installer's vendor record the owner of a
+    # project or phases (Change on the Progress tab), rather than sending the
+    # job across. phases: nil for the whole project.
+    def vendor_assigned(link, project, phases, actor: nil)
+      dealer = link.dealer_company.name
+      what = if phases.include?(nil) then project.name
+             elsif phases.one? then "#{phases.first.name} on #{project.name}"
+             else "#{phases.size} phases on #{project.name} (#{phases.map(&:name).first(3).to_sentence})"
+             end
+      by = actor ? " by #{actor.full_name.presence || actor.email}" : ''
+      title = "#{dealer} assigned you work"
+      text = "#{what}#{by}."
+      deliver(installer_admins(link), link.installer_company, :project_assigned, link, title, text,
+              item: { kind: 'assigned', title: "#{dealer} assigned you: #{what}", detail: text, from_name: dealer })
+    rescue => e
+      Rails.logger.error("[CompanyLinkNotifier] vendor_assigned for link #{link&.id}: #{e.class}: #{e.message}")
+    end
+
     # One company moved an estimated date on a handed-off phase and it was
     # copied across: the other company hears about it. One open item per
     # phase, refreshed by later moves until someone marks it seen.
