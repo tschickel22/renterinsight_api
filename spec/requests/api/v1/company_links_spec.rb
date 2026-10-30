@@ -260,8 +260,12 @@ RSpec.describe 'Company links', type: :request do
     pl = offer!(link, phase: set_phase, fee: 900)
     post "/api/v1/project_links/#{pl.id}/accept", headers: h(boss)
     copy = pl.reload.installer_project
+    asked = installer_co.project_bid_requests.create!(project: copy, project_phase: copy.project_phases.first,
+                                                      title: 'Set crew', status: 'open')
     post "/api/v1/project_links/#{pl.id}/cancel", headers: h(dealer)
     expect(copy.reload.status).to eq('cancelled')
+    # Bids the installer asked for on it can't be awarded any more.
+    expect(asked.reload.status).to eq('cancelled')
 
     # Money already spent on it keeps it on the installer's profit report.
     pl2 = offer!(link, phase: finish_phase, fee: 500)

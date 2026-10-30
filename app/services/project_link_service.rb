@@ -322,6 +322,10 @@ class ProjectLinkService
     has_costs = project.project_cost_items.not_deleted.exists? ||
                 pl.installer_company.bills.where(project_id: project.id).where.not(status: 'void').exists?
     project.update!(status: has_costs ? 'on_hold' : 'cancelled')
+    # Bids the installer asked for on the job can't be awarded now; leaving
+    # them open kept them on Bids & Quotes with nothing to do (E87 retest).
+    bids = ProjectBidService.new(pl.installer_company)
+    pl.installer_company.project_bid_requests.open.where(project_id: project.id).find_each { |r| bids.cancel!(r) }
   end
 
   def check_dealer_change!(change)

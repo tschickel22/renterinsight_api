@@ -80,10 +80,23 @@ class Api::V1::PrintedChecksController < ApplicationController
 
     return render json: { error: 'No queued checks found for the given IDs' }, status: :not_found if checks.empty?
 
+    # Every number in the batch must be free on its account before any check
+    # prints, so a clash never leaves half a batch printed.
+    clash = checks.map(&:bank_account).uniq.filter_map do |ba|
+      taken = PrintedCheck.taken_numbers(ba, starting_number, checks.size)
+      next if taken.empty?
+
+      "Check #{'number'.pluralize(taken.size)} #{taken.to_sentence} #{taken.size == 1 ? 'has' : 'have'} already been printed " \
+        "from #{ba.bank_name}. The next free number is #{PrintedCheck.next_number_for(ba)}."
+    end
+    return render json: { error: clash.join(' ') }, status: :unprocessable_entity if clash.any?
+
     printed = []
-    checks.each_with_index do |check, i|
-      check.print!(starting_number + i)
-      printed << check
+    PrintedCheck.transaction do
+      checks.each_with_index do |check, i|
+        check.print!(starting_number + i)
+        printed << check
+      end
     end
 
     pdf_bytes = CheckPrintingService.generate_pdf_bytes(printed)
@@ -130,6 +143,7 @@ class Api::V1::PrintedChecksController < ApplicationController
           id: ba.id,
           bank_name: ba.bank_name,
           check_number: ba.check_number,
+          next_check_number: PrintedCheck.next_number_for(ba),
           check_format: ba.check_format,
           check_company_name: ba.check_company_name,
           check_signor_name: ba.check_signor_name
