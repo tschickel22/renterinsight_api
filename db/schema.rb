@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_29_120100) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_30_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7814,6 +7814,29 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_29_120100) do
     t.index ["source_type", "source_id"], name: "index_tracked_links_on_source_type_and_source_id"
     t.index ["token"], name: "index_tracked_links_on_token", unique: true
     t.index ["vehicle_id"], name: "index_tracked_links_on_vehicle_id"
+  end
+
+  create_table "training_videos", force: :cascade do |t|
+    t.string "title", null: false
+    t.string "slug", null: false
+    t.text "description"
+    t.string "module_key"
+    t.integer "position", default: 0, null: false
+    t.integer "duration_seconds"
+    t.string "video_url"
+    t.string "video_key"
+    t.bigint "video_size"
+    t.string "poster_url"
+    t.string "captions_url"
+    t.jsonb "chapters", default: [], null: false
+    t.boolean "is_published", default: false, null: false
+    t.string "share_token", null: false
+    t.boolean "share_enabled", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["module_key", "position"], name: "index_training_videos_on_module_key_and_position"
+    t.index ["share_token"], name: "index_training_videos_on_share_token", unique: true
+    t.index ["slug"], name: "index_training_videos_on_slug", unique: true
   end
 
   create_table "truebuild_addons", force: :cascade do |t|
