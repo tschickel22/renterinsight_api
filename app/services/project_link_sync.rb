@@ -12,7 +12,8 @@
 # Tasks: the dealer's own tasks under a handed-off phase follow the
 # installer's copies of them (linked_task_id), and a phase the installer
 # finishes finishes the dealer's tasks still open under it. Tasks the
-# installer adds stay in the installer's company.
+# installer adds stay in the installer's company. A moved date is told to
+# the other company (bell, email, Review Updates).
 class ProjectLinkSync
   DATE_FIELDS = %w[estimated_start_date estimated_completion_date].freeze
 
@@ -74,15 +75,26 @@ class ProjectLinkSync
       changed << "#{dst.name} is now #{src.status.humanize.downcase}"
       finish_tasks(dst, src) if src.status == 'completed'
     end
-    changed.concat(copy_dates(src, dst))
-    log(pl, pl.installer_company, changed)
+    dates = copy_dates(src, dst)
+    log(pl, pl.installer_company, changed + dates)
+    tell_dates(pl, dst, dates, pl.installer_company)
     finish_if_done(pl)
   end
 
   def to_installer(map)
     src = map.dealer_phase
     dst = map.installer_phase.reload
-    log(map.project_link, map.project_link.dealer_company, copy_dates(src, dst))
+    pl = map.project_link
+    dates = copy_dates(src, dst)
+    log(pl, pl.dealer_company, dates)
+    tell_dates(pl, dst, dates, pl.dealer_company)
+  end
+
+  # The other company hears that the install dates moved (E87).
+  def tell_dates(pl, phase, dates, by_company)
+    return if dates.empty?
+
+    CompanyLinkNotifier.date_changed(pl, phase: phase, changes: dates, by_company: by_company)
   end
 
   # The installer says the phase is finished, so the dealer's tasks under it

@@ -179,7 +179,36 @@ class CompanyLinkNotifier
                       project: pl.installer_project })
     end
 
+    # One company moved an estimated date on a handed-off phase and it was
+    # copied across: the other company hears about it. One open item per
+    # phase, refreshed by later moves until someone marks it seen.
+    def date_changed(project_link, phase:, changes:, by_company:)
+      pl = project_link
+      to_installer = by_company.id == pl.dealer_company_id
+      company = to_installer ? pl.installer_company : pl.dealer_company
+      project = phase.project
+      people = if to_installer
+                 [project.owner].compact.select { |u| u.company_id == company.id && u.active? }.presence ||
+                   installer_admins(pl.company_link)
+               else
+                 dealer_recipients(pl)
+               end
+      title = "#{by_company.name} changed dates on #{phase.name}"
+      text = "#{changes.join('; ')}. #{project.name}."
+      ProjectNotices.deliver(users: people, company: company, type: :project_date_changed, notifiable: phase,
+                             title: title, message: text, action_url: link_to_project(project),
+                             item: { kind: 'date_changed', subject: phase, title: title, detail: text,
+                                     from_name: by_company.name, project: project, phase: phase,
+                                     assigned_user: project.owner })
+    rescue => e
+      Rails.logger.error("[CompanyLinkNotifier] date_changed for link #{project_link&.id}: #{e.class}: #{e.message}")
+    end
+
     private
+
+    def link_to_project(project)
+      project.deal_id ? "/deals/#{project.deal_id}?tab=progress" : "/deals/projects/#{project.id}"
+    end
 
     def deliver(users, company, type, notifiable, title, message, item: nil)
       ProjectNotices.deliver(users: users, company: company, type: type, notifiable: notifiable,
@@ -191,15 +220,23 @@ class CompanyLinkNotifier
           .select { |u| u.company && u.effective_admin? }
     end
 
+    # A platform admin who set the link up from inside a company (support, or
+    # testing) is not one of its users, so they are told as well as its admins
+    # (E68 test 6.3: the rate card reached Summit Park's admins, not the tester).
     def installer_admins(link)
       return [] unless link.installer_company
 
-      link.installer_company.users.where(status: 'active').select(&:effective_admin?)
+      (link.installer_company.users.where(status: 'active').select(&:effective_admin?) +
+        acting_admins(link.accepted_by)).uniq
     end
 
     def dealer_people(link)
       [link.invited_by].compact.select { |u| u.company_id == link.dealer_company_id && u.active? }.presence ||
-        link.dealer_company.users.where(status: 'active').select(&:effective_admin?)
+        (link.dealer_company.users.where(status: 'active').select(&:effective_admin?) + acting_admins(link.invited_by)).uniq
+    end
+
+    def acting_admins(user)
+      [user].compact.select { |u| u.platform_admin? && u.active? }
     end
 
     def dealer_recipients(project_link)

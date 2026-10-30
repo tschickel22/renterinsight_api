@@ -128,6 +128,8 @@ class Notification < ApplicationRecord
     project_change_order: { category: 'projects', priority: 'high', title: 'Change Order or Quote to Approve' },
     project_change_decided: { category: 'projects', priority: 'normal', title: 'Your Change Order Was Decided' },
     project_review_nudge: { category: 'projects', priority: 'normal', title: 'Project Items Still Waiting' },
+    project_date_changed: { category: 'projects', priority: 'normal', title: 'Install Date Changed' },
+    project_phase_open_tasks: { category: 'projects', priority: 'normal', title: 'Phase Closed With Open Steps' },
     company_link: { category: 'projects', priority: 'high', title: 'Linked Company' },
     project_link: { category: 'projects', priority: 'high', title: 'Linked Job' },
 

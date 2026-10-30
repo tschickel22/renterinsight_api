@@ -77,6 +77,19 @@ RSpec.describe 'Linked installer pricing', type: :request do
     post "/api/v1/projects/#{ip.project_id}/set_phase_status", headers: h(boss), params: { phase_id: ip.id, status: 'in_progress' }.to_json
   end
 
+  # E68 test 6.3: the tester set the link up as a platform admin working
+  # inside the dealer, so the rate card went to the dealer's admins only.
+  it 'also tells a platform admin who set the link up from inside the dealer' do
+    support = User.create!(email: 'support@platform.example', first_name: 'S', last_name: 'P', password: 'Pass1234!',
+                           company_id: stranger_co.id, role: 'platform_admin', status: 'active')
+    link.update_columns(invited_by_id: support.id)
+
+    card = card!(card_items)
+    expect(Notification.where(recipient: support, notifiable: card)).to exist
+    expect(Notification.where(recipient: dealer, notifiable: card)).to exist
+    expect(Notification.where(recipient: stranger, notifiable: card)).not_to exist
+  end
+
   it 'sends a rate card the dealer approves once, and keeps it in force until a new one is approved' do
     first = approved_card!
     expect(first).to be_approved

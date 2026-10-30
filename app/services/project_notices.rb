@@ -16,10 +16,11 @@
 # consent.
 class ProjectNotices
   class << self
-    # users: recipients in one company. item: attributes for a Review Updates
-    # row (kind:, subject:, title: ...), or nil for a bell-only event.
+    # users: recipients in one company (or a platform admin acting for it).
+    # item: attributes for a Review Updates row (kind:, subject:, title: ...),
+    # or nil for a bell-only event.
     def deliver(users:, type:, title:, message:, notifiable:, company:, item: nil, action_url: nil)
-      users = Array(users).compact.uniq.select { |u| u.company_id == company.id && u.active? }
+      users = Array(users).compact.uniq.select { |u| (u.company_id == company.id || u.platform_admin?) && u.active? }
       url = action_url || link_for(notifiable, company)
       users.each do |user|
         notification = NotificationService.create(

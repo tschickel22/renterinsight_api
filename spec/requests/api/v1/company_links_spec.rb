@@ -186,6 +186,17 @@ RSpec.describe 'Company links', type: :request do
     # The dealer moves the install date; the installer's phase follows.
     perform_enqueued_jobs { set_phase.update!(estimated_start_date: Date.new(2026, 11, 20)) }
     expect(iph.reload.estimated_start_date).to eq(Date.new(2026, 11, 20))
+    # The installer hears about it (E87), on its own copy of the phase.
+    moved = installer_co.review_items.open.find_by(kind: 'date_changed', subject: iph)
+    expect(moved).to have_attributes(from_name: 'Summit Homes', needs_action: false)
+    expect(moved.detail).to include('Nov 20, 2026')
+    expect(Notification.where(company_id: installer_co.id, notification_type: 'project_date_changed', recipient: boss)).to exist
+
+    # And the other way: the installer moves the finish date, the dealer is told.
+    perform_enqueued_jobs { iph.reload.update!(estimated_completion_date: Date.new(2026, 11, 24)) }
+    expect(set_phase.reload.estimated_completion_date).to eq(Date.new(2026, 11, 24))
+    expect(dealer_co.review_items.open.find_by(kind: 'date_changed', subject: set_phase)).to have_attributes(from_name: 'Summit Install')
+    expect(Notification.where(company_id: dealer_co.id, notification_type: 'project_date_changed', recipient: dealer)).to exist
 
     allow(ProjectNotificationService).to receive(:notify_phase_change)
     perform_enqueued_jobs { ip.set_phase_status!(iph.reload, 'completed') }

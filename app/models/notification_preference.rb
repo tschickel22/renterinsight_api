@@ -101,6 +101,8 @@ class NotificationPreference < ApplicationRecord
     project_change_order: { in_app: true, email: true, sms: true, push: false },
     project_change_decided: { in_app: true, email: true, sms: true, push: false },
     project_review_nudge: { in_app: false, email: true, sms: false, push: false },
+    project_date_changed: { in_app: true, email: true, sms: false, push: false },
+    project_phase_open_tasks: { in_app: true, email: false, sms: false, push: false },
     company_link: { in_app: true, email: false, sms: false },
     project_link: { in_app: true, email: false, sms: false }
   }.freeze

@@ -148,7 +148,35 @@ class Project < ApplicationRecord
       save!
     end
 
+    note_open_tasks(phase, new_status, changed_by) unless Current.project_link_sync
+
     { success: true, phase: phase.reload, old_status: old_status }
+  end
+
+  # A phase closed with steps still open goes to Review Updates for the
+  # phase's person and the project owner (E87), and comes off once the steps
+  # are ticked (ProjectPhaseTask) or the phase is reopened.
+  def note_open_tasks(phase, new_status, changed_by)
+    if new_status != 'completed'
+      ProjectNotices.close!(subject: phase, kinds: 'phase_open_tasks', resolution: 'reopened', by: changed_by)
+      return
+    end
+    left = phase.project_phase_tasks.pending.count
+    return if left.zero?
+
+    steps = "#{left} open #{'step'.pluralize(left)}"
+    by = changed_by ? " by #{changed_by.full_name.presence || changed_by.email}" : ''
+    title = "#{phase.name} closed with #{steps}"
+    text = "#{phase.name} on #{name} was marked complete#{by} with #{steps}. Tick them off or reopen the phase."
+    people = [phase.assigned_to, owner].compact.uniq.reject { |u| changed_by && u.id == changed_by.id }
+    url = deal_id ? "/deals/#{deal_id}?tab=progress" : "/deals/projects/#{id}"
+    ProjectNotices.deliver(users: people, company: company, type: :project_phase_open_tasks, notifiable: phase,
+                           title: title, message: text, action_url: url,
+                           item: { kind: 'phase_open_tasks', subject: phase, title: "#{title}, #{name}", detail: text,
+                                   from_name: changed_by&.full_name, project: self, phase: phase,
+                                   assigned_user: phase.assigned_to || owner, metadata: { open_tasks: left } })
+  rescue => e
+    Rails.logger.error("[Project] open tasks note for phase #{phase&.id}: #{e.class}: #{e.message}")
   end
 
   # Recalculate current_phase_id based on phase statuses

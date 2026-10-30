@@ -21,6 +21,9 @@ class ProjectPhaseTask < ApplicationRecord
 
   after_commit :sync_linked_task, on: :update,
                if: -> { linked_task_id.present? && saved_change_to_status? && !Current.project_link_sync }
+  # The last open step of a closed phase is ticked: its Review Updates item
+  # (Project#note_open_tasks) is done.
+  after_commit :clear_open_tasks_item, on: :update, if: -> { saved_change_to_status? && status == 'completed' }
 
   scope :ordered,           -> { order(:position) }
   scope :pending,           -> { where(status: 'pending') }
@@ -48,6 +51,13 @@ class ProjectPhaseTask < ApplicationRecord
 
   def sync_linked_task
     ProjectLinkTaskSyncJob.perform_later(id)
+  end
+
+  def clear_open_tasks_item
+    phase = project_phase
+    return unless phase&.status == 'completed' && !phase.project_phase_tasks.pending.exists?
+
+    ProjectNotices.close!(subject: phase, kinds: 'phase_open_tasks', resolution: 'steps done', by: completed_by)
   end
 
   def assigned_to_in_company

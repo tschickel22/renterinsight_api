@@ -225,10 +225,27 @@ RSpec.describe 'Project inbox and bids', type: :request do
     expect([task.reload.status, second.reload.status]).to eq(%w[completed completed])
   end
 
-  it 'leaves tasks open when completing the phase without asking' do
+  it 'leaves tasks open when completing the phase without asking, and lists the phase in Review Updates until they are done' do
+    phase.update!(assigned_to: rep)
     post "/api/v1/projects/#{project.id}/set_phase_status", headers: h(dealer),
          params: { phase_id: phase.id, status: 'completed' }.to_json
     expect(task.reload.status).to eq('pending')
+
+    item = company.review_items.open.find_by(kind: 'phase_open_tasks', subject: phase)
+    expect(item).to have_attributes(title: 'Set closed with 1 open step, Diaz home', assigned_user_id: rep.id, needs_action: false)
+    # The phase's person hears; the one who closed it doesn't.
+    expect(Notification.where(recipient: rep, notification_type: 'project_phase_open_tasks')).to exist
+    expect(Notification.where(recipient: dealer, notification_type: 'project_phase_open_tasks')).not_to exist
+
+    task.complete!(by: rep)
+    expect(item.reload).to have_attributes(status: 'closed', resolution: 'steps done')
+  end
+
+  it 'takes the open steps item off when the phase is reopened' do
+    post "/api/v1/projects/#{project.id}/set_phase_status", headers: h(dealer), params: { phase_id: phase.id, status: 'completed' }.to_json
+    item = company.review_items.open.find_by!(kind: 'phase_open_tasks', subject: phase)
+    post "/api/v1/projects/#{project.id}/set_phase_status", headers: h(dealer), params: { phase_id: phase.id, status: 'in_progress' }.to_json
+    expect(item.reload).to have_attributes(status: 'closed', resolution: 'reopened')
   end
 
   it 'says which contractor cannot be emailed when sending assignment notices' do
