@@ -258,8 +258,11 @@ RSpec.describe 'Project inbox and bids', type: :request do
   end
 
   it 'shows untemplated projects on the All Projects grid by their own phase names' do
+    project.update!(customer_name: 'Maria Diaz')
     get '/api/v1/projects/grid', headers: h(dealer), params: { template_id: 'none' }
     expect(response).to have_http_status(:ok), response.body
+    # No deal, so the client comes from the project itself.
+    expect(body['projects'].first).to include('customer_name' => 'Maria Diaz', 'name' => 'Diaz home', 'dealer_name' => nil)
     expect(body['template']['phases'].map { |p| p['name'] }).to eq(['Set'])
     expect(body['projects'].map { |p| p['id'] }).to eq([project.id])
   end

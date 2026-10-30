@@ -666,6 +666,11 @@ module Api
           template.project_template_phases.order(:position)
         end
 
+        # An installer's copy of a dealer's job has no deal: its client is the
+        # customer named on the project, and it says which dealer sent it.
+        from_dealer = ProjectLink.where(installer_project_id: projects.map(&:id)).includes(:dealer_company)
+                                 .to_h { |pl| [pl.installer_project_id, pl.dealer_company&.name] }
+
         project_rows = projects.map do |project|
           phase_map = {}
           project.project_phases.includes(:project_phase_tasks).each do |ph|
@@ -700,6 +705,9 @@ module Api
             deal: deal ? { id: deal.id, name: deal.name, deal_number: deal.deal_number, value: deal.calculated_value } : nil,
             account: deal&.account ? { id: deal.account.id, name: deal.account.name } : nil,
             contact: deal&.contact ? { id: deal.contact.id, full_name: [deal.contact.first_name, deal.contact.last_name].compact.join(' ') } : nil,
+            name:                  project.name,
+            customer_name:         project.customer_name.presence,
+            dealer_name:           from_dealer[project.id],
             location: project.location ? { id: project.location.id, name: project.location.name } : nil,
             phases: template_phases.map do |tp|
               pd = phase_map[untemplated ? tp.name : tp.position] || {}
