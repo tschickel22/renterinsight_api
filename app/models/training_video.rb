@@ -52,8 +52,17 @@ class TrainingVideo < ApplicationRecord
 
   private
 
+  # A new video starts as "New training video"; its slug follows the title
+  # until it's renamed, and never clashes with another video's.
   def fill_slug
-    self.slug = title.to_s.parameterize if slug.blank? && title.present?
+    return if title.blank?
+    return unless slug.blank? || (will_save_change_to_title? && slug.to_s.match?(/\Anew-training-video(-\d+)?\z/))
+
+    base = title.parameterize.presence || 'training-video'
+    candidate = base
+    n = 1
+    candidate = "#{base}-#{n += 1}" while self.class.where.not(id: id).exists?(slug: candidate)
+    self.slug = candidate
   end
 
   def fill_share_token

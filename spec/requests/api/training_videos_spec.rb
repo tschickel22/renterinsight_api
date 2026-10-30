@@ -70,6 +70,17 @@ RSpec.describe 'Training videos', type: :request do
     expect(body['video']['share_token']).to be_present
   end
 
+  it 'adds several new videos and gives each its own slug, which follows the title once renamed' do
+    2.times { post '/api/admin/training_videos', headers: h(platform), params: { video: { title: 'New training video' } } }
+    expect(response).to have_http_status(:created), response.body
+    slugs = TrainingVideo.order(:id).last(2).map(&:slug)
+    expect(slugs).to eq(%w[new-training-video new-training-video-2])
+
+    video = TrainingVideo.order(:id).last
+    patch "/api/admin/training_videos/#{video.id}", headers: h(platform), params: { video: { title: 'Getting bids' } }
+    expect(video.reload.slug).to eq('getting-bids')
+  end
+
   it 'uploads the MP4 to the assets bucket and refuses other file types' do
     s3 = instance_double(S3UploadService)
     allow(S3UploadService).to receive(:new).and_return(s3)
