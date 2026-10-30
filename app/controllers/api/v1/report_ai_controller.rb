@@ -736,7 +736,7 @@ module Api
           output_tokens: log.output_tokens.to_i + answer.output_tokens.to_i,
           cost_cents: log.cost_cents.to_i + (Catalog::PriceBooks::ClaudeClient.cost_usd(answer.input_tokens.to_i, answer.output_tokens.to_i) * 100).round
         )
-        { answer: answer.answer, articles: answer.articles, places: answer.places, answered: answer.answered }
+        { answer: answer.answer, articles: answer.articles, places: answer.places, videos: answer.videos, answered: answer.answered }
       rescue StandardError => e
         Rails.logger.error("[ReportAI#help_answer] #{e.class} #{e.message}")
         log.update_columns(execution_status: 'error', failure_reason: 'help_unavailable') if required

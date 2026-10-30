@@ -1,0 +1,210 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Which help covers what we just changed? (E88)
+#
+# Lists the tours, training videos and help articles on staging that show or
+# describe the screens behind the files given, so whoever finished a feature
+# change can ask whether they need updating. Run it once the change is done,
+# not after every edit.
+#
+#   bin/knowledge_impact path/to/File.tsx app/controllers/api/v1/x_controller.rb ...
+#   bin/knowledge_impact --base origin/main     # every file changed since main, both repos
+#
+# Frontend paths are relative to the frontend repo (src/...), backend paths to
+# this repo. Reads staging's database through the Render CLI, read only.
+#
+# How a file is tied to help:
+#   - data-tour markers in the file: tours whose steps point at them, videos
+#     whose "screens it shows" list them (strong)
+#   - the routes that render the file (App.tsx and nested <Route>s): tours with
+#     a step on that route, videos that list it (strong)
+#   - words from the file's name: articles and video narration that mention
+#     them, in the same area (maybe; worth a look)
+
+require 'json'
+require 'open3'
+require 'set'
+
+BACKEND = File.expand_path('..', __dir__)
+FRONTEND = ENV.fetch('FRONTEND_DIR', File.expand_path('../Platform_DMS_8.4.25', BACKEND))
+STAGING_DB = ENV.fetch('STAGING_DB', 'dpg-d3tqad6uk2gs73dckbfg-a')
+GENERIC = %w[page list view form modal dialog card panel table index component components section tab tabs button
+             detail details settings manager editor service controller api new edit show hook hooks util utils
+             types type test spec helper helpers main layout shared common item items data record records].to_set
+
+def git_changed(dir, base)
+  out = `git -C #{dir} diff --name-only #{base}...HEAD 2>/dev/null` + `git -C #{dir} diff --name-only 2>/dev/null`
+  out.lines.map(&:strip).reject(&:empty?).uniq
+end
+
+args = ARGV.dup
+files = { front: [], back: [] }
+if (i = args.index('--base'))
+  base = args[i + 1]
+  args.slice!(i, 2)
+  files[:front] = git_changed(FRONTEND, base)
+  files[:back] = git_changed(BACKEND, base)
+end
+args.each do |f|
+  path = f.sub(%r{\A#{Regexp.escape(FRONTEND)}/}, '').sub(%r{\A#{Regexp.escape(BACKEND)}/}, '')
+  File.exist?(File.join(FRONTEND, path)) && path.start_with?('src/') ? files[:front] << path : files[:back] << path
+end
+files[:front].select! { |f| f.match?(/\.(tsx?|jsx?)\z/) && !f.include?('__tests__') }
+files[:back].select! { |f| f.start_with?('app/') }
+abort 'Give the files you changed, or --base <ref>.' if files.values.all?(&:empty?)
+
+# --- Frontend: import graph and routes ---------------------------------------
+SRC = File.join(FRONTEND, 'src')
+all = Dir.glob("#{SRC}/**/*.{ts,tsx}").reject { |f| f.include?('__tests__') }
+rel = ->(f) { f.delete_prefix("#{FRONTEND}/") }
+resolve = lambda do |from, spec|
+  base = if spec.start_with?('@/') then File.join(SRC, spec[2..])
+         elsif spec.start_with?('.') then File.expand_path(spec, File.dirname(from))
+         end
+  next nil unless base
+
+  ['', '.ts', '.tsx', '/index.ts', '/index.tsx'].map { |ext| base + ext }.find { |p| File.file?(p) }
+end
+importers = Hash.new { |h, k| h[k] = Set.new }
+routes_in = {}
+# Per file: the local name each import is known by, to the file it names.
+names = Hash.new { |h, k| h[k] = {} }
+all.each do |f|
+  text = File.read(f)
+  text.scan(/from\s+['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/).flatten.compact.each do |spec|
+    target = resolve.call(f, spec)
+    importers[rel.call(target)] << rel.call(f) if target
+  end
+  text.scan(/import\s+([\w\s{},*]+?)\s+from\s+['"]([^'"]+)['"]/m).each do |clause, spec|
+    target = resolve.call(f, spec)
+    next unless target
+
+    clause.scan(/(?:\w+\s+as\s+)?(\w+)/).flatten.each { |name| names[rel.call(f)][name] = rel.call(target) unless name == 'type' }
+  end
+  text.scan(/(\w+)\s*=\s*(?:React\.)?lazy\(\s*\(\)\s*=>\s*import\(\s*['"]([^'"]+)['"]/).each do |name, spec|
+    target = resolve.call(f, spec)
+    names[rel.call(f)][name] = rel.call(target) if target
+  end
+  # <Route path="x" element={<Comp ... — which component each path draws.
+  text.scan(/<Route\s+[^>]*?path=["']([^"']+)["'][^>]*?element=\{\s*<\s*(\w+)/).each do |path, comp|
+    (routes_in[rel.call(f)] ||= []) << [path, comp]
+  end
+end
+
+# Routes that draw a file: walk up the importers to a file whose <Route>s name
+# a component imported from it; keep nested paths' parents too.
+def routes_for(file, importers, routes_in, names, seen = Set.new, depth = 0)
+  return [] if depth > 6 || seen.include?(file)
+
+  seen << file
+  stem = File.basename(file, '.*')
+  found = []
+  importers[file].each do |parent|
+    hits = Array(routes_in[parent]).select { |_, comp| names[parent][comp] == file }
+    hits.each do |path, _|
+      above = routes_for(parent, importers, routes_in, names, seen.dup, depth + 1)
+      found << path if above.empty? || path.start_with?('/')
+      above.each { |a| found << (path.start_with?('/') ? path : "#{a.chomp('/*').chomp('/')}/#{path}") }
+    end
+    found.concat(routes_for(parent, importers, routes_in, names, seen, depth + 1)) if hits.empty?
+  end
+  found.uniq
+end
+
+markers = Set.new
+routes = Set.new
+words = Set.new
+files[:front].each do |f|
+  full = File.join(FRONTEND, f)
+  next unless File.file?(full)
+
+  File.read(full).scan(/data-tour=["'{`]+([^"'`}$]+)/).flatten.each { |m| markers << m }
+  routes_for(f, importers, routes_in, names).each { |r| routes << r.sub(%r{/\*\z}, '') }
+  File.basename(f, '.*').gsub(/([a-z])([A-Z])/, '\1 \2').downcase.split(/[^a-z]+/).each { |w| words << w unless w.size < 4 || GENERIC.include?(w) }
+end
+files[:back].each do |f|
+  File.basename(f, '.rb').sub(/_controller\z/, '').split('_').each { |w| words << w.sub(/s\z/, '') unless w.size < 4 || GENERIC.include?(w) }
+end
+
+# --- Staging's help -------------------------------------------------------
+def staging(sql)
+  out, err, st = Open3.capture3('render', 'psql', STAGING_DB, '--command', sql, '-o', 'text', '--', '-t', '-A')
+  abort "Could not read staging (render psql): #{err.strip}" unless st.success?
+  JSON.parse(out.strip.empty? ? '[]' : out.strip)
+end
+
+tours = staging(<<~SQL)
+  select coalesce(json_agg(t), '[]') from (
+    select t.id, t.name, t.trigger_route, t.approved_at is not null as approved,
+           (select coalesce(json_agg(json_build_object('route', s.route, 'selector', s.selector, 'title', s.title) order by s.position), '[]')
+              from tour_steps s where s.tour_id = t.id) as steps
+    from tours t where t.is_active) t;
+SQL
+videos = staging(<<~SQL)
+  select coalesce(json_agg(v), '[]') from (
+    select v.id, v.title, v.module_key, to_jsonb(v) -> 'covers' as covers, to_jsonb(v) ->> 'transcript' as transcript
+    from training_videos v where v.video_url is not null) v;
+SQL
+articles = staging(<<~SQL)
+  select coalesce(json_agg(a), '[]') from (
+    select a.slug, a.title, m.key as module_key, lower(a.title || ' ' || coalesce(a.content, '')) as body
+    from knowledge_articles a left join knowledge_modules m on m.id = a.knowledge_module_id
+    where a.is_published and a.article_type <> 'release_note') a;
+SQL
+
+route_match = lambda do |pattern, actual|
+  next false if pattern.to_s.empty? || actual.to_s.empty?
+
+  re = Regexp.new("\\A#{Regexp.escape(pattern).gsub(/:\w+/, '[^/]+')}/?\\z")
+  actual.split('?').first.match?(re)
+end
+marker_of = ->(sel) { sel.to_s[/data-tour="([^"]+)"/, 1] }
+areas = routes.map { |r| r.split('/')[1] }.compact.to_set
+
+found_tours = tours.map do |t|
+  why = []
+  t['steps'].each_with_index do |s, i|
+    m = marker_of.call(s['selector'])
+    why << "step #{i + 1} points at #{m}" if m && markers.include?(m)
+    hit = routes.find { |r| route_match.call(r, s['route']) }
+    why << "step #{i + 1} is on #{s['route']}" if hit && why.none? { |w| w.start_with?("step #{i + 1} ") }
+  end
+  why << "starts on #{t['trigger_route']}" if routes.any? { |r| route_match.call(r, t['trigger_route']) }
+  [t, why.uniq.first(3)] if why.any?
+end.compact
+
+found_videos = videos.map do |v|
+  covers = v['covers'] || {}
+  why = (Array(covers['markers']) & markers.to_a).map { |m| "shows #{m}" }
+  Array(covers['routes']).each { |cr| why << "shows #{cr}" if routes.any? { |r| route_match.call(cr, r) || route_match.call(r, cr) } }
+  strong = why.any?
+  said = words.select { |w| v['transcript'].to_s.downcase.include?(w) || v['title'].to_s.downcase.include?(w) }
+  why << "says #{said.first(3).join(', ')}" if said.size >= 2 && (areas.empty? || areas.include?(v['module_key']) || covers.empty?)
+  [v, why, strong] if why.any?
+end.compact
+
+found_articles = articles.map do |a|
+  said = words.select { |w| a['body'].include?(w) }
+  next if said.size < 2 && !(said.size == 1 && a['title'].downcase.include?(said.first))
+  next if areas.any? && a['module_key'] && !areas.include?(a['module_key']) && said.size < 3
+
+  [a, said.first(4)]
+end.compact.sort_by { |_, s| -s.size }.first(12)
+
+# --- Report ---------------------------------------------------------------
+puts 'Checked against staging. Changed screens:'
+puts "  routes:  #{routes.empty? ? '(none found)' : routes.to_a.sort.join(', ')}"
+puts "  markers: #{markers.empty? ? '(none)' : markers.to_a.sort.join(', ')}"
+puts "  words:   #{words.to_a.sort.join(', ')}"
+puts
+puts "Tours (#{found_tours.size})"
+found_tours.each { |t, why| puts "  - #{t['name']} (tour #{t['id']}#{t['approved'] ? ', approved' : ''}): #{why.join('; ')}" }
+puts
+puts "Training videos (#{found_videos.size})"
+found_videos.each { |v, why, strong| puts "  - #{v['title']} (video #{v['id']})#{strong ? '' : ' maybe'}: #{why.join('; ')}" }
+puts
+puts "Help articles that may describe it (#{found_articles.size})"
+found_articles.each { |a, said| puts "  - #{a['title']} (#{a['slug']}): mentions #{said.join(', ')}" }
+puts
+puts 'Nothing found.' if found_tours.empty? && found_videos.empty? && found_articles.empty?

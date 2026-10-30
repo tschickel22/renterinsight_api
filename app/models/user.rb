@@ -32,6 +32,8 @@ class User < ApplicationRecord
   # reset service because passwords change from several places.
   after_update_commit :revoke_device_sessions_after_password_change,
                       if: :saved_change_to_password_digest?
+  # Training videos the company requires of every new user (E88).
+  after_create_commit { TrainingAssignment.assign_new_user!(self) }
 
   # RBAC System Associations
   has_many :user_role_assignments, dependent: :destroy

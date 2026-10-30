@@ -1,0 +1,540 @@
+# Project management help articles (backlog E88).
+#
+# Loaded into knowledge_articles by db/migrate/20261030160000_load_project_help_articles.rb
+# (Guide::ArticleLoader). Each entry is matched by slug. Write the product name as
+# {{brand}}; it is filled in when the article is shown. No em or en dashes.
+#
+# Screen names and button labels here were checked against the app as of
+# 2026-10-30 (E68 steps 1 to 7, E87). Change the text with the screen.
+
+supersedes:
+  # Seeded April 2026 for the old project screens; replaced by the set below.
+  - project-templates
+  - project-phases-tasks
+  - project-team
+
+articles:
+  - slug: projects-overview
+    module: projects
+    title: How projects work
+    article_type: concept
+    position: 200
+    excerpt: A project tracks the work on a home after the sale, phase by phase, with the people, bids and costs that go with it.
+    content: |
+      A project tracks the work on a home after the sale: ordering, delivery, set, finish and closing, broken into **phases**, each with its own **tasks** (steps). Most projects belong to a deal and open from the deal's **Progress** tab.
+
+      ## Where to find things
+
+      - **Projects > All Projects**: every project in a grid, one column per phase. Pick a template at the top to choose the columns, and untick **Active Only** to include finished and cancelled projects.
+      - **Projects > Review Updates**: everything waiting on someone, such as contractor invoices, bids to award and change orders. See [Review Updates](review-updates).
+      - **Projects > Bids & Quotes**: every bid and installer quote across all projects. See [Bids & Quotes](bids-and-quotes).
+      - **Projects > Linked Installers**: install companies that run their own {{brand}} company. See [Link an installer](link-an-installer).
+      - **Administration > Company Settings > Project Management**: project templates and project settings.
+
+      ## Inside a project
+
+      On a deal's **Progress** tab the project has five tabs:
+
+      1. **Phases**: the phases and their tasks, who owns each, dates, and the buttons to start, complete or skip a phase.
+      2. **Bids**: bid requests sent to contractors for a phase.
+      3. **Costs & Budget**: the budget per phase, committed costs (awarded bids, installer jobs) and actual costs from bills and expenses.
+      4. **Materials**: materials for the job.
+      5. **Documents**: files and photos, by phase.
+
+      ## Who does the work
+
+      - An **employee** is one of your users.
+      - A **contractor** is one of your vendors. They work from the Contractor Portal, where they see their tasks, bid on work and send invoices.
+      - A **linked installer** is an install company with its own {{brand}} company. You send it a whole job and it runs the job in its own books.
+
+  - slug: project-templates-setup
+    module: projects
+    title: Set up project templates
+    article_type: how_to
+    position: 201
+    excerpt: Templates hold your standard phases, tasks and default owners, so every new project starts the same way.
+    content: |
+      A template is the list of phases and tasks you use for a kind of job, so every new project starts complete and already assigned.
+
+      ## Create a template
+
+      1. Go to **Administration > Company Settings** and open the **Project Management** tab.
+      2. Click **New Template**.
+      3. Enter a **Template Name** and pick a **Type** (Standard, Land + Home, Factory Order, Used Home or Service Project).
+      4. Click **Add Phase** for each phase, in order. For each phase you can set:
+         - **Required (can't skip)**, so the phase can't be skipped on a project.
+         - **Notify on start**, so the customer is told when the phase starts.
+      5. Under a phase, click **Add Task** for each step.
+      6. Tick **Default template for new projects** if this is the one most deals use.
+      7. Save.
+
+      ## Default owners
+
+      A template can say who does the work, so a new project starts assigned:
+
+      - **Default contractor** and **Default employee** on the template cover the whole project.
+      - The same two fields on a phase, or on a task, override the template for that phase or task.
+
+      When a project is built, each task uses its own setting first, then its phase's, then the template's. If a default contractor or employee is no longer active, that item is left unassigned and the project shows a banner listing what still needs an owner.
+
+      Everyone given work this way is told: contractors by email (and text, if they agreed to texts), employees by a bell notice, an email and a text.
+
+      > **Tip:** A template change only affects projects created afterwards. Projects already running keep the phases they were built with.
+
+  - slug: start-a-project
+    module: projects
+    title: Start a project on a deal
+    article_type: how_to
+    position: 202
+    excerpt: Create a project from a template on the deal's Progress tab, with an optional start date that fills in every phase date.
+    content: |
+      ## Create the project
+
+      1. Open the deal and click the **Progress** tab.
+      2. Click **Create Project**.
+      3. Under **Select Template**, choose a template. The number of phases shows beside each name, and your default template is marked **Default**.
+      4. Optionally set a **Project Start Date**. If you do, every phase and task date is filled in from the template's durations.
+      5. Click **Create Project**.
+
+      The project opens on the **Phases** tab with every phase from the template. Any default contractor or employee on the template is already assigned and has been told.
+
+      ## Find it again
+
+      - From the deal: the **Progress** tab.
+      - From **Projects > All Projects**: pick the template at the top of the grid. Each row is a project and each column a phase, so you can see at a glance where every job stands. Click the project name to open it.
+
+      > **Note:** Jobs a linked dealer sends to your install company are projects too, but they have no deal. On **All Jobs** they are listed under the dealer's template, or under **No template**.
+
+  - slug: project-and-phase-owners
+    module: projects
+    title: Give a project or a phase to someone
+    article_type: how_to
+    position: 203
+    excerpt: Make a contractor or an employee the owner of the whole project or of one phase, and choose whether their tasks follow.
+    content: |
+      Every project and every phase can have an owner: a **contractor**, an **employee**, or both.
+
+      ## Change the owner
+
+      1. On the deal's **Progress** tab, find the line that reads **Whole project** (at the top) or **This phase** (inside an expanded phase).
+      2. Click **Change**.
+      3. Pick the contractor, the employee, or both, and click **Save**.
+      4. {{brand}} asks **Apply this to the work that hasn't started?** and tells you how many phases and tasks would move.
+         - **Apply** moves the phases and tasks that haven't started to the new owner. Tasks already started or done, and tasks given to someone else, stay as they are.
+         - **Project only** or **Phase only** changes just the owner line.
+
+      ## Who is told
+
+      - A contractor gets an email (and a text if they agreed to texts). One who got new tasks out of it hears through the usual task emails instead.
+      - An employee gets a bell notice, an email and a text, and an item in their **Review Updates** under **Assigned to you**.
+      - If the contractor is a linked installer company, its admins are told too.
+      - Nobody is told about work they gave themselves.
+
+      > **Tip:** To hand a phase to an installer that runs its own {{brand}} company, use **Send to installer** instead. See [Send a job to your installer](send-job-to-installer).
+
+  - slug: tasks-and-phases
+    module: projects
+    title: Work through tasks and complete phases
+    article_type: how_to
+    position: 204
+    excerpt: Assign tasks, tick them off, and complete, skip or reopen phases.
+    content: |
+      ## Tasks
+
+      Expand a phase on the **Phases** tab to see its tasks.
+
+      - Tick the box beside a task when it is done.
+      - Click **Assign** under a task to give it to an employee, or **Contractor** to give it to a contractor. The contractor gets an email with a link to the task in the Contractor Portal.
+      - Click **Add task** at the bottom of a phase to add a step to this project only.
+      - Click **Edit dates** to change a phase's estimated days, start and completion dates.
+
+      ## Complete a phase
+
+      1. Click **Mark Phase Complete**.
+      2. If the phase still has open tasks, **Also tick off its open steps** is ticked. Leave it ticked to close them with the phase.
+      3. Confirm.
+
+      If you untick it, the phase completes with its steps still open, and an item **closed with open steps** goes to **Review Updates** for the phase's owner and the project owner. It clears itself once the last step is ticked or the phase is reopened.
+
+      ## Skip or reopen
+
+      - **Skip** passes over a phase the job doesn't need. Phases marked required in the template can't be skipped. **Unskip** brings it back.
+      - **Reopen Phase** sets a completed phase back to in progress.
+
+      ## Phases a linked installer runs
+
+      A phase you sent to a linked installer follows their progress. Its tasks can't be ticked on your side: hover or tap a box to see who ticks them off. You can still change its install dates, and the installer is told when you do.
+
+  - slug: get-bids-on-a-phase
+    module: projects
+    title: Get bids on a phase
+    article_type: how_to
+    position: 205
+    excerpt: Send a phase to several contractors, with a scope and due dates, and let them bid in the Contractor Portal.
+    content: |
+      ## Ask for bids
+
+      1. On the **Phases** tab, expand the phase and click **Get bids for this phase**. (Or open the **Bids** tab and click **Get bids**.)
+      2. Under **Contractors to ask**, pick two or more contractors.
+      3. Set **Bids due** and **Work to start**.
+      4. Write the **Scope of work**, or leave it blank to send the phase and its task list.
+      5. Send.
+
+      Each contractor gets an email with a link to bid in the Contractor Portal. Until a bid is awarded, they see the work and the town, not the customer's name.
+
+      ## While bids come in
+
+      - The phase shows a summary such as "Bids out: 1 of 2 answered, low $4,350" with **View bids**, which opens the **Bids** tab.
+      - Each bid that arrives rings your bell and updates one **Bids to award** item in **Review Updates**.
+      - Contractors can attach files (a quote sheet, photos, specs) to their bid. You see them with the bid.
+      - A contractor can also **Pass on this job**. Their card then shows they passed.
+      - Click **Ask more** to send the same request to more contractors.
+
+      ## A bid by phone or email
+
+      Click **Enter bid** on that contractor's card, type the amount, when they can start and the days of work, and save. It is marked as entered by you.
+
+      Next: [Award a bid](award-a-bid).
+
+  - slug: award-a-bid
+    module: projects
+    title: Award, change or undo a bid
+    article_type: how_to
+    position: 206
+    excerpt: Compare bids, award one with a note to the winner, change a contractor's bid with a reason, undo an award or cancel the request.
+    content: |
+      ## Award
+
+      1. Open the **Bids** tab (or **Projects > Bids & Quotes**, **Compare and award**).
+      2. Compare the bids. The lowest is marked **Lowest**.
+      3. Click **Award** on the one you want.
+      4. Optionally write a **Note** to the winner: start date, site contact, gate code, anything they need to know.
+      5. Confirm.
+
+      When you award:
+
+      - The phase (or the whole project) is assigned to the winner, and their tasks that haven't started go to them.
+      - A cost line for the bid amount is added to **Costs & Budget** as committed. Their invoice from the portal bills against it.
+      - The winner gets an email and a text with your note. The others are told they weren't picked.
+
+      ## Change a contractor's bid
+
+      Click **Change** on a bid the contractor sent. You must say **Why are you changing it?** before it saves. The change and its reason are kept on the bid's history, and the contractor is emailed about it.
+
+      ## Undo an award
+
+      **Undo award** removes the committed cost line, gives the work back to whoever had it before and reopens bidding. It only works before the cost is billed and before work starts.
+
+      ## Cancel a request
+
+      **Cancel request** closes it. Contractors who were still bidding get an email that it was closed.
+
+  - slug: bids-and-quotes
+    module: projects
+    title: Bids & Quotes
+    article_type: guide
+    position: 207
+    excerpt: One page for every bid you asked for, every installer quote and change order, and the quotes dealers asked of you.
+    content: |
+      **Projects > Bids & Quotes** shows every bid and quote across all projects, so you don't have to open each one.
+
+      ## You asked for
+
+      Rows are bid requests you sent contractors, quotes you asked a linked installer for ("Ask them to quote"), and change orders your installers sent. They sit in five tabs:
+
+      - **Ready to award**: at least one answer is in, or a quote or change order waits for your approval.
+      - **Waiting on responses**: nobody has answered yet.
+      - **Awarded**
+      - **Declined**
+      - **Cancelled**
+
+      Each row shows the project, phase, how many contractors answered, the low bid, and how it compares to the phase budget. Click **Compare and award** to award right on the page, or **Open project**.
+
+      ## Asked of you
+
+      If you are an installer, a second switch, **Asked of you**, lists what dealers asked you to price, and your change orders, under **Requests to answer**, **Submitted**, **Won** and **Not awarded**.
+
+      ## Finding things
+
+      - **Search** by project, customer or contractor.
+      - **Past due only** shows requests whose due date has passed.
+      - The numbers on the tabs follow your search and filter.
+      - The page follows the location picked at the top of the screen. If bids at other locations are hidden, a note says how many, with a button to switch to that location.
+
+      The menu count beside **Bids & Quotes** is the number ready to award plus the requests waiting on your answer.
+
+  - slug: review-updates
+    module: projects
+    title: Review Updates
+    article_type: guide
+    position: 208
+    excerpt: Everything on your projects that is waiting on someone, in one place, closing by itself once it is dealt with.
+    content: |
+      **Projects > Review Updates** is the one place for project work that needs you: contractor invoices to approve, bids to award, installer quotes and change orders, rate cards, jobs offered to you, and more. You don't need to watch the bell.
+
+      ## The tabs
+
+      - **Waiting**: open items. **Needs you** comes first (something to approve, award or answer), then **For your information** (an answer came back, dates moved, work was assigned to you).
+      - **Closed**: items that were dealt with, with who did it and when.
+      - **Contractor work**: completed contractor work waiting for your review.
+
+      Each row has its own action button, such as **Review bill**, **Compare and award**, **Approve or decline** or **Accept or decline**.
+
+      ## Mine or everyone
+
+      **Mine** shows items given to you plus anything not given to anyone in particular. **Everyone** shows the whole company. Use **Every kind** to filter by type.
+
+      ## Items close by themselves
+
+      Approve the bill in Accounting, award the bid on the project, accept the job from the Linked Installers page: wherever you do it, the item moves to **Closed**. An FYI item closes when you click **Mark seen**. Marked one by mistake? Open **Closed** and click **Reopen**.
+
+      ## Counts and reminders
+
+      - The red count beside **Review Updates** in the menu is what needs you, plus contractor work waiting review. A folded menu shows a dot.
+      - The **Waiting on you** card on the dashboard shows the same numbers. If your dashboard doesn't have it, add it from **Customize**.
+      - Anything needing action that has waited a day gets one reminder email to its owner (or the project owner, or your admins).
+
+  - slug: project-notices
+    module: projects
+    title: Project emails and texts, and how to turn them off
+    article_type: how_to
+    position: 209
+    excerpt: Who is emailed and texted about project work, and the switches each person has in Notification Center.
+    content: |
+      Project events reach people three ways: the bell, **Review Updates**, and email and text.
+
+      ## What goes out
+
+      - Work assigned to someone (a project, phase or task).
+      - Bids received, bids awarded (with your note), bids changed by the dealer.
+      - Contractor invoices sent from the portal.
+      - Jobs sent to a linked installer, accepted, declined or taken back.
+      - Rate cards, quotes and change orders sent, approved or declined.
+      - Install dates moved by the other company.
+      - A daily reminder for anything needing action that has waited a day.
+
+      ## Your switches
+
+      1. Open the user menu (your name, top right) and click **Account Settings**.
+      2. Open the **Notifications** tab and find the **Projects** group.
+      3. Each event has its own switches for the bell, email and text (and push in the mobile app). Turn off what you don't want.
+      4. Click **Save Changes**. **Reset to Defaults** puts everything back.
+
+      By default, anything waiting on you or answering you is on for email and text, and things that are only for your information stay in the app. Review Updates always lists open items, whatever your switches say.
+
+      ## Texts need a mobile number
+
+      Texts go to the phone number on your **Profile** tab. If a notice is set to text you and there is no number, the Notifications tab says so, with a link to add it.
+
+      ## Contractors
+
+      Contractors aren't users, so they have no switches. They get emails at the address on their vendor record, and texts only if they agreed to texts. If a contractor's email can't be delivered, {{brand}} tells you which one when you send the assignment.
+
+  - slug: contractor-invoices-to-bills
+    module: projects
+    title: Contractor invoices become draft bills
+    article_type: how_to
+    position: 210
+    excerpt: A contractor's invoice from the portal arrives as a draft bill on the project and phase, waiting for your approval.
+    content: |
+      ## What happens
+
+      1. The contractor opens the job in the Contractor Portal and clicks **Send an invoice**, attaching the invoice (PDF or photo), the total, and which part of the job it is for.
+      2. A **draft bill** from that vendor appears in **Accounting > Bills**, linked to the project and phase, and an item **Contractor invoice** waits in **Review Updates**. The project owner gets a bell notice, an email and a text.
+      3. Open it (the **Review bill** button in Review Updates goes straight there), check it and approve it.
+
+      Approving moves the phase's cost from committed to actual on **Costs & Budget**, and closes the Review Updates item. Voiding or deleting the bill closes it too.
+
+      ## Paying it
+
+      Pay the bill as usual, including printing a check. When you print checks, the starting number is the next one not yet printed from that bank account. If you type a number that was already used, {{brand}} names the number that clashes and the next free one, and prints none of the batch.
+
+      > **Note:** Whether a cost line posts through bills or is only tracked is set under **Company Settings > Project Management**, **Project Costs and Bills**.
+
+  - slug: project-job-costs
+    module: projects
+    title: Track job costs on a project
+    article_type: how_to
+    position: 211
+    excerpt: Put bills and expenses on a project and phase, and see budget, committed, billed and paid in two reports.
+    content: |
+      ## Put a cost on a project
+
+      **A bill:** in **Accounting > Bills**, pick the **Project** in the bill header. A phase picker appears; choose the phase, or leave **No particular phase**. Each line takes the project, and a cost line appears on the project's **Costs & Budget** tab once the bill posts.
+
+      **An expense:** click **Record Expense**, pick the **Project**, then the phase. The category and vendor lists can be typed into to search. The cost line on the project shows the vendor, and its type comes from the vendor: a contractor becomes **Subcontractor**, a supplier **Materials**, anything else **Other**. Voiding the expense removes the line.
+
+      ## Committed and actual
+
+      - **Committed**: work agreed but not billed yet, such as an awarded bid or a job sent to a linked installer.
+      - **Actual**: bills and expenses posted against the project.
+
+      ## The reports
+
+      Under **Reports**, in the **Projects** group:
+
+      - **Project Profitability**: per project, the sale, front gross, job cost, margin and budget variance.
+      - **Project Budget vs. Actual**: per project and phase, the budget, committed, billed, paid and remaining.
+
+      Both work on a phone: rows become cards.
+
+  - slug: link-an-installer
+    module: projects
+    title: Link an installer that runs its own company
+    article_type: how_to
+    position: 220
+    excerpt: Link your install company's own {{brand}} account to your vendor record, so you can send it whole jobs.
+    content: |
+      Some install companies run their own {{brand}} company, with their own crews, jobs and books. Linking lets you send them jobs while each company keeps its own records. You don't need a link to give an ordinary contractor work: assign them on the project as usual.
+
+      ## Send the invitation (dealer)
+
+      1. Go to **Projects > Linked Installers** and open **Links**.
+      2. Click **Link an installer**.
+      3. Under **Which of your vendors is it?**, pick their vendor record.
+      4. Enter **Their {{brand}} admin's sign-in email**. It must be the email an admin at the installer signs in with. Any other email is refused and nothing is sent.
+      5. Click **Send invitation**.
+
+      The installer's admin gets an email with a button to the invitation, and an item in their Review Updates.
+
+      ## Accept it (installer)
+
+      1. Open **Linked Dealers**, **Links**. The invitation is under **Invitations for you**.
+      2. Read **When you link**: what is shared (the customer's details for jobs you're sent, your progress, dates and photos), and what stays private (your costs, bids, subcontractors and margins).
+      3. Tick the agreement and click **Accept and link**.
+
+      If you are an admin at more than one company, the screen says which company is accepting. Switch to the right company first if the jobs belong there.
+
+      ## End a link
+
+      Either company can click **End link**. No new jobs can be sent; jobs already handed off stay in both companies.
+
+  - slug: send-job-to-installer
+    module: projects
+    title: Send a job to your installer
+    article_type: how_to
+    position: 221
+    excerpt: Hand phases of a project to a linked installer for one price, follow their progress, and take the job back if needed.
+    content: |
+      ## Send it
+
+      1. On the deal's **Progress** tab, find the **Linked installer** panel and click **Send to installer**.
+      2. Pick the **Installer**.
+      3. Under **What to send**, choose **The whole project**, or tick the phases they will do for one fee (delivery and set together, for example).
+      4. Choose the **Price**:
+         - **Their rate card**: lines from the rate card you approved. The price is agreed when you send it.
+         - **Set a price**: type the amount. They accept it or ask for a different price.
+         - **Ask them to quote**: they price it when they accept, and you approve their price before any of it starts.
+      5. Add a **Note for the installer** if you like, and send.
+
+      The installer's admins get an email and a text. The job shows **Waiting for them to accept**, and its price shows as a committed cost on **Costs & Budget** until their bill arrives.
+
+      ## While they work it
+
+      - Status comes back by itself: when they start or finish a phase, yours follows, and your customer gets the usual phase update under your name.
+      - Either side can change the install dates. The other side sees the new date and is told.
+      - Their photos come across unless they untick them. Other files cross only when ticked **Share with**. Files you share go to them the same way.
+      - A quote or change order from them waits in **Review Updates** and on **Bids & Quotes**. Approve it, or decline with a reason. See [Rate cards, quotes and change orders](installer-prices).
+
+      ## Their bill
+
+      When they bill the job, a draft bill from their vendor record lands in your **Accounting > Bills**, on the project and phase, against the committed cost.
+
+      ## Take it back
+
+      Click **Take it back** on the job. They keep their copy, marked taken back, and are told. Any pending cost comes off your budget and any price or change order still waiting is withdrawn.
+
+  - slug: installer-prices
+    module: projects
+    title: Rate cards, quotes and change orders
+    article_type: how_to
+    position: 222
+    excerpt: How a linked installer's prices are agreed before work starts, and how changes to a job are approved.
+    content: |
+      With a linked installer, every price is agreed before the work starts.
+
+      ## Rate card
+
+      The installer writes a rate card for you: base lines (set and finish, per job or per section) and add-ons (skirting per foot, for example).
+
+      - **Installer:** on **Linked Dealers > Links**, on the dealer's card, click **Write a rate card** (or **Send new prices** to change it). Add lines with **Add a line**, choose **Base** or **Add-on** and the unit, then **Send for approval**.
+      - **Dealer:** the rate card waits in **Review Updates** and on the **Links** tab. Click **Approve these prices** or **Decline** with a reason.
+
+      An approved version stays in force until a newer one is approved, so jobs are never left without prices.
+
+      ## Quotes
+
+      A job sent with **Ask them to quote** arrives as **They asked you to quote**. The installer clicks **Price and accept**. The dealer approves the price before any phase can start; until then the installer sees why the phase can't start.
+
+      ## Change orders
+
+      Extra work after a job is agreed is a change order, and only the installer sends one:
+
+      1. **Installer:** on the job, click **Change order**, describe **What changed**, add the lines and price, and pick **Which phase it is for** (or the whole job). That phase can't start until it is approved; phases already under way keep going.
+      2. **Dealer:** approve or decline it from **Review Updates**, **Bids & Quotes** or the project. Approving adds it to the approved total and adds a committed cost line.
+
+      A lower price isn't a negative change order: send a new price instead. The installer can only bill the approved total (the price plus approved change orders).
+
+  - slug: installer-working-jobs
+    module: projects
+    title: For installers, working jobs from dealers
+    article_type: how_to
+    position: 223
+    excerpt: Accept jobs from linked dealers, price them, track them on All Jobs and the Installer Overview, and bill the dealer.
+    content: |
+      If your company is an install company linked to dealers, their jobs arrive in your own {{brand}} company.
+
+      ## Accept a job
+
+      1. When a dealer sends a job you get an email, a text and an item in **Review Updates**.
+      2. Open **Linked Dealers** and the **Jobs from dealers** tab. Under **Waiting for you** you see the scope, the site and the price.
+      3. Click **Accept job**, or **Accept at a different price** to ask for another price, or **Decline** with a reason the dealer sees.
+      4. For a quote request, click **Price and accept** and send your price.
+
+      Accepting creates a project in your company with the customer's details and the phases you were sent. You never see the dealer's deal price or their costs.
+
+      ## Work the job
+
+      - Start and complete phases and tick off tasks as usual. The dealer's project follows.
+      - Tasks you add yourself stay in your company.
+      - Photos you upload are shared with the dealer unless you untick them. Other files cross only when ticked.
+
+      ## See all your jobs
+
+      - **All Jobs** lists your jobs under the template the dealer built them from, using that template's phases as the columns. **No template** holds the rest. Taken-back jobs are hidden while **Active Only** is on.
+      - The dashboard opens on **Installer Overview**: active jobs, jobs waiting for you, starting this week, behind schedule, money owed both ways, and quick actions.
+
+      ## Bill the dealer
+
+      On the job, click **Bill** and the dealer's name. The amount is the approved total. Your invoice goes on your books against the job, and a draft bill appears in the dealer's accounting.
+
+  - slug: contractor-portal-for-contractors
+    module: contractors
+    title: What your contractors do in the Contractor Portal
+    article_type: guide
+    position: 230
+    excerpt: How a contractor bids, works tasks, sends work for review and sends invoices, so you know what they see.
+    content: |
+      Contractors work from the Contractor Portal with their own sign-in. Here is what they can do there.
+
+      ## Bids
+
+      Under **Bid requests** they see the work and the town (not your customer's name until they win it), the scope and tasks, and the due date.
+
+      - Enter **Your price**, **Can start**, **Days of work** and **Notes**, then **Send bid**. They can change it and send it again until you decide.
+      - Add files with **Add files** (a quote sheet, photos, specs). You see them with the bid.
+      - Or click **Pass on this job**.
+
+      When they win, the bid shows **Awarded to you** with your note, and **Open the job** takes them to their tasks.
+
+      ## Tasks and work reviews
+
+      Assigned tasks are listed with the job. They update the status, add notes and photos, and click **Submit for Review** when the work is done. It waits in your **Review Updates**, **Contractor work** tab, for you to approve or ask for changes.
+
+      ## Invoices
+
+      On the job, **Send an invoice** with the invoice (PDF or photo), the **Total**, an optional invoice number, and **For which part of the job**. It becomes a draft bill in your accounting. See [Contractor invoices become draft bills](contractor-invoices-to-bills).
+
+      ## Texts
+
+      Contractors get emails about new work. They get texts as well once they agree to texts on their vendor record.

@@ -24,6 +24,7 @@ module Guide
 
       How to answer:
       - Use your tools before answering a how-to or where-is question: find_place for where something is, search_help for how to do it, my_account when the answer depends on how this dealership is set up.
+      - Also call search_videos for a how-to question. When a training video covers it, mention it in one short line and include it in reply videos, with the start it returned, so the person can watch that part.
       - Answer only from what the tools return and what the person told you. Never invent a menu path, button, field, report or setting. If the tools do not cover it, say plainly that you do not know and suggest contacting support. Do not guess.
       - Use this dealership's own words for things (my_account your_terms) and their own setup (deal stages, locations, connections) when it matters.
       - Be brief: a short answer, then numbered steps if there are steps. Speak to the person as "you".
@@ -44,6 +45,11 @@ module Guide
         input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
       },
       {
+        name: 'search_videos',
+        description: 'Search the training videos (title, chapters and what the narrator says). Returns matching videos with the moment that covers the question.',
+        input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
+      },
+      {
         name: 'my_account',
         description: "How this dealership is set up: their terms for things, deal stages, locations, users, connections (QuickBooks, website, texting, email) and what is on their plan.",
         input_schema: { type: 'object', properties: {} }
@@ -57,6 +63,10 @@ module Guide
             answer_markdown: { type: 'string' },
             article_slugs: { type: 'array', items: { type: 'string' }, description: 'Slugs of articles your answer used.' },
             place_keys: { type: 'array', items: { type: 'string' }, description: 'Up to 3 place keys from find_place the person should go to, most useful first.' },
+            videos: {
+              type: 'array', description: 'Up to 2 training videos from search_videos worth watching, with where to start.',
+              items: { type: 'object', properties: { id: { type: 'integer' }, start: { type: 'integer' } }, required: ['id'] }
+            },
             answered: { type: 'boolean', description: 'False when the tools did not cover the question.' }
           },
           required: %w[answer_markdown answered]
@@ -64,7 +74,7 @@ module Guide
       }
     ].freeze
 
-    Result = Struct.new(:answer, :articles, :places, :answered, :input_tokens, :output_tokens, keyword_init: true)
+    Result = Struct.new(:answer, :articles, :places, :videos, :answered, :input_tokens, :output_tokens, keyword_init: true)
 
     # data_assistant: whether this company has the AI Assistant (the sparkle
     # in the header), which answers questions about its own records.
@@ -75,6 +85,7 @@ module Guide
       @data_assistant = data_assistant.nil? ? (AiQueryLog.monthly_limit_for(company, user: user).positive? rescue false) : data_assistant
       @seen_articles = {}
       @seen_places = {}
+      @seen_videos = {}
     end
 
     # Questions about the dealership's own records (which deals, how many
@@ -134,6 +145,7 @@ module Guide
       case use['name']
       when 'find_place' then find_place(input['query'].to_s)
       when 'search_help' then search_help(input['query'].to_s)
+      when 'search_videos' then search_videos(input['query'].to_s)
       when 'my_account' then Guide::AccountState.new(@user, @company).to_h
       else { error: 'unknown tool' }
       end
@@ -171,16 +183,31 @@ module Guide
       end
     end
 
+    # Videos this person can open in the help center's Videos tab.
+    def search_videos(query)
+      admin = @user.respond_to?(:platform_admin?) && (@user.platform_admin? || @user.super_admin?)
+      TrainingVideo.search(query, scope: TrainingVideo.visible(admin: admin)).map do |video, moment|
+        @seen_videos[video.id] = video
+        { id: video.id, title: video.title, start: moment[:start], chapter: moment[:label],
+          length: video.duration_seconds, about: video.description.to_s.first(300) }
+      end
+    end
+
     # Only articles and places the tools actually returned are passed on, so a
     # made-up slug or key never becomes a link.
     def finish(input, tokens_in, tokens_out)
       articles = Array(input['article_slugs']).filter_map { |s| @seen_articles[s] }.uniq.first(4)
       places = Array(input['place_keys']).filter_map { |k| @seen_places[k] }.uniq.first(3)
+      videos = Array(input['videos']).filter_map do |v|
+        video = @seen_videos[v['id'].to_i] if v.is_a?(Hash)
+        video && { id: video.id, title: video.title, start: v['start'].to_i.clamp(0, video.duration_seconds.to_i) }
+      end.uniq { |v| v[:id] }.first(2)
       answer = clean(input['answer_markdown'])
       Result.new(
         answer: answer.presence || NO_ANSWER,
         articles: articles.map { |a| { slug: a.slug, title: Guide::Copy.render(a.title, company: @company) } },
         places: places.map { |e| { key: e['key'], title: e['title'], kind: e['kind'], route: e['route'] } },
+        videos: videos,
         answered: answer.present? && input['answered'] != false,
         input_tokens: tokens_in, output_tokens: tokens_out
       )

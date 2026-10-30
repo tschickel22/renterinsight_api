@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_29_120100) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_30_200100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7816,6 +7816,65 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_29_120100) do
     t.index ["vehicle_id"], name: "index_tracked_links_on_vehicle_id"
   end
 
+  create_table "training_assignments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "training_video_id", null: false
+    t.bigint "assigned_by_id"
+    t.date "due_on"
+    t.string "source", default: "manual", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_training_assignments_on_company_id"
+    t.index ["training_video_id"], name: "index_training_assignments_on_training_video_id"
+    t.index ["user_id", "training_video_id"], name: "index_training_assignments_on_user_id_and_training_video_id", unique: true
+  end
+
+  create_table "training_videos", force: :cascade do |t|
+    t.string "title", null: false
+    t.string "slug", null: false
+    t.text "description"
+    t.string "module_key"
+    t.integer "position", default: 0, null: false
+    t.integer "duration_seconds"
+    t.string "video_url"
+    t.string "video_key"
+    t.bigint "video_size"
+    t.string "poster_url"
+    t.string "captions_url"
+    t.jsonb "chapters", default: [], null: false
+    t.boolean "is_published", default: false, null: false
+    t.string "share_token", null: false
+    t.boolean "share_enabled", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["module_key", "position"], name: "index_training_videos_on_module_key_and_position"
+    t.uuid "uid", default: -> { "gen_random_uuid()" }, null: false
+    t.text "transcript"
+    t.integer "public_views", default: 0, null: false
+    t.jsonb "source_files", default: {}, null: false
+    t.jsonb "covers", default: {}, null: false
+    t.index ["share_token"], name: "index_training_videos_on_share_token", unique: true
+    t.index ["slug"], name: "index_training_videos_on_slug", unique: true
+    t.index ["uid"], name: "index_training_videos_on_uid", unique: true
+  end
+
+  create_table "training_video_views", force: :cascade do |t|
+    t.bigint "training_video_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "company_id"
+    t.integer "furthest_seconds", default: 0, null: false
+    t.integer "watched_seconds", default: 0, null: false
+    t.integer "plays", default: 0, null: false
+    t.datetime "completed_at"
+    t.datetime "last_watched_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_training_video_views_on_company_id"
+    t.index ["training_video_id"], name: "index_training_video_views_on_training_video_id"
+    t.index ["user_id", "training_video_id"], name: "index_training_video_views_on_user_id_and_training_video_id", unique: true
+  end
+
   create_table "truebuild_addons", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "source_type", null: false
@@ -9650,6 +9709,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_29_120100) do
   add_foreign_key "tracked_link_events", "tracked_links"
   add_foreign_key "tracked_links", "communications"
   add_foreign_key "tracked_links", "companies"
+  add_foreign_key "training_assignments", "training_videos", on_delete: :cascade
+  add_foreign_key "training_assignments", "users", on_delete: :cascade
+  add_foreign_key "training_video_views", "training_videos", on_delete: :cascade
+  add_foreign_key "training_video_views", "users", on_delete: :cascade
   add_foreign_key "truebuild_addons", "companies"
   add_foreign_key "truebuild_addons", "manufacturers"
   add_foreign_key "truebuild_designs", "accounts", on_delete: :nullify

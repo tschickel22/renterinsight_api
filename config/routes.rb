@@ -249,6 +249,10 @@ Rails.application.routes.draw do
       post 'invitations/accept', to: 'invitations#accept'
       # Help approved on staging, for production to copy (E75); token protected.
       get 'guide_sync/approved', to: 'guide_sync#approved'
+      # A training video's share link (E88): plays without signing in.
+      get 'training_videos/series/:module_key', to: 'training_videos#series'
+      get 'training_videos/:token', to: 'training_videos#show'
+      post 'training_videos/:token/play', to: 'training_videos#play'
     end
     
     # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================
@@ -2266,6 +2270,12 @@ Rails.application.routes.draw do
       # Agreement Merge Fields (definitions)
       get 'agreement_merge_fields', to: 'agreement_merge_fields#index'
 
+      # Help center Videos tab (E88).
+      get 'training_videos', to: 'training_videos#index'
+      post 'training_videos/:id/progress', to: 'training_videos#progress'
+      put 'training_assignments/new_users', to: 'training_assignments#new_users'
+      resources :training_assignments, only: %i[index create destroy]
+
       # ==================== UNIFIED KNOWLEDGE BASE / SMART HELP ====================
       # Smart search + navigate + articles (read-only for end users).
       # Admin-side CRUD lives under api/admin/knowledge.
@@ -3230,6 +3240,15 @@ Rails.application.routes.draw do
 
     # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
     namespace :admin do
+      # Training videos for the help center (E88).
+      resources :training_videos, only: %i[index create update destroy] do
+        collection { put :settings }
+        member do
+          post :upload
+          post :reset_share_link
+        end
+      end
+
       # Who is on a tenant site right now, and who has just left. Cross-tenant
       # on purpose: this is the platform operator's view.
       # Which dealers have the AI connector and how much they use it (E53).

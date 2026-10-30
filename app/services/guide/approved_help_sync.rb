@@ -46,6 +46,9 @@ module Guide
       Setting.set('Platform', 0, TOUR_CURSOR, tours.last['approved_at']) if tours.any?
       published = publish_ready
       apply_ready_tours
+      # Training videos: only when staging sent its list (an older staging, or
+      # a failed fetch, sends none and must not hide anything here).
+      Guide::TrainingVideoSync.new.apply(payload['videos']) if payload.key?('videos')
       published
     end
 
