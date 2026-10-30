@@ -126,12 +126,19 @@ module Merge
 
     def move_rows(table, column, type_column: nil, type_value: nil)
       conn  = ActiveRecord::Base.connection
-      where = +"#{conn.quote_column_name(column)} = #{conn.quote(@loser.id)}"
+      # Ids go in as string literals: Postgres casts an untyped literal to the
+      # column's type, so this works for bigint keys and for the few tables
+      # (notes.entity_id) that store the id as varchar. A bare integer against
+      # a varchar column fails with "operator does not exist".
+      where = +"#{conn.quote_column_name(column)} = #{conn.quote(@loser.id.to_s)}"
       where << " AND #{conn.quote_column_name(type_column)} = #{conn.quote(type_value)}" if type_column
 
       sql = "UPDATE #{conn.quote_table_name(table)} " \
-            "SET #{conn.quote_column_name(column)} = #{conn.quote(@survivor.id)} WHERE #{where}"
-      conn.update(sql)
+            "SET #{conn.quote_column_name(column)} = #{conn.quote(@survivor.id.to_s)} WHERE #{where}"
+      # Savepoint so a unique-index collision rolls back only this statement.
+      # Without it Postgres aborts the whole merge transaction and every later
+      # table fails with "current transaction is aborted".
+      ActiveRecord::Base.transaction(requires_new: true) { conn.update(sql) }
     rescue ActiveRecord::RecordNotUnique => e
       # A unique index on (owner_id, something) can legitimately collide: the
       # same tag on both records, the same enrolment in one campaign. Losing the
