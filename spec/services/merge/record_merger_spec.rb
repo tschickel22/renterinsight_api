@@ -88,6 +88,17 @@ RSpec.describe Merge::RecordMerger do
       expect(result.moved.keys).to include('quotes.contact_id')
       expect(result.moved.keys).to include('communications.communicable_id')
     end
+
+    it 'moves notes, whose entity_id column is a string' do
+      survivor = contact
+      loser    = contact
+      note = Note.create!(entity_type: 'Contact', entity_id: loser.id.to_s, content: 'called')
+
+      result = described_class.call(survivor: survivor, loser: loser)
+
+      expect(note.reload.entity_id).to eq(survivor.id.to_s)
+      expect(result.moved.keys).to include('notes.entity_id')
+    end
   end
 
   describe 'retiring the duplicate' do
