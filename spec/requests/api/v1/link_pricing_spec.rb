@@ -216,6 +216,13 @@ RSpec.describe 'Linked installer pricing', type: :request do
     expect(row['approved_total']).to eq(4500.0)
     expect(row['changes'].map { |c| c['status'] }).to eq(%w[declined approved])
 
+    # Both sides see the change orders on Bids & Quotes (E87 retest).
+    get '/api/v1/bids_board', headers: h(dealer)
+    orders = body['outgoing'].select { |r| r['source'] == 'change_order' }.to_h { |r| [r['title'], r['stage']] }
+    expect(orders).to eq('Change order 1: Finish' => 'awarded', 'Change order 2: Set and Finish' => 'declined')
+    get '/api/v1/bids_board', headers: h(boss)
+    expect(body['incoming'].select { |r| r['source'] == 'change_order' }.map { |r| r['stage'] }).to match_array(%w[won not_awarded])
+
     post "/api/v1/project_links/#{pl.id}/bill", headers: h(boss), params: {}.to_json
     expect(response).to have_http_status(:ok), response.body
     pl.reload

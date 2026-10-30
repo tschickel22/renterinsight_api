@@ -20,13 +20,21 @@ module Api
       def index
         return unless authorize_action!('deals', 'read')
 
-        outgoing = bid_rows + quote_rows_out
-        outgoing = filter_by_location(outgoing)
-        incoming = quote_rows_in
+        all_rows = bid_rows + quote_rows_out + change_rows_out
+        outgoing = filter_by_location(all_rows)
+        # Rows the location picker hid (not RBAC), so the page can say so
+        # rather than look empty.
+        hidden = Current.location_filtered? ? filter_by_location(all_rows, picker: false) - outgoing : []
+        other_locations = hidden.size
+        hidden_locations = @company.locations.where(id: hidden.filter_map { |r| r[:location_id] }.uniq).order(:name)
+                                   .map { |l| { id: l.id, name: l.name, count: hidden.count { |r| r[:location_id] == l.id } } }
+        incoming = quote_rows_in + change_rows_in
 
         render json: {
           outgoing: outgoing.sort_by { |r| [OUT_SORT.index(r[:stage]) || 9, -(r[:updated_at] || r[:created_at]).to_i] },
           incoming: incoming.sort_by { |r| [IN_STAGES.index(r[:stage]) || 9, -(r[:updated_at] || r[:created_at]).to_i] },
+          other_locations: other_locations,
+          hidden_locations: hidden_locations,
           counts: {
             outgoing: OUT_STAGES.index_with { |s| outgoing.count { |r| r[:stage] == s } },
             incoming: IN_STAGES.index_with { |s| incoming.count { |r| r[:stage] == s } }
@@ -38,9 +46,9 @@ module Api
       def counts
         return unless authorize_action!('deals', 'read')
 
-        ready = @company.project_bid_requests.open.joins(:bids).where(project_bids: { status: 'submitted' }).distinct.count
-        ready += ProjectLinkChange.pending.where(kind: 'price').joins(:project_link)
-                                  .where(project_links: { dealer_company_id: @company.id, status: %w[offered accepted] }).count
+        # Same rows as the page's Ready to award tab, so the badge and the
+        # page agree whatever location is picked.
+        ready = filter_by_location(bid_rows + quote_rows_out + change_rows_out).count { |r| r[:stage] == 'ready' }
         to_answer = quote_links_in.count { |pl| in_stage(pl) == 'to_answer' }
         render json: { ready: ready, to_answer: to_answer, total: ready + to_answer }
       end
@@ -119,6 +127,43 @@ module Api
         pl.link_changes.select { |c| c.kind == 'price' }.max_by(&:number)
       end
 
+      # Change orders a linked installer sent on a job (E87 retest: they are
+      # prices waiting on a yes or no too). Dealer side: to approve, approved,
+      # declined; withdrawn ones count as cancelled.
+      CHANGE_OUT = { 'pending' => 'ready', 'approved' => 'awarded', 'declined' => 'declined', 'withdrawn' => 'cancelled' }.freeze
+      CHANGE_IN = { 'pending' => 'submitted', 'approved' => 'won', 'declined' => 'not_awarded' }.freeze
+
+      def change_rows_out
+        @change_rows_out ||= change_orders(dealer_company_id: @company.id).map do |c|
+          change_row(c, CHANGE_OUT[c.status], counterpart: c.project_link.installer_company.name)
+            .merge(location_id: c.project_link.dealer_project.location_id)
+        end
+      end
+
+      def change_rows_in
+        change_orders(installer_company_id: @company.id).filter_map do |c|
+          stage = CHANGE_IN[c.status]
+          change_row(c, stage, counterpart: c.project_link.dealer_company.name) if stage
+        end
+      end
+
+      def change_orders(**link_scope)
+        ProjectLinkChange.where(kind: 'change').joins(:project_link).where(project_links: link_scope)
+                         .includes(:dealer_phase, project_link: %i[installer_company dealer_company dealer_project installer_project])
+                         .order(created_at: :desc).limit(300)
+      end
+
+      def change_row(change, stage, counterpart:)
+        pl = change.project_link
+        quote_row(pl, change, stage, counterpart: counterpart).merge(
+          source: 'change_order', key: "change-#{change.id}", id: change.id,
+          title: "#{change.label}: #{change.dealer_phase&.name || pl.scope_label}",
+          phase_name: change.dealer_phase&.name || pl.dealer_phase&.name,
+          decline_reason: change.decline_reason, note: change.description,
+          created_at: change.created_at, updated_at: change.updated_at
+        )
+      end
+
       # The installer sees the job's scope and the dealer's name, never the
       # dealer's customer (the job carries that only once accepted).
       def quote_row(pl, price, stage, counterpart:)
@@ -139,12 +184,14 @@ module Api
 
       # Same rule as the project lists: company-tier admins see everything,
       # everyone else their locations. Rows with no location are kept.
-      def filter_by_location(rows)
+      # picker: false applies only what the person may see, not the location
+      # picked in the header.
+      def filter_by_location(rows, picker: true)
         if current_user.uses_rbac? && !current_user.effective_admin?
           ids = permission_service.accessible_location_ids
           rows = rows.select { |r| r[:location_id].nil? || ids.include?(r[:location_id]) }
         end
-        rows = rows.select { |r| r[:location_id].nil? || r[:location_id] == Current.location_id } if Current.location_filtered?
+        rows = rows.select { |r| r[:location_id].nil? || r[:location_id] == Current.location_id } if picker && Current.location_filtered?
         rows
       end
     end

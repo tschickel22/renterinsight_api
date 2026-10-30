@@ -176,6 +176,26 @@ RSpec.describe 'Project inbox and bids', type: :request do
     expect(body).to include('ready' => 1, 'total' => 1)
   end
 
+  # E87 retest: the header was on another location, so the page looked empty
+  # while the project showed its bids.
+  it 'says how many bids the picked location hides, and the badge follows the same filter' do
+    aurora = company.locations.create!(name: 'Aurora', active: true)
+    denver = company.locations.create!(name: 'Denver', active: true)
+    project.update!(location_id: aurora.id)
+    portal_bid(send_request([smith]), smith, '4500')
+
+    get '/api/v1/bids_board', headers: h(dealer).merge('X-Location-ID' => denver.id.to_s)
+    expect(body['outgoing']).to be_empty
+    expect(body['other_locations']).to eq(1)
+    expect(body['hidden_locations']).to eq([{ 'id' => aurora.id, 'name' => 'Aurora', 'count' => 1 }])
+    get '/api/v1/bids_board/counts', headers: h(dealer).merge('X-Location-ID' => denver.id.to_s)
+    expect(body['ready']).to eq(0)
+
+    get '/api/v1/bids_board', headers: h(dealer).merge('X-Location-ID' => aurora.id.to_s)
+    expect(body['outgoing'].size).to eq(1)
+    expect(body['other_locations']).to eq(0)
+  end
+
   it 'lists a contractor invoice until its bill is approved' do
     bill = company.bills.create!(vendor_id: smith.id, bill_number: 'B-1', bill_date: Date.current, due_date: Date.current + 30,
                                  status: 'draft', total_amount: 4850, subtotal: 4850, project_id: project.id)
