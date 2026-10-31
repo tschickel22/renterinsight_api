@@ -11,7 +11,7 @@ module Api
       before_action :set_shot, only: %i[update destroy text_checked]
 
       RECIPE_PARAMS = [:key, :module_key, :title, :alt_text, :route, :crop_marker, :padding, :mobile_crop_marker,
-                       { steps: %i[click fill value wait highlight], mobile_steps: %i[click fill value wait highlight], mask_selectors: [] }].freeze
+                       { steps: %i[click fill value wait highlight optional], mobile_steps: %i[click fill value wait highlight optional], mask_selectors: [] }].freeze
 
       def index
         shots = Knowledge::Screenshot.ordered.to_a

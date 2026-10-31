@@ -150,6 +150,7 @@ screenshots:
     route: /accounts
     crop: css:main
     steps:
+      - { click: 'css:button:has-text("Clear filters")', optional: true }
       - { highlight: accounts-add }
     articles:
       - { slug: managing-accounts, after: '## Getting There', caption: Accounts }
@@ -169,6 +170,7 @@ screenshots:
     route: /contacts
     crop: css:main
     steps:
+      - { click: 'css:button:has-text("Clear filters")', optional: true }
       - { highlight: contacts-add }
     articles:
       - { slug: managing-contacts, after: '## Getting There', caption: Contacts }
@@ -257,6 +259,7 @@ screenshots:
     route: /deals
     crop: css:main
     steps:
+      - { click: 'css:button:has-text("All Deals")', optional: true }
       - { highlight: add-button }
     articles:
       - { slug: sales-pipeline, after: '## Getting There', caption: The deals pipeline }
@@ -267,6 +270,8 @@ screenshots:
     route: /deals
     crop: stats-tiles
     padding: 12
+    steps:
+      - { click: 'css:button:has-text("All Deals")', optional: true }
     articles:
       - { slug: deal-analytics, after: '## Getting There', caption: Deal stats }
 
@@ -338,6 +343,7 @@ screenshots:
     route: /crm
     crop: css:main
     steps:
+      - { click: 'css:button:has-text("Clear filters")', optional: true }
       - { highlight: add-button }
     articles:
       - { slug: managing-leads, after: '## Getting There', caption: The leads list }
@@ -349,6 +355,8 @@ screenshots:
     route: /crm
     crop: stats-tiles
     padding: 12
+    steps:
+      - { click: 'css:button:has-text("Clear filters")', optional: true }
     articles:
       - { slug: managing-leads, after: '### Stats tiles', caption: Lead stats }
 
@@ -399,8 +407,8 @@ screenshots:
 
   - key: settings-notifications
     module: projects
-    title: Notifications in Company Settings
-    route: /settings?tab=notifications
+    title: Your notification settings
+    route: /account/settings?tab=notifications
     crop: css:main
     articles:
       - { slug: project-notices, after: '## Your switches', caption: Notification switches }
@@ -445,11 +453,13 @@ screenshots:
 
   - key: settings-quotes
     module: quotes
-    title: Quote settings
-    route: /settings?tab=quotes
+    title: Quotes, with the New Quote button
+    route: /quotes
     crop: css:main
+    steps:
+      - { highlight: quotes-new }
     articles:
-      - { slug: quote-templates, after: '## Getting There', caption: Quote settings }
+      - { slug: quote-templates, after: '## Getting There', caption: Quotes }
 
   # ------------------------------------------------------------------ service
   - key: service-list
@@ -484,6 +494,14 @@ screenshots:
     articles:
       - { slug: profile-settings, after: '## Getting There', caption: Your account settings }
       - { slug: security-settings, after: '## Getting There', caption: Your account settings }
+
+  - key: account-security
+    module: users
+    title: The Security tab of your account settings
+    route: /account/settings?tab=security
+    crop: css:main
+    articles:
+      - { slug: security-settings, after: '### Setting up multi-factor authentication (MFA)', caption: Security settings }
 
   # ----------------------------------------------------------------- warranty
   - key: warranty-claims
