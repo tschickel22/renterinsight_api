@@ -57,7 +57,8 @@ screenshots:
     route: /accounting/bills
     crop: css:main
     steps:
-      - { highlight: bills-new }
+      # The Summary tab's own New Bill button (the bills-new marker is on the Bills tab).
+      - { highlight: 'css:button:has-text("New Bill")' }
     articles:
       - { slug: bills-and-expenses, after: '## Getting There', caption: Bills & Payments }
       - { slug: bill-payments, after: '## Getting There', caption: Bills & Payments }
@@ -66,7 +67,7 @@ screenshots:
   - key: accounting-new-bill
     module: accounting
     title: Entering a bill
-    route: /accounting/bills
+    route: /accounting/bills?tab=bills
     crop: css:main
     steps:
       - { click: bills-new }
