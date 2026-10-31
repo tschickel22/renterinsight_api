@@ -112,7 +112,7 @@ ActiveRecord::Base.transaction do
       earned_date: Date.new(2026, 10, 16), location_id: deal.location_id || denver.id, metadata: { demo_key: "help-#{deal.id}" },
       approved_by_user_id: admin.id, approved_at: Time.zone.parse('2026-10-20 10:00'),
       **(c[:status] == 'paid' ? { paid_by_user_id: admin.id, paid_at: Time.zone.parse('2026-10-24 10:00'), payment_method: 'direct_deposit',
-                                  amount_paid: c[:amount], payment_reference: 'Payroll 10/24' } : {})
+                                  paid_date: Date.new(2026, 10, 24), amount_paid: c[:amount], payment_reference: 'Payroll 10/24' } : {})
     )
     payment.commission_payment_line_items.create!(description: 'Front gross', calculation_basis: 'front_gross',
                                                   calculation_method: 'percentage', rate: 25, basis_amount: (c[:amount] * 4).round(2),
