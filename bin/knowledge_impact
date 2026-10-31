@@ -146,6 +146,12 @@ videos = staging(<<~SQL)
     select v.id, v.title, v.module_key, to_jsonb(v) -> 'covers' as covers, to_jsonb(v) ->> 'transcript' as transcript
     from training_videos v where v.video_url is not null) v;
 SQL
+# Help article screenshots (E89); none on a staging older than the table.
+has_shots = staging("select to_json(to_regclass('public.knowledge_screenshots') is not null);")
+shots = has_shots ? staging(<<~SQL) : []
+  select coalesce(json_agg(s), '[]') from (
+    select s.key, s.route, s.crop_marker, s.mobile_crop_marker, s.steps, s.mobile_steps from knowledge_screenshots s) s;
+SQL
 articles = staging(<<~SQL)
   select coalesce(json_agg(a), '[]') from (
     select a.slug, a.title, m.key as module_key, lower(a.title || ' ' || coalesce(a.content, '')) as body
@@ -184,6 +190,14 @@ found_videos = videos.map do |v|
   [v, why, strong] if why.any?
 end.compact
 
+found_shots = shots.map do |sh|
+  used = [sh['crop_marker'], sh['mobile_crop_marker'], *Array(sh['steps']).map { |st| st['click'] || st['fill'] || st['highlight'] },
+          *Array(sh['mobile_steps']).map { |st| st['click'] || st['fill'] || st['highlight'] }].compact
+  why = (used & markers.to_a).map { |m| "crops to or clicks #{m}" }
+  why << "is taken on #{sh['route']}" if routes.any? { |r| route_match.call(r, sh['route']) || route_match.call(sh['route'], r) }
+  [sh, why] if why.any?
+end.compact
+
 found_articles = articles.map do |a|
   said = words.select { |w| a['body'].include?(w) }
   next if said.size < 2 && !(said.size == 1 && a['title'].downcase.include?(said.first))
@@ -204,7 +218,10 @@ puts
 puts "Training videos (#{found_videos.size})"
 found_videos.each { |v, why, strong| puts "  - #{v['title']} (video #{v['id']})#{strong ? '' : ' maybe'}: #{why.join('; ')}" }
 puts
+puts "Screenshots (#{found_shots.size}): retaken by themselves the next morning; check the article text, and a marker you removed breaks the shot"
+found_shots.each { |sh, why| puts "  - #{sh['key']}: #{why.join('; ')}" }
+puts
 puts "Help articles that may describe it (#{found_articles.size})"
 found_articles.each { |a, said| puts "  - #{a['title']} (#{a['slug']}): mentions #{said.join(', ')}" }
 puts
-puts 'Nothing found.' if found_tours.empty? && found_videos.empty? && found_articles.empty?
+puts 'Nothing found.' if found_tours.empty? && found_videos.empty? && found_shots.empty? && found_articles.empty?

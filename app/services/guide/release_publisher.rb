@@ -33,7 +33,8 @@ module Guide
     def publish_entry
       article = @drafts['article'] || {}
       if article['title'].present? && article['content'].present?
-        record = upsert_article(@item.published_article_id, article['title'], article['excerpt'], article['content'], 'how_to')
+        content = with_screenshot(article['content'], @drafts['screenshot'])
+        record = upsert_article(@item.published_article_id, article['title'], article['excerpt'], content, 'how_to')
         @item.published_article_id = record.id
       end
 
@@ -57,6 +58,23 @@ module Guide
       note = upsert_article(@item.published_note_id, @drafts['title'].presence || "What's new", @drafts['notes'].lines.first.to_s.first(240),
                             @drafts['notes'], 'release_note', slug_prefix: "release-#{Date.current}")
       @item.published_note_id = note.id
+    end
+
+    # The article with the screenshot the drafter asked for (E89): its recipe
+    # is made here and the nightly run on staging takes the pictures.
+    def with_screenshot(content, shot)
+      return content unless shot.is_a?(Hash) && shot['key'].to_s.match?(Knowledge::Screenshot::KEY_FORMAT)
+      return content if Knowledge::Screenshot.keys_in(content).include?(shot['key'])
+
+      Knowledge::Screenshot.find_or_create_by!(key: shot['key']) do |s|
+        s.assign_attributes(route: shot['route'], crop_marker: shot['crop_marker'], module_key: entry['module'].presence,
+                            title: shot['caption'], alt_text: shot['caption'], source: 'drafted')
+      end
+      line = shot['caption'].present? ? %({{shot: #{shot['key']} "#{shot['caption']}"}}) : "{{shot: #{shot['key']}}}"
+      Guide::ScreenshotLoader.insert(content, line) || content
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.warn("[Guide::ReleasePublisher] screenshot #{shot['key']}: #{e.message}")
+      content
     end
 
     def upsert_article(id, title, excerpt, content, type, slug_prefix: nil)

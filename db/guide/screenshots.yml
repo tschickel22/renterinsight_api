@@ -1,0 +1,549 @@
+# Help article screenshots (backlog E89), loaded on staging by
+# Guide::ScreenshotLoader whenever this file changes. Nobody takes these by
+# hand: the nightly run (scripts/screenshot-capture.cjs in the frontend repo)
+# plays each recipe in the Summit Park demo company at desktop and phone size.
+#
+#   key:      lowercase words joined by dashes; the article line is {{shot: key}}
+#   route:    the page to open
+#   crop:     a data-tour marker, or css:selector (css:main is the page without
+#             the menu and header); empty takes the whole screen
+#   steps:    done first, in order: {click: marker}, {fill: marker, value: text},
+#             {wait: ms}, {highlight: marker} (an orange ring round it)
+#   mask:     CSS selectors that change daily, left out of the comparison
+#   articles: where the shot goes: the article's slug, and the heading whose
+#             paragraph it follows (the first paragraph when there is none)
+#
+# The file wins for the keys it names. A shot is added to an article only
+# when the article does not show it yet, so moving the line by hand sticks.
+
+screenshots:
+  # ---------------------------------------------------------------- accounting
+  - key: accounting-dashboard
+    module: accounting
+    title: The Accounting dashboard
+    route: /accounting
+    crop: css:main
+    articles:
+      - { slug: accounting-overview, after: '## Getting There', caption: The Accounting dashboard }
+      - { slug: location-accounting, after: '## Getting There', caption: The Accounting dashboard }
+
+  - key: accounting-chart-of-accounts
+    module: accounting
+    title: The chart of accounts
+    route: /accounting/chart-of-accounts
+    crop: css:main
+    articles:
+      - { slug: chart-of-accounts, after: '## Getting There', caption: The chart of accounts }
+
+  - key: accounting-journal-entries
+    module: accounting
+    title: The Journal Entries list
+    route: /accounting/journal-entries
+    crop: css:main
+    articles:
+      - { slug: journal-entries, after: '## Getting There', caption: Journal Entries }
+
+  - key: accounting-new-journal-entry
+    module: accounting
+    title: A new journal entry
+    route: /accounting/journal-entries/new
+    crop: css:main
+    articles:
+      - { slug: journal-entries, after: '## Creating a Manual Journal Entry', caption: A new journal entry }
+
+  - key: accounting-bills
+    module: accounting
+    title: Bills & Payments, with the New Bill button
+    route: /accounting/bills
+    crop: css:main
+    steps:
+      - { highlight: bills-new }
+    articles:
+      - { slug: bills-and-expenses, after: '## Getting There', caption: Bills & Payments }
+      - { slug: bill-payments, after: '## Getting There', caption: Bills & Payments }
+      - { slug: contractor-invoices-to-bills, after: '## Paying it', caption: Bills & Payments }
+
+  - key: accounting-new-bill
+    module: accounting
+    title: Entering a bill
+    route: /accounting/bills
+    crop: css:main
+    steps:
+      - { click: bills-new }
+      - { wait: 500 }
+    articles:
+      - { slug: bills-and-expenses, after: '## Creating a Bill', caption: Entering a bill }
+
+  - key: accounting-bank-transactions
+    module: accounting
+    title: Bank Transactions
+    route: /accounting/bank-transactions
+    crop: css:main
+    steps:
+      - { highlight: bank-filter-unmatched }
+    articles:
+      - { slug: bank-transactions, after: '## Getting There', caption: Bank Transactions }
+
+  - key: accounting-bank-accounts
+    module: accounting
+    title: Bank accounts on the Bank Transactions page
+    route: /accounting/bank-transactions
+    crop: bank-accounts
+    padding: 12
+    articles:
+      - { slug: bank-accounts, after: '## Getting There', caption: Your bank accounts }
+
+  - key: accounting-reconciliation
+    module: accounting
+    title: Bank reconciliation
+    route: /accounting/reconciliation
+    crop: css:main
+    articles:
+      - { slug: bank-reconciliation, after: '## Getting There', caption: Bank reconciliation }
+
+  - key: accounting-recurring-entries
+    module: accounting
+    title: Recurring journal entries
+    route: /accounting/recurring
+    crop: css:main
+    articles:
+      - { slug: recurring-entries, after: '## Getting There', caption: Recurring entries }
+
+  - key: reports-catalog
+    module: reports
+    title: The Reports page
+    route: /reports
+    crop: css:main
+    articles:
+      - { slug: running-reports, after: '## Getting There', caption: The Reports page }
+      - { slug: financial-reports, after: '## Getting There', caption: The Reports page }
+
+  - key: accounting-profit-and-loss
+    module: accounting
+    title: A Profit & Loss report
+    route: /accounting/reports/profit-and-loss
+    crop: css:main
+    articles:
+      - { slug: financial-reports, after: '## Profit & Loss (P&L)', caption: Profit & Loss }
+
+  - key: accounting-balance-sheet
+    module: accounting
+    title: A Balance Sheet
+    route: /accounting/reports/balance-sheet
+    crop: css:main
+    articles:
+      - { slug: financial-reports, after: '## Balance Sheet', caption: Balance Sheet }
+
+  - key: data-import-export
+    module: accounting
+    title: Import / Export
+    route: /data/import-export
+    crop: css:main
+    articles:
+      - { slug: accounting-import, after: '## Getting There', caption: Import / Export }
+      - { slug: import-export-leads, after: '## Getting There', caption: Import / Export }
+
+  # ------------------------------------------------------- accounts & contacts
+  - key: accounts-list
+    module: accounts
+    title: Accounts, with the Add button
+    route: /accounts
+    crop: css:main
+    steps:
+      - { highlight: accounts-add }
+    articles:
+      - { slug: managing-accounts, after: '## Getting There', caption: Accounts }
+      - { slug: account-types, after: '## Getting There', caption: Accounts }
+
+  - key: accounts-new
+    module: accounts
+    title: Adding an account
+    route: /accounts/new
+    crop: css:main
+    articles:
+      - { slug: managing-accounts, after: '### Adding an account', caption: Adding an account }
+
+  - key: contacts-list
+    module: contacts
+    title: Contacts, with the Add button
+    route: /contacts
+    crop: css:main
+    steps:
+      - { highlight: contacts-add }
+    articles:
+      - { slug: managing-contacts, after: '## Getting There', caption: Contacts }
+
+  - key: contacts-new
+    module: contacts
+    title: Adding a contact
+    route: /contacts/new
+    crop: css:main
+    articles:
+      - { slug: managing-contacts, after: '### Adding a contact', caption: Adding a contact }
+
+  # --------------------------------------------------------------- agreements
+  - key: agreements-list
+    module: agreements
+    title: Agreements, with the New button
+    route: /agreements
+    crop: css:main
+    steps:
+      - { highlight: agreements-new }
+    articles:
+      - { slug: agreement-templates, after: '## Getting There', caption: Agreements }
+      - { slug: send-for-esign, after: '## Getting There', caption: Agreements }
+      - { slug: agreement-categories, after: '## Getting There', caption: Agreements }
+
+  - key: agreements-new
+    module: agreements
+    title: Creating an agreement
+    route: /agreements/new
+    crop: css:main
+    articles:
+      - { slug: send-for-esign, after: '### Creating an agreement', caption: Creating an agreement }
+
+  # ------------------------------------------------- brochures, calendar, tasks
+  - key: brochures-list
+    module: brochures
+    title: Brochures, with the Create button
+    route: /brochures
+    crop: css:main
+    steps:
+      - { highlight: brochures-add }
+    articles:
+      - { slug: creating-brochures, after: '## Getting There', caption: Brochures }
+
+  - key: calendar-month
+    module: calendar
+    title: The calendar
+    route: /calendar
+    crop: css:main
+    steps:
+      - { highlight: calendar-new-event }
+    articles:
+      - { slug: using-calendar, after: '## Getting There', caption: The calendar }
+
+  # -------------------------------------------------------------- commissions
+  - key: commission-plans
+    module: commissions
+    title: Commission plans
+    route: /commissions/plans
+    crop: css:main
+    steps:
+      - { highlight: commission-plans-new }
+    articles:
+      - { slug: commission-plans, after: '## Getting There', caption: Commission plans }
+
+  - key: commission-reports
+    module: commissions
+    title: Commission reports
+    route: /accounting/deals-commissions?tab=reports
+    crop: css:main
+    articles:
+      - { slug: commission-reports, after: '## Getting There', caption: Commission reports }
+
+  - key: commission-payments
+    module: commissions
+    title: Commission payments
+    route: /commissions/payments
+    crop: css:main
+    articles:
+      - { slug: commission-payments, after: '## Getting There', caption: Commission payments }
+
+  # -------------------------------------------------------------------- deals
+  - key: deals-board
+    module: deals
+    title: The deals pipeline
+    route: /deals
+    crop: css:main
+    steps:
+      - { highlight: add-button }
+    articles:
+      - { slug: sales-pipeline, after: '## Getting There', caption: The deals pipeline }
+
+  - key: deals-stats
+    module: deals
+    title: Deal stats
+    route: /deals
+    crop: stats-tiles
+    padding: 12
+    articles:
+      - { slug: deal-analytics, after: '## Getting There', caption: Deal stats }
+
+  - key: settings-pipeline
+    module: deals
+    title: Pipeline stages in Company Settings
+    route: /settings?tab=pipeline
+    crop: css:main
+    articles:
+      - { slug: deal-stages, after: '## Getting There', caption: Pipeline stages }
+
+  # ---------------------------------------------------------------- inventory
+  - key: inventory-list
+    module: inventory
+    title: Inventory, with the Add button
+    route: /inventory
+    crop: css:main
+    steps:
+      - { highlight: add-button }
+    articles:
+      - { slug: managing-inventory, after: '## Getting There', caption: Inventory }
+      - { slug: inventory-media, after: '## Getting There', caption: Inventory }
+
+  - key: inventory-new
+    module: inventory
+    title: Adding inventory
+    route: /inventory/new
+    crop: css:main
+    articles:
+      - { slug: managing-inventory, after: '### Adding a unit', caption: Adding inventory }
+
+  # --------------------------------------------------------- invoices, payments
+  - key: invoices-list
+    module: invoices
+    title: Invoices, with the New Invoice button
+    route: /finance/invoices
+    crop: css:main
+    steps:
+      - { highlight: invoices-new }
+    articles:
+      - { slug: creating-invoices, after: '## Getting There', caption: Invoices }
+      - { slug: sending-invoices, after: '## Getting There', caption: Invoices }
+      - { slug: invoice-pdf, after: '## Getting There', caption: Invoices }
+      - { slug: draw-schedules, after: '## Getting There', caption: Invoices }
+
+  - key: invoices-new
+    module: invoices
+    title: Creating an invoice
+    route: /finance/invoices/new
+    crop: css:main
+    articles:
+      - { slug: creating-invoices, after: '### Creating an invoice', caption: Creating an invoice }
+
+  - key: payments-list
+    module: payments
+    title: Payments, with Record a payment
+    route: /finance/payments
+    crop: css:main
+    steps:
+      - { highlight: payments-record-manual }
+    articles:
+      - { slug: tracking-payments, after: '## Getting There', caption: Payments }
+      - { slug: invoice-payments-guide, after: '## Getting There', caption: Payments }
+
+  # -------------------------------------------------------------------- leads
+  - key: leads-list
+    module: leads
+    title: The leads list
+    route: /crm
+    crop: css:main
+    steps:
+      - { highlight: add-button }
+    articles:
+      - { slug: managing-leads, after: '## Getting There', caption: The leads list }
+      - { slug: lead-conversion, after: '## Getting There', caption: The leads list }
+
+  - key: leads-stats
+    module: leads
+    title: Lead stats
+    route: /crm
+    crop: stats-tiles
+    padding: 12
+    articles:
+      - { slug: managing-leads, after: '### Stats tiles', caption: Lead stats }
+
+  - key: leads-new-source
+    module: leads
+    title: The Source field on a new lead
+    route: /crm/new
+    crop: css:main
+    steps:
+      - { highlight: lead-form:source_id }
+    articles:
+      - { slug: lead-sources, after: '## Getting There', caption: Choosing a lead source }
+
+  # ----------------------------------------------------------------- projects
+  - key: projects-grid
+    module: projects
+    title: All Projects
+    route: /deals/projects
+    crop: css:main
+    articles:
+      - { slug: projects-overview, after: '## Where to find things', caption: All Projects }
+      - { slug: start-a-project, after: '## Find it again', caption: All Projects }
+
+  - key: settings-project-templates
+    module: projects
+    title: Project templates in Company Settings
+    route: /settings?tab=project-templates
+    crop: css:main
+    articles:
+      - { slug: project-templates-setup, after: '## Create a template', caption: Project templates }
+
+  - key: projects-bids
+    module: projects
+    title: Bids & Quotes
+    route: /projects/bids
+    crop: css:main
+    articles:
+      - { slug: bids-and-quotes, after: '## You asked for', caption: Bids & Quotes }
+      - { slug: get-bids-on-a-phase, after: '## While bids come in', caption: Bids & Quotes }
+
+  - key: projects-review-updates
+    module: projects
+    title: Review Updates
+    route: /projects/reviews
+    crop: css:main
+    articles:
+      - { slug: review-updates, after: '## The tabs', caption: Review Updates }
+
+  - key: settings-notifications
+    module: projects
+    title: Notifications in Company Settings
+    route: /settings?tab=notifications
+    crop: css:main
+    articles:
+      - { slug: project-notices, after: '## Your switches', caption: Notification switches }
+      - { slug: notification-preferences, after: '## Getting There', caption: Notification settings }
+
+  - key: reports-project-budget
+    module: projects
+    title: Project Budget vs. Actual
+    route: /accounting/reports/project-budget
+    crop: css:main
+    articles:
+      - { slug: project-job-costs, after: '## The reports', caption: Project Budget vs. Actual }
+
+  - key: linked-installers
+    module: projects
+    title: Linked Installers
+    route: /linked-companies
+    crop: css:main
+    articles:
+      - { slug: link-an-installer, after: '## Send the invitation (dealer)', caption: Linked Installers }
+      - { slug: send-job-to-installer, after: '## Send it', caption: Linked Installers }
+
+  # ------------------------------------------------------------------- quotes
+  - key: quotes-list
+    module: quotes
+    title: Quotes, with the New Quote button
+    route: /quotes
+    crop: css:main
+    steps:
+      - { highlight: quotes-new }
+    articles:
+      - { slug: creating-quotes, after: '## Getting There', caption: Quotes }
+      - { slug: public-quote-links, after: '## Getting There', caption: Quotes }
+
+  - key: quotes-new
+    module: quotes
+    title: Creating a quote
+    route: /quotes/new
+    crop: css:main
+    articles:
+      - { slug: creating-quotes, after: '### Creating a quote', caption: Creating a quote }
+
+  - key: settings-quotes
+    module: quotes
+    title: Quote settings
+    route: /settings?tab=quotes
+    crop: css:main
+    articles:
+      - { slug: quote-templates, after: '## Getting There', caption: Quote settings }
+
+  # ------------------------------------------------------------------ service
+  - key: service-list
+    module: service
+    title: Service Operations, with the New Ticket button
+    route: /service
+    crop: css:main
+    steps:
+      - { highlight: add-button }
+    articles:
+      - { slug: creating-service-tickets, after: '## Getting There', caption: Service Operations }
+      - { slug: assigning-tickets, after: '## Getting There', caption: Service Operations }
+      - { slug: ticket-priorities, after: '## Getting There', caption: Service Operations }
+
+  - key: service-new
+    module: service
+    title: Opening a service ticket
+    route: /service/new
+    crop: css:main
+    steps:
+      - { highlight: ticket-form:priority }
+    articles:
+      - { slug: creating-service-tickets, after: '### Creating a ticket', caption: Opening a ticket }
+      - { slug: ticket-priorities, after: '### Setting priority on a ticket', caption: Priority on a new ticket }
+
+  # -------------------------------------------------------------------- users
+  - key: account-settings
+    module: users
+    title: Your account settings
+    route: /account/settings
+    crop: css:main
+    articles:
+      - { slug: profile-settings, after: '## Getting There', caption: Your account settings }
+      - { slug: security-settings, after: '## Getting There', caption: Your account settings }
+
+  # ----------------------------------------------------------------- warranty
+  - key: warranty-claims
+    module: warranty
+    title: Warranty Claims, with the New Claim button
+    route: /warranty/claims
+    crop: css:main
+    steps:
+      - { highlight: warranty-new }
+    articles:
+      - { slug: filing-warranty-claims, after: '## Getting There', caption: Warranty Claims }
+      - { slug: tracking-warranty-claims, after: '## Getting There', caption: Warranty Claims }
+
+  - key: warranty-new
+    module: warranty
+    title: Filing a warranty claim
+    route: /warranty/claims/new
+    crop: css:main
+    articles:
+      - { slug: filing-warranty-claims, after: '### Filing standalone (no ticket)', caption: Filing a claim }
+
+  # ------------------------------------------------------------------ website
+  - key: website-settings
+    module: website_builder
+    title: Your website
+    route: /company/settings/website
+    crop: css:main
+    articles:
+      - { slug: building-website, after: '## Getting There', caption: Your website }
+      - { slug: website-pages-content, after: '## Getting There', caption: Your website }
+
+  # ---------------------------------------------------------------- workflows
+  - key: workflows-list
+    module: workflow_automation
+    title: Workflow Automation
+    route: /workflow-automation
+    crop: css:main
+    steps:
+      - { highlight: workflows-create }
+    articles:
+      - { slug: workflow-rules, after: '## Getting There', caption: Workflow Automation }
+      - { slug: testing-workflows, after: '## Getting There', caption: Workflow Automation }
+
+  - key: workflow-templates
+    module: workflow_automation
+    title: Starting a workflow from a template
+    route: /workflow-automation/templates
+    crop: css:main
+    articles:
+      - { slug: workflow-examples, after: '## Examples', caption: Workflow templates }
+
+  # A real project in the Summit Park demo company (staging project 10, with
+  # all 14 phases). If the demo is rebuilt, point this at another project.
+  - key: project-detail
+    module: projects
+    title: Inside a project
+    route: /deals/projects/10
+    crop: css:main
+    articles:
+      - { slug: projects-overview, after: '## Inside a project', caption: Inside a project }
+      - { slug: tasks-and-phases, after: '## Tasks', caption: A project's phases and tasks }
+      - { slug: project-and-phase-owners, after: '## Change the owner', caption: Owners on a project }
+      - { slug: award-a-bid, after: '## Award', caption: A project's phases }
