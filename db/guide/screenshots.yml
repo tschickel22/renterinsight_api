@@ -125,6 +125,10 @@ screenshots:
     title: A Profit & Loss report
     route: /accounting/reports/profit-and-loss
     crop: css:main
+    steps:
+      # Reports show what was last run until Run Report is pressed.
+      - { click: 'css:button:has-text("Run Report")', optional: true }
+      - { wait: 1500 }
     articles:
       - { slug: financial-reports, after: '## Profit & Loss (P&L)', caption: Profit & Loss }
 
@@ -133,6 +137,10 @@ screenshots:
     title: A Balance Sheet
     route: /accounting/reports/balance-sheet
     crop: css:main
+    steps:
+      # Reports show what was last run until Run Report is pressed.
+      - { click: 'css:button:has-text("Run Report")', optional: true }
+      - { wait: 1500 }
     articles:
       - { slug: financial-reports, after: '## Balance Sheet', caption: Balance Sheet }
 
@@ -421,6 +429,10 @@ screenshots:
     title: Project Budget vs. Actual
     route: /accounting/reports/project-budget
     crop: css:main
+    steps:
+      # Reports show what was last run until Run Report is pressed.
+      - { click: 'css:button:has-text("Run Report")', optional: true }
+      - { wait: 1500 }
     articles:
       - { slug: project-job-costs, after: '## The reports', caption: Project Budget vs. Actual }
 

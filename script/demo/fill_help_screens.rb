@@ -96,20 +96,20 @@ ActiveRecord::Base.transaction do
 
   # --- Commission payments ----------------------------------------------------
   plan = company.commission_plans.order(:id).find_by(name: 'Standard 2026') || company.commission_plans.order(:id).first
-  [
-    { deal: '2024 Fleetwood Estate Series - William Johnson', amount: 3_748.65, status: 'paid' },
-    { deal: '2024 Fleetwood Pinehurst - Elizabeth Brown', amount: 425.00, status: 'approved' }
-  ].each do |c|
-    deal = company.deals.find_by(name: c[:deal])
-    next puts("miss  commission: no deal #{c[:deal]}") unless deal&.owner_id
+  # The Commissions page lists payments on deals posted to the ledger only.
+  posted = company.deals.where(gl_posted: true).where.not(owner_id: nil).order(:id).first(2)
+  [{ amount: 3_748.65, status: 'paid' }, { amount: 425.00, status: 'approved' }].each_with_index do |c, i|
+    deal = posted[i]
+    next puts('miss  commission: not enough deals posted to the ledger') unless deal
 
-    found = company.commission_payments.where("metadata ->> 'demo_key' = ?", "help-#{deal.id}").exists?
+    key = "help-commission-#{i + 1}"
+    found = company.commission_payments.where("metadata ->> 'demo_key' = ?", key).exists?
     say(found, "commission payment, #{c[:status]}, $#{c[:amount]} on #{deal.name}")
     next if !apply || found
 
     payment = company.commission_payments.create!(
       deal: deal, payee_user_id: deal.owner_id, commission_plan: plan, amount: c[:amount], status: c[:status],
-      earned_date: Date.new(2026, 10, 16), location_id: deal.location_id || denver.id, metadata: { demo_key: "help-#{deal.id}" },
+      earned_date: Date.new(2026, 10, 16), location_id: deal.location_id || denver.id, metadata: { demo_key: key },
       approved_by_user_id: admin.id, approved_at: Time.zone.parse('2026-10-20 10:00'),
       **(c[:status] == 'paid' ? { paid_by_user_id: admin.id, paid_at: Time.zone.parse('2026-10-24 10:00'), payment_method: 'direct_deposit',
                                   paid_date: Date.new(2026, 10, 24), amount_paid: c[:amount], payment_reference: 'Payroll 10/24' } : {})
@@ -151,9 +151,10 @@ ActiveRecord::Base.transaction do
 
   # --- The account that takes the pictures ------------------------------------
   checker = company.users.find_by('lower(email) = ?', ENV['GUIDE_CHECK_EMAIL'].to_s.downcase.strip)
-  renamed = checker.nil? || checker.first_name != 'Tour'
+  renamed = checker.nil? || (checker.first_name != 'Tour' && checker.read_attribute(:name).to_s == 'Jordan Ellis')
   say(renamed, "rename #{checker&.email || 'the tour-check account (not in this company)'} to Jordan Ellis")
-  checker.update!(first_name: 'Jordan', last_name: 'Ellis') if apply && !renamed
+  # users.name too: pickers such as an invoice's Sales Rep show it.
+  checker.update!(first_name: 'Jordan', last_name: 'Ellis', name: 'Jordan Ellis') if apply && !renamed
 
   # --- The books still tie ----------------------------------------------------
   if apply
