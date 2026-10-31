@@ -68,7 +68,8 @@ screenshots:
     module: accounting
     title: Entering a bill
     route: /accounting/bills?tab=bills
-    crop: css:main
+    # The bill form opens in a dialog over the page.
+    crop: 'css:[role="dialog"]'
     steps:
       - { click: bills-new }
       - { wait: 500 }
