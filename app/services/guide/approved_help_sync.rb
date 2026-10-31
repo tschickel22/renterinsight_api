@@ -19,6 +19,10 @@ module Guide
   class ApprovedHelpSync
     CURSOR = 'guide_sync_cursor'
     TOUR_CURSOR = 'guide_sync_tour_cursor'
+    ARTICLE_CURSOR = 'guide_sync_article_cursor'
+    # Article edits on staging are copied from this day on (E89). Older
+    # differences between the servers' articles are left as they are.
+    ARTICLE_SYNC_START = '2026-10-31T00:00:00Z'
     # Tours from staging waiting for production's build, by module and key.
     PENDING_TOURS = 'guide_sync_pending_tours'
     STEP_FIELDS = %w[position route selector title content placement highlight_type click_required input_required].freeze
@@ -36,7 +40,8 @@ module Guide
 
       since = Setting.get('Platform', 0, CURSOR, nil)
       tours_since = Setting.get('Platform', 0, TOUR_CURSOR, nil)
-      payload = @fetcher.call(since, tours_since)
+      articles_since = Setting.get('Platform', 0, ARTICLE_CURSOR, nil) || ARTICLE_SYNC_START
+      payload = @fetcher.arity == 2 ? @fetcher.call(since, tours_since) : @fetcher.call(since, tours_since, articles_since)
       payload = { 'items' => payload } if payload.is_a?(Array)
       items = Array(payload['items'])
       items.each { |remote| copy(remote) }
@@ -49,6 +54,7 @@ module Guide
       # Training videos: only when staging sent its list (an older staging, or
       # a failed fetch, sends none and must not hide anything here).
       Guide::TrainingVideoSync.new.apply(payload['videos']) if payload.key?('videos')
+      sync_screenshots(payload)
       published
     end
 
@@ -84,9 +90,27 @@ module Guide
 
     private
 
-    def fetch(since, tours_since)
+    # Screenshots and article edits (E89). Articles first, so an article's
+    # new shot line and its picture arrive together.
+    def sync_screenshots(payload)
+      if payload.key?('articles')
+        articles = Array(payload['articles'])
+        screenshot_sync.apply_articles(articles)
+        Setting.set('Platform', 0, ARTICLE_CURSOR, articles.last['updated_at']) if articles.any?
+      end
+      screenshot_sync.apply(payload['screenshots']) if payload.key?('screenshots')
+    end
+
+    def screenshot_sync
+      @screenshot_sync ||= Guide::ScreenshotSync.new(
+        known_markers: known_markers, production_commits: production_commits,
+        production_built_at: Array(latest_snapshot.atlas['commits']).filter_map { |c| Time.zone.parse(c['date'].to_s) rescue nil }.max
+      )
+    end
+
+    def fetch(since, tours_since, articles_since = nil)
       uri = URI("#{ENV['GUIDE_SYNC_SOURCE_URL'].chomp('/')}/api/public/guide_sync/approved")
-      uri.query = URI.encode_www_form({ since: since, tours_since: tours_since }.compact_blank)
+      uri.query = URI.encode_www_form({ since: since, tours_since: tours_since, articles_since: articles_since }.compact_blank)
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 10, read_timeout: 30) do |http|
         http.get(uri.request_uri, 'X-Guide-Sync-Token' => ENV['GUIDE_SYNC_TOKEN'], 'Accept' => 'application/json')
       end

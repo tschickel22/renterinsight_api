@@ -2276,6 +2276,10 @@ Rails.application.routes.draw do
       put 'training_assignments/new_users', to: 'training_assignments#new_users'
       resources :training_assignments, only: %i[index create destroy]
 
+      # Help article screenshots (E89): the nightly run's recipes and pictures.
+      get 'help_screenshots/recipes', to: 'help_screenshots#recipes'
+      post 'help_screenshots/:key/capture', to: 'help_screenshots#capture', constraints: { key: /[a-z0-9-]+/ }
+
       # ==================== UNIFIED KNOWLEDGE BASE / SMART HELP ====================
       # Smart search + navigate + articles (read-only for end users).
       # Admin-side CRUD lives under api/admin/knowledge.
@@ -3247,6 +3251,11 @@ Rails.application.routes.draw do
           post :upload
           post :reset_share_link
         end
+      end
+
+      # Help article screenshots (E89).
+      resources :knowledge_screenshots, only: %i[index create update destroy] do
+        member { post :text_checked }
       end
 
       # Who is on a tenant site right now, and who has just left. Cross-tenant

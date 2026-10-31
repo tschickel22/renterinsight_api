@@ -15,7 +15,8 @@ class Api::Public::GuideSyncController < ApplicationController
     end
 
     since = parse_time(params[:since])
-    render json: { items: help_since(since), tours: tours_since(parse_time(params[:tours_since])), videos: videos }
+    render json: { items: help_since(since), tours: tours_since(parse_time(params[:tours_since])), videos: videos,
+                   screenshots: screenshots, articles: articles_since(parse_time(params[:articles_since])) }
   end
 
   private
@@ -69,6 +70,22 @@ class Api::Public::GuideSyncController < ApplicationController
       v.slice(:uid, :slug, :share_token, :video_url, :poster_url, :captions_url, :updated_at,
               *Guide::TrainingVideoSync::FIELDS)
     end
+  end
+
+  # Every help article screenshot (E89), with its pictures. A short list,
+  # sent whole each time; production copies what changed (Guide::ScreenshotSync).
+  def screenshots
+    Knowledge::Screenshot.ordered.map do |s|
+      s.slice(:key, :commit_sha, :commit_at, :captured_at, *Guide::ScreenshotSync::RECIPE_FIELDS)
+       .merge(Knowledge::Screenshot::SIZES.to_h { |size| [size, s.as_api_json[size.to_sym].slice(:url, :status, :width, :height)] })
+    end
+  end
+
+  # Articles edited on staging since production last copied (E89: adding
+  # screenshots edits them). `updated_at` is the cursor production keeps.
+  def articles_since(since)
+    Knowledge::Article.where('updated_at > ?', since).order(:updated_at).limit(200)
+                      .map { |a| a.slice(:slug, :title, :excerpt, :content, :is_published, :updated_at) }
   end
 
   # Tours played and approved on staging, with their steps, so production

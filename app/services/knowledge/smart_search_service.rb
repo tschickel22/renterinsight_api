@@ -193,7 +193,7 @@ module Knowledge
                                   .limit(8)
 
       scored = articles.map do |a|
-        text = "#{a.title} #{a.respond_to?(:excerpt) ? a.excerpt.to_s : ''} #{a.content.to_s}".downcase
+        text = "#{a.title} #{a.respond_to?(:excerpt) ? a.excerpt.to_s : ''} #{Knowledge::Screenshot.strip(a.content)}".downcase
         score = terms.count { |t| text.include?(t) }
         [a, score]
       end.sort_by { |_, s| -s }

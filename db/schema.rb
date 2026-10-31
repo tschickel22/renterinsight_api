@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_30_200100) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_31_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4128,6 +4128,45 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_30_200100) do
     t.index ["category"], name: "index_knowledge_modules_on_category"
     t.index ["is_active", "position"], name: "index_knowledge_modules_on_is_active_and_position"
     t.index ["key"], name: "index_knowledge_modules_on_key", unique: true
+  end
+
+  create_table "knowledge_screenshots", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "module_key"
+    t.string "title"
+    t.string "alt_text"
+    t.string "route", null: false
+    t.jsonb "steps", default: [], null: false
+    t.string "crop_marker"
+    t.integer "padding", default: 16, null: false
+    t.jsonb "mobile_steps"
+    t.string "mobile_crop_marker"
+    t.jsonb "mask_selectors", default: [], null: false
+    t.string "desktop_url"
+    t.string "desktop_previous_url"
+    t.string "desktop_status", default: "pending", null: false
+    t.string "desktop_error"
+    t.float "desktop_change_score"
+    t.integer "desktop_width"
+    t.integer "desktop_height"
+    t.string "mobile_url"
+    t.string "mobile_previous_url"
+    t.string "mobile_status", default: "pending", null: false
+    t.string "mobile_error"
+    t.float "mobile_change_score"
+    t.integer "mobile_width"
+    t.integer "mobile_height"
+    t.datetime "captured_at"
+    t.string "commit_sha"
+    t.datetime "commit_at"
+    t.boolean "needs_review", default: false, null: false
+    t.datetime "changed_at"
+    t.string "source", default: "admin", null: false
+    t.jsonb "source_files", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_knowledge_screenshots_on_key", unique: true
+    t.index ["module_key"], name: "index_knowledge_screenshots_on_module_key"
   end
 
   create_table "knowledge_searches", force: :cascade do |t|

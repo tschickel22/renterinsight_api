@@ -335,7 +335,11 @@ module Api
           is_published: article.is_published, position: article.position,
           updated_at: article.updated_at
         }
-        payload.merge!(content: copy(article.content), content_html: copy(article.content_html)) if include_body
+        if include_body
+          payload.merge!(content: copy(article.content), content_html: copy(article.content_html),
+                         # The pictures its {{shot: key}} lines show (E89).
+                         shots: Knowledge::Screenshot.for_article(article.content, admin: platform_admin?))
+        end
         payload
       end
 

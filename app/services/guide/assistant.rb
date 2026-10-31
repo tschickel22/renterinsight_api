@@ -179,7 +179,7 @@ module Guide
       Guide::HelpSearch.call(query).map do |a|
         @seen_articles[a.slug] = a
         { slug: a.slug, title: Guide::Copy.render(a.title, company: @company),
-          text: Guide::Copy.render("#{a.excerpt}\n\n#{a.content}", company: @company).to_s.first(2_500) }
+          text: Guide::Copy.render("#{a.excerpt}\n\n#{Knowledge::Screenshot.strip(a.content)}", company: @company).to_s.first(2_500) }
       end
     end
 

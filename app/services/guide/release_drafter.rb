@@ -32,6 +32,15 @@ module Guide
           article_excerpt: { type: 'string', description: 'One sentence, under 160 characters.' },
           article_markdown: { type: 'string', description: 'The article body in Markdown: what it is for, how to get there, the steps, tips. Use ## headings. Do not repeat the title.' },
           whats_new: { type: 'string', description: 'One or two sentences for a What\'s New list, or empty if this change is not news to a dealer.' },
+          screenshot: {
+            type: 'object',
+            description: 'Optional: one screenshot for the article, cropped to a marker from the allowed list (the part of the page the article is about). Omit when no marker fits. It is taken automatically and shown after the first paragraph.',
+            properties: {
+              marker: { type: 'string' },
+              caption: { type: 'string', description: 'A few words, e.g. "The New Quote button on a deal".' }
+            },
+            required: %w[marker caption]
+          },
           in_page_steps: {
             type: 'array',
             description: 'Optional tour steps on the page itself, after the person arrives. Only markers from the allowed list.',
@@ -123,10 +132,20 @@ module Guide
           content: clean(result['article_markdown'])
         },
         whats_new: clean(result['whats_new']),
+        screenshot: drafted_screenshot(result['screenshot']),
         # A tour only for a new place. A changed place keeps its tour; the
         # nightly tour check says if the change broke it.
         tour: (@item.change_type == 'added' && @item.published_tour_id.blank? ? { name: "Where to find #{entry['title']}", steps: where_steps + in_page(steps) } : nil)
       }.compact
+    end
+
+    # A screenshot the drafter asked for, kept only when its marker is on the
+    # place's page (E89). The publisher makes the recipe and adds the line.
+    def drafted_screenshot(shot)
+      return nil unless shot.is_a?(Hash) && allowed_markers.include?(shot['marker'].to_s) && entry['route'].present?
+
+      { key: "#{entry['key'].to_s.parameterize}-#{shot['marker'].to_s.parameterize}".first(80).delete_suffix('-'),
+        route: entry['route'].to_s, crop_marker: shot['marker'].to_s, caption: clean(shot['caption']).delete('"').first(120) }
     end
 
     # The help already written for this place, so a change updates it.
@@ -201,7 +220,7 @@ module Guide
         Markers you may use for in_page_steps (exact strings; use none if none fit):
         #{allowed_markers.join(', ').presence || '(none)'}
 
-        #{existing_article ? "This place already has this article. Rewrite it for the change: keep what is still true, fix what changed, and keep its title unless the place was renamed.\n## #{existing_article.title}\n#{existing_article.content.to_s.first(6000)}\n" : ''}
+        #{existing_article ? "This place already has this article. Rewrite it for the change: keep what is still true, fix what changed, and keep its title unless the place was renamed. Keep every {{shot: ...}} line exactly as it is (each is a screenshot that updates itself).\n## #{existing_article.title}\n#{existing_article.content.to_s.first(6000)}\n" : ''}
         Existing help articles, so you do not duplicate one:
         #{Knowledge::Article.published.limit(80).pluck(:title).join("\n")}
       TEXT

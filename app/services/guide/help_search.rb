@@ -19,7 +19,7 @@ module Guide
 
       candidates.map do |a|
         title = a.title.to_s.downcase
-        body = "#{a.excerpt} #{a.content}".downcase
+        body = "#{a.excerpt} #{Knowledge::Screenshot.strip(a.content)}".downcase
         score = terms.sum { |t| (title.include?(t) ? 3 : 0) + (body.include?(t) ? 1 : 0) }
         [a, score]
       end.sort_by { |_, s| -s }.first(limit).map(&:first)
