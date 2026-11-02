@@ -245,11 +245,16 @@ module Catalog
     end
 
     def inactivate_missing(seen_keys)
+      # A run with no homes at all says the crawl failed, not that a manufacturer
+      # discontinued its whole catalog. Treating it as the latter soft-deleted
+      # every home on every subscribed dealer during any site outage or block.
+      return 0 if seen_keys.empty?
+
       # Scoped to THIS location so ingesting one location doesn't tombstone
       # another location's copies.
       scope = @company.vehicles
                       .where(catalog_source_id: @source.id, location_id: @location_id, is_deleted: [false, nil])
-      scope = scope.where.not(catalog_source_key: seen_keys) if seen_keys.any?
+                      .where.not(catalog_source_key: seen_keys)
 
       count = 0
       scope.find_each do |vehicle|

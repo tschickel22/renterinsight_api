@@ -56,6 +56,16 @@ RSpec.describe Catalog::IngestionService do
     expect(gone.is_deleted).to be(true)
   end
 
+  # A site outage or a bot block yields no homes. That is a failed crawl, not a
+  # manufacturer discontinuing its whole catalog.
+  it 'keeps every home when a run has no homes at all' do
+    ingest([FakeCatalogAdapter.home('1'), FakeCatalogAdapter.home('2')])
+    result = ingest([])
+
+    expect(result.inactivated).to eq(0)
+    expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(2)
+  end
+
   it 'does not overwrite populated fields with blanks when protect_blanks is set' do
     ingest([FakeCatalogAdapter.home('1', description: 'Original description')])
     ingest([FakeCatalogAdapter.home('1', description: nil, square_feet: 9999)], protect_blanks: true)

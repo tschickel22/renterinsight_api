@@ -210,6 +210,17 @@ RSpec.describe Catalog::RunService do
       expect(vehicles.pluck(:location_id).uniq).to eq([nil])
     end
 
+    it 'leaves dealer homes alone when a crawl discovers nothing' do
+      create(:dealer_catalog_subscription, company: company, catalog_source: source, enabled: true, location_ids: [])
+      run_with(%w[201 202].map { |k| FakeCatalogAdapter.home(k) })
+
+      run = run_with([])
+
+      expect(run.status).to eq('failed')
+      expect(run.inactivated_count).to eq(0)
+      expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(2)
+    end
+
     it 'creates one copy per selected location' do
       loc_a = company.locations.create!(name: 'A', timezone: 'UTC')
       loc_b = company.locations.create!(name: 'B', timezone: 'UTC')
