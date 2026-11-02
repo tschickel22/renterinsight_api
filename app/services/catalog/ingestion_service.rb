@@ -48,7 +48,13 @@ module Catalog
       vehicle.catalog_last_synced_values&.[](SUPPLEMENT_MARK) == true
     end
 
-    Result = Struct.new(:added, :updated, :unchanged, :inactivated, keyword_init: true)
+    # How long a home stays held after a run in which most of its catalog vanished.
+    # Long enough for several weekly crawls, so a crawl that keeps dying partway
+    # has time to be noticed. Short enough that a real catalog overhaul still
+    # clears its discontinued homes without anyone stepping in.
+    MASS_REMOVAL_HOLD = 21.days
+
+    Result = Struct.new(:added, :updated, :unchanged, :inactivated, :held, keyword_init: true)
 
     # Maps a NormalizedHome → the hash of catalog-managed attributes a vehicle
     # would receive. Pulled out of #assign_attributes! so the SupplementApplier
@@ -114,7 +120,7 @@ module Catalog
     # @param homes [Array<NormalizedHome>]
     # @return [Result]
     def call(homes)
-      result    = Result.new(added: 0, updated: 0, unchanged: 0, inactivated: 0)
+      result    = Result.new(added: 0, updated: 0, unchanged: 0, inactivated: 0, held: 0)
       seen_keys = []
 
       homes.each do |home|
@@ -126,7 +132,7 @@ module Catalog
         end
       end
 
-      result.inactivated = inactivate_missing(seen_keys)
+      inactivate_missing(seen_keys, result)
       result
     end
 
@@ -244,33 +250,46 @@ module Catalog
       value.nil? || (value.respond_to?(:empty?) && value.empty?)
     end
 
-    def inactivate_missing(seen_keys)
+    def inactivate_missing(seen_keys, result)
       # A run with no homes at all says the crawl failed, not that a manufacturer
       # discontinued its whole catalog. Treating it as the latter soft-deleted
       # every home on every subscribed dealer during any site outage or block.
-      return 0 if seen_keys.empty?
+      return if seen_keys.empty?
 
       # Scoped to THIS location so ingesting one location doesn't tombstone
       # another location's copies.
       scope = @company.vehicles
                       .where(catalog_source_id: @source.id, location_id: @location_id, is_deleted: [false, nil])
-                      .where.not(catalog_source_key: seen_keys)
 
-      count = 0
-      scope.find_each do |vehicle|
-        # Never tombstone a supplemented vehicle — it's a dealer-original row
-        # that we attached catalog data to. Catalog dropping the model just
-        # means the dealer keeps it as-is.
-        next if self.class.supplemented?(vehicle)
-        # Nor a seeded inventory row. Those are the dealer's own homes, imported
-        # once at onboarding; a floorplan run must not tombstone them, and a
-        # home leaving the manufacturer's index does not un-sell it.
-        next if vehicle.source == SEEDED_VEHICLE_SOURCE
+      missing = scope.where.not(catalog_source_key: seen_keys).select { |vehicle| removable?(vehicle) }
+      present = scope.where(catalog_source_key: seen_keys).count
 
-        vehicle.update_columns(is_deleted: true, deleted_at: Time.current)
-        count += 1
+      # Losing most of a catalog in one run usually means the crawl died partway.
+      # Hold those homes and let the run report it; each is released once it has
+      # gone unseen for the whole hold, which is what a real overhaul looks like.
+      if missing.size > present
+        cutoff = MASS_REMOVAL_HOLD.ago
+        expired, held = missing.partition { |v| v.catalog_last_seen_at && v.catalog_last_seen_at < cutoff }
+        missing = expired
+        result.held = held.size
+        Rails.logger.warn "[Catalog::IngestionService] holding #{held.size} homes for company #{@company.id}, " \
+                          "source #{@source.id}: only #{present} seen this run"
       end
-      count
+
+      missing.each { |vehicle| vehicle.update_columns(is_deleted: true, deleted_at: Time.current) }
+      result.inactivated = missing.size
+    end
+
+    def removable?(vehicle)
+      # Never tombstone a supplemented vehicle — it's a dealer-original row that
+      # we attached catalog data to. Catalog dropping the model just means the
+      # dealer keeps it as-is.
+      return false if self.class.supplemented?(vehicle)
+
+      # Nor a seeded inventory row. Those are the dealer's own homes, imported
+      # once at onboarding; a floorplan run must not tombstone them, and a home
+      # leaving the manufacturer's index does not un-sell it.
+      vehicle.source != SEEDED_VEHICLE_SOURCE
     end
 
     # Columns to rewrite when the ONLY thing that moved is where an image is

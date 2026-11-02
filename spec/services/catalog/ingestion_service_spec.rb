@@ -66,6 +66,49 @@ RSpec.describe Catalog::IngestionService do
     expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(2)
   end
 
+  describe 'a run missing most of the catalog' do
+    let(:keys) { %w[1 2 3 4 5] }
+    let(:vehicles) { company.vehicles.where(catalog_source_id: source.id) }
+
+    before { ingest(keys.map { |k| FakeCatalogAdapter.home(k) }) }
+
+    it 'holds the missing homes and reports them' do
+      result = ingest([FakeCatalogAdapter.home('1')])
+
+      expect(result.held).to eq(4)
+      expect(result.inactivated).to eq(0)
+      expect(vehicles.where(is_deleted: [false, nil]).count).to eq(5)
+    end
+
+    it 'removes held homes once they have gone unseen for the whole hold' do
+      vehicles.where.not(catalog_source_key: %w[1 2]).update_all(catalog_last_seen_at: 22.days.ago)
+
+      result = ingest([FakeCatalogAdapter.home('1')])
+
+      expect(result.inactivated).to eq(3)
+      expect(result.held).to eq(1)
+      expect(vehicles.where(is_deleted: [false, nil]).pluck(:catalog_source_key)).to contain_exactly('1', '2')
+    end
+
+    it 'still removes homes normally when half or fewer went missing' do
+      result = ingest(%w[1 2 3].map { |k| FakeCatalogAdapter.home(k) })
+
+      expect(result.inactivated).to eq(2)
+      expect(result.held).to eq(0)
+    end
+
+    it 'does not count supplemented homes as missing' do
+      vehicles.where(catalog_source_key: %w[2 3 4 5]).find_each do |vehicle|
+        vehicle.update_columns(catalog_last_synced_values: { described_class::SUPPLEMENT_MARK => true })
+      end
+
+      result = ingest([FakeCatalogAdapter.home('1')])
+
+      expect(result.held).to eq(0)
+      expect(result.inactivated).to eq(0)
+    end
+  end
+
   describe 'a home with no bath count' do
     let(:no_baths) { FakeCatalogAdapter.home('1', bathrooms: nil) }
 

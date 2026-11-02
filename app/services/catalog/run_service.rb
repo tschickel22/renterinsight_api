@@ -69,6 +69,12 @@ module Catalog
       archive_images!(homes)
 
       ingest = ingest_into_subscribers(homes, degraded: degraded)
+      if ingest[:held].to_i.positive?
+        errors << { 'url' => @source.base_url.to_s,
+                    'message' => "Most of this catalog was missing from the run, so #{ingest[:held]} dealer homes " \
+                                 "were kept rather than removed. They clear after " \
+                                 "#{IngestionService::MASS_REMOVAL_HOLD.in_days.to_i} days unseen." }
+      end
 
       status = run_status(homes:, errors:, degraded:)
 
@@ -187,6 +193,7 @@ module Catalog
         totals[:added]       += result.added
         totals[:updated]     += result.updated
         totals[:inactivated] += result.inactivated
+        totals[:held]        += result.held
 
         totals[:inactivated] += inactivate_deselected_locations(sub.company, target_locations)
         heartbeat!

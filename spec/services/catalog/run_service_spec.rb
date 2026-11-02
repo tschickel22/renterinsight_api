@@ -221,6 +221,18 @@ RSpec.describe Catalog::RunService do
       expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(2)
     end
 
+    it 'flags a run that held homes back as partial' do
+      create(:dealer_catalog_subscription, company: company, catalog_source: source, enabled: true, location_ids: [])
+      run_with(%w[201 202 203 204].map { |k| FakeCatalogAdapter.home(k) })
+
+      run = run_with([FakeCatalogAdapter.home('201')])
+
+      expect(run.status).to eq('partial')
+      expect(run.inactivated_count).to eq(0)
+      expect(run.error_log.last['message']).to include('3 dealer homes were kept')
+      expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(4)
+    end
+
     it 'creates one copy per selected location' do
       loc_a = company.locations.create!(name: 'A', timezone: 'UTC')
       loc_b = company.locations.create!(name: 'B', timezone: 'UTC')

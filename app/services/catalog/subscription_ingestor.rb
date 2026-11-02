@@ -9,7 +9,7 @@ module Catalog
   # backfill a brand-new subscriber from ParsedHomeCache instead of forcing a
   # fresh crawl.
   class SubscriptionIngestor
-    Totals = Struct.new(:added, :updated, :inactivated, keyword_init: true)
+    Totals = Struct.new(:added, :updated, :inactivated, :held, keyword_init: true)
 
     # @param subscription [DealerCatalogSubscription]
     # @param homes [Array<NormalizedHome>]
@@ -17,7 +17,7 @@ module Catalog
     #   so it can never wipe populated dealer data with a blank.
     def self.call(subscription:, homes:, degraded: false)
       company = subscription.company
-      return Totals.new(added: 0, updated: 0, inactivated: 0) if company.nil?
+      return Totals.new(added: 0, updated: 0, inactivated: 0, held: 0) if company.nil?
 
       totals = Hash.new(0)
 
@@ -32,9 +32,10 @@ module Catalog
         totals[:added]       += result.added
         totals[:updated]     += result.updated
         totals[:inactivated] += result.inactivated
+        totals[:held]        += result.held
       end
 
-      Totals.new(added: totals[:added], updated: totals[:updated], inactivated: totals[:inactivated])
+      Totals.new(added: totals[:added], updated: totals[:updated], inactivated: totals[:inactivated], held: totals[:held])
     end
   end
 end
