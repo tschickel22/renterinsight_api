@@ -2154,6 +2154,7 @@ Rails.application.routes.draw do
         member do
           get :migrations
           post :migrations, action: :create_migrations
+          post :options, action: :add_option
         end
         collection do
           get :migration_recommendations

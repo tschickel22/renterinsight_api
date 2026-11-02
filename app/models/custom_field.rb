@@ -74,6 +74,35 @@ class CustomField < ApplicationRecord
   serialize :options, coder: JSON
   # validation_rules is jsonb - no serialize needed (PostgreSQL handles it natively)
   
+  MAX_OPTION_LENGTH = 100
+
+  # A dropdown people can add to while filling in a record. A setting on the
+  # field, turned on in the page layout editor.
+  def allow_new_options?
+    field_type == 'select' && ActiveModel::Type::Boolean.new.cast((validation_rules || {})['allow_new_options']) == true
+  end
+
+  # Adds a choice and returns the spelling to store. "dealer" when "Dealer"
+  # exists returns "Dealer", which is what keeps the list from filling up with
+  # the near duplicates this setting exists to prevent. The same field on other
+  # record types gets it too, or a lead's value would not exist on its deal.
+  def add_option!(raw)
+    value = raw.to_s.squish
+    raise ArgumentError, 'Enter a name for the new choice' if value.blank?
+    raise ArgumentError, "Keep it under #{MAX_OPTION_LENGTH} characters" if value.length > MAX_OPTION_LENGTH
+
+    self.class.transaction do
+      fields = self.class.where(company_id: company_id, field_key: field_key, field_type: 'select')
+                         .order(:id).lock.to_a.select(&:allow_new_options?)
+      spelling = fields.flat_map { |f| Array(f.options) }.find { |o| o.to_s.casecmp?(value) } || value
+      fields.each do |f|
+        f.update!(options: Array(f.options) + [spelling]) unless Array(f.options).include?(spelling)
+      end
+      reload
+      spelling
+    end
+  end
+
   # Helper: Validate a value against this field's rules
   def validate_value(value)
     errors = []
@@ -114,7 +143,9 @@ class CustomField < ApplicationRecord
       end
       
     when 'select'
-      errors << "#{name} must be one of: #{options.join(', ')}" unless options&.include?(value)
+      # Where people can add choices, an import or form can bring a new one too,
+      # and that must not stop the record being saved later.
+      errors << "#{name} must be one of: #{options.join(', ')}" unless allow_new_options? || options&.include?(value)
       
     when 'multiselect'
       value_array = value.is_a?(Array) ? value : JSON.parse(value)
