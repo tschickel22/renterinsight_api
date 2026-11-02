@@ -59,7 +59,8 @@ module Campaigns
       keys = Set.new
       return keys unless @campaign.campaign_audience
 
-      Campaigns::AudienceEnroller.new(campaign: @campaign).each_source_type do |source_type, scope|
+      # Includes people already enrolled, or nobody would ever come back for a new cycle.
+      Campaigns::AudienceEnroller.new(campaign: @campaign).each_source_type(exclude_enrolled: false) do |source_type, scope|
         scope.pluck("#{scope.klass.table_name}.id").each { |id| keys << [source_type, id] }
       end
       keys

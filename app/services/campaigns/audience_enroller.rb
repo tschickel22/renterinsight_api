@@ -113,12 +113,12 @@ module Campaigns
     # Yields [source_type, scope] for the primary source type plus each
     # additional_source_types entry. Enables one campaign to enroll from
     # Lead + Contact simultaneously (weekly-newsletter case).
-    def each_source_type
+    def each_source_type(exclude_enrolled: true)
       types = [@audience.source_type] + Array(@audience.try(:additional_source_types))
       types.uniq.compact.each do |type|
         # Each type gets its own filter-compiled scope so the same
         # audience filter_tree applies (e.g. tagged 'weekly-favorites').
-        yield type, audience_scope_for(type)
+        yield type, audience_scope_for(type, exclude_enrolled: exclude_enrolled)
       end
     end
 
@@ -186,7 +186,7 @@ module Campaigns
     # Applies the same filter tree / excludes to any given source type so
     # cross-source enrollment (Lead + Contact tagged 'weekly-favorites')
     # yields the same semantic audience across each type.
-    def audience_scope_for(source_type)
+    def audience_scope_for(source_type, exclude_enrolled: true)
       scope = Audiences::FilterCompiler.new(
         company: @campaign.company,
         source_type: source_type,
@@ -201,9 +201,12 @@ module Campaigns
       ).scope
       # Anyone already enrolled here, in any status, is skipped below anyway;
       # dropping them in SQL keeps a running dynamic campaign from walking its
-      # whole existing audience on every scheduler tick.
-      scope = scope.where.not(id: CampaignEnrollment.where(campaign_id: @campaign.id, recipient_type: source_type)
-                                                    .select(:recipient_id))
+      # whole existing audience on every scheduler tick. RecurringCycle asks for them
+      # kept: last cycle's recipients are exactly who it has to find.
+      if exclude_enrolled
+        scope = scope.where.not(id: CampaignEnrollment.where(campaign_id: @campaign.id, recipient_type: source_type)
+                                                      .select(:recipient_id))
+      end
       @campaign.sms_channel? ? scope_for_sms_compliance(scope) : scope
     rescue Audiences::FilterCompiler::CompilationError => e
       Rails.logger.error "[AudienceEnroller] filter compile failed for #{source_type}: #{e.message}"
