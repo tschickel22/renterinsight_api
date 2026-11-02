@@ -142,7 +142,9 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(response).to have_http_status(:ok)
     design.reload
     expect(design.contact).to be_present
-    expect(design.deal).to have_attributes(value: 101_250.0)
+    # The design's 101,250 plus freight to the homesite (a lot home gets a freight line since
+    # e83fab77), at the assumed minimum until the dealer sets rates and a delivery address is in.
+    expect(design.deal).to have_attributes(value: 102_450.0)
     expect(BuyerPortalAccess.find_by!(email: 'tia@example.com')).to have_attributes(buyer_type: 'Contact', buyer_id: design.contact_id)
 
     post "/api/v1/truebuild_designs/#{design.id}/quote", headers: rep_headers

@@ -50,7 +50,7 @@ RSpec.describe 'Api::Partner::V1 service tickets', type: :request do
 
   it "cannot reach another company's ticket" do
     other = Company.create!(name: "Other-#{SecureRandom.hex(4)}", industry: 'manufactured_housing')
-    theirs = other.service_tickets.create!(title: 'Theirs', description: 'D', ticket_number: 'OTHER-1')
+    theirs = other.service_tickets.create!(title: 'Theirs', description: 'D')
 
     get "/api/partner/v1/service-tickets/#{theirs.id}", headers: headers
     expect(response).to have_http_status(:not_found)

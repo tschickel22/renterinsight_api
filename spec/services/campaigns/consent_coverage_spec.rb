@@ -77,4 +77,38 @@ RSpec.describe Campaigns::ConsentCoverage do
   it 'returns zeroes rather than raising when the audience cannot be resolved' do
     expect(described_class.for_campaign(campaign).total).to eq(0)
   end
+
+  # The list raised an error it then swallowed whenever nobody was pending, so a
+  # draft always read 0 of 0 and the warning before start never appeared.
+  context 'before anyone is enrolled' do
+    before { campaign.create_campaign_audience!(source_type: 'Lead', filter_tree: {}) }
+
+    def audience_lead(consent: nil)
+      lead = Lead.create!(company_id: company.id, first_name: 'S', last_name: 'K',
+                          email: "a-#{SecureRandom.hex(4)}@example.com")
+      unless consent.nil?
+        pref = CommunicationPreference.find_or_create_for(recipient: lead, channel: 'email', category: 'marketing')
+        consent ? pref.opt_in! : pref.opt_out!('no thanks')
+      end
+      lead
+    end
+
+    it 'counts the audience the campaign would send to' do
+      audience_lead(consent: true)
+      audience_lead(consent: false)
+      audience_lead
+
+      result = described_class.for_campaign(campaign)
+
+      expect(result).to have_attributes(total: 3, consented: 1, opted_out: 1, missing: 1)
+    end
+
+    it 'finds only those never asked as uncovered' do
+      audience_lead(consent: true)
+      audience_lead(consent: false)
+      never_asked = audience_lead
+
+      expect(described_class.new(campaign).uncovered_recipients).to contain_exactly(never_asked)
+    end
+  end
 end

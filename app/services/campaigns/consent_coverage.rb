@@ -31,13 +31,12 @@ module Campaigns
 
       consented = 0
       opted_out = 0
+      answers = recorded_answers(recipients, channel)
       recipients.each do |r|
-        pref = CommunicationPreference.find_by(
-          recipient: r, channel: channel, category: 'marketing'
-        )
-        if pref.nil?
+        answer = answers[[r.class.polymorphic_name, r.id]]
+        if answer.nil?
           next
-        elsif pref.opted_in?
+        elsif answer
           consented += 1
         else
           opted_out += 1
@@ -58,11 +57,9 @@ module Campaigns
     # overturn an answer somebody gave.
     def uncovered_recipients
       channel = @campaign.sms_channel? ? 'sms' : 'email'
-      audience_recipients.reject do |r|
-        CommunicationPreference.exists?(
-          recipient: r, channel: channel, category: 'marketing'
-        )
-      end
+      recipients = audience_recipients
+      answers = recorded_answers(recipients, channel)
+      recipients.reject { |r| answers.key?([r.class.polymorphic_name, r.id]) }
     end
 
     private
@@ -76,6 +73,18 @@ module Campaigns
       setting.nil? ? true : ActiveModel::Type::Boolean.new.cast(setting) != false
     end
 
+    # [recipient type, id] => whether they opted in, for those with a preference
+    # row. One query per thousand, because a draft can resolve to thousands of people.
+    def recorded_answers(recipients, channel)
+      recipients.group_by { |r| r.class.polymorphic_name }.each_with_object({}) do |(type, group), answers|
+        group.map(&:id).each_slice(1000) do |ids|
+          CommunicationPreference.where(recipient_type: type, recipient_id: ids, channel: channel, category: 'marketing')
+                                 .pluck(:recipient_id, :opted_in)
+                                 .each { |id, opted_in| answers[[type, id]] = opted_in == true }
+        end
+      end
+    end
+
     # Running campaigns have real enrollments; a draft has only the audience
     # definition, so it gets resolved the same way the enroller would.
     def audience_recipients
@@ -84,10 +93,12 @@ module Campaigns
                  .where(status: %w[pending active])
                  .filter_map { |e| e.recipient_type.safe_constantize&.find_by(id: e.recipient_id) }
       else
-        enroller = AudienceEnroller.new(campaign: @campaign)
-        enroller.send(:each_source_type).flat_map do |source_type|
-          enroller.send(:audience_scope_for, source_type).to_a
+        # Everyone in the audience, including people enrolled in an earlier cycle.
+        recipients = []
+        AudienceEnroller.new(campaign: @campaign).each_source_type(exclude_enrolled: false) do |_source_type, scope|
+          recipients.concat(scope.to_a)
         end
+        recipients
       end
     rescue StandardError => e
       Rails.logger.error("[ConsentCoverage] campaign #{@campaign.id}: #{e.class}: #{e.message}")
