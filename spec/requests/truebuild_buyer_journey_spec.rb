@@ -131,6 +131,30 @@ RSpec.describe 'TrueBuild buyer journey', type: :request do
     expect(BuyerPortalAccess.where(buyer: someone_else)).to be_empty
   end
 
+  # The website never carries freight, even once the dealer has set rates. The
+  # dealer adds it on the deal sheet, so that is the only place it appears.
+  it 'keeps freight off everything the buyer sees, and on the deal sheet' do
+    company.dealer_catalog_terms.first.update!(freight_flat: 500, freight_minimum: 2000)
+
+    catalog = Truebuild::BuyerCatalog.new(company, variant)
+    expect(catalog.price([fridge.id])[:total]).to eq(101_250.0)
+    expect(catalog.price([fridge.id])[:lines].map { |l| l[:kind] }).not_to include('freight')
+    expect(Truebuild::ModelList.new(company).send(:base_retail, variant)).to eq(100_000.0)
+
+    design = save_design
+    expect(design.price_snapshot['total']).to eq(101_250.0)
+    expect(design.price_snapshot['lines'].map { |l| l['kind'] }).not_to include('freight')
+
+    claim(design)
+    post "/api/crm/leads/#{design.lead_id}/convert", headers: rep_headers.merge('Content-Type' => 'application/json'),
+                                                    params: { create_contact: true, create_deal: { name: 'Tia home' } }.to_json
+    expect(design.reload.deal.home_build.lines.where(kind: 'freight')).to exist
+
+    post "/api/v1/truebuild_designs/#{design.id}/quote", headers: rep_headers
+    quote = Quote.find(JSON.parse(response.body)['id'])
+    expect(quote.total).to eq(101_250.0)
+  end
+
   it 'moves the login and designs to the contact on conversion, then quotes the design' do
     design = save_design
     claim(design)

@@ -52,7 +52,8 @@ class Api::V1::TruebuildDesignsController < ApplicationController
   def quote_items(design)
     lines = design.price_snapshot['show_prices'] ? design.price_snapshot['lines'] : nil
     lines = Truebuild::PricingEngine.new(company: @company, variant: design.variant, option_ids: design.option_ids,
-                                         location: design.vehicle&.location, addon_ids: design.metadata['addon_ids'])
+                                         location: design.vehicle&.location, addon_ids: design.metadata['addon_ids'],
+                                         include_freight: false)
                                     .call.retail_only[:lines].map(&:stringify_keys) if lines.blank?
     # The dealer's quote-only add-ons join the quote at today's price.
     quote_only = @company.truebuild_addons.active.for_manufacturer(design.variant.manufacturer_id)
@@ -106,7 +107,7 @@ class Api::V1::TruebuildDesignsController < ApplicationController
   # before the buyer does.
   def price_today(d)
     Truebuild::PricingEngine.new(company: @company, variant: d.variant, option_ids: d.option_ids,
-                                 location: d.vehicle&.location).call.totals[:retail]
+                                 location: d.vehicle&.location, include_freight: false).call.totals[:retail]
   rescue ArgumentError
     nil
   end

@@ -16,7 +16,7 @@ module Truebuild
         next if shown.nil?
 
         today = PricingEngine.new(company: company, variant: d.variant, option_ids: d.option_ids,
-                                  location: d.vehicle&.location).call.totals[:retail]
+                                  location: d.vehicle&.location, include_freight: false).call.totals[:retail]
         next if today.nil?
 
         d.update_columns(metadata: d.metadata.merge('price_today' => today, 'repriced_at' => Time.current.iso8601,

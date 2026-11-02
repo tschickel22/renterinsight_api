@@ -39,8 +39,10 @@ module Truebuild
     # freight_miles: plant to homesite, when known (a deal sheet). assume_freight:
     # price freight from the stated assumptions when the dealer set none.
     # surcharge: a Deal Sheet's own figure for the home's required adders.
+    # include_freight: false for anything a buyer sees. The website price never has
+    # freight; the dealer adds it on the deal sheet (Tom, 2026-11-02).
     def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false,
-                   freight_miles: nil, assume_freight: false, surcharge: nil)
+                   freight_miles: nil, assume_freight: false, surcharge: nil, include_freight: true)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
@@ -48,6 +50,7 @@ module Truebuild
       @quote = quote
       @freight_miles = freight_miles
       @assume_freight = assume_freight
+      @include_freight = include_freight
       @surcharge = surcharge&.to_d
       @location = location
       @construction = construction
@@ -207,6 +210,7 @@ module Truebuild
     def freight_line
       # Freight once the dealer sets a rate; a deal sheet prices it from the
       # stated assumptions before then, so a quote never leaves it out.
+      return nil unless @include_freight
       return nil unless @assume_freight || @terms.freight_set?
 
       f = Freight.new(terms: @terms, variant: @variant, miles: @freight_miles).call
