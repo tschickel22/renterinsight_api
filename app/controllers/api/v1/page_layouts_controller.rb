@@ -856,6 +856,7 @@ module Api
             required: field.required || false,
             protected: false,
             options: field.options,
+            allow_new_options: field.allow_new_options?,
             placeholder: field.placeholder,
             # description is used as the hover tooltip on the form
             # (FieldLabel component reads it). Without this the NewLeadForm's

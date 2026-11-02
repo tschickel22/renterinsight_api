@@ -3,8 +3,11 @@
 module Api
   module V1
     class CustomFieldsController < ApplicationController
+      # Contacts and accounts are guarded by the crm permission, not their own name.
+      RECORD_PERMISSIONS = { 'contacts' => 'crm', 'accounts' => 'crm' }.freeze
+
       before_action :set_company_scope
-      before_action :set_custom_field, only: [:update, :destroy, :migrations, :create_migrations]
+      before_action :set_custom_field, only: [:update, :destroy, :migrations, :create_migrations, :add_option]
 
       # GET /api/v1/custom_fields?module=leads
       #
@@ -62,6 +65,26 @@ module Api
 
         @custom_field.update!(is_active: false)
         render json: { message: 'Custom field deactivated' }
+      end
+
+      # POST /api/v1/custom_fields/:id/options  { option: "New choice" }
+      #
+      # Whoever can fill in the record can add a choice, not only those who can
+      # change settings, and only on a field set up to allow it.
+      def add_option
+        resource = RECORD_PERMISSIONS.fetch(@custom_field.module, @custom_field.module)
+        unless can?(resource, 'create') || can?(resource, 'update')
+          return render(json: { error: 'Forbidden - Insufficient permissions' }, status: :forbidden)
+        end
+        unless @custom_field.allow_new_options?
+          return render(json: { error: 'New choices cannot be added to this field' }, status: :unprocessable_entity)
+        end
+
+        option = @custom_field.add_option!(params[:option])
+        @company.touch
+        render json: { option: option, options: @custom_field.options }
+      rescue ArgumentError => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # GET /api/v1/custom_fields/migration_recommendations?label=X&field_type=Y

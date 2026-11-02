@@ -87,7 +87,7 @@ module Audiences
     # With a company, Lead source becomes a pick list of that company's
     # sources (turned-off ones too, since older leads still carry them), so
     # nobody has to type a source name exactly. 'contains' stays for audiences
-    # saved before the list.
+    # saved before the list. The company's own custom fields follow the built-in ones.
     def self.for_source_type(source_type, company: nil)
       fields =
         case source_type
@@ -99,11 +99,89 @@ module Audiences
       return fields unless company
 
       names = nil
-      fields.map do |f|
+      built_in = fields.map do |f|
         next f unless f[:key] == 'source_name'
         names ||= Source.where(company_id: company.id).where.not(name: [nil, '']).distinct.order(:name).pluck(:name)
         names.any? ? f.merge(type: 'select', options: names) : f
       end
+      built_in + custom_fields_for(source_type, company)
+    end
+
+    # Custom field filters carry this prefix because a dealer's field key can
+    # match a built-in one (company 14 has its own "title" and "website").
+    CUSTOM_FIELD_PREFIX = 'custom:'
+    CUSTOM_FIELD_MODULES = { 'Lead' => 'leads', 'Contact' => 'contacts', 'Account' => 'accounts' }.freeze
+    CUSTOM_FIELD_KEY_FORMAT = /\A[\w-]+\z/
+
+    FREE_TEXT_OPS = %w[equals not_equals contains not_contains starts_with is_set is_blank].freeze
+    PICK_LIST_OPS = %w[equals not_equals in not_in contains not_contains is_set is_blank].freeze
+    # Past this many different values a list is slower than typing.
+    PICK_LIST_LIMIT = 100
+
+    def self.custom_field_definitions(source_type, company)
+      module_name = CUSTOM_FIELD_MODULES[source_type]
+      return CustomField.none unless module_name
+
+      CustomField.where(company_id: company.id, module: module_name)
+                 .select { |f| f.field_key.to_s.match?(CUSTOM_FIELD_KEY_FORMAT) }
+    end
+
+    def self.custom_fields_for(source_type, company)
+      definitions = custom_field_definitions(source_type, company).select(&:is_active)
+                                                                  .sort_by { |f| [f.display_order.to_i, f.label.to_s] }
+      stored = stored_values(source_type, company, definitions)
+
+      definitions.filter_map do |definition|
+        attrs = custom_field_filter(definition, stored[definition.field_key] || [])
+        next unless attrs
+
+        { key: "#{CUSTOM_FIELD_PREFIX}#{definition.field_key}", label: definition.label.presence || definition.name,
+          group: 'Custom fields' }.merge(attrs)
+      end
+    end
+
+    # How one custom field filters. nil for the types there is nothing to
+    # compare on (a user id, an uploaded file).
+    def self.custom_field_filter(definition, stored)
+      case definition.field_type
+      when 'text', 'select'
+        choices = (Array(definition.options).map(&:to_s) + stored).map(&:strip).reject(&:empty?).uniq { |v| v.downcase }
+        if choices.any? && choices.length <= PICK_LIST_LIMIT
+          { type: 'select', operators: PICK_LIST_OPS, options: choices.sort_by(&:downcase) }
+        else
+          { type: 'string', operators: FREE_TEXT_OPS }
+        end
+      when 'multiselect'
+        { type: 'select', operators: %w[in not_in is_set is_blank], options: Array(definition.options).map(&:to_s) }
+      when 'email', 'phone', 'url'
+        { type: 'string', operators: FREE_TEXT_OPS }
+      when 'longtext'
+        { type: 'string', operators: %w[contains not_contains is_set is_blank] }
+      when 'number', 'currency', 'percent'
+        { type: 'number', operators: %w[equals greater_than less_than greater_than_or_equal less_than_or_equal is_set is_blank] }
+      when 'date', 'datetime'
+        { type: 'date', operators: %w[days_since_greater_than greater_than less_than is_set is_blank] }
+      when 'checkbox'
+        { type: 'boolean', operators: %w[equals] }
+      end
+    end
+
+    # The values actually on records, so a text field imported from a
+    # spreadsheet (company 14's Category) can be picked from a list, and a pick
+    # list still offers what an import put there. One query for all the fields.
+    def self.stored_values(source_type, company, definitions)
+      keys = definitions.select { |f| %w[text select].include?(f.field_type) }.map(&:field_key)
+      return {} if keys.empty?
+
+      klass = source_type.constantize
+      table = klass.table_name
+      klass.where(company_id: company.id)
+           .joins("CROSS JOIN LATERAL jsonb_each_text(#{table}.custom_field_values) AS cf(key, value)")
+           .where('cf.key IN (?)', keys)
+           .where("TRIM(cf.value) <> ''")
+           .distinct
+           .pluck(Arel.sql('cf.key'), Arel.sql('cf.value'))
+           .each_with_object({}) { |(key, value), by_key| (by_key[key] ||= []) << value }
     end
 
     def self.operators_with_labels

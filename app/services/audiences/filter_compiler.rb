@@ -214,6 +214,7 @@ module Audiences
       raise CompilationError, "Unsupported operator: #{operator}" unless SUPPORTED_OPERATORS.include?(operator)
 
       return apply_tag_leaf(scope, operator, value) if operator.start_with?('tags_')
+      return apply_custom_field_leaf(scope, field, operator, value) if field.to_s.start_with?(FieldSchema::CUSTOM_FIELD_PREFIX)
 
       if VIRTUAL_FIELDS.include?(field)
         return apply_virtual_leaf(scope, field, operator, value)
@@ -262,6 +263,102 @@ module Audiences
         days = value.to_i
         scope.where("#{qualified} < ?", days.days.ago)
       end
+    end
+
+    # Values live in the custom_field_values JSONB, written by forms and imports,
+    # so a number can arrive as 8.0 or "8" and a bad one must not break the query.
+    # Nothing here casts: numbers are guarded by pattern, dates compare as ISO text.
+    def apply_custom_field_leaf(scope, field, operator, value)
+      key = field.to_s.delete_prefix(FieldSchema::CUSTOM_FIELD_PREFIX)
+      definition = custom_field_definitions[key]
+      raise CompilationError, "Unknown field: #{field}" unless definition
+
+      table = scope.model.table_name
+      json = "#{table}.custom_field_values->#{scope.connection.quote(key)}"
+      text = "#{table}.custom_field_values->>#{scope.connection.quote(key)}"
+
+      return scope.where("TRIM(COALESCE(#{text}, '')) NOT IN ('', '[]')") if operator == 'is_set'
+      return scope.where("TRIM(COALESCE(#{text}, '')) IN ('', '[]')") if operator == 'is_blank'
+
+      case definition.field_type
+      when 'multiselect' then apply_custom_multiselect_leaf(scope, json, operator, value)
+      when 'number', 'currency', 'percent' then apply_custom_number_leaf(scope, text, operator, value)
+      when 'date', 'datetime' then apply_custom_date_leaf(scope, text, operator, value)
+      when 'checkbox' then apply_custom_checkbox_leaf(scope, text, value)
+      else apply_custom_text_leaf(scope, text, operator, value)
+      end
+    end
+
+    def apply_custom_text_leaf(scope, text, operator, value)
+      normalized = "LOWER(TRIM(COALESCE(#{text}, '')))"
+      values = Array(value).map { |v| v.to_s.strip.downcase }.reject(&:empty?)
+      return scope if values.empty?
+
+      case operator
+      when 'equals', 'in' then scope.where("#{normalized} IN (:values)", values: values)
+      # NOT matches a record with no value too, as not_equals on any other field does.
+      when 'not_equals', 'not_in' then scope.where("#{normalized} NOT IN (:values)", values: values)
+      when 'contains' then scope.where("#{text} ILIKE :pattern", pattern: "%#{escape_like(values.first)}%")
+      when 'not_contains' then scope.where("COALESCE(#{text}, '') NOT ILIKE :pattern", pattern: "%#{escape_like(values.first)}%")
+      when 'starts_with' then scope.where("TRIM(#{text}) ILIKE :pattern", pattern: "#{escape_like(values.first)}%")
+      when 'ends_with' then scope.where("TRIM(#{text}) ILIKE :pattern", pattern: "%#{escape_like(values.first)}")
+      else raise CompilationError, "Operator #{operator} not supported on this custom field"
+      end
+    end
+
+    # Stored as a JSON array; jsonb_exists_any also matches a lone string from an import.
+    def apply_custom_multiselect_leaf(scope, json, operator, value)
+      values = Array(value).map(&:to_s).reject(&:empty?)
+      return scope if values.empty?
+
+      matches = "COALESCE(jsonb_exists_any(#{json}, ARRAY[:values]::text[]), FALSE)"
+      case operator
+      when 'in', 'equals' then scope.where(matches, values: values)
+      when 'not_in', 'not_equals' then scope.where("NOT #{matches}", values: values)
+      else raise CompilationError, "Operator #{operator} not supported on this custom field"
+      end
+    end
+
+    NUMBER_COMPARISONS = {
+      'equals' => '=', 'greater_than' => '>', 'less_than' => '<',
+      'greater_than_or_equal' => '>=', 'less_than_or_equal' => '<='
+    }.freeze
+
+    def apply_custom_number_leaf(scope, text, operator, value)
+      comparison = NUMBER_COMPARISONS[operator]
+      raise CompilationError, "Operator #{operator} not supported on this custom field" unless comparison
+
+      number = BigDecimal(value.to_s, exception: false)
+      return scope unless number
+
+      numeric = "CASE WHEN TRIM(#{text}) ~ '^-?[0-9]+([.][0-9]+)?$' THEN TRIM(#{text})::numeric END"
+      scope.where("(#{numeric}) #{comparison} :number", number: number)
+    end
+
+    def apply_custom_date_leaf(scope, text, operator, value)
+      day = "CASE WHEN #{text} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ].*)?$' THEN LEFT(#{text}, 10) END"
+      case operator
+      when 'days_since_greater_than'
+        scope.where("(#{day}) COLLATE \"C\" < :day", day: value.to_i.days.ago.to_date.iso8601)
+      when 'greater_than', 'less_than'
+        return scope if value.to_s.strip.empty?
+
+        comparison = operator == 'greater_than' ? '>' : '<'
+        scope.where("(#{day}) COLLATE \"C\" #{comparison} :day", day: value.to_s.strip.first(10))
+      else
+        raise CompilationError, "Operator #{operator} not supported on this custom field"
+      end
+    end
+
+    # A record never saved with the box ticked has no value, which reads as No.
+    def apply_custom_checkbox_leaf(scope, text, value)
+      ticked = "LOWER(TRIM(COALESCE(#{text}, ''))) IN ('true', 't', '1', 'yes')"
+      ActiveModel::Type::Boolean.new.cast(value) ? scope.where(ticked) : scope.where("NOT (#{ticked})")
+    end
+
+    # Includes turned-off fields, so an audience saved on one keeps working.
+    def custom_field_definitions
+      @custom_field_definitions ||= FieldSchema.custom_field_definitions(@source_type, @company).index_by(&:field_key)
     end
 
     # NOT matches a blank column too, as not_equals on any other field does.
