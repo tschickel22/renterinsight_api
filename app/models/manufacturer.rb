@@ -8,7 +8,6 @@ class Manufacturer < ApplicationRecord
   # merely *use* a global manufacturer still link via company_manufacturers.
   belongs_to :company, optional: true
 
-  has_many :parts, dependent: :restrict_with_error
   has_many :warranty_claims
   has_many :manufacturer_ar_transactions
   has_many :location_manufacturers
@@ -42,15 +41,6 @@ class Manufacturer < ApplicationRecord
   
   # Callbacks
   before_validation :normalize_fields
-  
-  # Soft delete (deactivate since we don't have is_deleted column)
-  def soft_delete!
-    if parts.where('is_deleted = ? OR is_deleted IS NULL', false).exists?
-      errors.add(:base, 'Cannot delete manufacturer with associated parts')
-      raise ActiveRecord::RecordInvalid, self
-    end
-    update!(active: false)
-  end
   
   def deactivate!
     update!(active: false)

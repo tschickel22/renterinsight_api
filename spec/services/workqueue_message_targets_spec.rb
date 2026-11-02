@@ -30,7 +30,7 @@ RSpec.describe WorkqueueService, type: :service do
   end
 
   def make_ticket(contact_id:)
-    t = ServiceTicket.new(company_id: company.id, title: 'T1', contact_id: contact_id)
+    t = ServiceTicket.new(company_id: company.id, title: 'T1', description: 'D', contact_id: contact_id)
     t.save!(validate: false)
     t
   end
