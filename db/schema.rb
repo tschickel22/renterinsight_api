@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_10_31_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2838,7 +2838,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_31_120000) do
     t.string "section"
     t.bigint "created_by_id"
     t.bigint "updated_by_id"
-    t.boolean "hidden", default: false, null: false
     t.string "visibility", default: "internal", null: false
     t.index ["company_id", "module", "field_key"], name: "index_custom_fields_on_company_module_field_key", unique: true
     t.index ["company_id", "module", "is_active"], name: "index_custom_fields_on_company_id_and_module_and_is_active"
