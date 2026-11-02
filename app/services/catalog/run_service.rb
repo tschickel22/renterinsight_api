@@ -69,6 +69,12 @@ module Catalog
       archive_images!(homes)
 
       ingest = ingest_into_subscribers(homes, degraded: degraded)
+      if ingest[:held].to_i.positive?
+        errors << { 'url' => @source.base_url.to_s,
+                    'message' => "Most of this catalog was missing from the run, so #{ingest[:held]} dealer homes " \
+                                 "were kept rather than removed. They clear after " \
+                                 "#{IngestionService::MASS_REMOVAL_HOLD.in_days.to_i} days unseen." }
+      end
 
       status = run_status(homes:, errors:, degraded:)
 
@@ -152,7 +158,7 @@ module Catalog
         if home.nil?
           errors << { 'url' => key.to_s, 'message' => 'fetch/parse returned nil' }
         else
-          errors << smoke_error(home) unless home.valid_smoke?
+          errors << smoke_error(home) unless home.valid_smoke?(untracked: @source.untracked_fields)
           homes << home
         end
         # Failed counts homes tried and lost, not homes not yet reached: a
@@ -169,7 +175,7 @@ module Catalog
     end
 
     def smoke_error(home)
-      missing = NormalizedHome::TRACKED_FIELDS.reject { |f| home.field_presence[f] }
+      missing = (NormalizedHome::TRACKED_FIELDS - @source.untracked_fields).reject { |f| home.field_presence[f] }
       { 'url' => home.source_url.to_s, 'field' => missing.join(','), 'message' => 'failed smoke check' }
     end
 
@@ -187,6 +193,7 @@ module Catalog
         totals[:added]       += result.added
         totals[:updated]     += result.updated
         totals[:inactivated] += result.inactivated
+        totals[:held]        += result.held
 
         totals[:inactivated] += inactivate_deselected_locations(sub.company, target_locations)
         heartbeat!
@@ -227,7 +234,7 @@ module Catalog
     end
 
     def finalize!(run, homes:, errors:, rates:, degraded:, status:, ingest:)
-      parsed_ok = homes.count(&:valid_smoke?)
+      parsed_ok = homes.count { |home| home.valid_smoke?(untracked: @source.untracked_fields) }
       run.update!(
         status:                 status,
         finished_at:            Time.current,

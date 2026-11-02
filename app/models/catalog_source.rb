@@ -12,7 +12,7 @@ class CatalogSource < ApplicationRecord
   ADAPTER_TYPES   = %w[champion_feed manufacturedhomes_platform timber_creek_dealer
                        avada_sitemap tru_model_line clayton_epic_region
                        clayton_retail_home_center trove_catalog cavco_retailer
-                       adventure_homes].freeze
+                       adventure_homes live_oak].freeze
   RUN_STATUSES    = %w[never_run success partial failed].freeze
   SCHEDULES       = %w[daily weekly manual].freeze
 

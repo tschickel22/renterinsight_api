@@ -32,6 +32,7 @@ module Catalog
       'champion_feed' => 'Champion',
       'tru_model_line' => 'TRU',
       'adventure_homes' => 'Adventure Homes',
+      'live_oak' => 'Live Oak',
       'timber_creek_dealer' => 'Timber Creek'
     }.freeze
 

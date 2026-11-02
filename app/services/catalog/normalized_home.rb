@@ -56,9 +56,12 @@ module Catalog
     end
 
     # Per-run smoke test: every home should yield a name + bed/bath/sqft + ≥1 image.
-    def valid_smoke?
-      model_name.present? && bedrooms.present? && bathrooms.present? &&
-        square_feet.present? && images.any?
+    # A field the source marks untracked is one its site does not publish, so its
+    # absence says nothing about whether this home parsed.
+    def valid_smoke?(untracked: [])
+      skip = Array(untracked).map(&:to_s)
+      model_name.present? && images.any? &&
+        %w[bedrooms bathrooms square_feet].all? { |f| skip.include?(f) || public_send(f).present? }
     end
 
     def image_source_urls

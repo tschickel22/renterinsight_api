@@ -56,6 +56,81 @@ RSpec.describe Catalog::IngestionService do
     expect(gone.is_deleted).to be(true)
   end
 
+  # A site outage or a bot block yields no homes. That is a failed crawl, not a
+  # manufacturer discontinuing its whole catalog.
+  it 'keeps every home when a run has no homes at all' do
+    ingest([FakeCatalogAdapter.home('1'), FakeCatalogAdapter.home('2')])
+    result = ingest([])
+
+    expect(result.inactivated).to eq(0)
+    expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(2)
+  end
+
+  describe 'a run missing most of the catalog' do
+    let(:keys) { %w[1 2 3 4 5] }
+    let(:vehicles) { company.vehicles.where(catalog_source_id: source.id) }
+
+    before { ingest(keys.map { |k| FakeCatalogAdapter.home(k) }) }
+
+    it 'holds the missing homes and reports them' do
+      result = ingest([FakeCatalogAdapter.home('1')])
+
+      expect(result.held).to eq(4)
+      expect(result.inactivated).to eq(0)
+      expect(vehicles.where(is_deleted: [false, nil]).count).to eq(5)
+    end
+
+    it 'removes held homes once they have gone unseen for the whole hold' do
+      vehicles.where.not(catalog_source_key: %w[1 2]).update_all(catalog_last_seen_at: 22.days.ago)
+
+      result = ingest([FakeCatalogAdapter.home('1')])
+
+      expect(result.inactivated).to eq(3)
+      expect(result.held).to eq(1)
+      expect(vehicles.where(is_deleted: [false, nil]).pluck(:catalog_source_key)).to contain_exactly('1', '2')
+    end
+
+    it 'still removes homes normally when half or fewer went missing' do
+      result = ingest(%w[1 2 3].map { |k| FakeCatalogAdapter.home(k) })
+
+      expect(result.inactivated).to eq(2)
+      expect(result.held).to eq(0)
+    end
+
+    it 'does not count supplemented homes as missing' do
+      vehicles.where(catalog_source_key: %w[2 3 4 5]).find_each do |vehicle|
+        vehicle.update_columns(catalog_last_synced_values: { described_class::SUPPLEMENT_MARK => true })
+      end
+
+      result = ingest([FakeCatalogAdapter.home('1')])
+
+      expect(result.held).to eq(0)
+      expect(result.inactivated).to eq(0)
+    end
+  end
+
+  describe 'a home with no bath count' do
+    let(:no_baths) { FakeCatalogAdapter.home('1', bathrooms: nil) }
+
+    it 'loads blank when the source declares it does not publish baths' do
+      source.update!(config: { 'untracked_fields' => %w[bathrooms] })
+
+      expect(ingest([no_baths]).added).to eq(1)
+      expect(company.vehicles.find_by(catalog_source_key: '1').bathrooms).to be_nil
+    end
+
+    it 'is still refused from a source that does publish baths' do
+      expect(ingest([no_baths]).added).to eq(0)
+      expect(company.vehicles.find_by(catalog_source_key: '1')).to be_nil
+    end
+
+    it 'still requires baths on a home that is not from a catalog' do
+      vehicle = company.vehicles.new(listing_type: 'manufactured_home', bathrooms: nil)
+      vehicle.valid?
+      expect(vehicle.errors[:bathrooms]).to be_present
+    end
+  end
+
   it 'does not overwrite populated fields with blanks when protect_blanks is set' do
     ingest([FakeCatalogAdapter.home('1', description: 'Original description')])
     ingest([FakeCatalogAdapter.home('1', description: nil, square_feet: 9999)], protect_blanks: true)
