@@ -142,7 +142,7 @@ RSpec.describe SchedulingService do
     end
     
     it 'processes scheduled communication successfully' do
-      allow(CommunicationService).to receive(:send_communication).and_return(
+      allow(CommunicationService).to receive(:send_existing_communication).and_return(
         { success: true }
       )
       
@@ -155,7 +155,7 @@ RSpec.describe SchedulingService do
     end
     
     it 'marks as failed on send error' do
-      allow(CommunicationService).to receive(:send_communication).and_return(
+      allow(CommunicationService).to receive(:send_existing_communication).and_return(
         { success: false, error: 'Send failed' }
       )
       

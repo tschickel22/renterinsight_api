@@ -56,7 +56,7 @@ module McpTools
       when 'account' then ctx.scope_locations(company.accounts.where(is_deleted: [false, nil]), include_unlocated: true)
       when 'deal' then ctx.scope_locations(company.deals.where(deleted_at: nil))
       when 'unit' then ctx.scope_locations(company.vehicles.where(is_deleted: [false, nil]))
-      when 'ticket' then ctx.scope_locations(company.service_tickets.where(deleted_at: nil))
+      when 'ticket' then ctx.scope_locations(company.service_tickets)
       when 'quote' then ctx.scope_locations(company.quotes.where(is_deleted: [false, nil]), include_unlocated: true)
       end
     end
@@ -293,7 +293,7 @@ module McpTools
     def ticket_detail(ticket)
       {
         description: ticket.description.to_s.first(2000).presence, notes: ticket.notes.to_s.first(2000).presence,
-        warranty_suspected: ticket.is_warranty_suspected, completed_date: iso(ticket.completed_date)
+        warranty_suspected: ticket.is_warranty_suspected
       }
     end
 

@@ -118,6 +118,10 @@ module Api
         buyer_access = BuyerPortalAccess.find_by(reset_token: params[:token])
         
         if buyer_access&.reset_token_valid?
+          if params[:password_confirmation].present? && params[:password] != params[:password_confirmation]
+            return render json: { ok: false, errors: ['Passwords do not match'] }, status: :unprocessable_entity
+          end
+
           if buyer_access.update(
             password: params[:password],
             password_confirmation: params[:password_confirmation],

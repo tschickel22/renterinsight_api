@@ -120,7 +120,7 @@ class SchedulingService
       communication.update!(scheduled_status: 'sending')
       
       # Send the communication
-      result = CommunicationService.send_communication(communication)
+      result = CommunicationService.send_existing_communication(communication)
       
       if result[:success]
         communication.update!(scheduled_status: 'sent')

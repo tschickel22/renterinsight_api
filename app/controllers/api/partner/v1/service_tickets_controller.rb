@@ -12,7 +12,7 @@ module Api
 
         # GET /api/partner/v1/service-tickets
         def index
-          tickets = company_scope(ServiceTicket).where(deleted_at: nil)
+          tickets = company_scope(ServiceTicket)
 
           # Filters
           tickets = tickets.where(status: params[:status]) if params[:status].present?
@@ -81,8 +81,14 @@ module Api
 
         # DELETE /api/partner/v1/service-tickets/:id
         def destroy
-          @service_ticket.update!(deleted_at: Time.current)
-          render json: { data: { id: @service_ticket.id, deleted: true } }
+          # Tickets have no soft delete; this removes the record, as the app's own delete does.
+          if @service_ticket.destroy
+            render json: { data: { id: @service_ticket.id, deleted: true } }
+          else
+            render json: { error: "Could not delete", details: @service_ticket.errors.full_messages }, status: :unprocessable_entity
+          end
+        rescue ActiveRecord::InvalidForeignKey
+          render json: { error: "Could not delete", details: ["This ticket is still linked to other records, such as a warranty claim."] }, status: :unprocessable_entity
         end
 
         private
@@ -101,13 +107,13 @@ module Api
         end
 
         def set_service_ticket
-          @service_ticket = company_scope(ServiceTicket).where(deleted_at: nil).find(params[:id])
+          @service_ticket = company_scope(ServiceTicket).find(params[:id])
         end
 
         def service_ticket_params
           params.permit(
             :title, :description, :status, :priority,
-            :assigned_to, :scheduled_date, :completed_date,
+            :assigned_to, :scheduled_date,
             :account_id, :contact_id, :vehicle_id, :deal_id, :location_id,
             :notes, :is_warranty_suspected,
             custom_fields: {},
@@ -125,7 +131,6 @@ module Api
             priority: ticket.priority,
             assigned_to: ticket.assigned_to,
             scheduled_date: ticket.scheduled_date&.iso8601,
-            completed_date: ticket.completed_date&.iso8601,
             account_id: ticket.account_id,
             contact_id: ticket.contact_id,
             vehicle_id: ticket.vehicle_id,
