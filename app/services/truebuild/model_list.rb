@@ -112,7 +112,7 @@ module Truebuild
     end
 
     def base_retail(variant)
-      BuyerCatalog.starting_retail(PricingEngine.new(company: @company, variant: variant).call.lines)
+      BuyerCatalog.starting_retail(PricingEngine.new(company: @company, variant: variant, include_freight: false).call.lines)
     rescue ArgumentError
       nil
     end

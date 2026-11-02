@@ -133,7 +133,7 @@ module Truebuild
 
     def build
       offered = offered_prices
-      engine = PricingEngine.new(company: @company, variant: @variant, location: @location,
+      engine = PricingEngine.new(company: @company, variant: @variant, location: @location, include_freight: false,
                                  option_ids: offered.map(&:catalog_option_id).uniq).call
       retail_by_option = engine.lines.select { |l| l[:kind] == 'option' }.to_h { |l| [l[:option_id], l[:retail]] }
       starting = self.class.starting_retail(engine.lines)
@@ -168,7 +168,7 @@ module Truebuild
 
     # Retail total for a selection, or nil when the dealer hides prices.
     def price(option_ids, addon_ids = [])
-      result = PricingEngine.new(company: @company, variant: @variant, location: @location,
+      result = PricingEngine.new(company: @company, variant: @variant, location: @location, include_freight: false,
                                  option_ids: allowed(option_ids), addon_ids: allowed_addons(addon_ids)).call
       show = prices_shown? && result.totals[:retail].present?
       monthly = SHOWS_MONTHLY.include?(@terms.price_display) && result.totals[:retail].present? && payments.enabled?
@@ -179,7 +179,7 @@ module Truebuild
     end
 
     # The price before any choices: the home plus what is always in it
-    # (freight, the dealer's included add-ons like delivery and setup).
+    # (the dealer's included add-ons like delivery and setup; never freight).
     def self.starting_retail(lines)
       always = lines.reject { |l| l[:kind] == 'option' }
       return nil if always.empty? || always.any? { |l| l[:retail].nil? }
