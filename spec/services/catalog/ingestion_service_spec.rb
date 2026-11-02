@@ -66,6 +66,28 @@ RSpec.describe Catalog::IngestionService do
     expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).count).to eq(2)
   end
 
+  describe 'a home with no bath count' do
+    let(:no_baths) { FakeCatalogAdapter.home('1', bathrooms: nil) }
+
+    it 'loads blank when the source declares it does not publish baths' do
+      source.update!(config: { 'untracked_fields' => %w[bathrooms] })
+
+      expect(ingest([no_baths]).added).to eq(1)
+      expect(company.vehicles.find_by(catalog_source_key: '1').bathrooms).to be_nil
+    end
+
+    it 'is still refused from a source that does publish baths' do
+      expect(ingest([no_baths]).added).to eq(0)
+      expect(company.vehicles.find_by(catalog_source_key: '1')).to be_nil
+    end
+
+    it 'still requires baths on a home that is not from a catalog' do
+      vehicle = company.vehicles.new(listing_type: 'manufactured_home', bathrooms: nil)
+      vehicle.valid?
+      expect(vehicle.errors[:bathrooms]).to be_present
+    end
+  end
+
   it 'does not overwrite populated fields with blanks when protect_blanks is set' do
     ingest([FakeCatalogAdapter.home('1', description: 'Original description')])
     ingest([FakeCatalogAdapter.home('1', description: nil, square_feet: 9999)], protect_blanks: true)

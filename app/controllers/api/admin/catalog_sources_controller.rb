@@ -29,6 +29,8 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # Adventure Homes publishes series and full specs on all 130 plans, but no
   # descriptive copy anywhere on the site — a full crawl found zero.
   ADVENTURE_UNTRACKED_FIELDS = %w[description].freeze
+  # Live Oak's site publishes none of these on any home. See LiveOakAdapter.
+  LIVE_OAK_UNTRACKED_FIELDS = %w[model_id bathrooms dimensions square_feet description].freeze
 
   # Debounces directory rebuilds across typeahead keystrokes.
   CLAYTON_REFRESH_LOCK      = 'clayton_directory_refresh_enqueued'
@@ -724,7 +726,8 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     # Without this a source created through the dialog tracks `description`,
     # which Adventure never publishes, so a run that parsed all 130 homes
     # perfectly still reports degraded.
-    'adventure_homes' => { 'untracked_fields' => ADVENTURE_UNTRACKED_FIELDS }
+    'adventure_homes' => { 'untracked_fields' => ADVENTURE_UNTRACKED_FIELDS },
+    'live_oak'        => { 'untracked_fields' => LIVE_OAK_UNTRACKED_FIELDS }
   }.freeze
 
   def apply_adapter_defaults(attrs, adapter_type)
@@ -867,7 +870,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       sqft:        home.square_feet,
       dimensions:  home.dimensions,
       imageCount:  home.images.size,
-      validSmoke:  home.valid_smoke?,
+      validSmoke:  home.valid_smoke?(untracked: @source.untracked_fields),
       # Clayton retail sources only — lets the admin confirm the starting-price
       # toggle actually produced prices before enabling. nil for other adapters.
       startingPrice: home.raw.is_a?(Hash) ? home.raw['starting_price'] : nil,

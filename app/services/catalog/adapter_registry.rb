@@ -28,7 +28,9 @@ module Catalog
       # Single-site type: adventurehomes.net runs a bespoke WordPress theme, so
       # unlike avada_sitemap or manufacturedhomes_platform there is no second
       # manufacturer to onboard behind it.
-      'adventure_homes'            => 'Catalog::Adapters::AdventureHomesAdapter'
+      'adventure_homes'            => 'Catalog::Adapters::AdventureHomesAdapter',
+      # Single-site type too: its specs live in one site-specific taxonomy.
+      'live_oak'                   => 'Catalog::Adapters::LiveOakAdapter'
     }.freeze
 
     module_function

@@ -159,7 +159,8 @@ class Vehicle < ApplicationRecord
   # FIX: Removed strict numericality validation to allow "4+" values
   with_options if: -> { listing_type == 'manufactured_home' } do
     validates :serial_number, presence: true, uniqueness: { scope: :company_id, conditions: -> { where(is_deleted: [false, nil]) } }
-    validates :bedrooms, :bathrooms, presence: true
+    validates :bedrooms, presence: true
+    validates :bathrooms, presence: true, unless: :catalog_source_omits_bathrooms?
     # Bedrooms and bathrooms are validated in normalize_bedroom_bathroom_values callback
   end
 
@@ -544,6 +545,16 @@ class Vehicle < ApplicationRecord
     }
     downcased = raw.to_s.strip.downcase
     mapped[downcased] || (STATUSES.include?(downcased) ? downcased : 'available')
+  end
+
+  # A manufacturer whose site never publishes baths (Live Oak) marks bathrooms
+  # untracked on its catalog source. Those homes may load blank until a spec
+  # sheet supplies the number. Every other source stays strict, so a parsing
+  # failure on a site that does publish baths still cannot reach a dealer.
+  def catalog_source_omits_bathrooms?
+    return false if bathrooms.present? || catalog_source_id.blank?
+
+    CatalogSource.find_by(id: catalog_source_id)&.untracked_fields.to_a.include?('bathrooms')
   end
 
   def normalize_bedroom_bathroom_values
