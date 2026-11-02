@@ -176,7 +176,6 @@ module Api
           placeholder: field.placeholder,
           isActive: field.is_active,
           isSystemField: field.is_system_field,
-          hidden: field.respond_to?(:hidden) ? field.hidden : false,
           visibility: field.visibility || 'internal',
           options: field.options,
           validationRules: field.validation_rules,
