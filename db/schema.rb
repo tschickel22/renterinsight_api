@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_02_170100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1223,7 +1223,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.text "preference_history"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.integer "company_id"
+    t.bigint "company_id"
     t.string "role", default: "Client"
     t.string "status", default: "Pending"
     t.json "permissions", default: []
@@ -1234,6 +1234,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.boolean "mfa_enabled", default: false
     t.string "mfa_method"
     t.boolean "push_opt_in", default: true
+    t.string "first_name"
+    t.string "last_name"
     t.index ["buyer_type", "buyer_id", "company_id"], name: "index_buyer_portal_on_buyer_and_company"
     t.index ["buyer_type", "buyer_id"], name: "index_buyer_portal_accesses_on_buyer"
     t.index ["company_id"], name: "index_buyer_portal_accesses_on_company_id"
@@ -2232,15 +2234,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.text "description"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "template_type", default: "general"
+    t.string "template_type"
     t.boolean "is_default", default: false
     t.integer "company_id"
+    t.string "scope_type"
+    t.bigint "scope_id"
     t.index ["channel"], name: "index_communication_templates_on_channel"
     t.index ["company_id"], name: "index_communication_templates_on_company_id"
     t.index ["is_active"], name: "index_communication_templates_on_is_active"
     t.index ["name"], name: "index_communication_templates_on_name"
-    t.index ["template_type", "channel"], name: "idx_comm_templates_type_channel_scope"
     t.index ["template_type"], name: "index_communication_templates_on_template_type"
+    t.index ["scope_type", "scope_id"], name: "index_communication_templates_on_scope_type_and_scope_id"
+    t.index ["template_type", "channel", "scope_type", "scope_id"], name: "idx_comm_templates_type_channel_scope"
+    t.index ["template_type", "channel"], name: "index_communication_templates_on_template_type_and_channel"
   end
 
   create_table "communication_threads", force: :cascade do |t|
@@ -2279,7 +2285,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.datetime "delivered_at"
     t.datetime "failed_at"
     t.text "error_message"
-    t.jsonb "metadata"
+    t.jsonb "metadata", default: {}
     t.string "external_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
@@ -2333,7 +2339,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.boolean "use_rbac_system", default: true, null: false
     t.jsonb "loan_settings", default: {}, null: false
     t.string "external_payments_id"
-    t.jsonb "branding_settings", default: {}
     t.boolean "filter_assignments_by_role", default: false, null: false, comment: "When true, users can only be assigned to records within their role department"
     t.string "quickbooks_realm_id"
     t.datetime "quickbooks_connected_at"
@@ -2350,7 +2355,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.jsonb "verified_email_domains", default: []
     t.string "public_inventory_token"
     t.jsonb "public_inventory_settings", default: {}
-    t.jsonb "pipeline_stages"
     t.string "sms_provisioning_mode", default: "platform", null: false
     t.integer "sms_monthly_limit", default: 2000, null: false
     t.string "phone"
@@ -3775,8 +3779,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.string "status", default: "pending", null: false
     t.string "recipient_name"
     t.json "recipient_data", default: {}
-    t.integer "invited_by_id", null: false
-    t.integer "company_id"
+    t.bigint "invited_by_id", null: false
+    t.bigint "company_id"
     t.string "role"
     t.json "permissions", default: []
     t.string "delivery_method", null: false
@@ -4260,16 +4264,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.datetime "updated_at", null: false
     t.decimal "cost_basis", precision: 15, scale: 2
     t.text "cost_basis_notes"
-    t.text "boundary_geojson"
-    t.decimal "boundary_area_sq_ft", precision: 12, scale: 2
-    t.boolean "has_boundary", default: false, null: false
     t.boolean "show_exact_location", default: true, null: false
     t.string "street_view_url"
     t.index ["acquisition_date"], name: "index_land_parcels_on_acquisition_date"
     t.index ["city", "state"], name: "index_land_parcels_on_city_and_state"
     t.index ["company_id", "parcel_number"], name: "index_land_parcels_on_company_id_and_parcel_number", unique: true
     t.index ["company_id"], name: "index_land_parcels_on_company_id"
-    t.index ["has_boundary"], name: "index_land_parcels_on_has_boundary"
     t.index ["is_deleted"], name: "index_land_parcels_on_is_deleted"
     t.index ["status"], name: "index_land_parcels_on_status"
     t.index ["zoning_type"], name: "index_land_parcels_on_zoning_type"
@@ -4856,60 +4856,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.index ["user_id"], name: "index_login_activities_on_user_id"
   end
 
-  create_table "lot_map_history_entries", force: :cascade do |t|
-    t.integer "lot_id", null: false
-    t.string "action", null: false
-    t.integer "inventory_id"
-    t.string "old_status"
-    t.string "new_status"
-    t.integer "user_id"
-    t.string "user_name"
-    t.text "details"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["action"], name: "index_lot_map_history_entries_on_action"
-    t.index ["created_at"], name: "index_lot_map_history_entries_on_created_at"
-    t.index ["inventory_id"], name: "index_lot_map_history_entries_on_inventory_id"
-    t.index ["lot_id"], name: "index_lot_map_history_entries_on_lot_id"
-    t.index ["user_id"], name: "index_lot_map_history_entries_on_user_id"
-  end
-
-  create_table "lot_map_layouts", force: :cascade do |t|
-    t.integer "company_id", null: false
-    t.string "name", null: false
-    t.string "address"
-    t.decimal "latitude", precision: 10, scale: 6
-    t.decimal "longitude", precision: 10, scale: 6
-    t.json "boundary", default: "{}"
-    t.integer "lot_count", default: 0
-    t.boolean "detected_from_satellite", default: false
-    t.string "industry_type"
-    t.string "created_by"
-    t.datetime "deleted_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "deleted_at"], name: "index_lot_map_layouts_on_company_id_and_deleted_at"
-    t.index ["company_id"], name: "index_lot_map_layouts_on_company_id"
-    t.index ["industry_type"], name: "index_lot_map_layouts_on_industry_type"
-    t.index ["name"], name: "index_lot_map_layouts_on_name"
-  end
-
-  create_table "lot_map_lots", force: :cascade do |t|
-    t.integer "layout_id", null: false
-    t.string "number", null: false
-    t.json "position", default: "{}"
-    t.integer "assigned_inventory_id"
-    t.string "assigned_inventory_info"
-    t.string "area"
-    t.text "notes"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["assigned_inventory_id"], name: "index_lot_map_lots_on_assigned_inventory_id"
-    t.index ["layout_id", "number"], name: "index_lot_map_lots_on_layout_id_and_number", unique: true
-    t.index ["layout_id"], name: "index_lot_map_lots_on_layout_id"
-    t.index ["number"], name: "index_lot_map_lots_on_number"
-  end
-
   create_table "manufacturer_ar_payments", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "manufacturer_ar_transaction_id", null: false
@@ -5451,7 +5397,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.bigint "updated_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "manufacturer_id"
     t.jsonb "images", default: []
     t.bigint "factory_id"
     t.bigint "floor_plan_id"
@@ -5471,7 +5416,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.index ["floor_plan_id"], name: "index_parts_on_floor_plan_id"
     t.index ["images"], name: "index_parts_on_images", using: :gin
     t.index ["is_configured_home"], name: "index_parts_on_is_configured_home"
-    t.index ["manufacturer_id"], name: "index_parts_on_manufacturer_id"
     t.index ["manufacturer_part_no"], name: "index_parts_on_manufacturer_part_no"
     t.index ["qb_item_id"], name: "index_parts_on_qb_item_id"
     t.index ["serial_number"], name: "index_parts_on_serial_number", where: "(serial_number IS NOT NULL)"
@@ -6716,11 +6660,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.datetime "updated_at", null: false
     t.string "permission_ui_type", default: "standard_crud", null: false
     t.jsonb "permission_groups", default: {}, null: false
-    t.integer "display_order", default: 0, null: false
     t.integer "position", default: 0
     t.index ["active"], name: "index_resources_on_active"
     t.index ["category"], name: "index_resources_on_category"
-    t.index ["display_order"], name: "index_resources_on_display_order"
     t.index ["key"], name: "index_resources_on_key", unique: true
     t.index ["permission_ui_type"], name: "index_resources_on_permission_ui_type"
     t.index ["position"], name: "index_resources_on_position"
@@ -6919,24 +6861,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
   end
 
   create_table "service_tickets", force: :cascade do |t|
-    t.integer "company_id", null: false
-    t.integer "account_id"
-    t.integer "contact_id"
-    t.integer "vehicle_id"
-    t.string "customer_id"
-    t.string "customer_type"
+    t.bigint "company_id", null: false
+    t.bigint "account_id"
+    t.bigint "contact_id"
+    t.bigint "vehicle_id"
     t.string "title", null: false
-    t.text "description"
+    t.text "description", null: false
     t.string "priority", default: "medium", null: false
     t.string "status", default: "open", null: false
     t.string "assigned_to"
     t.date "scheduled_date"
-    t.date "completed_date"
-    t.text "parts"
-    t.text "labor"
+    t.json "parts", default: []
+    t.json "labor", default: []
     t.text "notes"
-    t.text "custom_fields"
-    t.datetime "deleted_at"
+    t.json "custom_fields", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "location_id"
@@ -6962,10 +6900,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["custom_field_values"], name: "index_service_tickets_on_custom_field_values", using: :gin
-    t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
     t.index ["dealer_only"], name: "index_service_tickets_on_dealer_only"
-    t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
     t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"
@@ -6978,6 +6914,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.index ["ticket_number"], name: "index_service_tickets_on_ticket_number", unique: true
     t.index ["vehicle_id"], name: "index_service_tickets_on_vehicle_id"
     t.index ["warranty_claim_id"], name: "index_service_tickets_on_warranty_claim_id"
+    t.index ["company_id", "status"], name: "index_service_tickets_on_company_id_and_status"
   end
 
   create_table "settings", force: :cascade do |t|
@@ -7278,7 +7215,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.index ["channel"], name: "index_solid_cable_messages_on_channel"
     t.index ["channel_hash"], name: "index_solid_cable_messages_on_channel_hash"
     t.index ["created_at"], name: "index_solid_cable_messages_on_created_at"
-    t.index ["id"], name: "index_solid_cable_messages_on_id", unique: true
   end
 
   create_table "solid_queue_blocked_executions", force: :cascade do |t|
@@ -8183,14 +8119,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.string "mfa_secret"
     t.json "mfa_backup_codes", default: []
     t.datetime "mfa_verified_at"
-    t.integer "invitation_id"
+    t.bigint "invitation_id"
     t.datetime "deleted_at"
     t.text "deleted_reason"
     t.boolean "phone_verified", default: false, null: false
     t.string "mfa_sms_code"
     t.datetime "mfa_sms_expires_at"
     t.string "mfa_method", default: "sms"
-    t.integer "company_id"
+    t.bigint "company_id"
     t.string "title"
     t.string "department"
     t.string "invitation_token"
@@ -8219,6 +8155,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.text "email_signature"
     t.string "sms_signature"
     t.bigint "primary_user_id"
+    t.boolean "platform_admin", default: false
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
@@ -8450,7 +8387,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.decimal "target_gross", precision: 10, scale: 2, comment: "Target gross profit for this unit"
     t.decimal "minimum_price", precision: 10, scale: 2, comment: "Minimum acceptable selling price"
     t.boolean "use_location_address", default: false
-    t.string "public_id"
     t.integer "sections"
     t.json "floor_plan_images", default: [], null: false
     t.jsonb "custom_field_values", default: {}, null: false
@@ -8518,7 +8454,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
     t.index ["location_id"], name: "index_vehicles_on_location_id"
     t.index ["mileage", "year"], name: "index_vehicles_on_mileage_and_year"
-    t.index ["public_id"], name: "index_vehicles_on_public_id", unique: true
     t.index ["quickbooks_id"], name: "index_vehicles_on_quickbooks_id"
     t.index ["rv_class"], name: "index_vehicles_on_rv_class"
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
@@ -9490,12 +9425,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
   add_foreign_key "location_manufacturers", "locations"
   add_foreign_key "location_manufacturers", "manufacturers"
   add_foreign_key "locations", "companies"
-  add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id"
-  add_foreign_key "lot_map_history_entries", "users"
-  add_foreign_key "lot_map_history_entries", "vehicles", column: "inventory_id"
-  add_foreign_key "lot_map_layouts", "companies"
-  add_foreign_key "lot_map_lots", "lot_map_layouts", column: "layout_id"
-  add_foreign_key "lot_map_lots", "vehicles", column: "assigned_inventory_id"
   add_foreign_key "manufacturer_ar_payments", "companies", on_delete: :cascade
   add_foreign_key "manufacturer_ar_payments", "manufacturer_ar_transactions", on_delete: :cascade
   add_foreign_key "manufacturer_ar_transactions", "companies", on_delete: :cascade
@@ -9531,7 +9460,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
   add_foreign_key "part_categories", "users", column: "updated_by_id"
   add_foreign_key "parts", "companies"
   add_foreign_key "parts", "factories"
-  add_foreign_key "parts", "manufacturers"
   add_foreign_key "parts", "part_categories", column: "category_id"
   add_foreign_key "parts", "users", column: "created_by_id"
   add_foreign_key "parts", "users", column: "updated_by_id"
@@ -9672,7 +9600,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
   add_foreign_key "recurring_bills", "companies"
   add_foreign_key "recurring_bills", "contacts"
   add_foreign_key "recurring_bills", "locations"
-  add_foreign_key "recurring_bills", "suppliers"
   add_foreign_key "recurring_journal_entries", "companies"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
@@ -9722,7 +9649,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_160000) do
   add_foreign_key "stock_balances", "parts"
   add_foreign_key "subscription_plan_modules", "subscription_plans"
   add_foreign_key "supplier_parts", "parts"
-  add_foreign_key "supplier_parts", "suppliers"
   add_foreign_key "suppliers", "companies"
   add_foreign_key "suppliers", "users", column: "created_by_id"
   add_foreign_key "suppliers", "users", column: "updated_by_id"
