@@ -413,7 +413,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
     option = Truebuild::DealerOptions.add_upgrade!(
       company: @company, manufacturer_id: params[:manufacturer_id], name: params[:name], factory_code: params[:factory_code],
-      cost: params[:cost], retail: params[:retail], user: current_user, note: params[:note],
+      cost: params[:cost], retail: params[:retail],
       factory_order: params.key?(:factory_order) ? ActiveModel::Type::Boolean.new.cast(params[:factory_order]) != false : true
     )
     render json: upgrade_json(option), status: :created

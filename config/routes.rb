@@ -364,6 +364,7 @@ Rails.application.routes.draw do
       post   'deals/:deal_id/home_build/colors', to: 'deal_home_builds#create_color'
       post   'deals/:deal_id/home_build/colors/hide', to: 'deal_home_builds#hide_color'
       post   'deals/:deal_id/home_build/upgrades/remove', to: 'deal_home_builds#remove_upgrade'
+      post   'deals/:deal_id/home_build/doc_fee/use', to: 'deal_home_builds#use_doc_fee'
       get    'deals/:deal_id/home_build/suppliers', to: 'deal_home_builds#suppliers'
       post   'deals/:deal_id/home_build/purchase_order', to: 'deal_home_builds#create_purchase_order'
       post   'deals/:deal_id/home_build/purchase_order/:po_id/refresh', to: 'deal_home_builds#refresh_purchase_order'

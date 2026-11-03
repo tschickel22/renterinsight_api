@@ -4,7 +4,7 @@ module Truebuild
   # The platform admin's answer to a dealer's option change (backlog E85,
   # CatalogOptionRequest):
   #
-  #   apply!        for every dealer: an added color or upgrade joins the factory's book,
+  #   apply!        for every dealer: an added color joins the factory's book,
   #                 a hidden color is retired, a new name becomes the book's
   #   keep!         for that dealer only; it goes on working for them
   #   dismiss!      turned down: the dealer's change is undone
@@ -28,7 +28,7 @@ module Truebuild
       option = @request.option
       CatalogOptionRequest.transaction do
         case @request.action
-        when 'add' then option.kind == 'upgrade' ? publish_upgrade!(option) : publish_color!(option)
+        when 'add' then publish_color!(option)
         # Every copy of the color (one per series), as the dealer saw it.
         when 'hide' then DealerOptions.twins(option).update_all(status: 'discontinued', discontinued_on: Date.current, updated_at: Time.current)
         when 'rename' then DealerOptions.twins(option).find_each { |o| o.update!(name: @request.name) }
@@ -46,7 +46,7 @@ module Truebuild
       raise Invalid, "This request is #{@request.status}" unless CatalogOptionRequest::IN_FORCE.include?(@request.status)
 
       CatalogOptionRequest.transaction do
-        # Turning down a color or upgrade takes it off the dealer's lists; picks already made stay.
+        # Turning down a color takes it off the dealer's lists; picks already made stay.
         @request.option.update!(status: 'discontinued', discontinued_on: Date.current) if @request.action == 'add' && @request.option.dealer_color?
         resolve!('dismissed', note)
       end
@@ -80,23 +80,6 @@ module Truebuild
         ))
       end
       CatalogPriceBook.where(id: rows.map(&:catalog_price_book_id).uniq).find_each do |book|
-        book.update!(metadata: book.metadata.to_h.merge('corrected_at' => Time.current.iso8601(6)))
-      end
-    end
-
-    # The dealer's upgrade becomes the factory's: no longer theirs alone, and
-    # priced on every home in each published book that carries options.
-    def publish_upgrade!(option)
-      books = CatalogPriceBook.published.where(manufacturer_id: option.manufacturer_id, id: CatalogOptionPrice.select(:catalog_price_book_id)).to_a
-      raise Invalid, 'No published book carries options for this manufacturer' if books.empty?
-
-      meta = option.metadata.to_h
-      cost = meta['cost'].presence&.to_d
-      retail = meta['retail'].presence&.to_d
-      option.update!(company_id: nil)
-      books.each do |book|
-        CatalogOptionPrice.create!(price_book: book, option: option, dealer_cost: cost || 0, suggested_retail: retail,
-                                   is_standard: cost.to_d.zero? && retail.to_d.zero?, source_ref: { 'dealer_request_id' => @request.id })
         book.update!(metadata: book.metadata.to_h.merge('corrected_at' => Time.current.iso8601(6)))
       end
     end

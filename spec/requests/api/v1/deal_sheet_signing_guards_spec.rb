@@ -54,6 +54,15 @@ RSpec.describe 'Deal Sheet signing guards', type: :request do
     expect(response).to have_http_status(:ok)
   end
 
+  it 'still opens while the agreement is out, after a dealer price setting changes' do
+    send_it(create_agreement)
+    company.dealer_markup_rules.first.update!(value: 30, updated_at: 1.minute.from_now)
+    before = deal.home_build.reload.totals
+    get path, headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(deal.home_build.reload.totals).to eq(before)
+  end
+
   it 'refuses sheet edits while the agreement is out, and locks exactly what was signed' do
     agreement = create_agreement
     live = deal.home_build

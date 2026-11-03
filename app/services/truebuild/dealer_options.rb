@@ -160,12 +160,13 @@ module Truebuild
       CatalogOptionGroup.find_by!(manufacturer_id: manufacturer_id, key: UPGRADE_GROUP_KEY, factory_id: nil, series: nil)
     end
 
-    # Adds an upgrade of the dealer's own and sends it to the platform admin,
-    # as add_color! does. The same name again is the same upgrade: one they
-    # took off their list comes back, one still on it stays as it is.
+    # Adds an upgrade of the dealer's own, on every model from this manufacturer,
+    # ready to use. Unlike a color it goes to nobody for review: it stays the
+    # dealer's own and never reaches the buyer site. The same name again is the
+    # same upgrade: one they took off their list comes back, one still on it
+    # stays as it is.
     # factory_order: false keeps it off the factory PO (the dealer supplies it).
-    def self.add_upgrade!(company:, manufacturer_id:, name:, user: nil, factory_code: nil, cost: nil, retail: nil,
-                          factory_order: true, deal: nil, note: nil)
+    def self.add_upgrade!(company:, manufacturer_id:, name:, factory_code: nil, cost: nil, retail: nil, factory_order: true)
       name = name.to_s.squish
       raise ArgumentError, 'Name the upgrade' if name.blank?
 
@@ -184,8 +185,6 @@ module Truebuild
             key: "dealer-#{company.id}-upgrade-#{name.parameterize}-#{SecureRandom.hex(3)}"
           ))
         end
-        company.catalog_option_requests.create!(manufacturer_id: manufacturer_id, option: option, action: 'add', deal: deal,
-                                                requested_by: user, note: note.presence)
         option
       end
     end

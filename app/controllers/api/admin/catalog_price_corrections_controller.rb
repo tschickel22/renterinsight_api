@@ -166,7 +166,7 @@ class Api::Admin::CatalogPriceCorrectionsController < ApplicationController
     o = r.option
     meta = o&.metadata.to_h
     { id: r.id, action: r.action, status: r.status, label: r.label, color_set: r.color_set, name: r.name,
-      option: o && { id: o.id, name: o.name, kind: o.kind, factory_code: o.factory_code, group: o.group&.name, dealer_color: o.dealer_color?,
+      option: o && { id: o.id, name: o.name, factory_code: o.factory_code, group: o.group&.name, dealer_color: o.dealer_color?,
                      cost: meta['cost']&.to_f, retail: meta['retail']&.to_f },
       manufacturer: r.manufacturer&.name, company: r.company&.name, deal_id: r.deal_id, requested_by: r.requested_by&.name,
       note: r.note, resolution_note: r.resolution_note, resolved_at: r.resolved_at, created_at: r.created_at }

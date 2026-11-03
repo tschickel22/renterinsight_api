@@ -27,6 +27,7 @@
 #                                                             a color of the dealer's own, picked on this sheet
 #   POST   /api/v1/deals/:deal_id/home_build/colors/hide      { option_id } drop a factory color from the dealer's lists
 #   POST   /api/v1/deals/:deal_id/home_build/upgrades/remove  { option_id } take the dealer's own upgrade off their list
+#   POST   /api/v1/deals/:deal_id/home_build/doc_fee/use      bring this sheet up to the dealer's current document fee
 #   GET    /api/v1/deals/:deal_id/home_build/suppliers                suppliers for the factory PO, the likely one first
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order           { supplier_id | supplier_name, expected_delivery_date?, notes? }
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order/:po_id/refresh   rewrite a draft PO from the sheet
@@ -236,8 +237,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
             rules: rules.fetch(op.catalog_option_id, []).map { |_, type, target| { type: type, option_id: target } } }
         end.sort_by { |o| o[:name].to_s } }
     end
-    # With the dealer's document fee set, a doc fee of any other name is not offered: it would come straight back off.
-    fee_set = !doc_fee_setting.nil?
+    # A sheet holding the dealer's document fee is not offered another: it would come straight back off.
+    fee_set = @build.lines.any?(&:required_fee?)
     addons = @company.truebuild_addons.active.for_manufacturer(variant.manufacturer_id).order(:position, :id).to_a
     addons = addons.reject { |a| a.fee? && Truebuild::DealBuild.doc_fee_name?(a.name) } if fee_set
     templates = templates_json
@@ -273,7 +274,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     when 'custom'
       service.add_custom(**params.permit(:label, :unit_retail, :unit_cost, :quantity, :unit, :tax_category, :group_name).to_h.symbolize_keys,
                          on_addendum: truthy?(params[:on_addendum]), factory_order: params.key?(:factory_order) ? truthy?(params[:factory_order]) : nil,
-                         user: current_user)
+                         factory_code: params[:factory_code], user: current_user)
     else
       return render json: { error: 'kind must be option, addon, template, freight or custom' }, status: :unprocessable_entity
     end
@@ -292,6 +293,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     if params.key?(:on_addendum)
       service.set_addendum(line, truthy?(params[:on_addendum]), user: current_user,
                                                                  factory_order: params.key?(:factory_order) ? truthy?(params[:factory_order]) : nil)
+      return render json: build_json(@build.reload, service.warnings)
+    end
+
+    if params.key?(:factory_order)
+      service.set_factory_order(line, truthy?(params[:factory_order]))
       return render json: build_json(@build.reload, service.warnings)
     end
 
@@ -602,13 +608,19 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     head :no_content
   end
 
+  def use_doc_fee
+    return unless authorize_action!('deals', 'update')
+
+    service = Truebuild::DealBuild.new(@build)
+    service.use_dealer_doc_fee
+    render json: build_json(@build.reload, service.warnings)
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
 
   def truthy?(value) = ActiveModel::Type::Boolean.new.cast(value) == true
-
-  def doc_fee_setting
-    DealerCatalogTerm.effective(@company, @build.variant.manufacturer_id).doc_fee
-  end
 
   def book_row_for_option(option_id)
     variant = @build.variant
@@ -709,7 +721,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       totals: build.totals,
       discounts: build.discounts,
       freight_miles_set: build.freight_miles_set,
-      # The dealer's document fee, nil until set. Set: line 6 is read only.
+      # The dealer's document fee setting, nil until set. Line 6 is read only only on a sheet that took it.
       doc_fee: DealerCatalogTerm.effective(@company, variant.manufacturer_id).doc_fee&.to_f,
       color_skips: build.color_skips,
       # Lines on the deal the sheet did not write (a warranty added in Products).
@@ -729,6 +741,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       from_products: l.metadata['from_products'] == true,
       dealer_cost_set: l.metadata['dealer_cost_set'] == true, book_name: l.metadata['book_name'],
       dealer_color: l.option&.dealer_color? == true && !l.option.dealer_upgrade?, dealer_upgrade: l.option&.dealer_upgrade? == true,
+      factory_order: l.option&.dealer_upgrade? ? l.option.metadata.to_h['factory_order'] != false : nil,
       required_fee: l.required_fee?,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id,

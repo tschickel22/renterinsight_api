@@ -25,10 +25,11 @@ module Truebuild
   # writes the deal; the others are drafts the rep prices beside it and can
   # make live, which rewrites the deal from that version.
   #
-  # The document fee is the dealer's, from Settings, TrueBuild pricing: once
-  # set it is on every open sheet, and the rep can neither change nor remove
-  # it (apply_doc_fee!). A sheet that already has a doc fee line gets the
-  # dealer's in its place, so it is never charged twice.
+  # The document fee is the dealer's, from Settings, TrueBuild pricing. A deal's
+  # first sheet takes it when the sheet starts, and the rep can neither change nor
+  # remove it there. It never reaches back: a sheet that already exists, or a deal
+  # that already has a doc fee, keeps the fee it has, and changing the setting
+  # changes no sheet. The rep can bring a sheet up to the new figure themselves.
   class DealBuild
     class Locked < StandardError; end
 
@@ -38,7 +39,7 @@ module Truebuild
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
     TOTALS_VERSION = 6
     DOC_FEE_LABEL = 'Doc fee'
-    DOC_FEE_LOCKED = 'The document fee comes from Settings, TrueBuild pricing, and cannot be changed on a Deal Sheet.'
+    DOC_FEE_LOCKED = 'This document fee comes from Settings, TrueBuild pricing, and cannot be changed on a Deal Sheet.'
     DOC_FEE_MISSING = 'No document fee is set. Enter it under Settings, TrueBuild pricing (0 if you do not charge one).'
 
     def self.doc_fee_name?(name) = Deal.doc_fee_name?(name)
@@ -47,7 +48,7 @@ module Truebuild
     # Priced before the deal's lines last changed (a Products save), or by an
     # older version of these totals.
     def self.stale?(build)
-      return false if build.locked?
+      return false if build.locked? || Agreements::DealSheetLock.edit_problem(build)
       return true if build.priced_at.nil? || build.totals.to_h['version'] != TOTALS_VERSION
       # A platform admin corrected one of its books since (Truebuild::PriceCorrector).
       books = [build.price_book, build.cost_book, build.options_book].compact.uniq
@@ -174,6 +175,7 @@ module Truebuild
         end
       end
       add_line(kind: 'base', label: base_label, tax_category: 'home') unless @build.lines.exists?(kind: 'base')
+      seed_doc_fee
       reprice!
     end
 
@@ -242,11 +244,11 @@ module Truebuild
     end
 
     def add_custom(label:, unit_retail:, unit_cost: 0, quantity: 1, unit: 'each', tax_category: 'other', group_name: nil,
-                   on_addendum: false, factory_order: nil, user: nil)
+                   on_addendum: false, factory_order: nil, factory_code: nil, user: nil)
       guard!
       line = add_line(kind: 'custom', label: label, group_name: group_name, quantity: quantity, unit: unit, tax_category: tax_category,
                       unit_cost: unit_cost, unit_retail: unit_retail)
-      put_on_addendum(line, user: user, factory_order: factory_order) if on_addendum
+      put_on_addendum(line, user: user, factory_order: factory_order, factory_code: factory_code) if on_addendum
       reprice!
       line
     end
@@ -260,6 +262,29 @@ module Truebuild
       on ? put_on_addendum(line, user: user, factory_order: factory_order) : take_off_addendum(line, user: user)
       reprice!
       line
+    end
+
+    # Whether the dealer's own upgrade on this line goes on the factory PO: on
+    # the upgrade, so every sheet follows it.
+    def set_factory_order(line, on)
+      guard!
+      raise ArgumentError, 'Only an upgrade you added can change this' unless line.option&.dealer_upgrade?
+
+      line.option.update!(metadata: line.option.metadata.to_h.merge('factory_order' => on))
+      reprice!
+    end
+
+    # The rep bringing a sheet up to the dealer's current document fee, which
+    # replaces any doc fee on it. Nothing else changes a fee already on a sheet.
+    def use_dealer_doc_fee
+      guard!
+      fee = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id).doc_fee
+      raise ArgumentError, DOC_FEE_MISSING if fee.nil?
+
+      @build.lines.reload.select { |l| l.required_fee? || doc_fee_line?(l) }.each(&:destroy!)
+      remove_products_doc_fees(@build.deal) if @build.live?
+      add_required_doc_fee(fee) if fee.positive?
+      reprice!
     end
 
     # attrs: quantity, unit, tbd, no_charge, tax_category, notes; unit_retail
@@ -443,32 +468,48 @@ module Truebuild
       self.class.assert_editable!(@build)
     end
 
-    # Puts the dealer's document fee on the sheet, in place of any doc fee line
-    # already there, at the amount they set. None set: the line stays one the
-    # rep can type in, and the sheet warns. A deal that is won, posted or signed
-    # keeps the fee it was sold with, drafts of a change to it included.
+    # A new home priced on a deal that has a sheet carries that sheet's fee, or
+    # none if it has none. A deal's first sheet takes the dealer's, unless the
+    # deal already carries a doc fee or is already sold.
+    def seed_doc_fee
+      deal = @build.deal
+      live = deal.home_builds.where(live: true).where.not(id: @build.id).first
+      if live
+        fee = live.lines.find { |l| l.required_fee? || doc_fee_line?(l) }
+        add_line(kind: 'custom', label: fee.label, group_name: fee.group_name, tax_category: 'fee', quantity: fee.quantity, unit: fee.unit,
+                 unit_retail: fee.unit_retail, unit_cost: fee.unit_cost, metadata: fee.metadata.to_h.slice('required_fee')) if fee
+        return
+      end
+      return if deal.cost_snapshotted?
+      return if deal.deal_products.any? { |dp| dp.notes.to_s.match?(/category:\s*fee/i) && self.class.doc_fee_name?(dp.product_name) }
+
+      fee = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id).doc_fee
+      add_required_doc_fee(fee) if fee&.positive?
+    end
+
+    def add_required_doc_fee(fee)
+      add_line(kind: 'custom', label: DOC_FEE_LABEL, group_name: 'Fees', tax_category: 'fee', unit_retail: fee, unit_cost: 0,
+               metadata: { 'required_fee' => true })
+    end
+
+    # A sheet holding the dealer's fee holds only that one: a doc fee added in
+    # Products comes back off rather than charging it twice. The amount stays
+    # what it was when the sheet took it. A sheet without the dealer's fee is
+    # left alone. With the setting cleared, the line becomes the rep's to edit.
     def apply_doc_fee!
       deal = @build.deal
       return if deal.cost_snapshotted? || deal.home_build&.locked?
 
-      fee = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id).doc_fee
       lines = @build.lines.reload.to_a
       required = lines.find(&:required_fee?)
-      if fee.nil?
-        required&.update!(metadata: required.metadata.to_h.except('required_fee'))
-        return
+      return unless required
+
+      if DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id).doc_fee.nil?
+        return required.update!(metadata: required.metadata.to_h.except('required_fee'))
       end
 
       lines.select { |l| !l.required_fee? && doc_fee_line?(l) }.each(&:destroy!)
       remove_products_doc_fees(deal) if @build.live?
-      if fee.zero?
-        required&.destroy!
-      elsif required
-        required.update!(label: DOC_FEE_LABEL, unit_retail: fee, unit_cost: 0, quantity: 1, unit: 'each', tbd: false, no_charge: false, tax_category: 'fee')
-      else
-        add_line(kind: 'custom', label: DOC_FEE_LABEL, group_name: 'Fees', tax_category: 'fee', unit_retail: fee, unit_cost: 0,
-                 metadata: { 'required_fee' => true })
-      end
     end
 
     def doc_fee_line?(line)
@@ -485,14 +526,13 @@ module Truebuild
     end
 
     # Fees and set-up lines belong to their own rows on the contract, never Addendum A.
-    def put_on_addendum(line, user:, factory_order:)
+    def put_on_addendum(line, user:, factory_order:, factory_code: nil)
       return if line.kind == 'option' && line.option&.dealer_upgrade?
       raise ArgumentError, 'Only a line typed on this sheet can go on Addendum A this way' unless line.kind == 'custom'
       raise ArgumentError, "#{line.label} is a fee or service, so it has its own line on the contract" unless %w[other factory_option].include?(line.tax_category)
 
-      upgrade = DealerOptions.add_upgrade!(company: @build.company, manufacturer_id: @build.variant.manufacturer_id, name: line.label,
-                                           cost: line.unit_cost, retail: line.unit_retail, factory_order: factory_order != false,
-                                           user: user, deal: @build.deal)
+      upgrade = DealerOptions.add_upgrade!(company: @build.company, manufacturer_id: @build.variant.manufacturer_id, name: line.label, factory_code: factory_code,
+                                           cost: line.unit_cost, retail: line.unit_retail, factory_order: factory_order != false)
       # Already on their list at another figure: this deal keeps what the rep typed.
       saved = upgrade.metadata.to_h
       meta = line.metadata.to_h.except('from_products')

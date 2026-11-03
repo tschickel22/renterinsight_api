@@ -230,34 +230,50 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
       expect(response).to have_http_status(:not_found)
     end
 
-    it 'goes to the platform admin, who can make it everyone or turn it down' do
+    it 'is ready to use right away, with no admin review, on every model from that manufacturer' do
       post '/api/v1/truebuild_pricing/upgrades', headers: headers, params: { manufacturer_id: mfr.id, name: 'Storm Doors', cost: '200', retail: '450' }.to_json
       upgrade = CatalogOption.find(body['id'])
-      request = company.catalog_option_requests.find_by!(catalog_option_id: upgrade.id)
-      expect(request).to have_attributes(action: 'add', status: 'open')
+      expect(company.catalog_option_requests.where(catalog_option_id: upgrade.id)).to be_empty
 
-      Truebuild::OptionRequests.new(request, user: nil).apply!
-      expect(upgrade.reload.company_id).to be_nil
+      other_plan = CatalogPlan.create!(manufacturer: mfr, factory: factory, series: 'Prime', name: 'Summit')
+      other_variant = CatalogPlanVariant.create!(catalog_plan: other_plan, manufacturer: mfr, model_number: '1676S', width_ft: 16, length_ft: 76, building_code: variant.building_code)
+      CatalogVariantPrice.create!(price_book: book, variant: other_variant, net_base_price: 40_000)
+      contact = company.contacts.create!(first_name: 'Sam', last_name: 'Lee', email: "sam-#{SecureRandom.hex(3)}@example.com")
+      other_model_deal = company.deals.create!(name: 'Lee Summit', contact_id: contact.id)
+      post path(other_model_deal), headers: headers, params: { variant_id: other_variant.id }.to_json
+      expect(order_form(other_model_deal).map { |o| o['id'] }).to include(upgrade.id)
+
       other_headers = headers_for(other)
-      other_deal = sheet_for(other, other_headers)
-      expect(order_form(other_deal, other_headers).find { |o| o['id'] == upgrade.id }).to include('price' => 250.0, 'cost' => 200.0)
+      expect(order_form(sheet_for(other, other_headers), other_headers).map { |o| o['id'] }).not_to include(upgrade.id)
+    end
 
-      post '/api/v1/truebuild_pricing/upgrades', headers: headers, params: { manufacturer_id: mfr.id, name: 'Turned down', retail: '10' }.to_json
-      turned_down = CatalogOption.find(body['id'])
-      Truebuild::OptionRequests.new(company.catalog_option_requests.find_by!(catalog_option_id: turned_down.id), user: nil).dismiss!
+    it 'the line can say whether the factory builds it, and every sheet follows' do
       deal = sheet_for(company, headers)
-      expect(order_form(deal).map { |o| o['id'] }).not_to include(turned_down.id)
+      add_custom(deal, on_addendum: true)
+      line = line_named('Gutters')
+      expect(line['factory_order']).to be(true)
+      patch "#{path(deal)}/lines/#{line['id']}", headers: headers, params: { factory_order: false }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(line_named('Gutters')['factory_order']).to be(false)
+      expect(company.dealer_colors.find_by!(name: 'Gutters').metadata['factory_order']).to be(false)
+    end
+
+    it 'added from the options step carries its factory code onto the PO line' do
+      deal = sheet_for(company, headers)
+      add_custom(deal, label: 'Missing Factory Vent', on_addendum: true, factory_order: true, factory_code: 'mv-12')
+      expect(line_named('Missing Factory Vent')).to include('kind' => 'option', 'factory_code' => 'MV-12', 'dealer_upgrade' => true)
+      expect(company.catalog_option_requests).to be_empty
     end
   end
 
   describe 'the document fee' do
-    it 'warns until set, then is on the sheet, the deal and the contract, read only' do
-      deal = sheet_for(company, headers)
+    it 'warns until set, then a new sheet has it on the sheet, the deal and the contract, read only' do
+      sheet_for(company, headers)
       expect(body.dig('build', 'warnings')).to include(Truebuild::DealBuild::DOC_FEE_MISSING)
       expect(body.dig('build', 'doc_fee')).to be_nil
 
       set_terms(doc_fee: 395)
-      get path(deal), headers: headers # an open sheet picks it up when next opened
+      deal = sheet_for(company, headers)
       line = line_named('Doc fee')
       expect(line).to include('kind' => 'custom', 'retail' => 395.0, 'required_fee' => true, 'tax_category' => 'fee')
       expect(body.dig('build', 'doc_fee')).to eq(395.0)
@@ -275,11 +291,75 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
       expect(response).to have_http_status(:unprocessable_entity)
       delete "#{path(deal)}/lines/#{line['id']}", headers: headers
       expect(response).to have_http_status(:unprocessable_entity)
+    end
 
+    it 'changing the setting changes no sheet, until the rep brings that sheet up to it' do
+      set_terms(doc_fee: 395)
+      deal = sheet_for(company, headers)
       set_terms(doc_fee: 450)
       get path(deal), headers: headers
-      expect(lines.count { |l| l['required_fee'] }).to eq(1)
+      expect(line_named('Doc fee')).to include('retail' => 395.0, 'required_fee' => true)
+      expect(body.dig('build', 'doc_fee')).to eq(450.0)
+
+      post "#{path(deal)}/doc_fee/use", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(lines.count { |l| l['tax_category'] == 'fee' }).to eq(1)
       expect(line_named('Doc fee')['retail']).to eq(450.0)
+      expect(deal.reload.effective_doc_fee).to eq(450.0)
+
+      set_terms(doc_fee: 0)
+      post "#{path(deal)}/doc_fee/use", headers: headers
+      expect(lines.select { |l| l['tax_category'] == 'fee' }).to be_empty
+    end
+
+    it 'never touches the fee on an existing sheet, and it stays the rep\'s to edit' do
+      deal = sheet_for(company, headers)
+      add_custom(deal, label: 'Document preparation fee', unit_retail: 251, unit_cost: 0, tax_category: 'fee')
+      set_terms(doc_fee: 395)
+
+      get path(deal), headers: headers
+      fees = lines.select { |l| l['tax_category'] == 'fee' }
+      expect(fees.map { |l| [l['label'], l['retail'], l['required_fee']] }).to eq([['Document preparation fee', 251.0, false]])
+      expect(deal.reload.effective_doc_fee).to eq(251.0)
+      expect(deal.addon_gross).to eq(0)
+
+      patch "#{path(deal)}/lines/#{fees.first['id']}", headers: headers, params: { unit_retail: 275 }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(line_named('Document preparation fee')['retail']).to eq(275.0)
+    end
+
+    it 'an existing sheet with no doc fee gets none added, and the rep can still add one' do
+      template = company.fee_templates.create!(name: 'Documentation Fee', fee_type: 'doc', default_amount: 150)
+      deal = sheet_for(company, headers)
+      set_terms(doc_fee: 395)
+      get path(deal), headers: headers
+      expect(lines.select { |l| l['tax_category'] == 'fee' }).to be_empty
+
+      get "#{path(deal)}/options", headers: headers
+      expect(body['templates'].map { |t| t['name'] }).to include('Documentation Fee')
+      post "#{path(deal)}/lines", headers: headers, params: { kind: 'template', template_type: 'FeeTemplate', template_id: template.id }.to_json
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'a first sheet on a deal that already has a doc fee in Products keeps that fee' do
+      set_terms(doc_fee: 395)
+      contact = company.contacts.create!(first_name: 'Pat', last_name: 'Smith', email: "pat-#{SecureRandom.hex(3)}@example.com")
+      deal = company.deals.create!(name: 'Smith Apex', contact_id: contact.id)
+      deal.deal_products.create!(product_name: 'Document Fee', product_sku: 'X', quantity: 1, unit_price: 251, cost: 0, tax: 0, discount: 0, discount_type: 'fixed', notes: 'category:fee')
+      post path(deal), headers: headers, params: { variant_id: variant.id }.to_json
+      expect(response).to have_http_status(:created)
+      expect(lines.select(&:itself).any? { |l| l['required_fee'] }).to be(false)
+      expect(deal.reload.effective_doc_fee).to eq(251.0)
+    end
+
+    it 'a new home priced on the deal carries the fee the live sheet has' do
+      deal = sheet_for(company, headers)
+      add_custom(deal, label: 'Document preparation fee', unit_retail: 251, unit_cost: 0, tax_category: 'fee')
+      set_terms(doc_fee: 395)
+      post "#{path(deal)}/versions", headers: headers, params: { variant_id: variant.id }.to_json
+      expect(response).to have_http_status(:created)
+      expect(lines.select { |l| l['tax_category'] == 'fee' }.map { |l| [l['label'], l['retail'], l['required_fee']] })
+        .to eq([['Document preparation fee', 251.0, false]])
     end
 
     it 'is on a new sheet from the start, and a copy carries one' do
@@ -290,25 +370,15 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
       expect(lines.count { |l| l['required_fee'] }).to eq(1)
     end
 
-    it 'replaces a doc fee line already on the sheet instead of charging it twice' do
-      template = company.fee_templates.create!(name: 'Documentation Fee', fee_type: 'doc', default_amount: 150)
-      deal = sheet_for(company, headers)
-      post "#{path(deal)}/lines", headers: headers, params: { kind: 'template', template_type: 'FeeTemplate', template_id: template.id }.to_json
-      add_custom(deal, label: 'Document preparation fee', unit_retail: 200, unit_cost: 0, tax_category: 'fee')
-      add_custom(deal, label: 'Title work', unit_retail: 75, unit_cost: 0, tax_category: 'fee')
-      expect(lines.count { |l| l['tax_category'] == 'fee' }).to eq(3)
-
+    it 'a sheet holding the dealer\'s fee is not offered another doc fee' do
+      company.fee_templates.create!(name: 'Documentation Fee', fee_type: 'doc', default_amount: 150)
+      company.fee_templates.create!(name: 'Doc stamps', fee_type: 'other', default_amount: 40)
       set_terms(doc_fee: 395)
-      get path(deal), headers: headers
-      fees = lines.select { |l| l['tax_category'] == 'fee' }
-      expect(fees.map { |l| [l['label'], l['retail']] }).to contain_exactly(['Doc fee', 395.0], ['Title work', 75.0])
-
+      deal = sheet_for(company, headers)
       get "#{path(deal)}/options", headers: headers
-      expect(body['templates'].map { |t| t['name'] }).not_to include('Documentation Fee')
-      deal.reload
-      names = deal.deal_products.map(&:product_name)
-      expect(names).to include('Doc fee', 'Title work')
-      expect(names).not_to include('Documentation Fee', 'Document preparation fee')
+      names = body['templates'].map { |t| t['name'] }
+      expect(names).not_to include('Documentation Fee')
+      expect(names).to include('Doc stamps')
     end
 
     it 'takes in a doc fee entered in Products and does not let Products change it' do
