@@ -62,10 +62,14 @@ RSpec.describe 'Agreement from the Deal Sheet', type: :request do
   it 'says what blocks it' do
     buyer.update!(email: nil) if buyer.respond_to?(:email=)
     get path, headers: headers
-    expect(body['check']['blocking']).to include('The buyer needs an email address to sign')
+    expect(body['check']['open'].join).to include('The buyer has no email')
+    # They can still sign on paper: it is made, and only sending it online is refused.
     post path, headers: headers, params: { manager_id: manager.id }.to_json
+    expect(response).to have_http_status(:created)
+    agreement = company.agreements.find(body['agreement']['id'])
+    post "/api/v1/agreements/#{agreement.id}/send_agreement", headers: headers
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(body['error']).to include('email address')
+    expect(body['error']).to include('no email address')
   end
 
   it 'installs a package for a company from the platform admin, only when the name matches' do

@@ -63,11 +63,11 @@ module Truebuild
 
     # "28 x 56, 3 bed, 2 bath, 1,493 sq ft"
     def home_size
-      v = @build.variant
-      size = "#{v.width_ft} x #{v.length_ft}" if v.width_ft && v.length_ft
-      baths = v.baths && v.baths.to_d.to_s('F').sub(/\.0\z/, '')
-      sq = v.square_feet && v.square_feet.to_s.reverse.scan(/\d{1,3}/).join(',').reverse
-      [size, ("#{v.beds} bed" if v.beds), ("#{baths} bath" if baths), ("#{sq} sq ft" if sq)].compact.join(', ')
+      v = @build.specs
+      size = "#{v['width_ft']} x #{v['length_ft']}" if v['width_ft'] && v['length_ft']
+      baths = v['baths'] && v['baths'].to_d.to_s('F').sub(/\.0\z/, '')
+      sq = v['square_feet'] && v['square_feet'].to_s.reverse.scan(/\d{1,3}/).join(',').reverse
+      [size, ("#{v['beds']} bed" if v['beds']), ("#{baths} bath" if baths), ("#{sq} sq ft" if sq)].compact.join(', ')
     end
 
     private

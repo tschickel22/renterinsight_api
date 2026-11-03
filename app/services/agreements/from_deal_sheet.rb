@@ -33,12 +33,16 @@ module Agreements
       blocking = []
       blocking << 'Start the Deal Sheet first' unless @deal.home_build
       blocking << 'Add the buyer to the deal' unless @deal.contact
-      blocking << 'The buyer needs an email address to sign' if @deal.contact && @deal.contact.email.blank?
-      blocking << 'Buyer 2 needs an email address to sign' if @deal.co_applicant_contact && @deal.co_applicant_contact.email.blank?
+      if (unpriced = @deal.home_build&.lines.to_a.select { |l| l.priced? && l.retail.nil? }).any?
+        blocking << "No price yet: #{unpriced.map(&:label).to_sentence}. Type a price or mark it TBD"
+      end
       blocking << 'Choose the manager who accepts the agreement' if manager_required? && manager.nil?
       blocking << package_missing if templates.empty?
       open = DealSaleDetails.new(@deal).missing.map { |m| "Deal Sheet: #{m}" }
       open += Truebuild::AgreementSheets.new(@deal.home_build).open_items if @deal.home_build
+      [[@deal.contact, 'The buyer'], [@deal.co_applicant_contact, 'Buyer 2']].each do |person, who|
+        open << "#{who} has no email: add one to sign online, or sign on paper and upload the signed copy" if person && person.email.blank?
+      end
       { blocking: blocking, open: open }
     end
 
@@ -99,7 +103,7 @@ module Agreements
     def add_signer(agreement, who)
       name = who.respond_to?(:full_name) && who.full_name.present? ? who.full_name : [who.try(:first_name), who.try(:last_name)].compact.join(' ')
       agreement.agreement_signers.create!(role: 'signer', signing_order: 1,
-                                          name: name.presence || who.email, email: who.email, signable: who)
+                                          name: name.presence || who.email, email: who.email.to_s, signable: who)
     end
   end
 end

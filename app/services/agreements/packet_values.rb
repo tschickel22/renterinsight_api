@@ -87,14 +87,15 @@ module Agreements
       return { 'home.serial' => filled[:serial_number] } unless @build
 
       v = @build.variant
+      specs = @build.specs
       used = @build.vehicle&.condition.to_s.casecmp?('used')
-      { 'home.manufacturer' => v.manufacturer&.name, 'home.factory' => v.catalog_plan&.factory&.name || @build.price_book&.factory&.name,
+      { 'home.manufacturer' => v.maker_name, 'home.factory' => v.catalog_plan&.factory&.name || @build.price_book&.factory&.name,
         'home.condition' => used ? 'PRE-OWNED' : 'NEW',
-        'home.description' => [v.manufacturer&.name, v.catalog_plan&.series, v.catalog_plan&.name, v.model_number].compact.uniq.join(' ').squish,
-        'home.name' => @sheets.home_name, 'home.model_number' => v.model_number, 'home.size' => @sheets.home_size,
+        'home.description' => (v.manual_home? ? v.catalog_plan&.name : [v.manufacturer&.name, v.catalog_plan&.series, v.catalog_plan&.name, v.model_number].compact.uniq.join(' ').squish),
+        'home.name' => @sheets.home_name, 'home.model_number' => v.shown_model_number, 'home.size' => @sheets.home_size,
         'home.model_year' => values['model_year'], 'home.serial' => filled[:serial_number], 'home.hud_labels' => values['hud_labels'],
-        'home.floor_size' => ("#{v.width_ft} x #{v.length_ft}" if v.width_ft && v.length_ft), 'home.square_feet' => v.square_feet&.to_s,
-        'home.beds' => v.beds&.to_s, 'home.baths' => v.baths && v.baths.to_d.to_s('F').sub(/\.0\z/, '') }
+        'home.floor_size' => ("#{specs['width_ft']} x #{specs['length_ft']}" if specs['width_ft'] && specs['length_ft']), 'home.square_feet' => specs['square_feet']&.to_s,
+        'home.beds' => specs['beds']&.to_s, 'home.baths' => specs['baths'] && specs['baths'].to_d.to_s('F').sub(/\.0\z/, '') }
     end
 
     # Page 1's price ladder: base, options, freight, set-up, utilities, fees,
@@ -108,7 +109,8 @@ module Agreements
       freight = lines.select { |l| l.kind == 'freight' }
       setup = lines.select { |l| l.kind != 'freight' && l.tax_category == 'setup' }
       utility = lines.select { |l| l.tax_category == 'utility_connection' }
-      fees = lines.select { |l| l.tax_category == 'fee' }
+      # Only the document fee goes in its box. Other fees are named under Other.
+      fees = lines.select { |l| l.tax_category == 'fee' && (l.required_fee? || Deal.doc_fee_name?(l.label)) }
       counted = [freight, setup, utility, fees].flatten
       other = lines.reject { |l| %w[base option].include?(l.kind) || counted.include?(l) ||
                                   (l.kind == 'custom' && l.tax_category == 'factory_option') }

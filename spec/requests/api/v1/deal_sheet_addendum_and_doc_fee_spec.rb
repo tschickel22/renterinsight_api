@@ -146,13 +146,6 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
       expect(company.dealer_colors.where(kind: 'upgrade').count).to eq(1)
     end
 
-    it 'leaves fee and service lines to their own contract rows' do
-      deal = sheet_for(company, headers)
-      add_custom(deal, label: 'Set-up sold by dealer', tax_category: 'setup')
-      patch "#{path(deal)}/lines/#{line_named('Set-up sold by dealer')['id']}", headers: headers, params: { on_addendum: true }.to_json
-      expect(response).to have_http_status(:unprocessable_entity)
-    end
-
     it 'goes on the factory PO unless marked as the dealer supplying it' do
       deal = sheet_for(company, headers)
       add_custom(deal, on_addendum: true)
@@ -267,7 +260,7 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
   end
 
   describe 'the document fee' do
-    it 'warns until set, then a new sheet has it on the sheet, the deal and the contract, read only' do
+    it 'warns until set, then a new sheet has it on the sheet, the deal and the contract, locked but for a company admin' do
       sheet_for(company, headers)
       expect(body.dig('build', 'warnings')).to include(Truebuild::DealBuild::DOC_FEE_MISSING)
       expect(body.dig('build', 'doc_fee')).to be_nil
@@ -284,13 +277,8 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
       expect(deal.effective_doc_fee).to eq(395.0)
       expect(Agreements::PacketValues.new(deal).to_h['price.doc_fee']).to eq('$395.00')
 
-      patch "#{path(deal)}/lines/#{line['id']}", headers: headers, params: { unit_retail: 1 }.to_json
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(body['error']).to eq(Truebuild::DealBuild::DOC_FEE_LOCKED)
-      patch "#{path(deal)}/lines/#{line['id']}", headers: headers, params: { no_charge: true }.to_json
-      expect(response).to have_http_status(:unprocessable_entity)
-      delete "#{path(deal)}/lines/#{line['id']}", headers: headers
-      expect(response).to have_http_status(:unprocessable_entity)
+      # Who can change it: deal_sheet_review_fixes_spec, the document fee override.
+      expect(line['fee_locked']).to be(false)
     end
 
     it 'changing the setting changes no sheet, until the rep brings that sheet up to it' do

@@ -45,7 +45,12 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   before_action :set_build, except: %i[show create models create_version]
 
   # What PATCH changes besides a version's name.
-  EDIT_KEYS = %w[variant_id construction notes deal freight_miles discounts].freeze
+  EDIT_KEYS = %w[variant_id manual_home construction notes deal freight_miles discounts].freeze
+  # What changes a sheet, so on a won deal takes a company admin.
+  SHEET_EDITS = %i[make_live update reprice create_line update_line destroy_line remember create_color use_doc_fee].freeze
+
+  before_action :refuse_closed_sheet_edit, only: SHEET_EDITS
+  around_action :correction_in_one_piece, only: SHEET_EDITS
 
   rescue_from Truebuild::DealBuild::Locked do |e|
     render json: { error: e.message }, status: :conflict
@@ -76,7 +81,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
     return render json: { error: 'This deal already has a home build' }, status: :unprocessable_entity if @deal.home_builds.exists?
 
-    variant = priced_variant(params[:variant_id]) or return
+    variant = home_from_params or return
     vehicle = params[:vehicle_id].present? ? @company.vehicles.find_by(id: params[:vehicle_id]) : nil
     return render json: { error: 'Home not found' }, status: :not_found if params[:vehicle_id].present? && !vehicle
 
@@ -85,7 +90,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
     @deal.fill_delivery_address_from_billing!
     service = Truebuild::DealBuild.start(deal: @deal, variant: design&.variant || variant, vehicle: vehicle, design: design, user: current_user)
+    type_manual_prices(service)
     render json: build_json(service.build, service.warnings), status: :created
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   # A second version: a copy of one already on the deal, or a different home
@@ -105,9 +113,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       service = Truebuild::DealBuild.new(source).copy(label: params[:label], user: current_user)
       service.make_live! if ActiveModel::Type::Boolean.new.cast(params[:live])
     else
-      variant = priced_variant(params[:variant_id]) or return
+      variant = home_from_params or return
       service = Truebuild::DealBuild.start(deal: @deal, variant: variant, user: current_user, label: params[:label],
                                            live: ActiveModel::Type::Boolean.new.cast(params[:live]))
+      type_manual_prices(service)
     end
     render json: build_json(service.build.reload, service.warnings), status: :created
   end
@@ -115,14 +124,14 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def make_live
     return unless authorize_action!('deals', 'update')
 
-    service = Truebuild::DealBuild.new(@build).make_live!
+    service = sheet.make_live!
     render json: build_json(@build.reload, service.warnings)
   end
 
   def update
     return unless authorize_action!('deals', 'update')
 
-    service = Truebuild::DealBuild.new(@build)
+    service = sheet
     # A version's name is the rep's, and can change even once it is signed.
     @build.update!(label: params[:label].presence) if params.key?(:label)
     # Color sets marked "Not on this home" (Colors & finishes checklist).
@@ -131,19 +140,26 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
       @build.update!(metadata: @build.metadata.to_h.merge('color_skips' => Array(params[:color_skips]).map(&:to_s).reject(&:blank?).uniq))
     end
+    # Beds, baths and size as this home really is, for this deal's paperwork.
+    if params[:home_specs].present?
+      Truebuild::DealBuild.assert_editable!(@build)
+
+      specs = params.require(:home_specs).permit(*DealHomeBuild::SPEC_KEYS).to_h.transform_values(&:presence).compact
+      @build.update!(metadata: @build.metadata.to_h.merge('home_specs' => specs))
+      return render json: build_json(@build.reload) if (params.keys & EDIT_KEYS).empty?
+    end
     if (params.key?(:label) || params.key?(:color_skips)) && (params.keys & EDIT_KEYS).empty?
       return render json: build_json(@build.reload)
     end
 
-    if params[:variant_id].present? && params[:variant_id].to_i != @build.catalog_plan_variant_id
-      # A different home: its options are not this one's, so the build starts over.
-      variant = priced_variant(params[:variant_id]) or return
+    if params[:manual_home].present? || (params[:variant_id].present? && params[:variant_id].to_i != @build.catalog_plan_variant_id)
+      # A different home: its options are not this one's. What the rep added stays.
       Truebuild::DealBuild.assert_editable!(@build)
+      variant = home_from_params or return
 
-      @build.lines.delete_all
       vehicle = @build.vehicle&.catalog_plan_variant_id == variant.id ? @build.vehicle : nil
-      @build.update!(variant: variant, vehicle: vehicle, source: vehicle ? 'lot' : 'order')
-      service.seed
+      service.change_home!(variant, vehicle: vehicle)
+      type_manual_prices(service)
     else
       Truebuild::DealBuild.assert_editable!(@build)
 
@@ -157,7 +173,15 @@ class Api::V1::DealHomeBuildsController < ApplicationController
         if attrs.key?('delivery_point') && !%w[deliver lot].include?(attrs['delivery_point'])
           return render json: { error: 'delivery_point must be deliver or lot' }, status: :unprocessable_entity
         end
+        # These live on the deal, not the version: a draft can't change them under a signed LIVE sheet.
+        live = @deal.home_build
+        if !@build.live? && (problem = live && Agreements::DealSheetLock.edit_problem(live))
+          return render json: { error: "#{problem} Trade, payments and delivery are on the contract: unlock the sheet to change them." }, status: :conflict
+        end
+
+        moved = attrs.key?('delivery_point') && attrs['delivery_point'] != @deal.try(:delivery_point)
         @deal.update!(attrs.slice(*@deal.attribute_names))
+        service.follow_delivery_point(attrs['delivery_point']) if moved
       end
       if params.key?(:freight_miles)
         service.set_freight_miles(params[:freight_miles])
@@ -174,6 +198,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
     problem = Agreements::DealSheetLock.edit_problem(@build)
     return render json: { error: problem }, status: :conflict if problem
+    if @build.live? && @deal.cost_snapshotted?
+      return render json: { error: 'This deal is won, so its sheet cannot be cleared. A company admin can correct its lines, or move the deal back to an open stage first.' }, status: :unprocessable_entity
+    end
     if @build.live? && @deal.home_builds.where.not(id: @build.id).exists?
       return render json: { error: 'This is the LIVE version. Make another version live before deleting it.' }, status: :unprocessable_entity
     end
@@ -204,6 +231,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'read')
 
     variant = @build.variant
+    return render json: manual_home_options if variant.manual_home?
+
     book = Truebuild::OptionSource.current_for(variant)
     chosen = @build.lines.where(kind: 'option').pluck(:catalog_option_id).to_set
     rows = Truebuild::OptionSource.for_dealer(@company, book, variant, construction: @build.construction, keep_ids: chosen.to_a)
@@ -237,12 +266,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
             rules: rules.fetch(op.catalog_option_id, []).map { |_, type, target| { type: type, option_id: target } } }
         end.sort_by { |o| o[:name].to_s } }
     end
-    # A sheet holding the dealer's document fee is not offered another: it would come straight back off.
-    fee_set = @build.lines.any?(&:required_fee?)
-    addons = @company.truebuild_addons.active.for_manufacturer(variant.manufacturer_id).order(:position, :id).to_a
-    addons = addons.reject { |a| a.fee? && Truebuild::DealBuild.doc_fee_name?(a.name) } if fee_set
-    templates = templates_json
-    templates = templates.reject { |t| t[:type] == 'FeeTemplate' && Truebuild::DealBuild.doc_fee_name?(t[:name]) } if fee_set
+    addons, templates = addon_lists(variant)
     render json: { book_id: book&.id, book_name: book&.name, groups: groups,
                    addons: addons.map { |a| { id: a.id, name: a.name, mode: a.mode, price: a.price.to_f, cost: a.cost.to_f } },
                    # The same fee and package templates Products and the Deal Desk offer.
@@ -252,14 +276,14 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def reprice
     return unless authorize_action!('deals', 'update')
 
-    service = Truebuild::DealBuild.new(@build).reprice!
+    service = sheet.reprice!
     render json: build_json(@build.reload, service.warnings)
   end
 
   def create_line
     return unless authorize_action!('deals', 'update')
 
-    service = Truebuild::DealBuild.new(@build)
+    service = sheet
     case params[:kind]
     when 'option'
       return render json: { error: 'That option is not offered on this home' }, status: :unprocessable_entity unless offered_option?(params[:option_id])
@@ -289,7 +313,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
 
     line = @build.lines.find(params[:id])
-    service = Truebuild::DealBuild.new(@build)
+    service = sheet
     if params.key?(:on_addendum)
       service.set_addendum(line, truthy?(params[:on_addendum]), user: current_user,
                                                                  factory_order: params.key?(:factory_order) ? truthy?(params[:factory_order]) : nil)
@@ -304,7 +328,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     attrs = params.permit(:quantity, :unit, :tbd, :no_charge, :tax_category, :notes, :unit_retail, :label, :group_name, :unit_cost, :surcharge).to_h
     attrs['unit_retail'] = nil if params.key?(:unit_retail) && params[:unit_retail].blank?
     attrs['surcharge'] = nil if params.key?(:surcharge) && params[:surcharge].blank?
-    service.update_line(line, attrs)
+    service.update_line(line, attrs, user: current_user)
     render json: build_json(@build.reload, service.warnings)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
@@ -316,8 +340,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
 
     line = @build.lines.find(params[:id])
-    service = Truebuild::DealBuild.new(@build)
-    service.remove_line(line)
+    service = sheet
+    service.remove_line(line, user: current_user)
     render json: build_json(@build.reload, service.warnings)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
@@ -349,6 +373,30 @@ class Api::V1::DealHomeBuildsController < ApplicationController
                    new_name: [mfr.presence, plant.presence].compact.join(' ') }
   end
 
+  # What the factory order would say, with nothing created.
+  def preview_purchase_order
+    return unless authorize_action!('deals', 'read')
+
+    lines = Truebuild::FactoryOrder.lines(@build)
+    render json: { home: Truebuild::FactoryOrder.home_name(@build), lines: lines, colors: Truebuild::FactoryOrder.colors(@build),
+                   total: lines.sum { |l| l['quantity'].to_d * l['unit_cost'].to_d }.round(2).to_f,
+                   tbd: @build.lines.select(&:tbd).map(&:label), left_off: @build.lines.select { |l| l.kind == 'option' && l.option&.dealer_upgrade? && l.option.metadata.to_h['factory_order'] == false }.map(&:label),
+                   needs_override: @build.source == 'lot' || @build.variant.manual_home? }
+  end
+
+  # The agreement as it would print today, with nothing created.
+  def preview_agreement
+    return unless authorize_action!('deals', 'read')
+
+    maker = Agreements::FromDealSheet.new(@deal, user: current_user)
+    template = params[:template_id].present? ? maker.templates.find { |t| t.id == params[:template_id].to_i } : maker.templates.first
+    return render json: { error: maker.package_missing }, status: :unprocessable_entity unless template
+
+    Truebuild::DealBuild.new(@build).reprice! if Truebuild::DealBuild.stale?(@build)
+    pdf = Agreements::PacketRenderer.new(@deal.reload, template, agreement_number: 'PREVIEW').call.pdf
+    send_data pdf, type: 'application/pdf', disposition: 'inline', filename: 'agreement-preview.pdf'
+  end
+
   def create_purchase_order
     return unless authorize_action!('inventory', 'create')
 
@@ -364,7 +412,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
                end
     return render json: { error: 'Choose the factory to send it to' }, status: :unprocessable_entity unless supplier
 
-    po = Truebuild::FactoryOrder.new(@build).create!(supplier: supplier, user: current_user, manufacturer: manufacturer,
+    po = Truebuild::FactoryOrder.new(@build).create!(supplier: supplier, user: current_user, manufacturer: manufacturer, override: truthy?(params[:override]),
                                                      expected_delivery_date: params[:expected_delivery_date], notes: params[:notes])
     render json: { purchase_order: purchase_order_json(po), build: build_json(@build.reload)[:build] }, status: :created
   end
@@ -413,6 +461,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('agreements', 'create')
     return render json: { error: 'Make this version LIVE first: the agreement is made from the LIVE Deal Sheet' }, status: :unprocessable_entity unless @build.live
 
+    # The trade or the homesite may have changed on the deal since this was priced.
+    Truebuild::DealBuild.new(@build).reprice! if Truebuild::DealBuild.stale?(@build)
     maker = Agreements::FromDealSheet.new(@deal, user: current_user)
     template = params[:template_id].present? ? maker.templates.find { |t| t.id == params[:template_id].to_i } : maker.templates.first
     return render json: { error: 'That agreement package is not one of yours, or is not active' }, status: :unprocessable_entity if params[:template_id].present? && !template
@@ -544,7 +594,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     # The line's one-deal figures give way to the dealer's saved ones.
     cleared = [('set_retail' if params.key?(:price)), ('set_cost' if params.key?(:cost)), ('set_surcharge' if params.key?(:surcharge))].compact
     line.update!(metadata: line.metadata.to_h.except(*cleared)) if line && cleared.any?
-    service = Truebuild::DealBuild.new(@build).reprice!
+    service = sheet.reprice!
     render json: build_json(@build.reload, service.warnings)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
@@ -573,7 +623,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       factory_code: params[:factory_code], cost: params[:cost], retail: params[:retail], replaces_id: params[:replaces_id].presence,
       user: current_user, deal: @deal, note: params[:note]
     )
-    service = Truebuild::DealBuild.new(@build)
+    service = sheet
     service.add_option(option.id)
     render json: build_json(@build.reload, service.warnings).merge(color: { id: option.id, name: option.name }), status: :created
   rescue ArgumentError, ActiveRecord::RecordInvalid => e
@@ -608,10 +658,27 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     head :no_content
   end
 
+  # A cost that came in after signing (the hauler's bill): a company admin
+  # records it with no new signature, as long as the buyers' price holds.
+  def correct_cost
+    return unless authorize_action!('deals', 'update')
+
+    line = @build.lines.find(params[:id])
+    service = Truebuild::DealBuild.new(@build)
+    service.correct_signed_cost(line, params.require(:unit_cost), user: current_user)
+    render json: build_json(@build.reload, service.warnings)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  rescue ActionController::ParameterMissing
+    render json: { error: 'Enter the cost' }, status: :unprocessable_entity
+  rescue ArgumentError, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotSaved => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def use_doc_fee
     return unless authorize_action!('deals', 'update')
 
-    service = Truebuild::DealBuild.new(@build)
+    service = sheet
     service.use_dealer_doc_fee
     render json: build_json(@build.reload, service.warnings)
   rescue ArgumentError => e
@@ -621,6 +688,79 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   private
 
   def truthy?(value) = ActiveModel::Type::Boolean.new.cast(value) == true
+
+  # The LIVE sheet of a won or posted deal, unsigned: the rep's edit never
+  # reached the deal, so it became a correction a company admin makes.
+  def closed_sheet? = @build&.live? && @deal.cost_snapshotted? && !@build.locked?
+
+  def sheet
+    Truebuild::DealBuild.new(@build, correcting_by: closed_sheet? ? current_user : nil)
+  end
+
+  def refuse_closed_sheet_edit
+    return unless closed_sheet? && !current_user.effective_admin?
+
+    render json: { error: 'This deal is won, so its sheet is closed. A company admin can correct it, or move the deal back to an open stage.' }, status: :conflict
+  end
+
+  # A correction on a posted deal also posts to the books. If that can't happen
+  # (a closed period), none of it happens.
+  def correction_in_one_piece
+    return yield unless closed_sheet?
+
+    ActiveRecord::Base.transaction { yield }
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotSaved => e
+    render json: { error: "This deal is approved, and the change could not be posted to the books (#{e.message}). Nothing was changed." }, status: :unprocessable_entity unless performed?
+  end
+
+  # The home to start from: one a price book has, or one typed by hand.
+  def home_from_params
+    return priced_variant(params[:variant_id]) if params[:manual_home].blank?
+
+    m = params.require(:manual_home).permit(:description, :maker, :model, :width_ft, :length_ft, :beds, :baths, :building_code).to_h.symbolize_keys
+    Truebuild::ManualHome.create!(company: @company, **m)
+  end
+
+  def type_manual_prices(service)
+    return if params[:manual_home].blank?
+
+    prices = params.require(:manual_home).permit(:price, :cost).to_h.compact_blank
+    base = service.build.lines.find_by(kind: 'base')
+    service.update_line(base, { unit_retail: prices['price'], unit_cost: prices['cost'] }.compact) if base && prices.any?
+  end
+
+  # Add-ons and templates to offer. A sheet holding the dealer's document fee
+  # is not offered another. Whatever moved to Addendum A, and a template the
+  # same as an add-on, is not offered twice unless it is the one on this sheet.
+  def addon_lists(variant)
+    fee_held = @build.lines.any?(&:required_fee?)
+    upgrades = @company.dealer_colors.active.where(manufacturer_id: variant.manufacturer_id, kind: 'upgrade').pluck(:name).map { |n| n.to_s.downcase }
+    chosen = @build.lines.where(kind: 'template').map { |l| [l.source_template_type, l.source_template_id] }
+    addons = @company.truebuild_addons.active.for_manufacturer(variant.manufacturer_id).order(:position, :id).to_a
+    addons = addons.reject { |a| a.fee? && Truebuild::DealBuild.doc_fee_name?(a.name) } if fee_held
+    addons = addons.reject { |a| upgrades.include?(a.name.to_s.downcase) }
+    addon_names = addons.map { |a| a.name.to_s.downcase }
+    templates = templates_json.reject do |t|
+      next false if chosen.include?([t[:type], t[:id]])
+
+      name = t[:name].to_s.downcase
+      upgrades.include?(name) || addon_names.include?(name) || (fee_held && t[:type] == 'FeeTemplate' && Truebuild::DealBuild.doc_fee_name?(t[:name]))
+    end
+    [addons, templates]
+  end
+
+  # A home typed by hand has no book: the dealer's own upgrades and add-ons are its list.
+  def manual_home_options
+    chosen = @build.lines.where(kind: 'option').pluck(:catalog_option_id).to_set
+    upgrades = @company.dealer_colors.active.where(manufacturer_id: @build.variant.manufacturer_id, kind: 'upgrade').order(:name)
+    addons, templates = addon_lists(@build.variant)
+    rows = upgrades.map do |o|
+      { id: o.id, name: o.name, kind: 'upgrade', standard: false, dealer_color: false, dealer_upgrade: true, price: o.metadata.to_h['retail']&.to_f,
+        cost: o.metadata.to_h['cost']&.to_f, suggested_retail: nil, factory_code: o.factory_code, includes: [], unit: 'each', chosen: chosen.include?(o.id), rules: [] }
+    end
+    { book_id: nil, book_name: nil, groups: rows.any? ? [{ id: nil, name: 'Other upgrades', selection_type: 'multiple', required: false, options: rows }] : [],
+      addons: addons.map { |a| { id: a.id, name: a.name, mode: a.mode, price: a.price.to_f, cost: a.cost.to_f } }, templates: templates }
+  end
 
   def book_row_for_option(option_id)
     variant = @build.variant
@@ -647,7 +787,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     deals = @company.deals
     if current_user.uses_rbac? && !current_user.effective_admin?
       ids = permission_service.accessible_location_ids
-      deals = deals.where(location_id: ids) if ids.any?
+      deals = ids.any? ? deals.where(location_id: ids) : deals.none
     end
     @deal = deals.find(params[:deal_id])
   rescue ActiveRecord::RecordNotFound
@@ -666,13 +806,24 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   def priced_variant(id)
     variant = CatalogPlanVariant.find_by(id: id)
-    return variant if variant && Truebuild::HomeMatcher.new.priced?(variant.id)
-
-    render json: { error: 'That model is not in a published price book' }, status: :unprocessable_entity
-    nil
+    unless variant && Truebuild::HomeMatcher.new.priced?(variant.id)
+      render json: { error: 'That model is not in a published price book. You can type the home in by hand.' }, status: :unprocessable_entity
+      return nil
+    end
+    # The factories a platform admin gave this dealer, as the model list shows. A home of theirs on the lot is theirs to sell.
+    given = @company.dealer_factories.pluck(:factory_id)
+    if given.any? && given.exclude?(variant.catalog_plan&.factory_id) && !@company.vehicles.exists?(catalog_plan_variant_id: variant.id)
+      render json: { error: 'That model is not from a factory on your account' }, status: :unprocessable_entity
+      return nil
+    end
+    variant
   end
 
   def offered_option?(option_id)
+    if @build.variant.manual_home?
+      return @company.dealer_colors.active.exists?(id: option_id, manufacturer_id: @build.variant.manufacturer_id, kind: 'upgrade')
+    end
+
     book = Truebuild::OptionSource.current_for(@build.variant)
     Truebuild::OptionSource.for_dealer(@company, book, @build.variant, construction: @build.construction)
                            .any? { |op| op.catalog_option_id == option_id.to_i }
@@ -709,8 +860,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       last_unlock: Array(build.metadata.to_h['unlocks']).last,
       out_for_signature: (out = Agreements::DealSheetLock.out_for_signature(build)) && { id: out.id, number: out.agreement_number, status: out.status },
       versions: versions_json(build.deal),
-      model: model_json(variant, Truebuild::HomeMatcher.new).merge(factory: variant.catalog_plan.factory&.name,
-                                                                   series: variant.catalog_plan.series),
+      specs_set: build.metadata.to_h['home_specs'].to_h.compact_blank.keys,
+      model: model_json(variant, Truebuild::HomeMatcher.new).merge(specs_for_json(build)).merge(factory: variant.catalog_plan.factory&.name,
+                                                                   series: variant.manual_home? ? nil : variant.catalog_plan.series,
+                                                                   model_number: variant.shown_model_number),
       vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number,
                                   title: [build.vehicle.year, build.vehicle.make, build.vehicle.model].compact.join(' ') },
       design_id: build.truebuild_design_id,
@@ -726,11 +879,29 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       color_skips: build.color_skips,
       # Lines on the deal the sheet did not write (a warranty added in Products).
       other_deal_lines: other_deal_lines(build),
-      warnings: warnings || build.totals['warnings'] || [],
+      warnings: [*(warnings || build.totals['warnings'] || []), *unapplied_signatures(build)].uniq,
+      manual_home: variant.manual_home?,
+      # What this person can do here, so the screen can say so before they try.
+      can: { edit: can?('deals', 'update'), unlock: can?('agreements', 'delete'), create_po: can?('inventory', 'create'),
+             override_fee: current_user.effective_admin?, correct: current_user.effective_admin? },
+      closed: build.live? && build.deal.cost_snapshotted? && !build.locked?,
       purchase_orders: build.deal.purchase_orders.where(kind: 'factory_home', is_deleted: [false, nil]).order(:created_at)
                             .map { |po| purchase_order_json(po) },
       lines: build.lines.includes(:option).map { |l| line_json(l) }
     } }
+  end
+
+  # Buyers signed and the deal did not change: every open of the sheet says so until it is sorted out.
+  def unapplied_signatures(build)
+    return [] unless build.live?
+
+    @company.agreements.where(deal_id: build.deal_id, status: Agreement::STATUS_COMPLETED).where("metadata ? 'deal_sheet_not_applied'")
+            .map { |a| "#{a.agreement_number}: #{a.metadata.dig('deal_sheet_not_applied', 'reason')}" }
+  end
+
+  def specs_for_json(build)
+    s = build.specs
+    { beds: s['beds']&.to_i, baths: s['baths']&.to_f, width_ft: s['width_ft']&.to_i, length_ft: s['length_ft']&.to_i, square_feet: s['square_feet']&.to_i }.compact
   end
 
   def line_json(l)
@@ -743,6 +914,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       dealer_color: l.option&.dealer_color? == true && !l.option.dealer_upgrade?, dealer_upgrade: l.option&.dealer_upgrade? == true,
       factory_order: l.option&.dealer_upgrade? ? l.option.metadata.to_h['factory_order'] != false : nil,
       required_fee: l.required_fee?,
+      fee_locked: l.required_fee? && !current_user.effective_admin?,
+      doc_fee_line: l.required_fee? || (l.tax_category == 'fee' && Truebuild::DealBuild.doc_fee_name?(l.label)),
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id,
       # What a package holds ("PACKAGE 2" alone says nothing to a buyer).

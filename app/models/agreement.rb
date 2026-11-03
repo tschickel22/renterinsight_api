@@ -147,6 +147,10 @@ class Agreement < ApplicationRecord
   rescue StandardError => e
     Rails.logger.error("[Agreement #{id}] Deal Sheet lock failed: #{e.class}: #{e.message}")
     Sentry.capture_exception(e) if defined?(Sentry)
+    # The buyers signed and the deal did not change: someone has to see that.
+    update_columns(metadata: metadata.to_h.merge(
+      'deal_sheet_not_applied' => { 'at' => Time.current.iso8601, 'reason' => "Signed, but the Deal Sheet was not changed: #{e.message}." }
+    ))
     nil
   end
 
@@ -176,7 +180,13 @@ class Agreement < ApplicationRecord
   def can_send?
     status == STATUS_DRAFT &&
       agreement_signers.where(role: [AgreementSigner::ROLE_SIGNER, AgreementSigner::ROLE_COUNTER_SIGNER]).any? &&
+      signers_without_email.empty? &&
       !has_unsigned_preparer_fields?
+  end
+
+  # A buyer with no email signs on paper: the signed copy is uploaded instead of sent.
+  def signers_without_email
+    agreement_signers.where(email: '').pluck(:name)
   end
 
   def has_unsigned_preparer_fields?

@@ -45,7 +45,7 @@ module Agreements
       blocking = []
       blocking << 'The LIVE Deal Sheet is not signed yet: change it directly' unless @live&.locked?
       blocking << 'Make the change on a draft version, not the LIVE one' if @draft.live?
-      blocking << 'Nothing differs from the signed version yet' if @live&.locked? && !@draft.live? && changes[:lines].empty? && changes[:colors].empty?
+      blocking << 'Nothing differs from the signed version yet' if @live&.locked? && !@draft.live? && changes[:lines].empty? && changes[:colors].empty? && same_totals?
       blocking << 'No signed agreement found for the LIVE version' if @live&.locked? && signed.nil?
       if (open = open_change_order)
         blocking << "Change order #{open.metadata.dig('buyer_change_order', 'number')} (#{open.agreement_number}) is still open: send it, or void it first"
@@ -145,8 +145,20 @@ module Agreements
 
     # The home's own line too: a new copy is priced from today's book, and a
     # price move there must show on the change order, not hide in its total.
+    # Two lines of the same name stay two lines.
     def keyed(build)
-      build.lines.index_by { |l| l.catalog_option_id ? "o#{l.catalog_option_id}" : "#{l.kind}:#{l.label.downcase}" }
+      seen = Hash.new(0)
+      build.lines.each_with_object({}) do |l, keys|
+        key = l.catalog_option_id ? "o#{l.catalog_option_id}" : "#{l.kind}:#{l.label.downcase}"
+        seen[key] += 1
+        keys[seen[key] == 1 ? key : "#{key}##{seen[key]}"] = l
+      end
+    end
+
+    # A discount, a trade or the tax can differ with every line the same.
+    def same_totals?
+      t = changes[:totals]
+      t['difference'].zero? && t['selling_before'] == t['selling_after']
     end
 
     def price(line) = line.tbd ? nil : line.retail.to_d.round(2)
