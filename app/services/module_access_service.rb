@@ -69,7 +69,14 @@ class ModuleAccessService
   # the page for as long as a link is open, without buying it too, so the jobs
   # sent to it are never hidden.
   def linked_installer?
-    CompanyLink.open.exists?(installer_company_id: company.id)
+    return true if CompanyLink.open.exists?(installer_company_id: company.id)
+
+    # A link waiting on one of this company's admins: the page is where they
+    # accept it, and an installer has no other way to it.
+    emails = CompanyLink.where(status: 'invited', installer_company_id: nil).where.not(dealer_company_id: company.id).pluck(:invite_email)
+    return false if emails.empty?
+
+    company.users.active.where('LOWER(email) IN (?)', emails).any?(&:effective_admin?)
   end
 
   # Alias for has_module?
