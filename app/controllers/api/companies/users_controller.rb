@@ -154,7 +154,11 @@ module Api
           delivery_method: delivery_method,
           message: params[:message],
           location_ids: location_ids,
-          location_role: location_role
+          location_role: location_role,
+          recipient_data: {
+            email_template_id: params[:emailTemplateId] || params[:email_template_id],
+            sms_template_id: params[:smsTemplateId] || params[:sms_template_id]
+          }.compact.stringify_keys
         )
         
         if result[:success]

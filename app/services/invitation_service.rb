@@ -394,6 +394,9 @@ class InvitationService
   
   # Find appropriate template for invitation type
   def find_template(invitation)
+    chosen = chosen_template(invitation, invitation.delivery_method == 'sms' ? 'sms' : 'email')
+    return chosen if chosen
+
     # Convert invitation_type to template_type (e.g., 'company_user' -> 'company_user_invitation')
     template_type = "#{invitation.invitation_type}_invitation"
     
@@ -637,7 +640,19 @@ class InvitationService
   end
 
   # Find template for specific channel
+  # The template picked on Add User, if it's still usable and this company's.
+  def chosen_template(invitation, channel)
+    id = invitation.recipient_data.to_h["#{channel}_template_id"]
+    return unless id.present? && @company
+
+    CommunicationTemplate.active.for_company(@company.id)
+                         .by_type("#{invitation.invitation_type}_invitation").for_channel(channel).find_by(id: id)
+  end
+
   def find_template_for_channel(invitation, channel)
+    chosen = chosen_template(invitation, channel)
+    return chosen if chosen
+
     # Convert invitation_type to template_type (e.g., 'company_user' -> 'company_user_invitation')
     template_type = "#{invitation.invitation_type}_invitation"
     

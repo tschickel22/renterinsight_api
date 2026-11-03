@@ -138,6 +138,16 @@ RSpec.describe 'Company users access', type: :request do
       expect(response).to have_http_status(:ok)
     end
 
+    it 'uses the template picked on Add User, and only this company\'s' do
+      make = ->(co, name) { CommunicationTemplate.create!(company_id: co.id, name: name, template_type: 'company_user_invitation', channel: 'email', subject: 'S', body: 'B', is_active: true) }
+      mine = make.call(company, 'Second')
+      theirs = make.call(other_company, 'Foreign')
+      service = InvitationService.new(invited_by: admin, company: company)
+      pick = ->(id) { service.send(:chosen_template, Invitation.new(invitation_type: 'company_user', recipient_data: { 'email_template_id' => id }), 'email') }
+      expect(pick.call(mine.id)).to eq(mine)
+      expect(pick.call(theirs.id)).to be_nil
+    end
+
     it 'refuses a new invitation to a deleted email and says how to get them back' do
       target.soft_delete
       post "/api/companies/#{company.id}/users", params: { email: target.email.upcase, role: 'company_staff' }, headers: auth(admin)
