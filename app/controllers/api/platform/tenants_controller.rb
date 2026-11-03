@@ -109,6 +109,7 @@ module Api
             end
             
             # Auto-create tenant owner invitation if email provided
+            owner_invitation_error = nil
             if tenant_params[:owner_email].present?
               begin
                 # Get send_invitation param (default: false for delayed sending)
@@ -118,7 +119,9 @@ module Api
                 create_tenant_owner(@tenant, send_now: send_now)
               rescue => e
                 Rails.logger.error "Failed to create tenant owner invitation: #{e.message}"
-                # Don't fail the whole request if invitation creation fails
+                # Don't fail the whole request if invitation creation fails, but
+                # say so: the tenant exists and its owner has no invitation.
+                owner_invitation_error = e.message
               end
             end
             
@@ -131,6 +134,7 @@ module Api
             if subscription_error.present?
               response_data[:subscription_warning] = "Failed to create subscription: #{subscription_error}"
             end
+            response_data[:owner_invitation_error] = owner_invitation_error if owner_invitation_error.present?
             
             render json: response_data, status: :created
           else

@@ -38,7 +38,7 @@ module Api
         end
         
         # Check if target user is active
-        if target_user.inactive? || target_user.suspended?
+        if target_user.deactivated?
           return render json: {
             success: false,
             error: 'Cannot impersonate inactive or suspended user'

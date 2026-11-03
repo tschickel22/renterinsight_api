@@ -245,7 +245,7 @@ class ApplicationController < ActionController::API
   # E68 5a) has to take effect on their next click. Renders and returns true
   # when the token's user is deactivated.
   def refused_inactive_user?
-    return false unless @current_user_id && User.where(id: @current_user_id, status: %w[inactive suspended]).exists?
+    return false unless @current_user_id && User.deactivated.where(id: @current_user_id).exists?
 
     render json: { error: 'This account has been deactivated. Please contact your administrator.', code: 'user_inactive' }, status: :unauthorized
     true
@@ -725,8 +725,8 @@ class ApplicationController < ActionController::API
       return
     end
 
-    if target.inactive? || target.suspended?
-      Rails.logger.warn "[Impersonation] Target user #{impersonated_id} is inactive/suspended"
+    if target.deactivated?
+      Rails.logger.warn "[Impersonation] Target user #{impersonated_id} is deactivated"
       return
     end
 

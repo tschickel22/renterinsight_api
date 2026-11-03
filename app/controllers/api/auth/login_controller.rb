@@ -31,7 +31,7 @@ module Api
         user = User.sign_in_accounts.find_by(email: params[:email]&.downcase)
 
         if user&.authenticate(params[:password])
-          if user.inactive? || user.suspended?
+          if user.deactivated?
             render json: {
               success: false,
               message: 'Your account has been deactivated. Please contact support.'
@@ -157,7 +157,7 @@ module Api
 
           user = User.find(decoded[:user_id])
 
-          if user.inactive? || user.suspended? || company_access_blocked?(user)
+          if user.deactivated? || company_access_blocked?(user)
             render json: {
               success: false,
               message: 'Account is not active',

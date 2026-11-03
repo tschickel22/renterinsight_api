@@ -3,7 +3,7 @@
 module Api
   module V1
     class UsersController < ApplicationController
-      before_action :set_user, only: [:show, :update, :destroy]
+      before_action :set_user, only: [:show, :update, :destroy, :restore]
       before_action :authorize_company_access!
       before_action :authorize_user_management!, only: [:create, :update, :destroy]
 
@@ -155,11 +155,7 @@ module Api
         # RBAC: Check if user can delete users
         return unless authorize_action!('users', 'delete')
         
-        # Soft delete
-        if @user.update(deleted_at: Time.current, status: 'inactive')
-          # Deactivate all location assignments
-          @user.user_locations.update_all(active: false)
-
+        if @user.soft_delete
           render json: {
             message: 'User deleted successfully'
           }
@@ -167,6 +163,17 @@ module Api
           render json: {
             errors: ['Failed to delete user']
           }, status: :unprocessable_entity
+        end
+      end
+
+      # POST /api/v1/users/:id/restore
+      def restore
+        return unless authorize_action!('users', 'delete')
+
+        if @user.restore_deleted
+          render json: { success: true, user: user_json(@user), message: 'User restored successfully' }
+        else
+          render json: { success: false, error: @user.errors.full_messages.join(', ') }, status: :unprocessable_entity
         end
       end
 

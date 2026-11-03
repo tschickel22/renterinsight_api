@@ -72,6 +72,29 @@ RSpec.describe 'Agreement from the Deal Sheet', type: :request do
     expect(body['error']).to include('no email address')
   end
 
+  it 'the editor saving its signers back keeps them, a no-email buyer and their contact link included' do
+    buyer.update!(email: nil)
+    post path, headers: headers, params: { manager_id: manager.id }.to_json
+    agreement = company.agreements.find(body['agreement']['id'])
+    back = agreement.agreement_signers.order(:id).map { |s| { name: s.name, email: s.email, role: s.role, signing_order: s.signing_order } }
+
+    patch "/api/v1/agreements/#{agreement.id}", headers: headers, params: { agreement: { signers: back } }.to_json
+    expect(response).to have_http_status(:ok)
+    signers = agreement.reload.agreement_signers.order(:id)
+    expect(signers.count).to eq(back.size)
+    expect(signers.find_by(email: '').signable).to eq(buyer)
+  end
+
+  it 'a signer that will not save leaves the signers it had' do
+    post path, headers: headers, params: { manager_id: manager.id }.to_json
+    agreement = company.agreements.find(body['agreement']['id'])
+    count = agreement.agreement_signers.count
+
+    patch "/api/v1/agreements/#{agreement.id}", headers: headers, params: { agreement: { signers: [{ name: 'Nobody', email: 'not an email', role: 'signer' }] } }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(agreement.reload.agreement_signers.count).to eq(count)
+  end
+
   it 'installs a package for a company from the platform admin, only when the name matches' do
     admin = User.create!(email: "pa-#{SecureRandom.hex(4)}@example.com", first_name: 'P', last_name: 'A', password: 'Pass1234!',
                          company_id: company.id, role: 'platform_admin')

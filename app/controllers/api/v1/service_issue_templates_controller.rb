@@ -14,7 +14,6 @@ module Api
 
         templates = @company.service_issue_templates.active.ordered
         templates = templates.for_category(params[:category]) if params[:category].present?
-        templates = templates.for_location(current_location_id)
 
         render json: {
           templates: templates.map { |t| serialize_template(t) },
@@ -24,9 +23,9 @@ module Api
 
       # POST /api/v1/service-issue-templates
       #
-      # Upsert by title, matching how package_templates behaves: saving the
-      # same complaint twice from a ticket updates the library entry instead of
-      # erroring or duplicating it.
+      # One template per title. Saving a title already on the list used to
+      # overwrite it with no warning, so it now answers 409 and the screen asks;
+      # replacing is an update, and needs that permission.
       def create
         return unless authorize_action!('service', 'create')
 
@@ -36,12 +35,16 @@ module Api
                            .first
 
         if existing
+          unless ActiveModel::Type::Boolean.new.cast(params[:replace])
+            return render json: { error: "\"#{existing.title}\" is already on your template list.", existing: true }, status: :conflict
+          end
+          return unless authorize_action!('service', 'update')
+
           existing.update(template_params)
           return render json: { template: serialize_template(existing), existing: true }
         end
 
         template = @company.service_issue_templates.new(template_params)
-        template.location_id ||= current_location_id
 
         if template.save
           render json: { template: serialize_template(template) }, status: :created
@@ -96,10 +99,6 @@ module Api
         render json: { error: 'Template not found' }, status: :not_found if @template.nil?
       end
 
-      def current_location_id
-        Current.respond_to?(:location_id) ? Current.location_id : nil
-      end
-
       def template_params
         params.require(:template).permit(
           :title, :category, :complaint, :correction,
@@ -117,8 +116,8 @@ module Api
           complaint: template.complaint,
           correction: template.correction,
           defaultPayType: template.default_pay_type,
-          defaultHours: template.default_hours,
-          defaultRate: template.default_rate,
+          defaultHours: template.default_hours&.to_f,
+          defaultRate: template.default_rate&.to_f,
           defaultParts: template.default_parts,
           position: template.position,
           isActive: template.is_active,

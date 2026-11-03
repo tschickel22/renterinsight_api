@@ -1303,25 +1303,35 @@ module Api
         return if signers_data.blank?
 
         if agreement.status == Agreement::STATUS_DRAFT
-          # Draft: safe to do full replace
-          agreement.agreement_signers.destroy_all
+          # Draft: safe to do full replace, all or nothing: a signer that won't
+          # save must not cost the agreement the signers it already had. The
+          # editor sends names and emails only, so a signer it sends back keeps
+          # the person they were linked to.
+          Agreement.transaction do
+            linked = agreement.agreement_signers.to_a.index_by { |s| [s.name.to_s.strip.downcase, s.email.to_s.strip.downcase] }
+            agreement.agreement_signers.destroy_all
 
-          signers_data.each do |sd|
-            sd = sd.to_unsafe_h if sd.respond_to?(:to_unsafe_h)
+            signers_data.each do |sd|
+              sd = sd.to_unsafe_h if sd.respond_to?(:to_unsafe_h)
 
-            # Determine signable (polymorphic link to Contact)
-            signable_type = sd['signable_type'] || (sd['contact_id'].present? ? 'Contact' : nil)
-            signable_id = sd['signable_id'] || sd['contact_id']
+              # Determine signable (polymorphic link to Contact)
+              signable_type = sd['signable_type'] || (sd['contact_id'].present? ? 'Contact' : nil)
+              signable_id = sd['signable_id'] || sd['contact_id']
+              if signable_type.blank? && (was = linked[[sd['name'].to_s.strip.downcase, sd['email'].to_s.strip.downcase]])
+                signable_type = was.signable_type
+                signable_id = was.signable_id
+              end
 
-            agreement.agreement_signers.create!(
-              name: sd['name'],
-              email: sd['email'],
-              phone: sd['phone'],
-              role: sd['role'] || 'signer',
-              signing_order: sd['signing_order'] || 1,
-              signable_type: signable_type,
-              signable_id: signable_id
-            )
+              agreement.agreement_signers.create!(
+                name: sd['name'],
+                email: sd['email'].to_s,
+                phone: sd['phone'],
+                role: sd['role'] || 'signer',
+                signing_order: sd['signing_order'] || 1,
+                signable_type: signable_type,
+                signable_id: signable_id
+              )
+            end
           end
         else
           # Non-draft: only add NEW signers (don't touch existing)

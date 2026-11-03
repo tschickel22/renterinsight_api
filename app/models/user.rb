@@ -72,6 +72,10 @@ class User < ApplicationRecord
 
   # Scopes
   scope :active,           -> { where(status: 'active') }
+  # Everyone who must not get in. The Edit User screen saves 'disabled', the
+  # bulk and delete paths save 'inactive', so one list covers them all.
+  DEACTIVATED_STATUSES = %w[inactive suspended disabled].freeze
+  scope :deactivated, -> { where(status: DEACTIVATED_STATUSES).or(where.not(deleted_at: nil)) }
   scope :platform_admins,  -> { where(role: %w[platform_admin super_admin]) }
   
   # Virtual attribute for full name (backward compatibility with 'name' field)
@@ -99,6 +103,38 @@ class User < ApplicationRecord
   
   def active?
     status == 'active'
+  end
+
+  def deactivated?
+    DEACTIVATED_STATUSES.include?(status) || deleted_at.present?
+  end
+
+  # Delete User keeps the person and everything they touched, and can be undone
+  # with restore_deleted. Their location rows are stamped with the same time as
+  # deleted_at so a restore brings back those and not older removed ones.
+  def soft_delete
+    at = Time.current.floor(6)
+    transaction do
+      update!(deleted_at: at, status: 'inactive')
+      user_locations.where(active: true).update_all(active: false, updated_at: at)
+    end
+    true
+  rescue ActiveRecord::RecordInvalid
+    false
+  end
+
+  # False with errors when the company has no free seat. Someone who was still
+  # waiting on an invitation goes back to waiting.
+  def restore_deleted
+    at = deleted_at
+    still_invited = invitation_id.present? && Invitation.where(id: invitation_id).where.not(status: 'accepted').exists?
+    transaction do
+      update!(deleted_at: nil, status: still_invited ? 'invited' : 'active')
+      user_locations.where(active: false, updated_at: at).update_all(active: true) if at
+    end
+    true
+  rescue ActiveRecord::RecordInvalid
+    false
   end
 
   # Record sign-in activity for "Last Login" reporting. Token refresh keeps a
@@ -256,23 +292,23 @@ class User < ApplicationRecord
   def accessible_locations
     return company.locations if platform_admin? || admin? || company_admin?
     
+    company_assignments = user_role_assignments.where(tier: 'company', company_id: company_id).active
+
     # Company-tier roles get access to ALL company locations
-    has_company_tier_role = user_role_assignments
-      .where(tier: 'company')
-      .where(company_id: company_id)
-      .active
-      .exists?
-    
-    if has_company_tier_role
-      return company.locations
-    end
-    
+    return company.locations if company_assignments.joins(:role).where(roles: { tier: 'company' }).exists?
+
+    # A Sales Rep and the like is stored at company tier when no one location
+    # is named, so the tier alone doesn't say. The locations picked on Add or
+    # Edit User do: rows narrow them, and no rows is "All locations".
+    picked_location_ids = user_locations.where(active: true).pluck(:location_id)
+    return company.locations if picked_location_ids.empty? && company_assignments.exists?
+
     # Location-tier roles only get their assigned locations
     direct_location_ids = user_role_assignments
       .where(tier: 'location')
       .pluck(:location_id)
-    
-    Location.where(id: direct_location_ids.uniq)
+
+    Location.where(id: (direct_location_ids + picked_location_ids).uniq)
   end
 
   # Get all regions accessible to this user
@@ -352,7 +388,7 @@ class User < ApplicationRecord
     return nil unless target_company_id
 
     # Find the role by key, name, or ID
-    role = find_role_by_identifier(role_identifier)
+    role = find_role_by_identifier(role_identifier, company_id: target_company_id)
     return nil unless role
 
     # Determine tier from role if not specified
@@ -399,7 +435,7 @@ class User < ApplicationRecord
     target_company_id = company_id || self.company_id
     return nil unless target_company_id
 
-    role = find_role_by_identifier(role_identifier)
+    role = find_role_by_identifier(role_identifier, company_id: target_company_id)
     return nil unless role
 
     ActiveRecord::Base.transaction do
@@ -443,6 +479,11 @@ class User < ApplicationRecord
   # The account the person signs in with: password, MFA and resets live there.
   def sign_in_account
     primary_user || self
+  end
+
+  # Nobody has used this login yet, e.g. an imported user who never set a password.
+  def never_signed_in?
+    last_sign_in_at.nil? && !LoginActivity.where(user_type: 'User', user_id: id).exists?
   end
 
   # Every account this person can switch to, including this one: active, in a
@@ -498,12 +539,17 @@ class User < ApplicationRecord
   end
 
   # Find a role by various identifiers
-  def find_role_by_identifier(identifier)
+  # With a company, only that company's roles and the shared system roles count.
+  # Without this, a name lookup could return another company's custom role with
+  # the same name.
+  def find_role_by_identifier(identifier, company_id: nil)
     return nil if identifier.blank?
+
+    roles = company_id ? Role.where(company_id: [nil, company_id]) : Role.all
 
     # If it's an integer or looks like an ID, find by ID first
     if identifier.is_a?(Integer) || identifier.to_s.match?(/\A\d+\z/)
-      role = Role.find_by(id: identifier)
+      role = roles.find_by(id: identifier)
       return role if role
     end
 
@@ -541,24 +587,24 @@ class User < ApplicationRecord
     # Try mapped key first
     mapped_key = role_key_mapping[identifier_str]
     if mapped_key
-      role = Role.find_by(key: mapped_key)
+      role = roles.find_by(key: mapped_key)
       return role if role
     end
 
     # Try by exact key
-    role = Role.find_by(key: identifier_str)
+    role = roles.find_by(key: identifier_str)
     return role if role
 
     # Try by exact name
-    role = Role.find_by(name: identifier_str)
+    role = roles.find_by(name: identifier_str)
     return role if role
 
     # Try case-insensitive key match
-    role = Role.where('LOWER(key) = ?', identifier_str.downcase).first
+    role = roles.where('LOWER(key) = ?', identifier_str.downcase).first
     return role if role
 
     # Try case-insensitive name match
-    role = Role.where('LOWER(name) = ?', identifier_str.downcase).first
+    role = roles.where('LOWER(name) = ?', identifier_str.downcase).first
     return role if role
 
     Rails.logger.warn "⚠️ [RBAC] Could not find role for identifier: #{identifier_str}"

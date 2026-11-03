@@ -89,6 +89,8 @@ module Api
             # Already signs in to another company: accept with that password,
             # no name or new password asked for (E68 5a).
             existingAccount: invitation.existing_account?,
+            # Never signed in, so they have no password to confirm: they create one.
+            setsPassword: invitation.sets_password_on_accept?,
             token: token,
             branding: company_branding
           }
