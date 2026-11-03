@@ -292,23 +292,23 @@ class User < ApplicationRecord
   def accessible_locations
     return company.locations if platform_admin? || admin? || company_admin?
     
+    company_assignments = user_role_assignments.where(tier: 'company', company_id: company_id).active
+
     # Company-tier roles get access to ALL company locations
-    has_company_tier_role = user_role_assignments
-      .where(tier: 'company')
-      .where(company_id: company_id)
-      .active
-      .exists?
-    
-    if has_company_tier_role
-      return company.locations
-    end
-    
+    return company.locations if company_assignments.joins(:role).where(roles: { tier: 'company' }).exists?
+
+    # A Sales Rep and the like is stored at company tier when no one location
+    # is named, so the tier alone doesn't say. The locations picked on Add or
+    # Edit User do: rows narrow them, and no rows is "All locations".
+    picked_location_ids = user_locations.where(active: true).pluck(:location_id)
+    return company.locations if picked_location_ids.empty? && company_assignments.exists?
+
     # Location-tier roles only get their assigned locations
     direct_location_ids = user_role_assignments
       .where(tier: 'location')
       .pluck(:location_id)
-    
-    Location.where(id: direct_location_ids.uniq)
+
+    Location.where(id: (direct_location_ids + picked_location_ids).uniq)
   end
 
   # Get all regions accessible to this user
