@@ -5,7 +5,7 @@ module Api
     class UsersController < ApplicationController
       before_action :authenticate_user!
       before_action :set_company_and_verify_access
-      before_action :set_user, only: [:show, :update, :destroy, :restore, :resend_invitation]
+      before_action :set_user, only: [:show, :update, :destroy, :restore, :resend_invitation, :other_logins]
       
       # GET /api/companies/:company_id/users
       def index
@@ -74,6 +74,26 @@ module Api
         }
       end
       
+      # GET /api/companies/:company_id/users/:id/other_logins
+      # The other companies this person works in. Platform team only: it shows
+      # another company's data, which a dealer's admin must not see.
+      def other_logins
+        unless current_user.platform_admin? || current_user.super_admin?
+          return render json: { success: false, error: 'You do not have permission to see this.' }, status: :forbidden
+        end
+
+        root = @user.sign_in_account
+        others = ::User.where(id: root.id).or(::User.where(primary_user_id: root.id))
+                       .where(deleted_at: nil).where.not(id: @user.id).includes(:company).order(:id)
+        render json: {
+          success: true,
+          logins: others.map do |u|
+            role = u.user_role_assignments.where(company_id: u.company_id).includes(:role).order(:id).first&.role
+            { user_id: u.id, company_name: u.company&.name, role: role&.name || u.role, status: u.status }
+          end
+        }
+      end
+
       # POST /api/companies/:company_id/users/bulk-invite
       # { people: [{ email, name }], role, match_existing_roles }
       def bulk_invite

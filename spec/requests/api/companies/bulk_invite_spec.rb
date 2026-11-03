@@ -174,6 +174,32 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
     end
   end
 
+  describe 'GET other-logins' do
+    let!(:rep) { dealer_user('rep@easy.example', rep_role) }
+    let!(:linked) do
+      user = User.create!(email: rep.email, primary_user: rep, company_id: install.id, first_name: 'Rep', last_name: 'Dealer',
+                          role: 'Company Staff', status: 'active', password: SecureRandom.hex(16))
+      UserRoleAssignment.create!(user: user, role: staff_role, company_id: install.id, tier: 'company', assigned_at: Time.current)
+      user
+    end
+
+    it 'names the other company and role, from either record' do
+      get "/api/companies/#{install.id}/users/#{linked.id}/other-logins", headers: headers_for(platform_admin)
+      expect(body['logins']).to contain_exactly(include('company_name' => 'Easy Homes', 'role' => 'Sales Representative'))
+
+      get "/api/companies/#{dealer.id}/users/#{rep.id}/other-logins", headers: headers_for(platform_admin)
+      expect(body['logins']).to contain_exactly(include('company_name' => 'Easy Install', 'role' => 'Company Staff'))
+    end
+
+    it "is empty for someone in one company, and refused to a dealer's admin" do
+      get "/api/companies/#{install.id}/users/#{install_admin.id}/other-logins", headers: headers_for(platform_admin)
+      expect(body['logins']).to eq([])
+
+      get "/api/companies/#{install.id}/users/#{linked.id}/other-logins", headers: headers_for(install_admin)
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
   describe 'GET available-roles' do
     it "offers system roles and this company's own, never another company's" do
       mine = Role.create!(company_id: install.id, tier: 'company', key: 'install_lead', name: 'Install Lead')
@@ -294,6 +320,71 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
       expect(linked.primary_user).to eq(owner)
       expect(linked.user_role_assignments.map(&:role)).to eq([admin_role])
       expect(owner.reload.company_id).to eq(dealer.id)
+    end
+
+    describe 'editing the owner on an existing invitation' do
+      def update_owner(tenant, email)
+        patch "/api/platform/tenants/#{tenant.id}/update_owner_invitation",
+              headers: headers_for(platform_admin), params: { email: email }.to_json
+      end
+
+      let!(:tokens) { capture_tokens }
+      let(:tenant) do
+        create_tenant('placeholder@new.example')
+        ::Company.find(body['tenant']['id'])
+      end
+
+      it 'links an owner with an existing login, and the old link stops working' do
+        owner = dealer_user('owner@easy.example', admin_role)
+        old_token = tokens['placeholder@new.example']
+        invitation = tenant.invitations.find_by!(invitation_type: 'tenant')
+
+        update_owner(tenant, owner.email)
+        expect(response).to have_http_status(:ok)
+        expect(Invitation.find_valid_token(tokens['placeholder@new.example'] || old_token)).to be_nil
+        expect(invitation.reload.existing_account?).to be(true)
+        expect(invitation.sent_at).to be_nil
+
+        post "/api/platform/tenants/#{tenant.id}/send_owner_invitation", headers: headers_for(platform_admin)
+        expect(response).to have_http_status(:ok)
+
+        accept(tokens[owner.email], password: 'Pass1234!')
+        expect(body['success']).to be(true)
+        expect(tenant.users.find_by!(email: owner.email).primary_user).to eq(owner)
+      end
+
+      it "doesn't let an old link set the new person's first password" do
+        rep = dealer_user('rep@easy.example', rep_role, signed_in: false)
+        tenant
+        old_token = tokens['placeholder@new.example']
+        digest = rep.reload.password_digest
+
+        update_owner(tenant, rep.email)
+        accept(old_token, password: 'Attacker123!')
+
+        expect(rep.reload.password_digest).to eq(digest)
+        expect(tenant.users.where(email: rep.email)).to be_empty
+      end
+
+      it 'refuses a platform admin' do
+        update_owner(tenant, platform_admin.email)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(body['error']).to include('platform admin')
+      end
+
+      it 'refuses to change the email once the owner has accepted, and allows saving it unchanged' do
+        tenant
+        invitation = tenant.invitations.find_by!(invitation_type: 'tenant')
+        invitation.mark_as_accepted!
+
+        update_owner(tenant, invitation.email)
+        expect(response).to have_http_status(:ok)
+
+        update_owner(tenant, 'someone.else@new.example')
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(invitation.reload.email).to eq('placeholder@new.example')
+      end
     end
 
     it 'says so when the owner invite could not be made' do

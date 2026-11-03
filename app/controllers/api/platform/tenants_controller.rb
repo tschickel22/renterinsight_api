@@ -484,6 +484,24 @@ module Api
           update_params[:email] = params[:email] if params[:email].present?
           update_params[:phone] = params[:phone] if params[:phone].present?
           update_params[:recipient_name] = recipient_name if recipient_name.present?
+
+          new_email = params[:email].to_s.strip.downcase
+          if new_email.present? && new_email != invitation.email.to_s.downcase
+            if invitation.accepted?
+              return render json: {
+                error: 'This owner has already accepted, so changing the email here would not change who owns the company. Add the new person in Settings, Users.'
+              }, status: :unprocessable_entity
+            end
+
+            problem = InvitationService.new(invited_by: current_user, company: @tenant).tenant_owner_email_problem(new_email, except: invitation)
+            return render(json: { error: problem }, status: :unprocessable_entity) if problem
+
+            # A link already sent went to the old address. It must stop working,
+            # or whoever holds it could accept as the new person, and could set
+            # their first password. Sending again makes a fresh link.
+            update_params[:token_digest] = Digest::SHA256.hexdigest(SecureRandom.urlsafe_base64(32))
+            update_params[:sent_at] = nil
+          end
           
           if update_params.empty?
             return render json: { 
