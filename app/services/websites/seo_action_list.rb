@@ -55,7 +55,7 @@ module Websites
       item('google_ads_conversion', 'Add your Google Ads conversion label',
            'Your Google Ads tag is on the site, but Google is not told when someone sends in a form, so your ' \
            'ads cannot learn which clicks turn into leads. Whoever runs your ads can give you the label.',
-           'Add it', :conversion_settings)
+           'Add it', :website_settings)
     end
 
     def prices_item

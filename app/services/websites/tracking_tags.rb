@@ -26,6 +26,8 @@ module Websites
       'google_tag_manager_id' => /\AGTM-[A-Z0-9]{4,}\z/i,
       # Advertising
       'google_ads_id'         => /\AAW-\d{6,12}\z/i,
+      # Not a tag of its own: where a form reports a lead (google_ads_lead_target).
+      'google_ads_lead_label' => /\A[\w-]{4,60}\z/,
       'facebook_pixel_id'     => /\A\d{8,20}\z/,
       'tiktok_pixel_id'       => /\A[A-Z0-9]{15,30}\z/i,
       'snapchat_pixel_id'     => /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/,
@@ -39,8 +41,6 @@ module Websites
       'microsoft_clarity_id'  => /\A[a-z0-9]{6,14}\z/i,
       'logrocket_app_id'      => %r{\A[a-z0-9]{4,10}/[a-z0-9_-]{1,60}\z}i
     }.freeze
-
-    LEAD_LABEL_FORMAT = /\A[\w-]{4,60}\z/
 
     # What the website and landing page params permit, so a new vendor here
     # can't be dropped by a controller that was never told about it.
@@ -74,9 +74,13 @@ module Websites
       id_for('google_ads_id') || company_tracking['googleAdsId'].presence
     end
 
+    # This site's, entered on its Analytics tab, or the company's conversion
+    # settings, so a customer without settings access can still supply it.
     def google_ads_lead_label
-      label = company_tracking['googleAdsLeadLabel'].to_s.strip
-      label if LEAD_LABEL_FORMAT.match?(label)
+      id_for('google_ads_lead_label') || begin
+        label = company_tracking['googleAdsLeadLabel'].to_s.strip
+        label if ID_FORMATS.fetch('google_ads_lead_label').match?(label)
+      end
     end
 
     # A custom snippet counts: someone may have pasted their tag in by hand.
