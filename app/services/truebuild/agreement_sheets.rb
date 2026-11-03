@@ -16,8 +16,9 @@ module Truebuild
 
     # Schedule A's rows, in sheet order. A color or finish picked at no charge
     # is on the Colors sheet, not here (the PO does the same); one that costs
-    # extra is on both. A custom line counts when the rep left it a factory
-    # option; lines adopted from Products are fees and services, not options.
+    # extra is on both. A line the rep typed and ticked for Addendum A is an
+    # option by then (DealBuild#set_addendum), kept on their list for next time;
+    # lines adopted from Products are fees and services, not options.
     def schedule_rows
       @schedule_rows ||= options.map do |l|
         { 'description' => l.label, 'code' => l.factory_code.presence, 'group' => l.group_name.presence,
@@ -62,11 +63,11 @@ module Truebuild
 
     # "28 x 56, 3 bed, 2 bath, 1,493 sq ft"
     def home_size
-      v = @build.variant
-      size = "#{v.width_ft} x #{v.length_ft}" if v.width_ft && v.length_ft
-      baths = v.baths && v.baths.to_d.to_s('F').sub(/\.0\z/, '')
-      sq = v.square_feet && v.square_feet.to_s.reverse.scan(/\d{1,3}/).join(',').reverse
-      [size, ("#{v.beds} bed" if v.beds), ("#{baths} bath" if baths), ("#{sq} sq ft" if sq)].compact.join(', ')
+      v = @build.specs
+      size = "#{v['width_ft']} x #{v['length_ft']}" if v['width_ft'] && v['length_ft']
+      baths = v['baths'] && v['baths'].to_d.to_s('F').sub(/\.0\z/, '')
+      sq = v['square_feet'] && v['square_feet'].to_s.reverse.scan(/\d{1,3}/).join(',').reverse
+      [size, ("#{v['beds']} bed" if v['beds']), ("#{baths} bath" if baths), ("#{sq} sq ft" if sq)].compact.join(', ')
     end
 
     private

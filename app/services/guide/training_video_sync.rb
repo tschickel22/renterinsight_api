@@ -31,6 +31,10 @@ module Guide
 
     def apply_one(r)
       video = TrainingVideo.find_or_initialize_by(uid: r['uid'])
+      # An unreviewed draft stays on staging. Once copied, a video keeps following
+      # staging, so unpublishing it there still hides it here.
+      return false if video.new_record? && !r['is_published']
+
       source = video.source_files || {}
       return false if video.persisted? && source['updated_at'] == r['updated_at']
 

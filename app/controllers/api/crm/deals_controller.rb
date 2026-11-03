@@ -459,6 +459,10 @@ module Api
           params[:deal][:custom_field_values] = merged
         end
         
+        if (problem = signed_terms_problem)
+          return render json: { error: problem }, status: :conflict
+        end
+
         if @deal.update(deal_params)
           # Track stage change
           if old_stage != @deal.stage
@@ -629,6 +633,19 @@ module Api
       end
 
       private
+
+      # Trade and payments print on the contract. Once it is signed or out for
+      # signature they change with the sheet, which says how; a save that leaves
+      # them as they are is fine.
+      def signed_terms_problem
+        build = @deal.home_build
+        problem = build && Agreements::DealSheetLock.edit_problem(build)
+        return nil unless problem
+
+        changed = deal_params.to_h.slice('trade_allowance', 'trade_payoff', 'down_payment', 'additional_payment')
+                             .any? { |key, value| value.to_d != @deal[key].to_d }
+        changed ? "#{problem} Trade and payments are on the contract: unlock the sheet to change them." : nil
+      end
 
       def posted_deal = @deal
 

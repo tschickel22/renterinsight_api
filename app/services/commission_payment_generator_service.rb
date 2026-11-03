@@ -59,6 +59,27 @@ class CommissionPaymentGeneratorService
     payments.compact
   end
 
+  # The deal changed after commission was figured (a correction or a signed
+  # change order). Each person's commission follows it. What is not paid yet
+  # takes the new figure, and an approved one goes back for approval. What is
+  # already paid stands: more owed becomes a new payment, and less owed is noted
+  # on the paid one for a manager to settle.
+  def recalculate
+    return unless @deal.stage_is_won? && @deal.commission_plan.present?
+
+    ROLE_FIELDS.each do |role, field|
+      user_id = @deal.public_send(field)
+      next if user_id.blank?
+
+      payments = CommissionPayment.where(deal_id: @deal.id, payee_user_id: user_id, is_deleted: [false, nil]).where.not(status: %w[reversed cancelled]).order(:id).to_a
+      if payments.empty?
+        process_participant(role, user_id, []) if @deal.gl_posted?
+        next
+      end
+      recalculate_participant(role, user_id, payments)
+    end
+  end
+
   def preview
     previews = []
     ROLE_FIELDS.each { |role, field| preview_participant(role, @deal.public_send(field), previews) }
@@ -236,6 +257,36 @@ class CommissionPaymentGeneratorService
       location_id: @deal.location_id,
       calculation_details: calculation_data.deep_stringify_keys
     )
+  end
+
+  def recalculate_participant(role, user_id, payments)
+    lines = lines_for_role(role)
+    target = lines.sum(BigDecimal('0')) { |l| l[:amount] }.round(2)
+    paid, open = payments.partition { |p| %w[paid partially_paid].include?(p.status) }
+    owed = (target - paid.sum { |p| p.amount.to_d }).round(2)
+    details = build_calculation_details_for_role(role, lines).merge(line_items: build_line_items(lines), deal_economics: build_deal_economics,
+                                                                    recalculated_at: Time.current.iso8601).deep_stringify_keys
+    first, *rest = open
+    rest.each { |p| p.update_columns(status: 'cancelled', updated_at: Time.current) }
+    if first && owed.positive?
+      return if first.amount.to_d == owed && rest.empty?
+
+      first.update_columns(amount: owed, status: 'pending', approved_by_user_id: nil, approved_at: nil,
+                           calculation_details: details.merge('was' => first.amount.to_f), updated_at: Time.current)
+      return
+    end
+
+    first&.update_columns(status: 'cancelled', updated_at: Time.current)
+    if owed.positive?
+      @deal.company.commission_payments.create!(
+        deal_id: @deal.id, payee_user_id: user_id, commission_plan_id: @deal.commission_plan_id, amount: owed, status: 'pending',
+        location_id: @deal.location_id, calculation_details: details.merge('adjustment_of' => paid.map(&:id))
+      )
+    elsif owed.negative? && paid.any?
+      last = paid.last
+      last.update_columns(calculation_details: last.calculation_details.to_h.merge('overpaid_after_change' => (-owed).to_f, 'recalculated_at' => Time.current.iso8601),
+                          updated_at: Time.current)
+    end
   end
 
   def preview_participant(role, user_id, previews)

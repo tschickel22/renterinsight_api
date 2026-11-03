@@ -8,7 +8,7 @@ class CatalogOption < ApplicationRecord
 
   belongs_to :group, class_name: 'CatalogOptionGroup', foreign_key: :catalog_option_group_id, inverse_of: :options
   belongs_to :manufacturer
-  # Set on a dealer's own color (backlog E85): only that dealer ever sees it.
+  # Set on a dealer's own color (backlog E85) or upgrade: only that dealer ever sees it.
   belongs_to :company, optional: true
   belongs_to :replaced_by, class_name: 'CatalogOption', optional: true
   has_many :prices, class_name: 'CatalogOptionPrice', dependent: :restrict_with_error
@@ -26,7 +26,9 @@ class CatalogOption < ApplicationRecord
   scope :active, -> { where(status: 'active') }
   scope :platform, -> { where(company_id: nil) }
 
+  # True for anything the dealer added, color or upgrade.
   def dealer_color? = company_id.present?
+  def dealer_upgrade? = company_id.present? && kind == 'upgrade'
 
   private
 

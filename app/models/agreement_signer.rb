@@ -11,7 +11,9 @@ class AgreementSigner < ApplicationRecord
 
   # Validations
   validates :name, presence: true
-  validates :email, presence: true, format: { with: URI::MailTo::EMAIL_REGEXP }
+  # A buyer with no email signs on paper; everyone else needs one.
+  validates :email, presence: true, unless: -> { signable_type == 'Contact' }
+  validates :email, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
   validates :role, presence: true, inclusion: { in: %w[signer counter_signer preparer cc] }
   validates :status, presence: true, inclusion: { in: %w[pending viewed signed declined] }
   validates :access_token, presence: true, uniqueness: true

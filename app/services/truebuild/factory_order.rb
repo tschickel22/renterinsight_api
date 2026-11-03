@@ -4,7 +4,8 @@ module Truebuild
   # The factory PO for a deal's home (backlog E51), written from its LIVE Deal
   # Sheet: the model and each factory option with its code, quantity and
   # dealer cost. Dealer add-ons, fees, freight and set-up are not the
-  # factory's, so they stay off. Allowed at any stage of the deal.
+  # factory's, so they stay off, as does a dealer upgrade marked as theirs to
+  # supply. Allowed at any stage of the deal.
   #
   # The PO keeps a snapshot of those lines, so the sheet can say when it has
   # changed since (a draft PO is rewritten with one click; a sent one needs a
@@ -27,9 +28,10 @@ module Truebuild
     def self.lines(build)
       color_ids = color_option_ids(build)
       build.lines.select { |l| %w[base option].include?(l.kind) && l.priced? }
-           .reject { |l| l.kind == 'option' && color_ids.include?(l.catalog_option_id) && l.unit_cost.to_d.zero? }.map do |l|
+           .reject { |l| l.kind == 'option' && color_ids.include?(l.catalog_option_id) && l.unit_cost.to_d.zero? }
+           .reject { |l| l.kind == 'option' && l.option&.dealer_upgrade? && l.option.metadata.to_h['factory_order'] == false }.map do |l|
         { 'kind' => l.kind, 'option_id' => l.catalog_option_id, 'description' => l.kind == 'base' ? home_name(build) : l.label,
-          'code' => l.kind == 'base' ? build.variant.model_number : l.factory_code,
+          'code' => l.kind == 'base' ? build.variant.shown_model_number : l.factory_code,
           'quantity' => l.quantity.to_d.to_s, 'unit_cost' => l.unit_cost.to_d.round(2).to_s }
       end
     end
@@ -67,6 +69,8 @@ module Truebuild
 
     def self.home_name(build)
       v = build.variant
+      return v.catalog_plan.name if v.manual_home?
+
       "#{v.manufacturer&.name} #{v.catalog_plan.name} #{v.model_number}".squish
     end
 
@@ -127,8 +131,10 @@ module Truebuild
                                 email: cm&.effective_po_email || manufacturer.po_email.presence || manufacturer.contact_email)
     end
 
-    def create!(supplier:, user:, expected_delivery_date: nil, notes: nil, manufacturer: nil)
-      refuse_unless_orderable!
+    # override: the rep orders a home the sheet says needs no order: a duplicate of
+    # one on the lot, or one marked available by mistake.
+    def create!(supplier:, user:, expected_delivery_date: nil, notes: nil, manufacturer: nil, override: false)
+      refuse_unless_orderable!(override: override)
       po = @deal.company.purchase_orders.build(
         kind: 'factory_home', deal: @deal, deal_home_build: @build, supplier: supplier, vendor_id: supplier.id, manufacturer: manufacturer,
         location_id: @deal.location_id || @build.location_id, created_by: user, status: 'draft', order_date: Date.current,
@@ -143,7 +149,8 @@ module Truebuild
     def refresh!(po)
       raise Refused, "#{po.po_number} was already sent; ask the factory for a change instead" unless po.draft?
 
-      refuse_unless_orderable!
+      # The PO exists, so whoever made it already decided to order this home.
+      refuse_unless_orderable!(override: true)
       po.lines.each(&:mark_for_destruction)
       po.deal_home_build = @build
       write_lines(po)
@@ -204,9 +211,10 @@ module Truebuild
 
     private
 
-    def refuse_unless_orderable!
+    def refuse_unless_orderable!(override: false)
       raise Refused, 'Only the LIVE version of the Deal Sheet is ordered' unless @build.live?
-      raise Refused, 'This home is on the lot, so there is nothing to order from the factory' if @build.source == 'lot'
+      raise Refused, 'This home is on the lot, so there is nothing to order from the factory' if @build.source == 'lot' && !override
+      raise Refused, 'This home was typed by hand, so there is no factory order to write' if @build.variant.manual_home? && !override
       raise Refused, 'The Deal Sheet has no home yet' unless @build.lines.any? { |l| l.kind == 'base' }
     end
 

@@ -21,6 +21,20 @@ class DealHomeBuild < ApplicationRecord
   belongs_to :created_by, class_name: 'User', optional: true
   has_many :lines, -> { order(:position, :id) }, class_name: 'DealHomeBuildLine', inverse_of: :build, dependent: :delete_all
 
+  # What the sheet says about the home: the catalog's model, then the home on
+  # the lot if there is one, then what the rep corrected on this sheet.
+  SPEC_KEYS = %w[beds baths width_ft length_ft square_feet].freeze
+
+  def specs
+    base = SPEC_KEYS.index_with { |k| variant&.public_send(k) }
+    if vehicle
+      from_home = { 'beds' => vehicle.try(:bedrooms), 'baths' => vehicle.try(:bathrooms), 'width_ft' => vehicle.try(:width), 'length_ft' => vehicle.try(:length),
+                    'square_feet' => vehicle.try(:square_feet) }.compact
+      base.merge!(from_home)
+    end
+    base.merge(metadata.to_h['home_specs'].to_h.compact_blank)
+  end
+
   validates :source, inclusion: { in: SOURCES }
   validates :status, inclusion: { in: STATUSES }
   validates :version_number, uniqueness: { scope: :deal_id }

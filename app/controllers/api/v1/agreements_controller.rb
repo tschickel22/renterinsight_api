@@ -215,6 +215,10 @@ module Api
           }, status: :unprocessable_entity
         end
 
+        if (no_email = @agreement.signers_without_email).any?
+          return render json: { error: "#{no_email.to_sentence} has no email address. Add one to the signer, or sign on paper and upload the signed copy." }, status: :unprocessable_entity
+        end
+
         unless @agreement.can_send?
           return render json: { error: 'Agreement cannot be sent. Ensure it is in draft status with at least one signer.' }, status: :unprocessable_entity
         end

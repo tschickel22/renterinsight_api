@@ -15,9 +15,11 @@ module Api
       end
 
       # GET /api/public/training_videos/series/:module_key
-      # Every shared video in an area, in order: "Watch all" as one course.
+      # Every published, shared video in an area, in order: "Watch all" as one
+      # course. A draft never appears here: its address is easy to guess, unlike
+      # a share token. A single video can still be sent round by its token.
       def series
-        videos = shared.where(module_key: params[:module_key].to_s).ordered.to_a
+        videos = shared.published.where(module_key: params[:module_key].to_s).ordered.to_a
         return render(json: { error: 'This series is not available' }, status: :not_found) if videos.empty?
 
         render json: { module_key: params[:module_key], videos: videos.map { |v| v.as_public_json.merge(token: v.share_token) } }

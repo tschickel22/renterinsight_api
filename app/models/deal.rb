@@ -668,6 +668,15 @@ class Deal < ApplicationRecord
     'skirting fee' => :skirting, 'skirting' => :skirting
   }.freeze
 
+  # A fee line that is the document fee, whatever the rep called it: "Doc fee", "Docs",
+  # "Documentation", "Document Fee", "Document preparation fee". Not "Doc stamps" or
+  # "Documentary stamp tax", which are a government charge and not the dealer's fee.
+  DOC_FEE_NAME = /\A(?:docs?|documents?|documentation)(?: (?:prep|preparation|processing))?(?: (?:fees?|charges?))?\z/
+
+  def self.doc_fee_name?(name)
+    name.to_s.downcase.gsub(/[^a-z]+/, ' ').strip.match?(DOC_FEE_NAME)
+  end
+
   # Does this deal carry any fee/accessory line items? Determines whether to read
   # line items (Phase 3) or fall back to the deprecated columns (legacy/API deals).
   def has_fee_line_items?
@@ -685,7 +694,7 @@ class Deal < ApplicationRecord
         totals[:accessories] += dp.total.to_f
       elsif fee_line_item?(dp)
         normalized = normalize_fee_name(dp.product_name)
-        key = FEE_NAME_TO_KEY[normalized]
+        key = self.class.doc_fee_name?(dp.product_name) ? :doc : FEE_NAME_TO_KEY[normalized]
         if key
           totals[key] += dp.total.to_f
         elsif normalized == 'accessories'
@@ -738,7 +747,7 @@ class Deal < ApplicationRecord
       deal_products.sum do |dp|
         next 0.0 unless front_end_addon_line_item?(dp)
         # Doc fee is excluded from add-on gross (commission-wise it's a pass-through).
-        next 0.0 if fee_line_item?(dp) && normalize_fee_name(dp.product_name) == 'doc fee'
+        next 0.0 if fee_line_item?(dp) && self.class.doc_fee_name?(dp.product_name)
         line_item_price(dp)
       end.round(2)
     else

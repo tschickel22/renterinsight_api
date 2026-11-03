@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_02_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_03_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3150,7 +3150,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_190000) do
     t.decimal "freight_per_mile", precision: 10, scale: 2
     t.decimal "freight_flat", precision: 12, scale: 2
     t.decimal "margin_floor_pct", precision: 7, scale: 4
-    t.integer "round_retail_to"
+    t.decimal "round_retail_to", precision: 10, scale: 2
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.integer "freight_miles"
@@ -3168,6 +3168,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_02_190000) do
     t.decimal "preferred_payment_pct", precision: 7, scale: 4
     t.boolean "factory_po_hide_prices", default: false, null: false
     t.boolean "website_designer", default: true, null: false
+    t.decimal "doc_fee", precision: 10, scale: 2
     t.index "company_id, COALESCE(manufacturer_id, (0)::bigint)", name: "idx_dealer_catalog_terms_unique", unique: true
     t.index ["company_id"], name: "index_dealer_catalog_terms_on_company_id"
     t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"

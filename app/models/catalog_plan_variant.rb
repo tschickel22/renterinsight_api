@@ -38,6 +38,11 @@ class CatalogPlanVariant < ApplicationRecord
   # finishes and ask the dealer for the price.
   def unpriced? = champion_only? || external_ids.to_h['unpriced'] == true
 
+  # A home the dealer typed by hand because no price book has it (Truebuild::ManualHome).
+  def manual_home? = external_ids.to_h['manual_home'] == true
+  def maker_name = manual_home? ? external_ids.to_h['maker'].presence : manufacturer&.name
+  def shown_model_number = manual_home? ? external_ids.to_h['model'].to_s : model_number
+
   # Media keys people set (a platform admin's hidden photos and TrueView
   # photos) or made once per model (Claude's photo pick). A rescan of the
   # factory feed replaces the rest of media and keeps these.
