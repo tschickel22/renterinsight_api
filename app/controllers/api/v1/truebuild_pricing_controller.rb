@@ -32,7 +32,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update
                                           create_addon update_addon destroy_addon remember_price]
 
-  TERM_FIELDS = %i[price_update_policy price_display program_discount_pct margin_floor_pct round_retail_to doc_fee buyer_view
+  TERM_FIELDS = %i[price_update_policy price_display program_discount_pct margin_floor_pct round_retail_to doc_fee dealer_pack buyer_view
                    sale_discount_pct dealer_savings_pct preferred_payment_pct factory_po_hide_prices website_designer].freeze + DealerCatalogTerm::FREIGHT
   # The buyer view's lists (BuyerView); company-wide like price_display.
   BUYER_LISTS = %i[buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups].freeze

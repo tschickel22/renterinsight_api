@@ -109,7 +109,10 @@ module Truebuild
       list_surcharge = @dealer_prices.surcharge_for(vp) || DealerPrices.book_surcharge(vp)
       own = @dealer_prices.cost_for(vp)
       rule = rule_for(:base)
-      retail = rule ? rule.apply(retail_basis(vp) || cost) : nil
+      # The dealer's pack is marked up with the home, but it is not factory cost:
+      # it stays off the line's cost and the factory PO. A manual price ignores it.
+      pack = @terms.dealer_pack.to_d
+      retail = rule ? rule.apply((retail_basis(vp) || cost) + pack) : nil
       @warnings << 'No markup rule covers this home, so it has no retail price. Add a markup rule.' unless rule
       {
         kind: 'base', label: "#{@variant.catalog_plan.name} (#{@variant.model_number})",
@@ -117,7 +120,7 @@ module Truebuild
         detail: { net_base_price: money(own || vp.net_base_price), required_adders: vp.required_adders,
                   surcharge: money(@surcharge || list_surcharge), book_surcharge: money(list_surcharge),
                   dealer_surcharge_set: @dealer_prices.surcharge_for(vp).present?,
-                  program_discount: money(discount), rule: describe(rule),
+                  program_discount: money(discount), dealer_pack: (money(pack) if pack.positive?), rule: describe(rule),
                   factory_net_base_price: (money(vp.net_base_price) if own), dealer_cost_set: own.present? }.compact
       }
     end

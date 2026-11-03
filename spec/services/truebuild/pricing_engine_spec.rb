@@ -24,6 +24,21 @@ RSpec.describe Truebuild::PricingEngine do
 
   def price(**kw) = described_class.new(company: company, variant: variant, **kw).call
 
+  it 'marks up the dealer pack with the home, keeps it off cost, and leaves a manual price alone' do
+    company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.85)
+    plain = described_class.new(company: company, variant: variant, book: book).call.lines.find { |l| l[:kind] == 'base' }
+
+    company.dealer_catalog_terms.create!(manufacturer_id: nil, dealer_pack: 3000)
+    packed = described_class.new(company: company, variant: variant, book: book).call.lines.find { |l| l[:kind] == 'base' }
+    expect(packed[:cost]).to eq(plain[:cost])
+    expect(packed[:retail]).to eq(plain[:retail] + 5550)
+    expect(packed[:detail][:dealer_pack]).to eq(3000)
+
+    company.dealer_markup_rules.create!(scope_type: 'plan', scope_id: plan.id, markup_type: 'manual', value: 89_900)
+    manual = described_class.new(company: company, variant: variant, book: book).call.lines.find { |l| l[:kind] == 'base' }
+    expect(manual[:retail]).to eq(89_900)
+  end
+
   it 'prices the base from net plus required adders, less the program discount, through the markup rule' do
     company.dealer_catalog_terms.create!(manufacturer: mfr, program_discount_pct: 2)
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.3)

@@ -24,12 +24,13 @@ class DealerCatalogTerm < ApplicationRecord
   validates :freight_escort_width_ft, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true
   validates :round_retail_to, numericality: { greater_than: 0 }, allow_nil: true
   validates :doc_fee, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :dealer_pack, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :freight_miles, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
 
   # Settled once per dealer: what buyers see, how new books arrive, margin
   # floor, rounding, the document fee every Deal Sheet charges. Set per manufacturer: program discount and the buyer
   # discounts a deal sheet starts from.
-  COMPANY_WIDE = %i[price_update_policy price_display margin_floor_pct round_retail_to doc_fee
+  COMPANY_WIDE = %i[price_update_policy price_display margin_floor_pct round_retail_to doc_fee dealer_pack
                     buyer_view buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups
                     factory_po_hide_prices website_designer].freeze
   PER_MANUFACTURER = %i[program_discount_pct sale_discount_pct dealer_savings_pct preferred_payment_pct].freeze
