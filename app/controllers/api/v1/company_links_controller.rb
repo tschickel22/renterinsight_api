@@ -144,6 +144,7 @@ module Api
           vendor_name: l.dealer_vendor.name,
           invite_email: dealer_side || l.invited? ? l.invite_email : nil,
           invited_at: l.created_at, accepted_at: l.accepted_at, ended_at: l.ended_at,
+          waiting_for_admin: l.invited? && l.events.where(kind: %w[waiting_for_admin notified]).pluck(:kind) == ['waiting_for_admin'],
           rate_card: l.active? ? rate_card_json(l.current_rate_card) : nil,
           pending_rate_card: l.active? ? rate_card_json(l.pending_rate_card) : nil
         }

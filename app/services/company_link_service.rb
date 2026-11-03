@@ -23,16 +23,47 @@ class CompanyLinkService
     email = email.to_s.strip.downcase
     raise Error, 'Enter the email of an admin at the installer' unless email.match?(URI::MailTo::EMAIL_REGEXP)
     raise Error, "#{vendor.name} already has a link" if CompanyLink.open.exists?(dealer_vendor_id: vendor.id)
+    waiting = false
     unless dealertide_admin?(email)
-      raise Error, "#{email} is not an admin of a company on #{Brand.current.name}. Linking is only for an installer that " \
-                   'already runs its own company here. To give a contractor work, assign them on the project instead.'
+      waiting = platform_team? && admin_invite_pending?(email)
+      unless waiting
+        raise Error, "#{email} is not an admin of a company on #{Brand.current.name}. Linking is only for an installer that " \
+                     'already runs its own company here. If they were invited recently, they need to accept that invitation first. ' \
+                     'To give a contractor work, assign them on the project instead.'
+      end
     end
 
     link = CompanyLink.create!(dealer_company: @company, dealer_vendor: vendor, invite_email: email, invited_by: @actor,
                                agreement_version: CompanyLink::AGREEMENT_VERSION, dealer_agreed_at: Time.current)
     link.log!('invited', "#{@company.name} invited #{email} to link as #{vendor.name}", company: @company, user: @actor)
-    CompanyLinkNotifier.invited(link)
+    if waiting
+      # Nothing to act on yet: they can only accept from inside their company.
+      # They hear about it when they accept that invitation (admin_joined).
+      link.log!('waiting_for_admin', "Waiting for #{email} to accept their company invitation", company: @company, user: @actor)
+    else
+      CompanyLinkNotifier.invited(link)
+    end
     link
+  end
+
+  # Someone accepted an invitation to a company. Tell them about any link that
+  # was held back until they could accept it.
+  def self.admin_joined(email)
+    email = email.to_s.strip.downcase
+    CompanyLink.where(status: 'invited', invite_email: email).find_each do |link|
+      kinds = link.events.pluck(:kind)
+      next unless kinds.include?('waiting_for_admin') && kinds.exclude?('notified')
+
+      admin = User.active.where('LOWER(email) = ?', email).where.not(company_id: link.dealer_company_id).find(&:effective_admin?)
+      next unless admin
+
+      link.log!('notified', "#{email} can now accept this link", company: link.dealer_company)
+      Rails.cache.delete_matched("tenant_basic/#{admin.company_id}/*") rescue Company.where(id: admin.company_id).update_all(updated_at: Time.current)
+      CompanyLinkNotifier.invited(link)
+    end
+  rescue => e
+    # Joining the company must not fail over a notice.
+    Rails.logger.error("[CompanyLinkService.admin_joined] #{e.message}")
   end
 
   # Invitations waiting for an admin of this company: sent to their email,
@@ -82,6 +113,17 @@ class CompanyLinkService
     User.active.where('LOWER(email) = ?', email).where.not(company_id: @company.id).includes(:company).any? do |u|
       u.company && %w[active trial].include?(u.company.status.presence || 'active') && u.effective_admin?
     end
+  end
+
+  def platform_team?
+    @actor&.platform_admin? || @actor&.super_admin?
+  end
+
+  # The platform team sets up both companies, usually before anyone has accepted,
+  # so an owner or admin invitation still pending at another company is enough.
+  def admin_invite_pending?(email)
+    owner_invited = Invitation.active.where(invitation_type: 'tenant', email: email).where.not(company_id: @company.id).exists?
+    owner_invited || User.where(status: 'invited').where('LOWER(email) = ?', email).where.not(company_id: @company.id).any?(&:effective_admin?)
   end
 
   # The installer's module list comes from a cached tenant payload; an open

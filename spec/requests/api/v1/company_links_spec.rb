@@ -89,7 +89,7 @@ RSpec.describe 'Company links', type: :request do
     expect(link).to be_active
     expect(link.installer_company).to eq(installer_co)
     expect(link.installer_dealer_account.name).to eq('Summit Homes')
-    expect(link.events.pluck(:kind)).to eq(%w[invited accepted])
+    expect(link.events.order(:id).pluck(:kind)).to eq(%w[invited accepted])
     expect(installer_co.review_items.open).to be_empty
     expect(installer_co.review_items.closed.first.resolution).to eq('accepted')
   end
@@ -131,6 +131,63 @@ RSpec.describe 'Company links', type: :request do
 
     post "/api/v1/company_links/#{link.id}/end", headers: h(dealer), params: {}.to_json
     expect(Company.find(installer_co.id).has_module?('management.linked_companies')).to be(false)
+  end
+
+  describe 'the platform team linking before the installer has accepted' do
+    let(:platform) do
+      User.create!(email: 'ops@platform.example', first_name: 'O', last_name: 'P', password: 'Pass1234!',
+                   company_id: dealer_co.id, role: 'platform_admin', status: 'active')
+    end
+    let(:new_installer) { create(:company, name: 'New Install', industry: 'installer') }
+    let(:owner) { admin(dealer_co, 'mike@homes.example') }
+    let(:platform_headers) { h(platform).merge('X-Company-ID' => dealer_co.id.to_s) }
+    let(:token_box) { {} }
+
+    before do
+      Role.find_or_create_by!(company_id: nil, tier: 'company', key: 'company_admin') { |r| r.name = 'Company Administrator'; r.is_system_role = true }
+      allow_any_instance_of(InvitationService).to receive(:send_invitation) { |_s, inv, raw| token_box[inv.email] = raw }
+      InvitationService.new(invited_by: platform, company: new_installer).create_invitation(
+        invitation_type: 'tenant', email: owner.email, recipient_name: 'Mike', role: 'tenant'
+      )
+    end
+
+    def invite_as(headers)
+      post '/api/v1/company_links', headers: headers, params: { vendor_id: vendor.id, email: owner.email }.to_json
+    end
+
+    it 'holds the notice, then tells the owner once when they accept, and they can accept the link' do
+      allow(CompanyLinkNotifier).to receive(:invited).and_call_original
+      invite_as(platform_headers)
+      expect(response).to have_http_status(:created)
+      expect(body['company_link']['waiting_for_admin']).to be(true)
+      expect(CompanyLinkNotifier).not_to have_received(:invited)
+
+      post "/api/public/invitations/accept?token=#{token_box[owner.email]}", params: { password: 'Pass1234!' }.to_json,
+                                                                             headers: { 'Content-Type' => 'application/json' }
+      expect(JSON.parse(response.body)['success']).to be(true)
+      CompanyLinkService.admin_joined(owner.email) # a later call must not notify again
+      expect(CompanyLinkNotifier).to have_received(:invited).once
+
+      expect(ModuleAccessService.new(new_installer).linked_installer?).to be(true)
+
+      link = CompanyLink.find_by!(invite_email: owner.email)
+      linked = new_installer.users.find_by!(email: owner.email)
+      post "/api/v1/company_links/#{link.id}/accept", headers: h(linked), params: { agree: true }.to_json
+      expect(link.reload).to have_attributes(status: 'active', installer_company_id: new_installer.id)
+    end
+
+    it "keeps the rule for a dealer's own admin, and says to accept first" do
+      invite_as(h(dealer))
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(body['error']).to include('need to accept that invitation first')
+    end
+
+    it 'still refuses the platform team when no invitation is pending' do
+      post '/api/v1/company_links', headers: platform_headers, params: { vendor_id: vendor.id, email: 'nobody@else.example' }.to_json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
   end
 
   it 'sends a platform-branded invite with a link straight to the Links tab' do

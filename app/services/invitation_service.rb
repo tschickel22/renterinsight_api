@@ -301,6 +301,7 @@ class InvitationService
     
     # Mark invitation as accepted
     invitation.mark_as_accepted!(ip_address: ip_address, user_agent: user_agent)
+    CompanyLinkService.admin_joined(invitation.email)
     
     {
       success: true,
