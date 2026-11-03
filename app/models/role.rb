@@ -114,7 +114,7 @@ class Role < ApplicationRecord
       tier: 'company',
       key: 'company_manager',
       name: 'Company Manager',
-      description: 'Operational control with assigned region/location access',
+      description: 'Operational control across every location',
       color: '#f97316'
     )
 
@@ -122,7 +122,7 @@ class Role < ApplicationRecord
       tier: 'company',
       key: 'company_staff',
       name: 'Company Staff',
-      description: 'Standard user with assigned location access',
+      description: 'Standard user with access to every location',
       color: '#3b82f6'
     )
 
@@ -130,7 +130,7 @@ class Role < ApplicationRecord
       tier: 'company',
       key: 'company_read_only',
       name: 'Read-Only User',
-      description: 'View-only access to assigned areas',
+      description: 'View-only access across every location',
       color: '#6b7280'
     )
 

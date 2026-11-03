@@ -2,6 +2,8 @@
 
 module Api
   class InvitationsController < ApplicationController
+    include RoleAssignmentRules
+
     before_action :authenticate_user!
     before_action :set_company_scope
     before_action :set_invitation, only: [:show, :resend, :destroy]
@@ -33,6 +35,20 @@ module Api
       verify_company_access!
       return unless authorize_action!('users', 'create')
 
+      platform_team = current_user.platform_admin? || current_user.super_admin?
+      invitation_type = params[:invitation_type] || params[:invitationType] || 'company_user'
+
+      # A tenant invitation creates a whole new company. Those come from the
+      # platform screens, which call the service directly.
+      if invitation_type == 'tenant' && !platform_team
+        return render json: { success: false, error: 'You do not have permission to send this invitation.' }, status: :forbidden
+      end
+
+      # The same limit as creating a person: the role list on the form is a
+      # convenience, this is the rule.
+      unless can_assign_role?(params[:role].presence || 'staff')
+        return render json: { success: false, error: 'You do not have permission to assign this role.' }, status: :forbidden
+      end
 
       # Log incoming params for debugging
       received_location_ids = params[:location_ids] || params[:locationIds] || []
@@ -54,13 +70,13 @@ module Api
       )
       
       result = service.create_invitation(
-        invitation_type: params[:invitation_type] || params[:invitationType] || 'company_user',
+        invitation_type: invitation_type,
         email: params[:email],
         phone: params[:phone],
         recipient_name: params[:recipient_name] || params[:recipientName],
         recipient_data: params[:recipient_data] || {},
         role: params[:role],
-        permissions: params[:permissions] || [],
+        permissions: platform_team ? (params[:permissions] || []) : [],
         delivery_method: params[:delivery_method] || params[:deliveryMethod] || 'email',
         message: params[:message],
         location_ids: received_location_ids,
