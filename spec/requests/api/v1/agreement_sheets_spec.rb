@@ -55,6 +55,32 @@ RSpec.describe 'Agreement sheets', type: :request do
     build.update!(metadata: build.metadata.merge('color_skips' => ['Shutters']))
   end
 
+  it 'keeps free color picks off Addendum A and fills the color references from them' do
+    build = deal.home_build.reload
+    siding = build.lines.find_by(label: 'Siding: Clay')
+    shingles = build.lines.find_by(label: 'Shingles: Stone Gray')
+    expect(Truebuild::AgreementSheets.free_color?(siding)).to be(true)
+    expect(Truebuild::AgreementSheets.free_color?(shingles)).to be(false) # it costs extra, so Addendum A prices it
+
+    sheets = Truebuild::AgreementSheets.new(build)
+    expect(sheets.color_values).to eq('color.siding' => 'Clay', 'color.shingles' => 'Stone Gray')
+    expect(sheets.exterior_color).to eq('Clay')
+
+    values = Agreements::PacketValues.new(deal)
+    expect(values['color.siding']).to eq('Clay')
+    expect(values['home.exterior_color']).to eq('Clay')
+
+    get "/api/v1/deals/#{deal.id}/home_build", headers: headers
+    lines = response.parsed_body.dig('build', 'lines').index_by { |l| l['label'] }
+    expect(lines['Siding: Clay']).to include('free_color' => true, 'color_set' => 'Siding')
+    expect(lines['Shingles: Stone Gray']).to include('free_color' => false, 'color_set' => 'Shingles')
+
+    get '/api/v1/agreement_merge_fields', params: { deal_id: deal.id }, headers: headers
+    groups = response.parsed_body['merge_fields']
+    expect(groups.dig('colors', 'fields').find { |f| f['key'] == 'color.siding' }).to include('label' => 'Siding', 'value' => 'Clay')
+    expect(groups.dig('colors', 'fields').find { |f| f['key'] == 'color.front_door' }['value']).to be_nil
+  end
+
   it 'lists every option at retail, adds up to the sheet, and leaves free color picks to the Colors sheet' do
     sheets = Truebuild::AgreementSheets.new(deal.home_build.reload)
     rows = sheets.schedule_rows
