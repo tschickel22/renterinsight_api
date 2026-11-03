@@ -124,7 +124,9 @@ RSpec.describe 'Linked accounts', type: :request do
 
       post "/api/public/invitations/accept?token=#{invitation.token}", params: { password: 'Pass1234!' }.to_json, headers: { 'Content-Type' => 'application/json' }
       expect(body['success']).to be(true)
-      expect(body['token']).to be_nil
+      expect(body['token']).to be_present
+      expect(JsonWebToken.decode(body['token'])[:user_id]).to eq(placeholder.id)
+      expect(body['user']['company_id']).to eq(installer_co.id)
       expect(placeholder.reload.status).to eq('active')
       expect(person.reload.password_digest).to eq(digest)
       expect(person.company_accounts.map(&:company_id)).to eq([dealer_co.id, installer_co.id])

@@ -447,7 +447,7 @@ module Api
             )
             
             # Determine delivery method
-            delivery_method = params[:phone].present? ? 'both' : 'email'
+            delivery_method = owner_delivery_method(params[:email], params[:phone])
             
             # Create invitation (don't send yet - skip_send: true)
             result = invitation_service.create_invitation(
@@ -484,6 +484,25 @@ module Api
           update_params[:email] = params[:email] if params[:email].present?
           update_params[:phone] = params[:phone] if params[:phone].present?
           update_params[:recipient_name] = recipient_name if recipient_name.present?
+
+          new_email = params[:email].to_s.strip.downcase
+          if new_email.present? && new_email != invitation.email.to_s.downcase
+            if invitation.accepted?
+              return render json: {
+                error: 'This owner has already accepted, so changing the email here would not change who owns the company. Add the new person in Settings, Users.'
+              }, status: :unprocessable_entity
+            end
+
+            problem = InvitationService.new(invited_by: current_user, company: @tenant).tenant_owner_email_problem(new_email, except: invitation)
+            return render(json: { error: problem }, status: :unprocessable_entity) if problem
+
+            # A link already sent went to the old address. It must stop working,
+            # or whoever holds it could accept as the new person, and could set
+            # their first password. Sending again makes a fresh link.
+            update_params[:token_digest] = Digest::SHA256.hexdigest(SecureRandom.urlsafe_base64(32))
+            update_params[:sent_at] = nil
+            update_params[:delivery_method] = owner_delivery_method(new_email, invitation.phone)
+          end
           
           if update_params.empty?
             return render json: { 
@@ -575,6 +594,16 @@ module Api
         end
       end
       
+      # An owner who already has a login gets email only. The phone is still kept
+      # on the invitation, but a first password can only be set from an emailed
+      # invite (Invitation#sets_password_on_accept?), so a text would leave someone
+      # who has never signed in asked for a password they don't have.
+      def owner_delivery_method(email, phone)
+        return 'email' if phone.blank?
+
+        User.sign_in_accounts.where('LOWER(email) = ?', email.to_s.strip.downcase).exists? ? 'email' : 'both'
+      end
+
       def create_tenant_owner(tenant, send_now: false)
         # Use InvitationService to create proper invitation
         invitation_service = InvitationService.new(
@@ -583,7 +612,7 @@ module Api
         )
         
         # Determine delivery method based on whether phone is provided
-        delivery_method = tenant_params[:owner_phone].present? ? 'both' : 'email'
+        delivery_method = owner_delivery_method(tenant_params[:owner_email], tenant_params[:owner_phone])
         
         # Build recipient name
         recipient_name = [

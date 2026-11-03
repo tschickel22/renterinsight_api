@@ -56,24 +56,10 @@ class InvitationService
     # accepted. Guard here. An owner who already signs in elsewhere is fine: they
     # get a linked account on accept, so any number of those can be accepted.
     if invitation_type == 'tenant' && normalized_email.present?
-      login = User.sign_in_accounts.where('LOWER(email) = ?', normalized_email).first
-      in_this_company = @company && User.where(company_id: @company.id).where('LOWER(email) = ?', normalized_email).exists?
-      if in_this_company || (login.nil? && User.where('LOWER(email) = ?', normalized_email).exists?)
-        raise Error, "A user account with email #{normalized_email} already exists"
-      end
-      if login && (login.platform_admin? || login.super_admin?)
-        raise Error, "#{normalized_email} is a platform admin account and can't be added to a company"
-      end
-
-      existing_invite = login.nil? && Invitation
-        .active
-        .where(invitation_type: 'tenant', email: normalized_email)
-        .exists?
-      if existing_invite
-        raise Error, "A pending tenant invitation already exists for #{normalized_email}"
-      end
+      problem = tenant_owner_email_problem(normalized_email)
+      raise Error, problem if problem
     end
-    
+
     # Someone who already signs in to another company gets a linked account
     # here (E68 5a). Platform admins never do: they reach every company already.
     if invitation_type == 'company_user' && normalized_email.present? && @company
@@ -150,6 +136,24 @@ class InvitationService
     }
   end
   
+  # Why this email can't own this company, or nil. Someone who signs in elsewhere
+  # is fine: they get a linked account on accept. Also used when an owner's email
+  # is edited on an existing invitation (except: that invitation).
+  def tenant_owner_email_problem(email, except: nil)
+    email = email.to_s.strip.downcase
+    login = User.sign_in_accounts.where('LOWER(email) = ?', email).first
+    in_this_company = @company && User.where(company_id: @company.id).where('LOWER(email) = ?', email).exists?
+    if in_this_company || (login.nil? && User.where('LOWER(email) = ?', email).exists?)
+      return "A user account with email #{email} already exists"
+    end
+    return "#{email} is a platform admin account and can't be added to a company" if login && (login.platform_admin? || login.super_admin?)
+    return nil if login
+
+    other_invites = Invitation.active.where(invitation_type: 'tenant', email: email)
+    other_invites = other_invites.where.not(id: except.id) if except
+    "A pending tenant invitation already exists for #{email}" if other_invites.exists?
+  end
+
   # Send an existing invitation
   def send_invitation(invitation, raw_token = nil)
     # Get or find raw token

@@ -2804,6 +2804,7 @@ Rails.application.routes.draw do
         member do
           post :resend_invitation
           post :restore
+          get :other_logins, path: 'other-logins'
         end
       end
       

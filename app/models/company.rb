@@ -233,6 +233,7 @@ class Company < ApplicationRecord
   # Without a form there is no destination for an inventory ad to land on, so
   # the Meta feed carries no link and Meta rejects every home.
   after_create :seed_default_intake_form
+  after_save :seed_installer_role, if: -> { saved_change_to_industry? && industry == 'installer' }
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
   # The accounting subsystem is a web of cross-referencing FKs (and a circular
@@ -888,6 +889,13 @@ class Company < ApplicationRecord
     external_payments_enabled?
   end
   
+  def seed_installer_role
+    InstallerRoleSeeder.call(self)
+  rescue => e
+    Rails.logger.error "❌ [Company#seed_installer_role] Failed for Company #{id}: #{e.message}"
+    nil
+  end
+
   # Create default location after company creation
   def seed_default_project_templates
     ProjectTemplate.seed_defaults!(self)

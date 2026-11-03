@@ -28,6 +28,15 @@ class CalendarService
 
   attr_reader :user, :company, :params, :permission_service
   
+  # Reading a calendar more widely includes the narrower views: someone allowed
+  # to see the whole company can see their own calendar. Checking the exact scope
+  # refused 'my' to every role granted only a wider one, and 'my' is what the
+  # calendar opens on, so the page failed with a 403.
+  def self.can_read_view?(permission_service, view)
+    scopes = view == 'my' ? %w[own assigned_locations all] : %w[assigned_locations all]
+    scopes.any? { |scope| permission_service.can?('calendar', 'read', scope) }
+  end
+
   def initialize(user, company, params = {})
     @user = user
     @company = company
@@ -108,11 +117,9 @@ class CalendarService
     # - 'delete' with 'all' = view unassigned service tickets
     case view
     when 'my'
-      permission_service.can?('calendar', 'read', 'own') ||
-        permission_service.can?('calendar', 'read', 'all')
+      self.class.can_read_view?(permission_service, 'my')
     when 'team'
-      permission_service.can?('calendar', 'read', 'assigned_locations') ||
-        permission_service.can?('calendar', 'read', 'all')
+      self.class.can_read_view?(permission_service, 'team')
     when 'service_all'
       permission_service.can?('calendar', 'manage', 'all')
     when 'service_unassigned'

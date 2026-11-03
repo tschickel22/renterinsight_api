@@ -507,8 +507,11 @@ class User < ApplicationRecord
     return false if company_id.nil? || status != 'active' || deleted_at.present?
     return false if Company::NON_SEAT_ROLES.include?(role)
 
+    # A role change only takes a seat when the old role didn't hold one. Someone
+    # already active keeps their seat, or a full company could never change a role.
     new_record? || will_save_change_to_status? || will_save_change_to_deleted_at? ||
-      will_save_change_to_company_id? || will_save_change_to_role?
+      will_save_change_to_company_id? ||
+      (will_save_change_to_role? && Company::NON_SEAT_ROLES.include?(role_in_database))
   end
 
   def company_has_a_free_seat

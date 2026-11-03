@@ -92,7 +92,7 @@ module Api
         views = []
         
         # My Calendar - everyone with read/own permission
-        if permission_service.can?('calendar', 'read', 'own')
+        if CalendarService.can_read_view?(permission_service, 'my')
           views << {
             id: 'my',
             name: 'My Calendar',
@@ -102,7 +102,7 @@ module Api
         end
         
         # Team Calendar - users with read/assigned_locations permission
-        if permission_service.can?('calendar', 'read', 'assigned_locations')
+        if CalendarService.can_read_view?(permission_service, 'team')
           views << {
             id: 'team',
             name: 'Team Calendar',
@@ -227,10 +227,8 @@ module Api
         # - 'manage' with 'all' = view all service tickets
         # - 'delete' with 'all' = view unassigned service tickets
         result = case view
-        when 'my'
-          permission_service.can?('calendar', 'read', 'own')
-        when 'team'
-          permission_service.can?('calendar', 'read', 'assigned_locations')
+        when 'my', 'team'
+          CalendarService.can_read_view?(permission_service, view)
         when 'service_all'
           permission_service.can?('calendar', 'manage', 'all')
         when 'service_unassigned'
