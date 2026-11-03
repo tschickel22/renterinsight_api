@@ -322,6 +322,32 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
       expect(owner.reload.company_id).to eq(dealer.id)
     end
 
+    it 'emails an owner with a login even when a phone is entered, and keeps the phone' do
+      rep = dealer_user('rep@easy.example', rep_role, signed_in: false)
+      tokens = capture_tokens
+
+      post '/api/platform/tenants', headers: headers_for(platform_admin), params: {
+        tenant: { name: 'Phone Install', subdomain: "phone#{SecureRandom.hex(3)}", owner_email: rep.email, owner_phone: '3035550100', send_invitation: true }
+      }.to_json
+      invitation = ::Company.find(body['tenant']['id']).invitations.find_by!(invitation_type: 'tenant')
+
+      expect(invitation.delivery_method).to eq('email')
+      expect(invitation.phone).to be_present
+      expect(invitation.sets_password_on_accept?).to be(true)
+
+      accept(tokens[rep.email], password: 'BrandNew123!')
+      expect(body['success']).to be(true)
+    end
+
+    it 'still texts a brand new owner when a phone is entered' do
+      capture_tokens
+      post '/api/platform/tenants', headers: headers_for(platform_admin), params: {
+        tenant: { name: 'New Phone Co', subdomain: "newphone#{SecureRandom.hex(3)}", owner_email: 'fresh@new.example', owner_phone: '3035550100', send_invitation: true }
+      }.to_json
+
+      expect(::Company.find(body['tenant']['id']).invitations.find_by!(invitation_type: 'tenant').delivery_method).to eq('both')
+    end
+
     describe 'editing the owner on an existing invitation' do
       def update_owner(tenant, email)
         patch "/api/platform/tenants/#{tenant.id}/update_owner_invitation",
