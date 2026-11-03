@@ -32,6 +32,21 @@ RSpec.describe 'Invitation limits', type: :request do
     expect(Invitation.where(company_id: company.id).count).to eq(0)
   end
 
+  it 'lets a company admin make another company admin, and nothing higher' do
+    invite(admin, role: 'company_admin')
+    expect(response).to have_http_status(:created)
+    invite(admin, role: 'platform_admin')
+    expect(response).to have_http_status(:forbidden)
+  end
+
+  it 'lists Company Administrator for a company admin but not for a manager' do
+    Role.find_or_create_by!(key: 'company_admin') { |r| r.assign_attributes(tier: 'company', name: 'Company Administrator', active: true) }
+    get "/api/companies/#{company.id}/users/available-roles", headers: auth(admin)
+    expect(response.parsed_body['roles'].map { |r| r['key'] }).to include('company_admin')
+    get "/api/companies/#{company.id}/users/available-roles", headers: auth(manager)
+    expect(response.parsed_body['roles'].map { |r| r['key'] }).not_to include('company_admin')
+  end
+
   it 'allows a role below the sender' do
     invite(manager, role: 'sales_rep')
     expect(response).to have_http_status(:created)

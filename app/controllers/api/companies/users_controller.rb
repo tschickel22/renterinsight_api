@@ -49,13 +49,14 @@ module Api
           }
         end
         
-        # Filter roles: user can only assign roles with level < their own level
+        # Filter roles: user can only assign roles below their own level, plus
+        # company admins can make another company admin (grantable_level?)
         # For system roles (hierarchy_level > 0): check hierarchy
         # For custom roles (hierarchy_level == 0): include if user is admin-level or higher
         available = all_roles.select { |role|
           if role[:hierarchy_level] > 0
             # System role - check hierarchy
-            current_level > role[:hierarchy_level]
+            grantable_level?(current_level, role[:hierarchy_level])
           else
             # Custom role - include if user is admin or higher (level >= 40)
             current_level >= 40
@@ -130,7 +131,7 @@ module Api
 
       # POST /api/companies/:company_id/users
       def create
-        # SECURITY: Enforce role hierarchy - users can only assign roles at or below their level
+        # SECURITY: Enforce role hierarchy (RoleAssignmentRules)
         requested_role = params[:role] || 'staff'
         unless can_assign_role?(requested_role)
           Rails.logger.warn "🚫 [SECURITY] User #{current_user.id} (#{current_user.role}) attempted to create user with role '#{requested_role}' without sufficient privileges"
@@ -229,7 +230,7 @@ module Api
           }, status: :forbidden
         end
         
-        # SECURITY: Enforce role hierarchy - users can only assign roles at or below their level
+        # SECURITY: Enforce role hierarchy (RoleAssignmentRules)
         if role_changed && !can_assign_role?(new_role)
           Rails.logger.warn "🚫 [SECURITY] User #{current_user.id} (#{current_user.role}) attempted to assign role '#{new_role}' without sufficient privileges"
           return render json: {
