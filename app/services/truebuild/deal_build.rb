@@ -37,13 +37,11 @@ module Truebuild
     EXTRA_KINDS = %w[addon template custom].freeze
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
     TOTALS_VERSION = 6
-    # A fee line that is the document fee: "Doc fee", "Docs", "Documentation", "Document preparation fee".
-    DOC_FEE_NAME = /\bdoc(s|u\w*)?\b/i
     DOC_FEE_LABEL = 'Doc fee'
     DOC_FEE_LOCKED = 'The document fee comes from Settings, TrueBuild pricing, and cannot be changed on a Deal Sheet.'
     DOC_FEE_MISSING = 'No document fee is set. Enter it under Settings, TrueBuild pricing (0 if you do not charge one).'
 
-    def self.doc_fee_name?(name) = name.to_s.match?(DOC_FEE_NAME)
+    def self.doc_fee_name?(name) = Deal.doc_fee_name?(name)
 
 
     # Priced before the deal's lines last changed (a Products save), or by an

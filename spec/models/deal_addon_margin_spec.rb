@@ -116,4 +116,30 @@ RSpec.describe 'Deal front-end add-on classification', type: :model do
       expect(deal.reload.addon_gross).to eq(0.0)
     end
   end
+
+  describe 'document fee, whatever the line is called' do
+    ['Doc fee', 'Doc Fee', 'Doc. fee', 'Docs', 'Document Fee', 'Documentation fee', 'Document preparation fee', 'Doc prep fee'].each do |name|
+      it "treats #{name} as the doc fee: out of add-on gross, in effective_doc_fee" do
+        add_line(category: 'fee', name: name, price: 251, cost: 0)
+        add_line(category: 'fee', name: 'Delivery Fee', price: 1_000, cost: 0)
+        deal.reload
+        expect(deal.addon_gross).to eq(1_000.0)
+        expect(deal.effective_doc_fee).to eq(251.0)
+      end
+    end
+
+    ['Doc stamps', 'Documentary stamp tax', 'Admin fee'].each do |name|
+      it "leaves #{name} as an ordinary fee" do
+        add_line(category: 'fee', name: name, price: 300, cost: 0)
+        deal.reload
+        expect(deal.addon_gross).to eq(300.0)
+        expect(deal.effective_doc_fee).to eq(0.0)
+      end
+    end
+
+    it 'only looks at fee lines' do
+      add_line(category: 'accessory', name: 'Docs', price: 50, cost: 0)
+      expect(deal.reload.addon_gross).to eq(50.0)
+    end
+  end
 end
