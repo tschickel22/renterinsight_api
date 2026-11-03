@@ -99,6 +99,35 @@ RSpec.describe Websites::SelfAudit do
     expect(described_class.new(website: empty, canonical_host: 'empty.example.com').call).to be_nil
   end
 
+  it 'sees the tracking tags the live site serves' do
+    bare = Company.create!(name: 'Tag Co', address_line1: '1 Lot', city: 'Denver', state: 'CO', zip_code: '80231')
+    tagged = Website.create!(company_id: bare.id, location_id: (bare.locations.first || bare.locations.create!(name: 'Lot')).id, name: 'Tags',
+                             slug: "s-#{SecureRandom.hex(4)}", status: 'draft', tracking_config: { 'google_ads_id' => 'AW-17782600637', 'facebook_pixel_id' => '1779006393376259' })
+    tagged.website_pages.create!(title: 'Home', path: '/', order: 0, blocks: [])
+
+    report = described_class.new(website: tagged, canonical_host: 'tags.example.com').call
+    ads = report['checks'].find { |c| c['key'] == 'ad_tracking' }
+
+    expect(ads['status']).to eq('pass')
+    expect(ads['headline']).to include('AW-17782600637', '1779006393376259')
+  end
+
+  it 'grades a live site at its own domain, reading its real files' do
+    bare = Company.create!(name: 'Live Co', address_line1: '1 Lot', city: 'Denver', state: 'CO', zip_code: '80231')
+    live = Website.create!(company_id: bare.id, location_id: (bare.locations.first || bare.locations.create!(name: 'Lot')).id, name: 'Live',
+                           slug: "s-#{SecureRandom.hex(4)}", status: 'draft')
+    live.website_pages.create!(title: 'Home', path: '/', order: 0, blocks: [])
+    allow(live).to receive(:domain_status).and_return({ state: 'live', hostname: 'www.live.example', url: 'https://www.live.example' })
+    fetcher = instance_double(SiteProfiles::Fetcher)
+    allow(SiteProfiles::Fetcher).to receive(:new).and_return(fetcher)
+
+    audit = instance_double(SiteProfiles::SeoAudit, call: { 'checks' => [] })
+    expect(SiteProfiles::SeoAudit).to receive(:new)
+      .with(hash_including(source_url: 'https://www.live.example', fetcher: fetcher)).and_return(audit)
+
+    described_class.new(website: live).call
+  end
+
   # If the controller gains a tag and this does not, a dealer would be graded on
   # a page that is not the one we serve.
   it 'assembles the same head tags the live controller does, in the same order' do

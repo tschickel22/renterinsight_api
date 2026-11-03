@@ -95,7 +95,11 @@ module Public
     # Served per site rather than from a static file: an unpublished or noindex site must
     # not invite crawlers, and the sitemap line has to point at the dealer's own host.
     def robots
-      cache_publicly(CRAWLER_FILE_EDGE_MAX_AGE)
+      # Never stored in the shared cache in front of the API. Every dealer's Worker
+      # asks that origin for the same /robots.txt, and the cache there can't see
+      # X-Tenant-Host, so one dealer's sitemap line was served for all of them.
+      # The Worker still caches per visitor hostname, so this costs little.
+      response.headers['Cache-Control'] = 'no-store'
 
       if @metadata[:robots].to_s.start_with?('noindex')
         return render plain: "User-agent: *\nDisallow: /\n", content_type: 'text/plain'

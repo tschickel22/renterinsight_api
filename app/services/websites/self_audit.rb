@@ -39,12 +39,23 @@ module Websites
       SiteProfiles::SeoAudit.new(
         source_url: base_url,
         pages_html: pages,
-        fetcher: crawler_files,
+        # A live site has real files to read, and those are what crawlers get.
+        fetcher: live? ? SiteProfiles::Fetcher.new : crawler_files,
         skip: SHELL_DEPENDENT
       ).call
     end
 
     private
+
+    # A published site on its own domain is graded as that domain, not the
+    # platform address it also answers on.
+    def live_domain
+      @live_domain ||= @website.domain_status
+    end
+
+    def live?
+      live_domain[:state] == 'live'
+    end
 
     def base_url
       "https://#{@canonical_host}"
@@ -53,6 +64,8 @@ module Websites
     # A draft has no live hostname yet. The address it would take is the one
     # worth grading against, since that is what its canonical tags will say.
     def default_host
+      return live_domain[:hostname] if live?
+
       SiteAddress.host_for(@website)
     rescue StandardError
       "#{@website.slug}.example.com"
@@ -125,6 +138,10 @@ module Websites
         meta_tag('twitter:card', metadata[:og_image].present? ? 'summary_large_image' : 'summary'),
         schema
       ].compact.join("\n")
+      # Injected separately by the controller (inject_tracking), and just as much
+      # part of what a crawler receives.
+      tracking = TrackingTags.new(website: @website, page: page).call.head
+      tags = "#{tags}\n#{tracking}" if tracking.present?
 
       "<html><head>\n#{tags}\n</head><body>\n#{body}<div id=\"root\"></div>\n</body></html>"
     end

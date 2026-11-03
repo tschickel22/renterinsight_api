@@ -473,11 +473,19 @@ class Api::V1::WebsitesController < ApplicationController
 
     report = Websites::SelfAudit.new(website: website).call
     if report.nil?
-      return render json: { report: nil,
+      return render json: { report: nil, actions: Websites::SeoActionList.new(website: website).call,
                             message: 'Add a page or some inventory and there will be something to check.' }
     end
 
+    actions = Websites::SeoActionList.new(website: website, report: report).call
+    # Customers get the things only they can do. The technical report is for
+    # prospecting and for the platform team (Tom, 2026-11-03).
+    unless original_user&.platform_admin? || original_user&.super_admin? || @company.is_demo?
+      return render json: { actions: actions }
+    end
+
     render json: {
+      actions: actions,
       report: report,
       # Named so nobody reads a shorter list of checks as a cleaner site.
       not_judged: Websites::SelfAudit::SHELL_DEPENDENT
