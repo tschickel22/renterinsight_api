@@ -171,8 +171,8 @@ module Truebuild
       reprice!
     end
 
-    # correcting_by: a company admin correcting the unsigned LIVE sheet of a won
-    # deal. Without it a won deal's sheet does not write the deal.
+    # correcting_by: the person correcting the unsigned LIVE sheet of a won deal.
+    # Without it a won deal's sheet does not write the deal.
     def initialize(build, correcting_by: nil)
       @build = build
       @correcting_by = correcting_by
@@ -344,11 +344,10 @@ module Truebuild
       reprice!
     end
 
-    # The cost of a signed sheet moved (the hauler's bill came in): a company
-    # admin records it with no new signature, because the buyers' price does
-    # not change. Anything that would change what they signed is refused.
+    # The cost of a signed sheet moved (the hauler's bill came in): it is recorded
+    # with no new signature, because the buyers' price does not change. Anything
+    # that would change what they signed is refused.
     def correct_signed_cost(line, unit_cost, user:)
-      raise ArgumentError, 'Only a company admin can correct a signed cost' unless user&.effective_admin?
       raise ArgumentError, 'This version is not signed' unless @build.locked?
       raise ArgumentError, 'Only the LIVE version can be corrected this way' unless @build.live?
 
@@ -462,7 +461,7 @@ module Truebuild
 
     # Writes the deal from the build (see the class comment). Once the deal is
     # won or posted to the GL its price and cost are frozen: only a change the
-    # buyers sign, or a company admin's correction, moves them (write_closed_deal!).
+    # buyers sign, or a correction on the sheet, moves them (write_closed_deal!).
     def sync_deal!
       return unless @build.live?
       if @build.deal.cost_snapshotted?
@@ -499,6 +498,7 @@ module Truebuild
       end
       invoice = deal.deal_invoice_id && deal.company.invoices.find_by(id: deal.deal_invoice_id)
       DealInvoiceService.new(deal).sync_invoice!(invoice) if invoice
+      CommissionPaymentGeneratorService.new(deal).recalculate
     end
 
     def write_deal!(deal)

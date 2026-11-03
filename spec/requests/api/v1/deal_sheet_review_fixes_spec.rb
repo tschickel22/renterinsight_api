@@ -187,19 +187,39 @@ RSpec.describe 'Deal Sheet review fixes', type: :request do
       deal.reload
     end
 
-    it 'a company admin corrects it and the deal follows; a rep is told who can' do
+    it 'a rep corrects it and the deal follows' do
       deal = won_deal
       expect(deal).to be_cost_snapshotted
       line = deal.home_build.lines.find_by!(label: 'Steps')
 
       patch "#{path(deal)}/lines/#{line.id}", headers: rep, params: { unit_retail: 900 }.to_json
-      expect(response).to have_http_status(:conflict)
-      expect(body['error']).to include('company admin')
-
-      patch "#{path(deal)}/lines/#{line.id}", headers: headers, params: { unit_retail: 900 }.to_json
       expect(response).to have_http_status(:ok)
       expect(body.dig('build', 'closed')).to be(true)
       expect(deal.reload.deal_products.find_by(product_name: 'Steps').unit_price).to eq(900)
+    end
+
+    it 'commission follows the correction: open payments change, paid ones stand' do
+      deal = won_deal
+      seller = User.create!(email: "s-#{SecureRandom.hex(4)}@example.com", first_name: 'S', last_name: 'R', password: 'Pass1234!', company_id: company.id, role: 'user')
+      plan = company.commission_plans.create!(name: 'Std', is_default: true)
+      company.commission_components.create!(commission_plan: plan, name: 'Add-ons', component_type: 'addon_commission', rate: 0.10, is_active: true, applies_to_role: 'primary_salesperson')
+      deal.update!(commission_plan_id: plan.id, owner_id: seller.id)
+      pending = company.commission_payments.create!(deal_id: deal.id, payee_user_id: seller.id, commission_plan_id: plan.id, amount: 80, status: 'pending')
+      line = deal.home_build.lines.find_by!(label: 'Steps')
+
+      patch "#{path(deal)}/lines/#{line.id}", headers: rep, params: { unit_retail: 900 }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(pending.reload.amount).to eq(90)
+
+      pending.update_columns(status: 'paid')
+      patch "#{path(deal)}/lines/#{line.id}", headers: rep, params: { unit_retail: 1000 }.to_json
+      expect(pending.reload.amount).to eq(90)
+      adjustment = company.commission_payments.where(deal_id: deal.id).where.not(id: pending.id).first
+      expect(adjustment).to have_attributes(amount: 10, status: 'pending')
+
+      patch "#{path(deal)}/lines/#{line.id}", headers: rep, params: { unit_retail: 700 }.to_json
+      expect(adjustment.reload.status).to eq('cancelled')
+      expect(pending.reload.calculation_details['overpaid_after_change']).to eq(20.0)
     end
 
     it 'a correction keeps the other prices it was sold at, and opening does not move them' do
@@ -230,14 +250,11 @@ RSpec.describe 'Deal Sheet review fixes', type: :request do
       deal.reload
     end
 
-    it 'takes a late cost from a company admin with no new signature, and moves only the cost' do
+    it 'takes a late cost from a rep with no new signature, and moves only the cost' do
       deal = signed_deal
       freight_or_base = deal.home_build.lines.find_by!(kind: 'base')
       before = deal.home_build.totals['contract_total']
       post "#{path(deal)}/lines/#{freight_or_base.id}/correct_cost", headers: rep, params: { unit_cost: 40_000 }.to_json
-      expect(response).to have_http_status(:unprocessable_entity)
-
-      post "#{path(deal)}/lines/#{freight_or_base.id}/correct_cost", headers: headers, params: { unit_cost: 40_000 }.to_json
       expect(response).to have_http_status(:ok)
       expect(body.dig('build', 'totals', 'contract_total')).to eq(before)
       freight = deal.home_build.reload.lines.find_by(kind: 'freight')&.cost.to_d
@@ -377,7 +394,7 @@ RSpec.describe 'Deal Sheet review fixes', type: :request do
       expect(body.dig('build', 'warnings').join).to include(agreement.agreement_number, 'closed period')
     end
 
-    it 'a person with no locations under location permissions sees no deals' do
+    it 'a person with no locations at all under location permissions sees no deals' do
       deal = sheet_for
       lonely = User.create!(email: "x-#{SecureRandom.hex(4)}@example.com", first_name: 'X', last_name: 'Y', password: 'Pass1234!', company_id: company.id, role: 'user')
       company.update!(use_rbac_system: true)
@@ -419,6 +436,37 @@ RSpec.describe 'Deal Sheet review fixes', type: :request do
       post "#{path(deal)}/purchase_order", headers: headers, params: { supplier_name: 'Champion', override: true }.to_json
       expect(response).to have_http_status(:created)
       expect(deal.reload.purchase_orders.count).to eq(1)
+    end
+
+    it 'staff with a company-wide role reach any location, as admins do' do
+      deal = sheet_for
+      user = User.create!(email: "c-#{SecureRandom.hex(4)}@example.com", first_name: 'C', last_name: 'W', password: 'Pass1234!', company_id: company.id, role: 'user')
+      Resource.seed_defaults; Action.seed_defaults; Scope.seed_defaults
+      role = Role.create!(company_id: company.id, key: "all-#{SecureRandom.hex(3)}", name: 'All', tier: 'company', active: true)
+      RolePermission.create!(role: role, resource: Resource.find_by!(key: 'deals'), action: Action.find_by!(key: 'read'), scope: Scope.find_by!(key: 'all'))
+      user.user_role_assignments.create!(role: role, company_id: company.id, tier: 'company')
+      company.update!(use_rbac_system: true)
+      get path(deal), headers: { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id)}" }
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'an add-on or package price can apply going forward, and this deal takes it' do
+      package = company.package_templates.create!(name: 'Power pole', default_price: 900, cost: 500)
+      addon = company.truebuild_addons.create!(source: package, mode: 'quote_only')
+      deal = sheet_for
+      add_line(deal, kind: 'addon', addon_id: addon.id)
+      line = lines.find { |l| l['addon_id'] == addon.id }
+      post "#{path(deal)}/remember", headers: rep, params: { line_id: line['id'], price: 1000, cost: 600 }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(addon.reload.price).to eq(1000)
+      expect(package.reload.cost).to eq(600)
+      expect(line_named('Power pole')).to include('retail' => 1000.0, 'unit_cost' => 600.0)
+
+      fee = company.fee_templates.create!(name: 'Title work', fee_type: 'other', default_amount: 75)
+      add_line(deal, kind: 'template', template_type: 'FeeTemplate', template_id: fee.id)
+      post "#{path(deal)}/remember", headers: rep, params: { line_id: line_named('Title work')['id'], price: 90 }.to_json
+      expect(fee.reload.default_amount).to eq(90)
+      expect(line_named('Title work')['retail']).to eq(90.0)
     end
 
     it 'a picked option set TBD comes back decided when picked again' do

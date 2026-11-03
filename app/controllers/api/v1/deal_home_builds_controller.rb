@@ -46,10 +46,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   # What PATCH changes besides a version's name.
   EDIT_KEYS = %w[variant_id manual_home construction notes deal freight_miles discounts].freeze
-  # What changes a sheet, so on a won deal takes a company admin.
+  # What changes a sheet. On a won deal, it also corrects the deal.
   SHEET_EDITS = %i[make_live update reprice create_line update_line destroy_line remember create_color use_doc_fee].freeze
 
-  before_action :refuse_closed_sheet_edit, only: SHEET_EDITS
   around_action :correction_in_one_piece, only: SHEET_EDITS
 
   rescue_from Truebuild::DealBuild::Locked do |e|
@@ -199,7 +198,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     problem = Agreements::DealSheetLock.edit_problem(@build)
     return render json: { error: problem }, status: :conflict if problem
     if @build.live? && @deal.cost_snapshotted?
-      return render json: { error: 'This deal is won, so its sheet cannot be cleared. A company admin can correct its lines, or move the deal back to an open stage first.' }, status: :unprocessable_entity
+      return render json: { error: 'This deal is won, so its sheet cannot be cleared. Correct its lines, or move the deal back to an open stage first.' }, status: :unprocessable_entity
     end
     if @build.live? && @deal.home_builds.where.not(id: @build.id).exists?
       return render json: { error: 'This is the LIVE version. Make another version live before deleting it.' }, status: :unprocessable_entity
@@ -548,6 +547,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
 
     line = params[:line_id].present? ? @build.lines.find(params[:line_id]) : nil
+    return remember_list_item(line) if line && %w[addon template].include?(line.kind)
+
     option = line ? line.option : CatalogOption.find_by(id: params[:option_id])
     home = line&.kind == 'base'
     return render json: { error: 'Choose a home or factory option' }, status: :unprocessable_entity unless home || option
@@ -658,8 +659,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     head :no_content
   end
 
-  # A cost that came in after signing (the hauler's bill): a company admin
-  # records it with no new signature, as long as the buyers' price holds.
+  # A cost that came in after signing (the hauler's bill): anyone who can update
+  # deals records it with no new signature, as long as the buyers' price holds.
   def correct_cost
     return unless authorize_action!('deals', 'update')
 
@@ -689,18 +690,12 @@ class Api::V1::DealHomeBuildsController < ApplicationController
 
   def truthy?(value) = ActiveModel::Type::Boolean.new.cast(value) == true
 
-  # The LIVE sheet of a won or posted deal, unsigned: the rep's edit never
-  # reached the deal, so it became a correction a company admin makes.
+  # The LIVE sheet of a won or posted deal, unsigned: an edit corrects the deal,
+  # and anyone who can update deals can make it.
   def closed_sheet? = @build&.live? && @deal.cost_snapshotted? && !@build.locked?
 
   def sheet
     Truebuild::DealBuild.new(@build, correcting_by: closed_sheet? ? current_user : nil)
-  end
-
-  def refuse_closed_sheet_edit
-    return unless closed_sheet? && !current_user.effective_admin?
-
-    render json: { error: 'This deal is won, so its sheet is closed. A company admin can correct it, or move the deal back to an open stage.' }, status: :conflict
   end
 
   # A correction on a posted deal also posts to the books. If that can't happen
@@ -711,6 +706,33 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     ActiveRecord::Base.transaction { yield }
   rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotSaved => e
     render json: { error: "This deal is approved, and the change could not be posted to the books (#{e.message}). Nothing was changed." }, status: :unprocessable_entity unless performed?
+  end
+
+  # An add-on or template's price going forward, on the dealer's own list. This
+  # deal takes it too. Other sheets keep the price they have.
+  def remember_list_item(line)
+    Truebuild::DealBuild.assert_editable!(@build)
+    source = line.kind == 'addon' ? line.truebuild_addon&.source : line.source_template
+    return render json: { error: 'That is no longer on your list' }, status: :unprocessable_entity unless source
+
+    service = sheet
+    ActiveRecord::Base.transaction do
+      if params.key?(:price)
+        if line.kind == 'addon' then line.truebuild_addon.update!(price_override: params[:price].presence)
+        elsif source.is_a?(FeeTemplate) then source.update!(default_amount: params[:price])
+        else source.update!(default_price: params[:price])
+        end
+      end
+      source.update!(cost: params[:cost]) if params.key?(:cost) && source.respond_to?(:cost=)
+      line_changes = {}
+      line_changes[:unit_retail] = params[:price] if params.key?(:price) && line.kind == 'template'
+      line_changes[:unit_cost] = params[:cost] if params.key?(:cost)
+      line.update!(line_changes) if line_changes.any?
+      service.reprice!
+    end
+    render json: build_json(@build.reload, service.warnings)
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   # The home to start from: one a price book has, or one typed by hand.
@@ -883,7 +905,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       manual_home: variant.manual_home?,
       # What this person can do here, so the screen can say so before they try.
       can: { edit: can?('deals', 'update'), unlock: can?('agreements', 'delete'), create_po: can?('inventory', 'create'),
-             override_fee: current_user.effective_admin?, correct: current_user.effective_admin? },
+             override_fee: current_user.effective_admin? },
       closed: build.live? && build.deal.cost_snapshotted? && !build.locked?,
       purchase_orders: build.deal.purchase_orders.where(kind: 'factory_home', is_deleted: [false, nil]).order(:created_at)
                             .map { |po| purchase_order_json(po) },
