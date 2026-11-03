@@ -73,6 +73,37 @@ module Api
         }
       end
       
+      # POST /api/companies/:company_id/users/bulk-invite
+      # { people: [{ email, name }], role, match_existing_roles }
+      def bulk_invite
+        people = Array(params[:people]).map { |p| p.permit(:email, :name).to_h.symbolize_keys }
+        return render(json: { success: false, error: 'Add at least one person' }, status: :unprocessable_entity) if people.empty?
+
+        if people.length > BulkInviteService::MAX_PEOPLE
+          return render(json: { success: false, error: "Add up to #{BulkInviteService::MAX_PEOPLE} people at a time" }, status: :unprocessable_entity)
+        end
+
+        platform_admin = current_user.platform_admin? || current_user.super_admin?
+        match_roles = ActiveModel::Type::Boolean.new.cast(params[:match_existing_roles]) || false
+        # Matching reads the person's role in another company, so it stays with
+        # the platform team. A dealer's admin must not learn it from an invite.
+        if match_roles && !platform_admin
+          return render(json: { success: false, error: 'You do not have permission to match roles.' }, status: :forbidden)
+        end
+
+        role = params[:role].presence
+        if role && !can_assign_role?(role)
+          return render(json: { success: false, error: 'You do not have permission to assign this role.' }, status: :forbidden)
+        end
+        if role.nil? && !match_roles
+          return render(json: { success: false, error: 'Choose a role' }, status: :unprocessable_entity)
+        end
+
+        rows = BulkInviteService.new(invited_by: current_user, company: @company, default_role: role, match_roles: match_roles).call(people)
+        rows = rows.map { |r| r.except(:existing_login) } unless platform_admin
+        render json: { success: true, results: rows, invited: rows.count { |r| r[:status] == 'invited' } }
+      end
+
       # POST /api/companies/:company_id/users
       def create
         # SECURITY: Enforce role hierarchy - users can only assign roles at or below their level

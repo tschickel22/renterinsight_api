@@ -2797,6 +2797,7 @@ Rails.application.routes.draw do
           get :available_roles, path: 'available-roles'
           get :pending_invitations, path: 'pending-invitations'
           post :resend_all_invitations, path: 'resend-all-invitations'
+          post :bulk_invite, path: 'bulk-invite'
         end
         
         member do

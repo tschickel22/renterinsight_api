@@ -388,7 +388,7 @@ class User < ApplicationRecord
     return nil unless target_company_id
 
     # Find the role by key, name, or ID
-    role = find_role_by_identifier(role_identifier)
+    role = find_role_by_identifier(role_identifier, company_id: target_company_id)
     return nil unless role
 
     # Determine tier from role if not specified
@@ -435,7 +435,7 @@ class User < ApplicationRecord
     target_company_id = company_id || self.company_id
     return nil unless target_company_id
 
-    role = find_role_by_identifier(role_identifier)
+    role = find_role_by_identifier(role_identifier, company_id: target_company_id)
     return nil unless role
 
     ActiveRecord::Base.transaction do
@@ -479,6 +479,11 @@ class User < ApplicationRecord
   # The account the person signs in with: password, MFA and resets live there.
   def sign_in_account
     primary_user || self
+  end
+
+  # Nobody has used this login yet, e.g. an imported user who never set a password.
+  def never_signed_in?
+    last_sign_in_at.nil? && !LoginActivity.where(user_type: 'User', user_id: id).exists?
   end
 
   # Every account this person can switch to, including this one: active, in a
@@ -534,12 +539,17 @@ class User < ApplicationRecord
   end
 
   # Find a role by various identifiers
-  def find_role_by_identifier(identifier)
+  # With a company, only that company's roles and the shared system roles count.
+  # Without this, a name lookup could return another company's custom role with
+  # the same name.
+  def find_role_by_identifier(identifier, company_id: nil)
     return nil if identifier.blank?
+
+    roles = company_id ? Role.where(company_id: [nil, company_id]) : Role.all
 
     # If it's an integer or looks like an ID, find by ID first
     if identifier.is_a?(Integer) || identifier.to_s.match?(/\A\d+\z/)
-      role = Role.find_by(id: identifier)
+      role = roles.find_by(id: identifier)
       return role if role
     end
 
@@ -577,24 +587,24 @@ class User < ApplicationRecord
     # Try mapped key first
     mapped_key = role_key_mapping[identifier_str]
     if mapped_key
-      role = Role.find_by(key: mapped_key)
+      role = roles.find_by(key: mapped_key)
       return role if role
     end
 
     # Try by exact key
-    role = Role.find_by(key: identifier_str)
+    role = roles.find_by(key: identifier_str)
     return role if role
 
     # Try by exact name
-    role = Role.find_by(name: identifier_str)
+    role = roles.find_by(name: identifier_str)
     return role if role
 
     # Try case-insensitive key match
-    role = Role.where('LOWER(key) = ?', identifier_str.downcase).first
+    role = roles.where('LOWER(key) = ?', identifier_str.downcase).first
     return role if role
 
     # Try case-insensitive name match
-    role = Role.where('LOWER(name) = ?', identifier_str.downcase).first
+    role = roles.where('LOWER(name) = ?', identifier_str.downcase).first
     return role if role
 
     Rails.logger.warn "⚠️ [RBAC] Could not find role for identifier: #{identifier_str}"

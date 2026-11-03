@@ -99,11 +99,25 @@ class Invitation < ApplicationRecord
   # The invited linked account (E68 5a) when the email already signs in to
   # another company: they accept with that password instead of making one.
   def existing_account?
-    return false unless invitation_type == 'company_user'
+    return false unless %w[company_user tenant].include?(invitation_type)
 
     scope = User.where('LOWER(email) = ?', email.to_s.downcase)
     scope.where(company_id: company_id).where.not(primary_user_id: nil).exists? ||
       (scope.where(company_id: company_id).none? && scope.sign_in_accounts.where.not(company_id: company_id).exists?)
+  end
+
+  # A linked invite normally asks for the person's current password, which someone
+  # who has never signed in does not have. They may create one here instead, but
+  # only when the link can only have reached their own inbox. The inviter picks
+  # the phone number, so a link sent by text could go to anyone, and letting that
+  # set a password would hand over the person's account in their other company.
+  def sets_password_on_accept?
+    return false unless delivery_method == 'email' && existing_account?
+
+    root = User.sign_in_accounts.find_by('LOWER(email) = ?', email.to_s.downcase)
+    return false unless root && root.status == 'active' && !root.mfa_enabled
+
+    root.never_signed_in?
   end
 
   def expired?

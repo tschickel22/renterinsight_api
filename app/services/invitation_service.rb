@@ -53,14 +53,19 @@ class InvitationService
     # so the User.email uniqueness validation never fires until the invitee
     # accepts. That made it possible to silently issue two tenant invites for
     # the same email pointing at different companies; only one could ever be
-    # accepted. Guard here.
+    # accepted. Guard here. An owner who already signs in elsewhere is fine: they
+    # get a linked account on accept, so any number of those can be accepted.
     if invitation_type == 'tenant' && normalized_email.present?
-      existing_user = User.where('LOWER(email) = ?', normalized_email).exists?
-      if existing_user
+      login = User.sign_in_accounts.where('LOWER(email) = ?', normalized_email).first
+      in_this_company = @company && User.where(company_id: @company.id).where('LOWER(email) = ?', normalized_email).exists?
+      if in_this_company || (login.nil? && User.where('LOWER(email) = ?', normalized_email).exists?)
         raise Error, "A user account with email #{normalized_email} already exists"
       end
+      if login && (login.platform_admin? || login.super_admin?)
+        raise Error, "#{normalized_email} is a platform admin account and can't be added to a company"
+      end
 
-      existing_invite = Invitation
+      existing_invite = login.nil? && Invitation
         .active
         .where(invitation_type: 'tenant', email: normalized_email)
         .exists?
@@ -821,19 +826,8 @@ class InvitationService
     # A person who already signs in elsewhere accepts with that password. Their
     # sign-in account is left exactly as it is: no new password, MFA untouched.
     if (user.nil? && sign_in_account) || user&.linked_account?
-      root = user&.primary_user || sign_in_account
-      raise Error, 'Incorrect password for your DealerTide account' unless root.authenticate(user_params[:password].to_s)
-
-      user ||= User.create!(
-        email: root.email, primary_user: root, company_id: invitation.company_id,
-        first_name: root.first_name, last_name: root.last_name, name: root.read_attribute(:name), phone: root.phone,
-        role: invitation.role || 'staff', permissions: invitation.permissions || [],
-        invitation_id: invitation.id, status: 'invited', password: SecureRandom.hex(32)
-      )
-      user.update!(status: 'active')
-      assign_rbac_role_to_user(user, invitation.role, invitation.company_id)
-      assign_user_to_locations_safe(invitation, user) if UserLocation.where(user_id: user.id).none?
-      return user
+      return link_existing_account(invitation, user_params, user, user&.primary_user || sign_in_account,
+                                   role: invitation.role || 'staff', rbac_role: invitation.role)
     end
 
     if user
@@ -911,11 +905,47 @@ class InvitationService
     )
   end
   
+  # Checks who they are, then adds this company to their sign-in. Their sign-in
+  # account keeps its password and MFA, unless they have never signed in and the
+  # invite may set their first password (Invitation#sets_password_on_accept?).
+  def link_existing_account(invitation, user_params, user, root, role:, rbac_role:)
+    password = user_params[:password].to_s
+    # A password that already works is never changed.
+    sets_password = !root.authenticate(password) && invitation.sets_password_on_accept?
+    if sets_password
+      raise Error, 'Password must be at least 8 characters' if password.length < 8
+    elsif !root.authenticate(password)
+      raise Error, 'Incorrect password for your DealerTide account'
+    end
+
+    User.transaction do
+      user ||= User.create!(
+        email: root.email, primary_user: root, company_id: invitation.company_id,
+        first_name: root.first_name, last_name: root.last_name, name: root.read_attribute(:name), phone: root.phone,
+        role: role, permissions: invitation.permissions || [],
+        invitation_id: invitation.id, status: 'invited', password: SecureRandom.hex(32)
+      )
+      user.update!(status: 'active')
+      root.update!(password: password) if sets_password
+    end
+    assign_rbac_role_to_user(user, rbac_role, invitation.company_id)
+    assign_user_to_locations_safe(invitation, user) if UserLocation.where(user_id: user.id).none?
+    user
+  end
+
   def create_tenant(invitation, user_params)
     # Use existing company from invitation (DO NOT create new one)
     company = invitation.company
     raise Error, "No company associated with invitation" unless company
-    
+
+    # The owner already signs in to another company: link them as this company's
+    # admin instead of making a second login, which their email would not allow.
+    if invitation.existing_account?
+      root = User.sign_in_accounts.find_by!('LOWER(email) = ?', invitation.email.to_s.downcase)
+      linked = User.find_by(company_id: company.id, primary_user_id: root.id)
+      return link_existing_account(invitation, user_params, linked, root, role: 'tenant', rbac_role: 'company_admin')
+    end
+
     # Find or update existing placeholder user
     user = User.find_by(email: invitation.email, company_id: company.id)
     
