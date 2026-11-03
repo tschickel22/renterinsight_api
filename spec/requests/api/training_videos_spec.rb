@@ -64,10 +64,11 @@ RSpec.describe 'Training videos', type: :request do
     expect(body['enabled']).to be(true)
 
     post '/api/admin/training_videos', headers: h(platform),
-         params: { video: { title: 'Linked installers', module_key: 'projects', chapters: [{ title: 'Link', start: 0 }] } }
+         params: { video: { title: 'Linked installers', module_key: 'projects', chapters: [{ title: 'Link', start: 0, terms: 'connect, installer' }] } }
     expect(response).to have_http_status(:created), response.body
     expect(body['video']).to include('slug' => 'linked-installers', 'is_published' => false)
     expect(body['video']['share_token']).to be_present
+    expect(body['video']['chapters'].first['terms']).to eq('connect, installer')
   end
 
   it 'adds several new videos and gives each its own slug, which follows the title once renamed' do

@@ -37,46 +37,69 @@ class TrainingVideo < ApplicationRecord
   end
 
   # The best videos for a question, each with the moment that answers it: the
-  # narration line or chapter that shares the most words with it.
+  # narration line or chapter that shares the most words with it. A chapter can
+  # carry hidden `terms`, the words a dealer would use that the narrator does
+  # not ("store" for location), so they count for more than a passing mention.
   def self.search(query, scope: published, limit: 3)
-    terms = query.to_s.downcase.scan(/[a-z0-9&]+/).reject { |w| w.length < 3 || Knowledge::SmartSearchService::STOP_WORDS.include?(w) }.uniq.first(6)
+    terms = query.to_s.downcase.scan(/[a-z0-9&]+/)
+                 .reject { |w| w.length < 3 || Knowledge::SmartSearchService::STOP_WORDS.include?(w) }
+                 .map { |w| stem(w) }.uniq
     return [] if terms.empty?
 
     scope.to_a.filter_map do |video|
-      title = video.title.to_s.downcase
-      body = [video.description, video.transcript, Array(video.chapters).map { |c| c['title'] }].flatten.compact.join(' ').downcase
-      score = terms.sum { |t| (title.include?(t) ? 3 : 0) + (body.include?(t) ? 1 : 0) }
+      title = words_in(video.title)
+      chapters = Array(video.chapters)
+      body = words_in([video.description, video.transcript, chapters.map { |c| c['title'] }].flatten.compact.join(' '))
+      hidden = words_in(chapters.map { |c| c['terms'] }.compact.join(' '))
+      score = terms.sum { |t| (title.include?(t) ? 3 : 0) + (body.include?(t) ? 1 : 0) + (hidden.include?(t) ? 2 : 0) }
       next if score.zero?
 
       [video, score, video.moment_for(terms)]
     end.sort_by { |_, score, _| -score }.first(limit).map { |video, _, moment| [video, moment] }
   end
 
+  # Whole words, so "add" does not find "address", with endings removed so
+  # "locations" still finds "location" and "changing" finds "change".
+  def self.words_in(text)
+    text.to_s.downcase.scan(/[a-z0-9&]+/).map { |w| stem(w) }.to_set
+  end
+
+  def self.stem(word)
+    return word if word.length < 4 || word.end_with?('ss')
+
+    base = word.sub(/(ing|ed|es)\z/, '')
+    base = word.sub(/s\z/, '') if base.length < 3
+    base = base.chop if base != word && base.length > 3 && base.match?(/([bdgmnprt])\1\z/)
+    base = base.chomp('e') if base.length > 3
+    base.length < 3 ? word : base
+  end
+
   # { start:, label: } for the moment that best answers the question: the
-  # narration line that shares the most words with it, counting the title of
-  # the chapter it sits in. Words the video says all the time ("bid" in the
-  # bids video) count for less than the rare one that names the step
-  # ("award"). When the chapter's title matches, start at the chapter, so the
+  # narration line that shares the most words with it, counting the title and
+  # hidden terms of the chapter it sits in. Words the video says all the time
+  # ("bid" in the bids video) count for less than the rare one that names the
+  # step ("award"). When the chapter matches, start at the chapter, so the
   # person gets the whole part.
   def moment_for(terms)
     chaps = Array(chapters).sort_by { |c| c['start'].to_i }
+    chapter_words = chaps.to_h { |c| [c, self.class.words_in("#{c['title']} #{c['terms']}")] }
     chapter_at = ->(at) { chaps.select { |c| c['start'].to_i <= at }.last }
     lines = transcript.to_s.lines.filter_map do |line|
       m = /\A(\d+):(\d{2}) (.+)\z/.match(line.strip)
-      m && { start: m[1].to_i * 60 + m[2].to_i, text: m[3] }
+      m && { start: m[1].to_i * 60 + m[2].to_i, words: self.class.words_in(m[3]) }
     end
-    weight = terms.to_h { |t| [t, 1.0 / (1 + lines.count { |l| l[:text].downcase.include?(t) })] }
-    hits = ->(text) { terms.sum { |t| text.to_s.downcase.include?(t) ? weight[t] : 0 } }
-    scored = lines.map { |l| [l, hits.call(l[:text]) + 2 * hits.call(chapter_at.call(l[:start])&.dig('title'))] }
+    weight = terms.to_h { |t| [t, 1.0 / (1 + lines.count { |l| l[:words].include?(t) })] }
+    hits = ->(words) { terms.sum { |t| words&.include?(t) ? weight[t] : 0 } }
+    scored = lines.map { |l| [l, hits.call(l[:words]) + 2 * hits.call(chapter_words[chapter_at.call(l[:start])])] }
     best, score = scored.max_by { |_, sc| sc }
     if best.nil? || score.zero?
-      chapter = chaps.max_by { |c| hits.call(c['title']) }
-      chapter = nil if chapter && hits.call(chapter['title']).zero?
+      chapter = chaps.max_by { |c| hits.call(chapter_words[c]) }
+      chapter = nil if chapter && hits.call(chapter_words[chapter]).zero?
       return { start: chapter&.dig('start').to_i, label: chapter&.dig('title') }
     end
 
     chapter = chapter_at.call(best[:start])
-    start = chapter && hits.call(chapter['title']).positive? ? chapter['start'].to_i : [best[:start] - 1, 0].max
+    start = chapter && hits.call(chapter_words[chapter]).positive? ? chapter['start'].to_i : [best[:start] - 1, 0].max
     { start: start, label: chapter&.dig('title') }
   end
 
