@@ -3,6 +3,8 @@
 module Api
   module Companies
     class UsersController < ApplicationController
+      include RoleAssignmentRules
+
       before_action :authenticate_user!
       before_action :set_company_and_verify_access
       before_action :set_user, only: [:show, :update, :destroy, :restore, :resend_invitation, :other_logins]
@@ -311,7 +313,14 @@ module Api
       def resend_invitation
         # For users with 'invited' status, create a new invitation
         # (old invitation was already used to create placeholder user)
-        
+
+        # Accepting an invitation sets a password, so it must not be a way back
+        # in for someone an admin shut out.
+        if @user.deactivated?
+          return render json: { success: false, error: 'This person is disabled. Set them back to Active before inviting them.' },
+                        status: :unprocessable_entity
+        end
+
         service = InvitationService.new(
           invited_by: current_user,
           company: @company
@@ -460,7 +469,7 @@ module Api
                                .distinct
                                .pluck(:user_id)
 
-        scope = @company.users.where(deleted_at: nil)
+        scope = @company.users.where(deleted_at: nil).where.not(status: User::DEACTIVATED_STATUSES)
         scope = scope.where("status = 'invited' OR (last_sign_in_at IS NULL AND id NOT IN (?))",
                             logged_in_user_ids.presence || [0])
         scope.reject do |u|
@@ -559,28 +568,6 @@ module Api
         'read_only' => 10
       }.freeze
       
-      def can_assign_role?(target_role)
-        # Platform admins and super admins can assign any role
-        return true if current_user.platform_admin? || current_user.super_admin?
-
-        # Get target role level
-        target_level = ROLE_HIERARCHY[target_role] || 0
-
-        # Users can only assign roles at or below their level
-        # But they cannot assign their own level (prevents lateral escalation)
-        role_level_of(current_user) > target_level
-      end
-
-      def role_level_of(user)
-        levels = [ROLE_HIERARCHY[user.role] || 0]
-        if @company&.use_rbac_system
-          user.roles_for_company(@company.id).each do |role|
-            levels << (ROLE_HIERARCHY[role.key] || ROLE_HIERARCHY[role.name] || 0)
-          end
-        end
-        levels.max
-      end
-
       # Peers may manage each other (a dealer with two admins needs that);
       # nobody may touch someone above them.
       def outranks_current_user?(user)

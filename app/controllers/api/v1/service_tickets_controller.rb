@@ -764,8 +764,14 @@ module Api
       # losing it because one complaint row was malformed would be worse than
       # landing on the detail page with an issue missing.
       def create_submitted_issues(ticket, rows)
+        policy = ServiceWarrantyPolicy.for_company(@company)
+        may_price = policy.amount_setter?(ServiceWarrantyPolicy.actor_kind_for(current_user))
+
         rows.each_with_index do |row, index|
           attrs = row.respond_to?(:to_unsafe_h) ? row.to_unsafe_h : row.to_h
+          # Same rule as adding an issue to a saved ticket. The ticket still goes
+          # through, the issue just arrives unpriced for someone who may price it.
+          attrs = attrs.except('parts', 'labor').merge('pricing_status' => 'unpriced') unless may_price
           ticket.issues.create!(
             company_id: ticket.company_id,
             position: index,

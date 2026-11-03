@@ -843,6 +843,10 @@ class InvitationService
     user = User.where(company_id: invitation.company_id).where('LOWER(email) = ?', invitation.email.to_s.downcase).first
     sign_in_account = User.sign_in_accounts.where('LOWER(email) = ?', invitation.email.to_s.downcase).where.not(company_id: invitation.company_id).first
 
+    # An invitation sent before someone was disabled must not undo it: accepting
+    # would set a new password and make them active again.
+    raise Error, 'This invitation is no longer valid. Please ask your administrator.' if user&.deactivated?
+
     # A person who already signs in elsewhere accepts with that password. Their
     # sign-in account is left exactly as it is: no new password, MFA untouched.
     if (user.nil? && sign_in_account) || user&.linked_account?
