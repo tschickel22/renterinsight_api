@@ -101,6 +101,12 @@ module Public
       # The Worker still caches per visitor hostname, so this costs little.
       response.headers['Cache-Control'] = 'no-store'
 
+      # Crawlable on purpose. A demo that was already indexed only drops out of
+      # Google if Google can fetch a page and read its noindex tag.
+      if @website.company&.is_demo?
+        return render plain: "User-agent: *\nAllow: /\n", content_type: 'text/plain'
+      end
+
       if @metadata[:robots].to_s.start_with?('noindex')
         return render plain: "User-agent: *\nDisallow: /\n", content_type: 'text/plain'
       end
@@ -134,6 +140,8 @@ module Public
     end
 
     def sitemap
+      return head(:not_found) if @website.company&.is_demo?
+
       cache_publicly(CRAWLER_FILE_EDGE_MAX_AGE)
       pages = visible_pages.reject { |p| p.robots.to_s.include?('noindex') }
 
@@ -312,13 +320,24 @@ module Public
     # is Cloudflare's job and it already does it.
     def canonical_redirect_target
       domain = @resolution&.company_domain
-      return nil if domain.nil?
+      return own_domain_redirect_target if domain.nil?
 
       host = Websites::RequestHost.for(request)
       wanted_host = canonical_host_for(domain, host)
       return nil if wanted_host == host
 
       "#{request.scheme}://#{wanted_host}#{request.fullpath}"
+    end
+
+    # A site on its own domain also still answers on its platform address. Left
+    # serving, that is a second complete copy of the site in Google, with each
+    # copy calling itself the original, so the platform address sends people on.
+    def own_domain_redirect_target
+      status = @website&.domain_status
+      return nil unless status && status[:state] == 'live' && status[:hostname].present?
+      return nil if status[:hostname] == Websites::RequestHost.for(request)
+
+      "https://#{status[:hostname]}#{request.fullpath}"
     end
 
     def canonical_host_for(domain, host)

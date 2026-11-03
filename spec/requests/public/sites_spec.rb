@@ -47,6 +47,97 @@ RSpec.describe 'Public::Sites', type: :request do
     get path, headers: { 'HTTP_HOST' => host }
   end
 
+  describe 'a site with its own domain, asked for at its platform address' do
+    let(:platform_host) { 'sunshine.mydealertide.test' }
+
+    before do
+      website.update!(published_at: Time.current)
+      allow(Websites::RequestHost).to receive(:for).and_return(platform_host)
+      allow(Websites::HostResolver).to receive(:call).and_return(
+        Websites::HostResolver::Result.new(website: website, company_domain: nil, canonical_host: platform_host)
+      )
+    end
+
+    def own_domain(**attrs)
+      CompanyDomain.create!({ company_id: company.id, website_id: website.id, hostname: 'www.sunshine.test',
+                              web_enabled: true, active: true, verification_status: 'active', ssl_status: 'active' }.merge(attrs))
+    end
+
+    it 'sends every path there, permanently, keeping the path and query' do
+      own_domain
+
+      get_site('/about?utm_source=ad', host: platform_host)
+
+      expect(response).to have_http_status(:moved_permanently)
+      expect(response.headers['Location']).to eq('https://www.sunshine.test/about?utm_source=ad')
+    end
+
+    it 'redirects robots.txt and the sitemap too' do
+      own_domain
+
+      get_site('/robots.txt', host: platform_host)
+      expect(response).to have_http_status(:moved_permanently)
+
+      get_site('/sitemap.xml', host: platform_host)
+      expect(response).to have_http_status(:moved_permanently)
+    end
+
+    it 'keeps serving there until the domain is really live' do
+      own_domain(ssl_status: 'pending')
+      allow(Websites::SpaShell).to receive(:fetch).and_return('<html><head></head><body><div id="root"></div></body></html>')
+
+      get_site('/', host: platform_host)
+
+      expect(response).not_to have_http_status(:moved_permanently)
+    end
+
+    it 'keeps serving there when the site has no domain of its own' do
+      allow(Websites::SpaShell).to receive(:fetch).and_return('<html><head></head><body><div id="root"></div></body></html>')
+
+      get_site('/', host: platform_host)
+
+      expect(response).not_to have_http_status(:moved_permanently)
+    end
+
+    it 'does not redirect the domain to itself' do
+      own_domain
+      allow(Websites::RequestHost).to receive(:for).and_return('www.sunshine.test')
+      allow(Websites::SpaShell).to receive(:fetch).and_return('<html><head></head><body><div id="root"></div></body></html>')
+
+      get_site('/', host: 'www.sunshine.test')
+
+      expect(response).not_to have_http_status(:moved_permanently)
+    end
+  end
+
+  describe 'a demo company site' do
+    before do
+      company.update!(is_demo: true)
+      allow(Websites::SpaShell).to receive(:fetch).and_return('<html><head></head><body><div id="root"></div></body></html>')
+    end
+
+    it 'still opens from a link, marked to stay out of search' do
+      get_site('/')
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('<meta name="robots" content="noindex, nofollow">')
+    end
+
+    it 'lets crawlers read that tag, and offers no sitemap' do
+      get_site('/robots.txt')
+      expect(response.body).to eq("User-agent: *\nAllow: /\n")
+
+      get_site('/sitemap.xml')
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'is graded as the real site it stands for' do
+      report = Websites::SelfAudit.new(website: website, canonical_host: 'demo.example.com').call
+
+      expect(report['checks'].find { |c| c['key'] == 'crawlability' }&.dig('status')).not_to eq('fail')
+    end
+  end
+
   describe 'serving a page' do
     it 'answers on the dealer hostname' do
       get_site('/about')
