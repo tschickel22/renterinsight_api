@@ -267,6 +267,9 @@ module Websites
     # one here, tell crawlers not to index it rather than relying on that invariant.
     def robots
       return 'noindex, nofollow' unless @website.status == 'published'
+      # A demo company's site copies a real dealer's or shows sample data. Prospects
+      # still open it from a link, but it must never compete in search.
+      return 'noindex, nofollow' if @website.company&.is_demo?
       return 'noindex, nofollow' if seo_config['noindex'].to_s == 'true'
       return @blog_post.robots if @blog_post&.robots.present?
       # A page's own setting, which landing pages default to noindex. It was

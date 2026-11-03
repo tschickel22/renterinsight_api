@@ -126,7 +126,9 @@ module Websites
       tags = [
         tag(:title, metadata[:title]),
         meta_tag('description', metadata[:description]),
-        meta_tag('robots', metadata[:robots]),
+        # A demo is kept out of Google deliberately, and the report on it is what
+        # prospects see, so it is graded as the real site it stands for.
+        meta_tag('robots', @website.company&.is_demo? ? 'index, follow' : metadata[:robots]),
         link_tag('canonical', metadata[:canonical_url]),
         link_tag('icon', metadata[:favicon_url]),
         property_tag('og:title', metadata[:title]),
