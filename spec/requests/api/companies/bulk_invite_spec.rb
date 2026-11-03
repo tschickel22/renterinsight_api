@@ -6,7 +6,7 @@ require 'rails_helper'
 # without researching who is who first (the install company for a dealer).
 RSpec.describe 'Bulk invite and linked first logins', type: :request do
   let(:dealer) { create(:company, name: 'Easy Homes') }
-  let(:install) { create(:company, name: 'Easy Install') }
+  let(:install) { create(:company, name: 'Easy Install', industry: 'installer') }
 
   let(:platform_admin) do
     User.create!(email: 'ops@platform.example', first_name: 'Ops', last_name: 'Team', password: 'Pass1234!',
@@ -118,6 +118,16 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
       bulk_invite(as: platform_admin, match: true, people: [{ email: 'one@easy.example' }, { email: 'two@easy.example' }])
 
       expect(Role.where(company_id: install.id, name: 'Company Administrator (Copy)').count).to eq(1)
+    end
+
+    it 'only keeps roles on an installer company' do
+      dealer_user('rep@easy.example', rep_role)
+      install.update!(industry: 'manufactured_housing')
+
+      bulk_invite(as: platform_admin, match: true, people: [{ email: 'rep@easy.example' }])
+
+      expect(response).to have_http_status(:forbidden)
+      expect(install.users.where(email: 'rep@easy.example')).to be_empty
     end
 
     it "won't let a company admin match roles or see who already has a login" do

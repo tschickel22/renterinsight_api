@@ -6,8 +6,9 @@
 # So nobody has to research who already has a login before inviting.
 #
 # match_roles gives someone with a login the role they hold in the company they
-# sign in to. It reads another company's data, so only platform admins may ask
-# for it (enforced by the controller).
+# sign in to. It is for linked accounts into an installer company, and reads
+# another company's data, so only platform admins may ask for it, and only on an
+# installer company (enforced by the controller).
 class BulkInviteService
   MAX_PEOPLE = 50
 

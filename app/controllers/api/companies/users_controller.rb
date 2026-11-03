@@ -88,8 +88,9 @@ module Api
         match_roles = ActiveModel::Type::Boolean.new.cast(params[:match_existing_roles]) || false
         # Matching reads the person's role in another company, so it stays with
         # the platform team. A dealer's admin must not learn it from an invite.
-        if match_roles && !platform_admin
-          return render(json: { success: false, error: 'You do not have permission to match roles.' }, status: :forbidden)
+        # It exists for linked accounts into an installer company, nothing else.
+        if match_roles && !(platform_admin && @company.industry == 'installer')
+          return render(json: { success: false, error: 'Keeping a current role is only for linked accounts into an installer company.' }, status: :forbidden)
         end
 
         role = params[:role].presence
