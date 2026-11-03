@@ -43,6 +43,37 @@ RSpec.describe 'Public::Sites blog posts', type: :request do
     get path, headers: { 'HTTP_HOST' => 'sunshine-rv.test' }
   end
 
+  describe 'an old /blog/<slug> link' do
+    it 'moves permanently to the post on the canonical host, keeping the query' do
+      get_site('/blog/spring-homes/?utm_source=email')
+
+      expect(response).to have_http_status(:moved_permanently)
+      expect(response.location).to eq('https://sunshine-rv.test/blog/post/spring-homes?utm_source=email')
+    end
+
+    it 'still answers 404 for a slug no post has' do
+      get_site('/blog/no-such-post')
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'does not move a draft post' do
+      website.blog_posts.create!(author: author, title: 'Draft', slug: 'draft-post', content: '<p>x</p>', status: :draft)
+
+      get_site('/blog/draft-post')
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'lets a real page at that address win' do
+      website.website_pages.create!(title: 'Spring', path: '/blog/spring-homes', order: 2, blocks: [])
+
+      get_site('/blog/spring-homes')
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
   it 'gives a post its own title, description, image and canonical' do
     get_site('/blog/post/spring-homes')
 

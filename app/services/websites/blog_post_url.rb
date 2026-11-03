@@ -45,5 +45,19 @@ module Websites
       slug = path.delete_prefix(prefix)
       slug.present? && !slug.include?('/') ? slug : nil
     end
+
+    # A post's address on a site that had no /post/ segment, like /blog/my-post.
+    # A dealer moving to us has those links in Google and in old emails, and they
+    # would otherwise answer with the header and footer and nothing between.
+    # Only a shape check: the caller decides whether it names a real post.
+    def legacy_slug_from(website, path, base: blog_page_path(website))
+      return nil if base.blank? || base == '/'
+
+      prefix = "#{base}/"
+      return nil unless path.to_s.start_with?(prefix)
+
+      slug = path.delete_prefix(prefix)
+      slug.present? && !slug.include?('/') && slug != SEGMENT ? slug : nil
+    end
   end
 end
