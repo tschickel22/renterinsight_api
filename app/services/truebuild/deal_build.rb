@@ -24,6 +24,11 @@ module Truebuild
   # A deal can hold several versions of the sheet. Only the LIVE version
   # writes the deal; the others are drafts the rep prices beside it and can
   # make live, which rewrites the deal from that version.
+  #
+  # The document fee is the dealer's, from Settings, TrueBuild pricing: once
+  # set it is on every open sheet, and the rep can neither change nor remove
+  # it (apply_doc_fee!). A sheet that already has a doc fee line gets the
+  # dealer's in its place, so it is never charged twice.
   class DealBuild
     class Locked < StandardError; end
 
@@ -31,7 +36,15 @@ module Truebuild
     # The lines written to the deal as lines of their own (the rest roll into the home line).
     EXTRA_KINDS = %w[addon template custom].freeze
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
-    TOTALS_VERSION = 5
+    TOTALS_VERSION = 6
+    # A fee line that is the document fee: "Doc fee", "Docs", "Documentation", "Document preparation fee".
+    DOC_FEE_NAME = /\bdoc(s|u\w*)?\b/i
+    DOC_FEE_LABEL = 'Doc fee'
+    DOC_FEE_LOCKED = 'The document fee comes from Settings, TrueBuild pricing, and cannot be changed on a Deal Sheet.'
+    DOC_FEE_MISSING = 'No document fee is set. Enter it under Settings, TrueBuild pricing (0 if you do not charge one).'
+
+    def self.doc_fee_name?(name) = name.to_s.match?(DOC_FEE_NAME)
+
 
     # Priced before the deal's lines last changed (a Products save), or by an
     # older version of these totals.
@@ -43,7 +56,7 @@ module Truebuild
       return true if books.any? { |b| (at = b.metadata.to_h['corrected_at']).present? && Time.zone.parse(at) > build.priced_at }
       # The dealer changed their price list, names or colors, or the admin decided on one of those.
       company = build.company
-      return true if [company.dealer_markup_rules, company.catalog_price_requests, company.catalog_option_requests, company.dealer_colors]
+      return true if [company.dealer_markup_rules, company.dealer_catalog_terms, company.catalog_price_requests, company.catalog_option_requests, company.dealer_colors]
                      .any? { |scope| (at = scope.maximum(:updated_at)) && at > build.priced_at }
 
       changed = build.deal.deal_products.maximum(:updated_at)
@@ -230,10 +243,23 @@ module Truebuild
       reprice!
     end
 
-    def add_custom(label:, unit_retail:, unit_cost: 0, quantity: 1, unit: 'each', tax_category: 'other', group_name: nil)
+    def add_custom(label:, unit_retail:, unit_cost: 0, quantity: 1, unit: 'each', tax_category: 'other', group_name: nil,
+                   on_addendum: false, factory_order: nil, user: nil)
       guard!
       line = add_line(kind: 'custom', label: label, group_name: group_name, quantity: quantity, unit: unit, tax_category: tax_category,
                       unit_cost: unit_cost, unit_retail: unit_retail)
+      put_on_addendum(line, user: user, factory_order: factory_order) if on_addendum
+      reprice!
+      line
+    end
+
+    # The rep's tick on a line they typed. On: it counts on Addendum A as an
+    # option, and goes on the dealer's upgrades, so every sheet for this
+    # factory offers it from then on. Off: back to a plain line, and off that
+    # list (sheets that already have it keep it).
+    def set_addendum(line, on, user: nil, factory_order: nil)
+      guard!
+      on ? put_on_addendum(line, user: user, factory_order: factory_order) : take_off_addendum(line, user: user)
       reprice!
       line
     end
@@ -245,6 +271,8 @@ module Truebuild
     # adders for this deal (nil goes back to the book's).
     def update_line(line, attrs)
       guard!
+      raise ArgumentError, DOC_FEE_LOCKED if line.required_fee?
+
       attrs = attrs.to_h.symbolize_keys
       changes = attrs.slice(:quantity, :unit, :tbd, :no_charge, :tax_category)
       # TBD (no price yet) and N/C (no charge) cannot both be true: setting one clears the other.
@@ -274,6 +302,7 @@ module Truebuild
     def remove_line(line)
       guard!
       raise ArgumentError, 'The home itself cannot be removed; change the model instead' if line.kind == 'base'
+      raise ArgumentError, DOC_FEE_LOCKED if line.required_fee?
 
       line.destroy!
       reprice!
@@ -292,7 +321,8 @@ module Truebuild
       products = @build.deal.deal_products.reload.to_a
       by_tag = products.group_by { |dp| tag_of(dp) }
       DealHomeBuildLine.transaction do
-        @build.lines.reload.select { |l| EXTRA_KINDS.include?(l.kind) && l.priced? }.each do |line|
+        # The document fee is not the rep's to change here either: reprice writes it back.
+        @build.lines.reload.select { |l| EXTRA_KINDS.include?(l.kind) && l.priced? && !l.required_fee? }.each do |line|
           dp = by_tag[line.id.to_s]&.first
           dp ? take_edits(line, dp) : line.destroy!
         end
@@ -305,6 +335,7 @@ module Truebuild
 
     def reprice!
       guard!
+      apply_doc_fee!
       lines = @build.lines.reload.to_a
       result = engine(option_ids: lines.filter_map(&:catalog_option_id), addon_ids: lines.filter_map(&:truebuild_addon_id))
       priced = index(result)
@@ -414,6 +445,75 @@ module Truebuild
       self.class.assert_editable!(@build)
     end
 
+    # Puts the dealer's document fee on the sheet, in place of any doc fee line
+    # already there, at the amount they set. None set: the line stays one the
+    # rep can type in, and the sheet warns. A deal that is won, posted or signed
+    # keeps the fee it was sold with, drafts of a change to it included.
+    def apply_doc_fee!
+      deal = @build.deal
+      return if deal.cost_snapshotted? || deal.home_build&.locked?
+
+      fee = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id).doc_fee
+      lines = @build.lines.reload.to_a
+      required = lines.find(&:required_fee?)
+      if fee.nil?
+        required&.update!(metadata: required.metadata.to_h.except('required_fee'))
+        return
+      end
+
+      lines.select { |l| !l.required_fee? && doc_fee_line?(l) }.each(&:destroy!)
+      remove_products_doc_fees(deal) if @build.live?
+      if fee.zero?
+        required&.destroy!
+      elsif required
+        required.update!(label: DOC_FEE_LABEL, unit_retail: fee, unit_cost: 0, quantity: 1, unit: 'each', tbd: false, no_charge: false, tax_category: 'fee')
+      else
+        add_line(kind: 'custom', label: DOC_FEE_LABEL, group_name: 'Fees', tax_category: 'fee', unit_retail: fee, unit_cost: 0,
+                 metadata: { 'required_fee' => true })
+      end
+    end
+
+    def doc_fee_line?(line)
+      EXTRA_KINDS.include?(line.kind) && line.tax_category == 'fee' && self.class.doc_fee_name?(line.label)
+    end
+
+    # A doc fee entered in Products before the sheet took it in.
+    def remove_products_doc_fees(deal)
+      deal.deal_products.reload.each do |dp|
+        next if dp.notes.to_s.match?(TAG) || dp.home_line_item?
+
+        dp.destroy! if dp.notes.to_s.match?(/category:\s*fee/i) && self.class.doc_fee_name?(dp.product_name)
+      end
+    end
+
+    # Fees and set-up lines belong to their own rows on the contract, never Addendum A.
+    def put_on_addendum(line, user:, factory_order:)
+      return if line.kind == 'option' && line.option&.dealer_upgrade?
+      raise ArgumentError, 'Only a line typed on this sheet can go on Addendum A this way' unless line.kind == 'custom'
+      raise ArgumentError, "#{line.label} is a fee or service, so it has its own line on the contract" unless %w[other factory_option].include?(line.tax_category)
+
+      upgrade = DealerOptions.add_upgrade!(company: @build.company, manufacturer_id: @build.variant.manufacturer_id, name: line.label,
+                                           cost: line.unit_cost, retail: line.unit_retail, factory_order: factory_order != false,
+                                           user: user, deal: @build.deal)
+      # Already on their list at another figure: this deal keeps what the rep typed.
+      saved = upgrade.metadata.to_h
+      meta = line.metadata.to_h.except('from_products')
+      meta['set_retail'] = true if saved['retail'].to_d != line.unit_retail.to_d
+      meta['set_cost'] = true if saved['cost'].to_d != line.unit_cost.to_d
+      line.update!(kind: 'option', option: upgrade, label: upgrade.name, group_name: upgrade.group&.name,
+                   factory_code: upgrade.factory_code, tax_category: 'factory_option', metadata: meta)
+    end
+
+    def take_off_addendum(line, user:)
+      return line.update!(tax_category: 'other') if line.kind == 'custom' && line.tax_category == 'factory_option'
+      return if line.kind == 'custom'
+      raise ArgumentError, 'Only an upgrade you added can come off Addendum A this way' unless line.kind == 'option' && line.option&.dealer_upgrade?
+
+      DealerOptions.remove_color!(line.option, user: user)
+      line.update!(kind: 'custom', option: nil, group_name: nil, factory_code: nil, tax_category: 'other',
+                   metadata: line.metadata.to_h.except('set_retail', 'set_cost', 'rule', 'dealer_cost_set', 'book_name'))
+    end
+
     def engine(option_ids:, addon_ids:)
       surcharge = @build.lines.find_by(kind: 'base')&.metadata.to_h['set_surcharge']
       result = PricingEngine.new(company: @build.company, variant: @build.variant, option_ids: option_ids, addon_ids: addon_ids,
@@ -509,6 +609,7 @@ module Truebuild
       end
       unpriced = counted.select { |l| l.retail.nil? }.map(&:label)
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
+      @warnings << DOC_FEE_MISSING if terms.doc_fee.nil?
       { version: TOTALS_VERSION, cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
         discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
         other_lines_total: other_net.round(2).to_f,
@@ -517,7 +618,7 @@ module Truebuild
         contract_total: contract_total&.round(2)&.to_f, down_payment: deal.down_payment.to_f,
         additional_payment: deal.try(:additional_payment).to_f, unpaid_balance: unpaid&.round(2)&.to_f,
         delivery_point: deal.try(:delivery_point), freight_miles: @build.freight_miles,
-        freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to, warnings: @warnings.uniq }
+        freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to&.to_f, warnings: @warnings.uniq }
     end
 
     # Sales tax by the taxing state's rules (Tax::DealTax): the same numbers GL

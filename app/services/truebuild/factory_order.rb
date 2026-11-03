@@ -4,7 +4,8 @@ module Truebuild
   # The factory PO for a deal's home (backlog E51), written from its LIVE Deal
   # Sheet: the model and each factory option with its code, quantity and
   # dealer cost. Dealer add-ons, fees, freight and set-up are not the
-  # factory's, so they stay off. Allowed at any stage of the deal.
+  # factory's, so they stay off, as does a dealer upgrade marked as theirs to
+  # supply. Allowed at any stage of the deal.
   #
   # The PO keeps a snapshot of those lines, so the sheet can say when it has
   # changed since (a draft PO is rewritten with one click; a sent one needs a
@@ -27,7 +28,8 @@ module Truebuild
     def self.lines(build)
       color_ids = color_option_ids(build)
       build.lines.select { |l| %w[base option].include?(l.kind) && l.priced? }
-           .reject { |l| l.kind == 'option' && color_ids.include?(l.catalog_option_id) && l.unit_cost.to_d.zero? }.map do |l|
+           .reject { |l| l.kind == 'option' && color_ids.include?(l.catalog_option_id) && l.unit_cost.to_d.zero? }
+           .reject { |l| l.kind == 'option' && l.option&.dealer_upgrade? && l.option.metadata.to_h['factory_order'] == false }.map do |l|
         { 'kind' => l.kind, 'option_id' => l.catalog_option_id, 'description' => l.kind == 'base' ? home_name(build) : l.label,
           'code' => l.kind == 'base' ? build.variant.model_number : l.factory_code,
           'quantity' => l.quantity.to_d.to_s, 'unit_cost' => l.unit_cost.to_d.round(2).to_s }

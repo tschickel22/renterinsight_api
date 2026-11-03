@@ -35,6 +35,9 @@ class DealHomeBuildLine < ApplicationRecord
     'each'
   end
 
+  # The dealer's document fee from their settings: on the sheet by rule, not the rep's to change.
+  def required_fee? = metadata.to_h['required_fee'] == true
+
   # Charged to the buyer and counted in totals.
   def priced? = !tbd
 end

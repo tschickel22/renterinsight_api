@@ -18,6 +18,10 @@
 #   DELETE /api/v1/truebuild_pricing/colors/:id
 #   POST   /api/v1/truebuild_pricing/colors/:id/hide       a factory color
 #   DELETE /api/v1/truebuild_pricing/colors/:id/hide
+#   GET    /api/v1/truebuild_pricing/upgrades?manufacturer_id=
+#   POST   /api/v1/truebuild_pricing/upgrades              { manufacturer_id, name, factory_code?, cost?, retail?, factory_order? }
+#   PATCH  /api/v1/truebuild_pricing/upgrades/:id          { name?, factory_code?, cost?, retail?, factory_order? }
+#   DELETE /api/v1/truebuild_pricing/upgrades/:id
 class Api::V1::TruebuildPricingController < ApplicationController
   include ModuleAccessRequired
   require_module! Truebuild::BuyerCatalog::MODULE
@@ -28,7 +32,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   after_action :warm_model_list, only: %i[update_terms create_rule update_rule destroy_rule accept_update decline_update
                                           create_addon update_addon destroy_addon remember_price]
 
-  TERM_FIELDS = %i[price_update_policy price_display program_discount_pct margin_floor_pct round_retail_to buyer_view
+  TERM_FIELDS = %i[price_update_policy price_display program_discount_pct margin_floor_pct round_retail_to doc_fee buyer_view
                    sale_discount_pct dealer_savings_pct preferred_payment_pct factory_po_hide_prices website_designer].freeze + DealerCatalogTerm::FREIGHT
   # The buyer view's lists (BuyerView); company-wide like price_display.
   BUYER_LISTS = %i[buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups].freeze
@@ -392,7 +396,61 @@ class Api::V1::TruebuildPricingController < ApplicationController
     head :no_content
   end
 
+  # GET /api/v1/truebuild_pricing/upgrades?manufacturer_id=
+  def upgrades
+    return unless authorize_action!('company_settings', 'read')
+
+    list = Truebuild::DealerOptions.new(@company, params[:manufacturer_id]).upgrades
+    render json: { upgrades: list.map { |o| upgrade_json(o) } }
+  end
+
+  # POST /api/v1/truebuild_pricing/upgrades
+  def create_upgrade
+    return unless authorize_action!('company_settings', 'update')
+    unless CatalogPriceBook.published.exists?(manufacturer_id: params[:manufacturer_id])
+      return render json: { error: 'No published price book for that manufacturer' }, status: :unprocessable_entity
+    end
+
+    option = Truebuild::DealerOptions.add_upgrade!(
+      company: @company, manufacturer_id: params[:manufacturer_id], name: params[:name], factory_code: params[:factory_code],
+      cost: params[:cost], retail: params[:retail], user: current_user, note: params[:note],
+      factory_order: params.key?(:factory_order) ? ActiveModel::Type::Boolean.new.cast(params[:factory_order]) != false : true
+    )
+    render json: upgrade_json(option), status: :created
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # PATCH /api/v1/truebuild_pricing/upgrades/:id
+  def update_upgrade
+    return unless authorize_action!('company_settings', 'update')
+
+    option = @company.dealer_colors.find_by!(id: params[:id], kind: 'upgrade')
+    Truebuild::DealerOptions.update_color!(option, params.permit(:name, :factory_code, :cost, :retail, :factory_order).to_h)
+    render json: upgrade_json(option)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # DELETE /api/v1/truebuild_pricing/upgrades/:id
+  def destroy_upgrade
+    return unless authorize_action!('company_settings', 'update')
+
+    Truebuild::DealerOptions.remove_color!(@company.dealer_colors.find_by!(id: params[:id], kind: 'upgrade'), user: current_user)
+    head :no_content
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Not found' }, status: :not_found
+  end
+
   private
+
+  def upgrade_json(o)
+    meta = o.metadata.to_h
+    { id: o.id, name: o.name, factory_code: o.factory_code, cost: meta['cost']&.to_f, retail: meta['retail']&.to_f,
+      factory_order: meta['factory_order'] != false }
+  end
 
   STATUS_WORDS = { 'open' => 'Waiting on review', 'dealer_only' => 'Kept for you', 'applied' => 'Fixed for everyone',
                    'dismissed' => 'Turned down' }.freeze

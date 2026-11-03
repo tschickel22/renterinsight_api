@@ -16,8 +16,9 @@ module Truebuild
 
     # Schedule A's rows, in sheet order. A color or finish picked at no charge
     # is on the Colors sheet, not here (the PO does the same); one that costs
-    # extra is on both. A custom line counts when the rep left it a factory
-    # option; lines adopted from Products are fees and services, not options.
+    # extra is on both. A line the rep typed and ticked for Addendum A is an
+    # option by then (DealBuild#set_addendum), kept on their list for next time;
+    # lines adopted from Products are fees and services, not options.
     def schedule_rows
       @schedule_rows ||= options.map do |l|
         { 'description' => l.label, 'code' => l.factory_code.presence, 'group' => l.group_name.presence,

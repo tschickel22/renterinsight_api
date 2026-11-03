@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 module Truebuild
-  # A dealer's own changes to a factory's options (backlog E85): colors they
-  # added, book colors they hid, and their names for book options. Each is
+  # A dealer's own changes to a factory's options (backlog E85): colors and
+  # upgrades they added, book colors they hid, and their names for book options. Each is
   # saved once and used on every Deal Sheet after, and each goes to the
   # platform admin as a CatalogOptionRequest (Truebuild::OptionRequests
   # applies it for everyone, keeps it for the dealer, or turns it down).
@@ -13,6 +13,11 @@ module Truebuild
   # built in memory beside the book's, in every color set the model offers.
   # Hidden colors drop out, except one already picked on the sheet in front
   # of the rep.
+  #
+  # A dealer upgrade works the same way, without a set: it joins every model
+  # of that manufacturer under Other upgrades. It starts from Settings, or from
+  # a line typed on a Deal Sheet and ticked for Addendum A. Like their colors,
+  # it never reaches the buyer designer.
   #
   # A factory book can carry one color as several options, one per series
   # (Champion's Topeka book has Shutters "Black" seven times). A dealer means
@@ -27,6 +32,11 @@ module Truebuild
     # The dealer's active colors for this manufacturer.
     def colors
       @colors ||= @company.dealer_colors.where(manufacturer_id: @manufacturer_id, kind: 'color', status: 'active').includes(:group).to_a
+    end
+
+    # The dealer's active upgrades for this manufacturer.
+    def upgrades
+      @upgrades ||= @company.dealer_colors.where(manufacturer_id: @manufacturer_id, kind: 'upgrade', status: 'active').includes(:group).order(:name).to_a
     end
 
     # A color's set and name: what its copies across series share. Nil for
@@ -72,9 +82,8 @@ module Truebuild
       keep = keep_ids.to_set
       rows = rows.reject { |op| !keep.include?(op.catalog_option_id) && hidden?(op.option) } if hidden_ids.any?
       sets = rows.filter_map { |op| DealBuild.choice_set(op.option) }.to_set
-      return rows if sets.empty? || colors.empty?
-
-      rows + colors.select { |o| sets.include?(DealBuild.choice_set(o)) }.map { |o| self.class.row_for(o) }
+      own = colors.select { |o| sets.include?(DealBuild.choice_set(o)) } + upgrades
+      rows + own.map { |o| self.class.row_for(o) }
     end
 
     # A dealer color by id, or nil.
@@ -82,12 +91,20 @@ module Truebuild
       colors.find { |o| o.id == id.to_i }
     end
 
-    # An unsaved price row for a dealer color: never written, only read.
+    # What prices a dealer's own line on a sheet. An upgrade taken off their
+    # list keeps its price on sheets that already have it.
+    def priced_own(id)
+      color(id) || @company.dealer_colors.find_by(id: id.to_i, manufacturer_id: @manufacturer_id, kind: 'upgrade')
+    end
+
+    # An unsaved price row for a dealer color or upgrade: never written, only
+    # read. Standard (included at no charge) only when it has neither a cost nor a price.
     def self.row_for(option)
       meta = option.metadata.to_h
       cost = meta['cost'].presence&.to_d
-      CatalogOptionPrice.new(option: option, catalog_option_id: option.id, dealer_cost: cost,
-                             suggested_retail: meta['retail'].presence&.to_d, is_standard: cost.nil? || cost.zero?)
+      retail = meta['retail'].presence&.to_d
+      CatalogOptionPrice.new(option: option, catalog_option_id: option.id, dealer_cost: cost, suggested_retail: retail,
+                             is_standard: cost.to_d.zero? && retail.to_d.zero?)
     end
 
     # The color sets a manufacturer's book uses, each with its options: a
@@ -131,6 +148,48 @@ module Truebuild
       end
     end
 
+    # The order form's section for dealer upgrades: first in the list, and
+    # shared by that manufacturer's dealers (the options in it are not).
+    UPGRADE_GROUP_KEY = 'dealer-upgrades'
+
+    def self.upgrade_group(manufacturer_id)
+      CatalogOptionGroup.find_by(manufacturer_id: manufacturer_id, key: UPGRADE_GROUP_KEY, factory_id: nil, series: nil) ||
+        CatalogOptionGroup.create!(manufacturer_id: manufacturer_id, key: UPGRADE_GROUP_KEY, name: 'Other upgrades',
+                                   selection_type: 'multiple', position: -1)
+    rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+      CatalogOptionGroup.find_by!(manufacturer_id: manufacturer_id, key: UPGRADE_GROUP_KEY, factory_id: nil, series: nil)
+    end
+
+    # Adds an upgrade of the dealer's own and sends it to the platform admin,
+    # as add_color! does. The same name again is the same upgrade: one they
+    # took off their list comes back, one still on it stays as it is.
+    # factory_order: false keeps it off the factory PO (the dealer supplies it).
+    def self.add_upgrade!(company:, manufacturer_id:, name:, user: nil, factory_code: nil, cost: nil, retail: nil,
+                          factory_order: true, deal: nil, note: nil)
+      name = name.to_s.squish
+      raise ArgumentError, 'Name the upgrade' if name.blank?
+
+      CatalogOption.transaction do
+        same = company.dealer_colors.where(manufacturer_id: manufacturer_id, kind: 'upgrade').where('LOWER(name) = ?', name.downcase)
+        next same.active.first if same.active.exists?
+
+        attrs = { name: name, status: 'active', discontinued_on: nil, factory_code: factory_code.to_s.strip.upcase.presence,
+                  metadata: money_meta(cost, retail).merge('factory_order' => factory_order != false) }
+        option = same.first
+        if option
+          option.update!(attrs)
+        else
+          option = company.dealer_colors.create!(attrs.merge(
+            manufacturer_id: manufacturer_id, group: upgrade_group(manufacturer_id), kind: 'upgrade',
+            key: "dealer-#{company.id}-upgrade-#{name.parameterize}-#{SecureRandom.hex(3)}"
+          ))
+        end
+        company.catalog_option_requests.create!(manufacturer_id: manufacturer_id, option: option, action: 'add', deal: deal,
+                                                requested_by: user, note: note.presence)
+        option
+      end
+    end
+
     # Changes a dealer color's name, code, cost or price. Its request to the
     # admin stays as it is: the admin applies what the color is by then.
     def self.update_color!(option, attrs)
@@ -143,12 +202,13 @@ module Truebuild
 
         attrs[k].blank? ? meta.delete(k.to_s) : meta[k.to_s] = money(attrs[k])
       end
+      meta['factory_order'] = ActiveModel::Type::Boolean.new.cast(attrs[:factory_order]) != false if attrs.key?(:factory_order)
       option.metadata = meta.deep_stringify_keys
       option.save!
       option
     end
 
-    # Retires a dealer color. Sheets that picked it keep the pick.
+    # Retires a dealer color or upgrade. Sheets that picked it keep the pick.
     def self.remove_color!(option, user: nil)
       CatalogOption.transaction do
         option.update!(status: 'discontinued', discontinued_on: Date.current)

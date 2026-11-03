@@ -151,7 +151,7 @@ module Truebuild
       @option_ids.filter_map do |id|
         price = most_specific(prices.select { |op| op.catalog_option_id == id })
         # The dealer's own color: no book row, priced as they set it.
-        price ||= (color = @dealer_options.color(id)) && DealerOptions.row_for(color)
+        price ||= (own = @dealer_options.priced_own(id)) && DealerOptions.row_for(own)
         unless price
           name = CatalogOption.find_by(id: id)&.name || "option #{id}"
           @warnings << "#{name} is not offered on #{@variant.model_number}."
@@ -195,8 +195,12 @@ module Truebuild
               else @dealer_prices.cost_for(retail_price) || retail_price.dealer_cost.to_d
               end
       rule = rule_for(:option, option)
+      # A price the dealer set on their own color or upgrade beats a general
+      # markup; a rule written for that one option still beats it.
+      own_retail = option.dealer_color? ? retail_price.suggested_retail : nil
       retail, source =
-        if rule then [rule.apply(basis), describe(rule)]
+        if own_retail && rule&.scope_type != 'option' then [own_retail.to_d, 'your set price']
+        elsif rule then [rule.apply(basis), describe(rule)]
         elsif retail_price.suggested_retail then [retail_price.suggested_retail.to_d, "factory suggested retail"]
         else [basis, 'no markup']
         end
@@ -248,17 +252,17 @@ module Truebuild
         @warnings << "Margin #{margin_pct}% is under your #{@terms.margin_floor_pct.to_d.to_s('F')}% floor."
       end
       { cost: money(cost), retail: money(retail), margin: money(margin), margin_pct: margin_pct&.to_f,
-        rounded_to: @terms.round_retail_to }
+        rounded_to: @terms.round_retail_to&.to_f }
     end
 
     def round_retail(amount) = self.class.round_retail(amount, @terms)
 
     # A total rounded up to the dealer's step (DealBuild rounds its totals the same way).
     def self.round_retail(amount, terms)
-      step = terms.round_retail_to.to_i
+      step = terms.round_retail_to.to_d
       return amount unless step.positive?
 
-      (amount / step).ceil * step
+      (amount.to_d / step).ceil * step
     end
 
     # ---- rules ---------------------------------------------------------

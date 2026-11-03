@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # A dealer's change to a factory's options, sent to the platform admin
-# (backlog E85): a color they added (add; the option is their own dealer
-# color), a book color they hid (hide), or their name for an option (rename).
+# (backlog E85): a color or upgrade they added (add; the option is their own),
+# a book color they hid (hide), or their name for an option (rename).
 # It works for the dealer the moment they make it. The admin applies it to
 # the book for everyone, keeps it for that dealer only, or turns it down (the
 # dealer's change is undone and they are told why). Truebuild::DealerOptions

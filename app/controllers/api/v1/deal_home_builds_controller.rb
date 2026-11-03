@@ -17,7 +17,8 @@
 #   GET    /api/v1/deals/:deal_id/home_build/options         the model's options by group
 #   POST   /api/v1/deals/:deal_id/home_build/reprice
 #   POST   /api/v1/deals/:deal_id/home_build/lines           { kind: option|addon|template|freight|custom, ... }
-#   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id
+#                                                             custom: on_addendum? (also keeps it on the dealer's list), factory_order?
+#   PATCH  /api/v1/deals/:deal_id/home_build/lines/:id       { on_addendum } or the line's own fields
 #   DELETE /api/v1/deals/:deal_id/home_build/lines/:id
 #   POST   /api/v1/deals/:deal_id/home_build/lines/:id/report_price   { field: price|cost, suggested_value, note }
 #   POST   /api/v1/deals/:deal_id/home_build/remember         { line_id | option_id, price?, cost?, surcharge? (home), name?, note? }
@@ -25,6 +26,7 @@
 #   POST   /api/v1/deals/:deal_id/home_build/colors           { color_set, name, factory_code?, cost?, retail?, replaces_id?, note? }
 #                                                             a color of the dealer's own, picked on this sheet
 #   POST   /api/v1/deals/:deal_id/home_build/colors/hide      { option_id } drop a factory color from the dealer's lists
+#   POST   /api/v1/deals/:deal_id/home_build/upgrades/remove  { option_id } take the dealer's own upgrade off their list
 #   GET    /api/v1/deals/:deal_id/home_build/suppliers                suppliers for the factory PO, the likely one first
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order           { supplier_id | supplier_name, expected_delivery_date?, notes? }
 #   POST   /api/v1/deals/:deal_id/home_build/purchase_order/:po_id/refresh   rewrite a draft PO from the sheet
@@ -221,7 +223,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
           { id: op.catalog_option_id, name: own.name_for(op.option), kind: op.option.kind, standard: op.is_standard && dealer_cost.nil?,
             color_set: Truebuild::DealBuild.choice_set(op.option),
             # The dealer's own changes (E85): their color, their name (the book's kept), their cost and price.
-            dealer_color: op.option.dealer_color?, book_name: (op.option.name if own.renamed?(op.option)),
+            dealer_color: op.option.dealer_color? && !op.option.dealer_upgrade?, dealer_upgrade: op.option.dealer_upgrade?,
+            book_name: (op.option.name if own.renamed?(op.option)),
             hidden: own.hidden?(op.option),
             factory_cost: op.dealer_cost&.to_f, dealer_cost_set: dealer_cost.present?,
             your_price: prices.manual_retail(op.option)&.to_f,
@@ -233,11 +236,16 @@ class Api::V1::DealHomeBuildsController < ApplicationController
             rules: rules.fetch(op.catalog_option_id, []).map { |_, type, target| { type: type, option_id: target } } }
         end.sort_by { |o| o[:name].to_s } }
     end
+    # With the dealer's document fee set, a doc fee of any other name is not offered: it would come straight back off.
+    fee_set = !doc_fee_setting.nil?
+    addons = @company.truebuild_addons.active.for_manufacturer(variant.manufacturer_id).order(:position, :id).to_a
+    addons = addons.reject { |a| a.fee? && Truebuild::DealBuild.doc_fee_name?(a.name) } if fee_set
+    templates = templates_json
+    templates = templates.reject { |t| t[:type] == 'FeeTemplate' && Truebuild::DealBuild.doc_fee_name?(t[:name]) } if fee_set
     render json: { book_id: book&.id, book_name: book&.name, groups: groups,
-                   addons: @company.truebuild_addons.active.for_manufacturer(variant.manufacturer_id).order(:position, :id)
-                                   .map { |a| { id: a.id, name: a.name, mode: a.mode, price: a.price.to_f, cost: a.cost.to_f } },
+                   addons: addons.map { |a| { id: a.id, name: a.name, mode: a.mode, price: a.price.to_f, cost: a.cost.to_f } },
                    # The same fee and package templates Products and the Deal Desk offer.
-                   templates: templates_json }
+                   templates: templates }
   end
 
   def reprice
@@ -263,7 +271,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     when 'freight'
       service.add_freight
     when 'custom'
-      service.add_custom(**params.permit(:label, :unit_retail, :unit_cost, :quantity, :unit, :tax_category, :group_name).to_h.symbolize_keys)
+      service.add_custom(**params.permit(:label, :unit_retail, :unit_cost, :quantity, :unit, :tax_category, :group_name).to_h.symbolize_keys,
+                         on_addendum: truthy?(params[:on_addendum]), factory_order: params.key?(:factory_order) ? truthy?(params[:factory_order]) : nil,
+                         user: current_user)
     else
       return render json: { error: 'kind must be option, addon, template, freight or custom' }, status: :unprocessable_entity
     end
@@ -278,14 +288,22 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     return unless authorize_action!('deals', 'update')
 
     line = @build.lines.find(params[:id])
+    service = Truebuild::DealBuild.new(@build)
+    if params.key?(:on_addendum)
+      service.set_addendum(line, truthy?(params[:on_addendum]), user: current_user,
+                                                                 factory_order: params.key?(:factory_order) ? truthy?(params[:factory_order]) : nil)
+      return render json: build_json(@build.reload, service.warnings)
+    end
+
     attrs = params.permit(:quantity, :unit, :tbd, :no_charge, :tax_category, :notes, :unit_retail, :label, :group_name, :unit_cost, :surcharge).to_h
     attrs['unit_retail'] = nil if params.key?(:unit_retail) && params[:unit_retail].blank?
     attrs['surcharge'] = nil if params.key?(:surcharge) && params[:surcharge].blank?
-    service = Truebuild::DealBuild.new(@build)
     service.update_line(line, attrs)
     render json: build_json(@build.reload, service.warnings)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def destroy_line
@@ -488,7 +506,12 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     variant = @build.variant
     ActiveRecord::Base.transaction do
       if params.key?(:price)
-        Truebuild::DealerPrices.set_retail!(company: @company, target: home ? variant : option, value: params[:price])
+        # The dealer's own upgrade keeps its price on itself, the one Settings shows and edits.
+        if !home && option&.dealer_upgrade?
+          Truebuild::DealerOptions.update_color!(option, retail: params[:price])
+        else
+          Truebuild::DealerPrices.set_retail!(company: @company, target: home ? variant : option, value: params[:price])
+        end
       end
       if params.key?(:cost)
         if option&.dealer_color?
@@ -567,7 +590,25 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # Takes the dealer's own upgrade off their list: new sheets stop offering it,
+  # sheets that have it keep it. Like the rest of the list, a deal reader's to change (E85).
+  def remove_upgrade
+    return unless authorize_action!('deals', 'update')
+
+    option = @company.dealer_colors.find_by(id: params[:option_id], kind: 'upgrade')
+    return render json: { error: 'That upgrade is not on your list' }, status: :not_found unless option
+
+    Truebuild::DealerOptions.remove_color!(option, user: current_user)
+    head :no_content
+  end
+
   private
+
+  def truthy?(value) = ActiveModel::Type::Boolean.new.cast(value) == true
+
+  def doc_fee_setting
+    DealerCatalogTerm.effective(@company, @build.variant.manufacturer_id).doc_fee
+  end
 
   def book_row_for_option(option_id)
     variant = @build.variant
@@ -668,6 +709,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       totals: build.totals,
       discounts: build.discounts,
       freight_miles_set: build.freight_miles_set,
+      # The dealer's document fee, nil until set. Set: line 6 is read only.
+      doc_fee: DealerCatalogTerm.effective(@company, variant.manufacturer_id).doc_fee&.to_f,
       color_skips: build.color_skips,
       # Lines on the deal the sheet did not write (a warranty added in Products).
       other_deal_lines: other_deal_lines(build),
@@ -684,7 +727,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       cost: l.cost&.to_f, retail: l.retail&.to_f, standard: l.is_standard, tbd: l.tbd, no_charge: l.no_charge,
       tax_category: l.tax_category, set_retail: l.metadata['set_retail'] == true, set_cost: l.metadata['set_cost'] == true, set_surcharge: l.metadata.key?('set_surcharge'), not_offered: l.metadata['not_offered'] == true,
       from_products: l.metadata['from_products'] == true,
-      dealer_cost_set: l.metadata['dealer_cost_set'] == true, book_name: l.metadata['book_name'], dealer_color: l.option&.dealer_color? == true,
+      dealer_cost_set: l.metadata['dealer_cost_set'] == true, book_name: l.metadata['book_name'],
+      dealer_color: l.option&.dealer_color? == true && !l.option.dealer_upgrade?, dealer_upgrade: l.option&.dealer_upgrade? == true,
+      required_fee: l.required_fee?,
       rule: l.metadata['rule'], notes: l.metadata['notes'], base: l.metadata['base'], freight: l.metadata['freight'],
       template_type: l.source_template_type, template_id: l.source_template_id,
       # What a package holds ("PACKAGE 2" alone says nothing to a buyer).
