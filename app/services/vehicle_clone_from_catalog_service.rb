@@ -2,7 +2,8 @@
 
 # Clones a Champion IMS catalog row (source='champion_ims') into a dealer-owned
 # working copy (source='champion_ims_clone'). Triggered when a dealer attempts
-# to change the status of a catalog row to anything other than 'available_to_order'.
+# to change the status of a catalog row, or edits one (the copy then stays
+# 'available_to_order' until someone says the home is here).
 #
 # The catalog row stays untouched and continues to receive sync updates. The
 # clone is fully dealer-owned: sync never writes to it, and the dealer can edit
@@ -75,8 +76,8 @@ class VehicleCloneFromCatalogService
       return nil
     end
 
-    if requested_status.blank? || requested_status == 'available_to_order'
-      errors.add(:status, 'must be a non-catalog status (reserved, sold, pending, available, service)')
+    if requested_status.blank?
+      errors.add(:status, 'is required')
       return nil
     end
 

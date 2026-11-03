@@ -334,8 +334,8 @@ module Api
         # dealer did was drag a photo.
         #
         # Status edit: clone status = the new status (existing behavior).
-        # Field edit (no status): clone status defaults to 'available' so the
-        #   home immediately enters the dealer's normal inventory pipeline.
+        # Field edit (no status): the clone stays 'available_to_order'. Entering
+        #   a price or a note does not put a home on the lot; someone says so.
         #
         # NOTE: Only catalog rows clone. Clones themselves are edited in place
         # (no clones-of-clones — `cloneable?` returns true only for catalog rows).
@@ -347,7 +347,7 @@ module Api
           # a catalog row, that's a no-op (it's already that). Treat as no change.
           requested_status = nil if requested_status.to_s == 'available_to_order'
 
-          clone_status   = requested_status.presence || 'available'
+          clone_status   = requested_status.presence || 'available_to_order'
           override_attrs = params_to_update.to_h.except('status', :status)
 
           # The clone always inherits the catalog row's media verbatim. The edit

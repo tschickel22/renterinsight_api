@@ -61,9 +61,9 @@ RSpec.describe VehicleCloneFromCatalogService do
     expect(catalog.images.first['url']).to eq('https://cdn/a.jpg')
   end
 
-  it 'rejects cloning to the catalog-only status' do
-    service = described_class.new(catalog, status: 'available_to_order')
-    expect(service.call).to be_nil
-    expect(service.errors[:status].join).to match(/non-catalog status/)
+  it 'can leave the copy to order: editing a catalog home does not put it on the lot' do
+    clone = described_class.new(catalog, status: 'available_to_order').call
+    expect(clone).to have_attributes(status: 'available_to_order')
+    expect(clone).not_to be_cloneable
   end
 end

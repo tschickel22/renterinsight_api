@@ -21,6 +21,10 @@ class DealHomeBuild < ApplicationRecord
   belongs_to :created_by, class_name: 'User', optional: true
   has_many :lines, -> { order(:position, :id) }, class_name: 'DealHomeBuildLine', inverse_of: :build, dependent: :delete_all
 
+  # A home is 'lot' only if its status says it is here. A linked home that is
+  # still to be ordered prices and orders like any factory home.
+  def self.source_for(vehicle) = vehicle&.on_lot? ? 'lot' : 'order'
+
   # What the sheet says about the home: the catalog's model, then the home on
   # the lot if there is one, then what the rep corrected on this sheet.
   SPEC_KEYS = %w[beds baths width_ft length_ft square_feet].freeze
