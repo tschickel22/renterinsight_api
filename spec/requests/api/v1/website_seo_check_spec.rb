@@ -60,3 +60,48 @@ RSpec.describe 'GET /api/v1/websites/:id/seo_check', type: :request do
     expect(report_for(empty)).to be_nil
   end
 end
+
+RSpec.describe 'seo_check by who is asking', type: :request do
+  let(:company) { Company.create!(name: 'Who Homes', address_line1: '1 Lot', city: 'Denver', state: 'CO', zip_code: '80231') }
+  let(:location) { company.locations.first || company.locations.create!(name: 'Lot') }
+  let!(:website) do
+    site = Website.create!(company_id: company.id, location_id: location.id, name: 'Who', slug: "w-#{SecureRandom.hex(4)}", status: 'draft')
+    site.website_pages.create!(title: 'Home', path: '/', order: 0, blocks: [])
+    site
+  end
+  let!(:admin_role) { Role.find_or_create_by!(company_id: nil, tier: 'company', key: 'company_admin') { |r| r.name = 'Company Administrator'; r.is_system_role = true } }
+
+  def ask(user)
+    get "/api/v1/websites/#{website.id}/seo_check", headers: {
+      'Authorization' => "Bearer #{JsonWebToken.generate_access_token(user)}", 'X-Company-ID' => company.id.to_s
+    }
+    JSON.parse(response.body)
+  end
+
+  def user(role)
+    User.create!(email: "#{role}#{SecureRandom.hex(2)}@who.example", first_name: 'A', last_name: 'B', password: 'Pass1234!',
+                 company_id: company.id, role: role, status: 'active')
+  end
+
+  it 'gives a customer the things they can do, and no technical report' do
+    data = ask(user('company_admin'))
+
+    expect(response).to have_http_status(:ok)
+    expect(data['actions'].map { |a| a['key'] }).to include('analytics')
+    expect(data).not_to have_key('report')
+    expect(data).not_to have_key('not_judged')
+  end
+
+  it 'gives the platform team both' do
+    data = ask(user('platform_admin'))
+
+    expect(data['report']).to be_present
+    expect(data['actions']).to be_present
+  end
+
+  it 'gives a demo company the report, since that is what prospects are shown' do
+    company.update!(is_demo: true)
+
+    expect(ask(user('company_admin'))['report']).to be_present
+  end
+end

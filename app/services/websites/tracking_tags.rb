@@ -40,6 +40,8 @@ module Websites
       'logrocket_app_id'      => %r{\A[a-z0-9]{4,10}/[a-z0-9_-]{1,60}\z}i
     }.freeze
 
+    LEAD_LABEL_FORMAT = /\A[\w-]{4,60}\z/
+
     # What the website and landing page params permit, so a new vendor here
     # can't be dropped by a controller that was never told about it.
     FIELDS = ID_FORMATS.keys.freeze
@@ -65,6 +67,23 @@ module Websites
       head = "#{MARKER}\n#{head}" if head
 
       Result.new(head: head, body: body_markup.join("\n").presence)
+    end
+
+    # Google Ads id in use: this site's, or the company's conversion settings.
+    def google_ads_id
+      id_for('google_ads_id') || company_tracking['googleAdsId'].presence
+    end
+
+    def google_ads_lead_label
+      label = company_tracking['googleAdsLeadLabel'].to_s.strip
+      label if LEAD_LABEL_FORMAT.match?(label)
+    end
+
+    # A custom snippet counts: someone may have pasted their tag in by hand.
+    def analytics_installed?
+      return true if id_for('google_analytics_id') || id_for('google_tag_manager_id')
+
+      [config.dig('custom_scripts', 'head'), config.dig('custom_scripts', 'body')].join.match?(/\b(?:G-[A-Z0-9]{4,}|GTM-[A-Z0-9]{4,})\b/)
     end
 
     # Site config with the page's merged over it.
@@ -111,10 +130,30 @@ module Websites
       value
     end
 
+    # Where a website form reports a lead (fireLeadForActiveTags). The label lives
+    # with the company's conversion settings, and without it the Ads conversion
+    # would record against the wrong action, so nothing is sent.
+    def google_ads_lead_target
+      ads_id = google_ads_id
+      label = google_ads_lead_label
+      return nil if ads_id.blank? || label.blank? || !ID_FORMATS.fetch('google_ads_id').match?(ads_id)
+
+      %(<script>window.dtGoogleAdsLead = "#{ads_id}/#{label}";</script>)
+    end
+
+    def company_tracking
+      @company_tracking ||= begin
+        company = @website&.company
+        location = @website&.try(:location)
+        company ? company.resolved_tracking(location).to_h.stringify_keys : {}
+      end
+    end
+
     def head_markup
       tags = []
       tags << gtm_head
       tags << gtag
+      tags << google_ads_lead_target
       tags << facebook_pixel
       tags << tiktok_pixel
       tags << snapchat_pixel

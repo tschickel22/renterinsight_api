@@ -469,10 +469,18 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.headers['ETag']).not_to eq(before)
     end
 
-    it 'caches robots.txt and the sitemap for longer than a page' do
-      get_site('/robots.txt')
+    it 'caches the sitemap for longer than a page' do
+      get_site('/sitemap.xml')
 
       expect(response.headers['Cache-Control']).to include('s-maxage=3600')
+    end
+
+    # The cache in front of the API can't see which dealer asked, so a stored copy
+    # would be served for every dealer.
+    it 'never lets the shared cache store robots.txt' do
+      get_site('/robots.txt')
+
+      expect(response.headers['Cache-Control']).to eq('no-store')
     end
 
     it 'never caches an error' do
