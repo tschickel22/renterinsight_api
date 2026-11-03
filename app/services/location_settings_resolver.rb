@@ -54,6 +54,26 @@ class LocationSettingsResolver
     resolved
   end
   
+  def resolved_operational_settings
+    platform_operational = Setting.get('Platform', 0, 'operational') || {}
+    # The Company Settings UI writes the 'operational_settings' key; fall back to legacy 'operational'.
+    company_operational = (Setting.get('Company', @company.id, 'operational_settings').presence ||
+                           Setting.get('Company', @company.id, 'operational')) || {}
+    location_operational = Setting.get('Location', @location.id, 'operational') || {}
+
+    Rails.logger.debug "⚙️ [LocationSettingsResolver] Resolving operational for Location #{@location.id}"
+    
+    # Start with platform defaults
+    resolved = platform_operational.deep_merge(company_operational).deep_merge(location_operational)
+
+    # Add timezone and business_hours from location columns if present
+    resolved['timezone'] = @location.timezone if @location.timezone.present?
+    resolved['business_hours'] = @location.business_hours if @location.business_hours.present?
+    resolved['delivery_radius_miles'] = @location.delivery_radius_miles if @location.delivery_radius_miles.present?
+
+    resolved
+  end
+
   private
   
   def determine_email_source(location, company, platform)
@@ -84,26 +104,6 @@ class LocationSettingsResolver
     else
       'none'
     end
-  end
-
-  def resolved_operational_settings
-    platform_operational = Setting.get('Platform', 0, 'operational') || {}
-    # The Company Settings UI writes the 'operational_settings' key; fall back to legacy 'operational'.
-    company_operational = (Setting.get('Company', @company.id, 'operational_settings').presence ||
-                           Setting.get('Company', @company.id, 'operational')) || {}
-    location_operational = Setting.get('Location', @location.id, 'operational') || {}
-
-    Rails.logger.debug "⚙️ [LocationSettingsResolver] Resolving operational for Location #{@location.id}"
-    
-    # Start with platform defaults
-    resolved = platform_operational.deep_merge(company_operational).deep_merge(location_operational)
-
-    # Add timezone and business_hours from location columns if present
-    resolved['timezone'] = @location.timezone if @location.timezone.present?
-    resolved['business_hours'] = @location.business_hours if @location.business_hours.present?
-    resolved['delivery_radius_miles'] = @location.delivery_radius_miles if @location.delivery_radius_miles.present?
-
-    resolved
   end
 
   def resolved_integration_settings
