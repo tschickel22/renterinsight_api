@@ -252,6 +252,8 @@ module Agreements
     # Lookup helper. Returns nil for unknown keys (e.g., user-defined custom fields
     # via build_entity_custom_fields — those get generic path built at decorate time).
     def self.for(key)
+      return { section: 'deal_sheet_colors', field_id: nil, path: ['Deal Sheet', 'Colors & finishes', key.to_s.delete_prefix('color.').humanize] } if key.to_s.start_with?('color.')
+
       SECTIONS[key.to_s]
     end
   end

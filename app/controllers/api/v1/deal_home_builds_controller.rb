@@ -962,6 +962,8 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       dealer_cost_set: l.metadata['dealer_cost_set'] == true, book_name: l.metadata['book_name'],
       dealer_color: l.option&.dealer_color? == true && !l.option.dealer_upgrade?, dealer_upgrade: l.option&.dealer_upgrade? == true,
       factory_order: l.option&.dealer_upgrade? ? l.option.metadata.to_h['factory_order'] != false : nil,
+      color_set: l.option && Truebuild::DealBuild.choice_set(l.option),
+      free_color: Truebuild::AgreementSheets.free_color?(l),
       required_fee: l.required_fee?,
       fee_locked: l.required_fee? && !current_user.effective_admin?,
       doc_fee_line: l.required_fee? || (l.tax_category == 'fee' && Truebuild::DealBuild.doc_fee_name?(l.label)),

@@ -3663,9 +3663,9 @@ class AgreementVisionScanService
       /\bcabinet\b/i                    => { label: 'Cabinet',               merge: 'vehicle.interior_color' },
 
       # Flooring
-      /\bcarpet\s*color\b/i             => { label: 'Carpet Color',          merge: 'vehicle.flooring_type' },
+      /\bcarpet\s*color\b/i             => { label: 'Carpet Color',          merge: 'color.carpet' },
       /\bcarpet\b/i                     => { label: 'Carpet',                merge: 'vehicle.flooring_type' },
-      /\blinoleum\s*color\b/i           => { label: 'Linoleum Color',        merge: 'vehicle.flooring_type' },
+      /\blinoleum\s*color\b/i           => { label: 'Linoleum Color',        merge: 'color.linoleum' },
       /\blinoleum\b/i                   => { label: 'Linoleum',              merge: 'vehicle.flooring_type' },
       /\bwood\s*laminate\s*color\b/i    => { label: 'Wood Laminate Color',   merge: 'vehicle.flooring_type' },
       /\bwood\s*laminate\b/i            => { label: 'Wood Laminate',         merge: 'vehicle.flooring_type' },
@@ -3674,7 +3674,7 @@ class AgreementVisionScanService
       # Exterior
       /\bbody\s*color\b/i               => { label: 'Body Color',            merge: 'vehicle.exterior_color' },
       /\bbody\b/i                       => { label: 'Body',                  merge: 'vehicle.exterior_material' },
-      /\bshingles?\s*color\b/i          => { label: 'Shingles Color',        merge: 'vehicle.roof_material' },
+      /\bshingles?\s*color\b/i          => { label: 'Shingles Color',        merge: 'color.shingles' },
       /\bshingles?\b/i                  => { label: 'Shingles',              merge: 'vehicle.roof_material' },
       /\btrim\s*color\b/i               => { label: 'Trim Color',            merge: 'vehicle.exterior_color' },
       /\bfacia.*soffit/i                => { label: 'Facia/Soffit',          merge: 'vehicle.exterior_color' },

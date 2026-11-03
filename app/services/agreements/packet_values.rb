@@ -31,7 +31,7 @@ module Agreements
     def [](key) = to_h[key.to_s]
 
     def to_h
-      @to_h ||= agreement.merge(buyers).merge(site).merge(home).merge(prices).merge(sale).compact_blank
+      @to_h ||= agreement.merge(buyers).merge(site).merge(home).merge(colors).merge(prices).merge(sale).compact_blank
     end
 
     def self.date(value)
@@ -96,6 +96,13 @@ module Agreements
         'home.model_year' => values['model_year'], 'home.serial' => filled[:serial_number], 'home.hud_labels' => values['hud_labels'],
         'home.floor_size' => ("#{specs['width_ft']} x #{specs['length_ft']}" if specs['width_ft'] && specs['length_ft']), 'home.square_feet' => specs['square_feet']&.to_s,
         'home.beds' => specs['beds']&.to_s, 'home.baths' => specs['baths'] && specs['baths'].to_d.to_s('F').sub(/\.0\z/, '') }
+    end
+
+    # The color and finish picks, for any blank a dealer's contract ties to one.
+    def colors
+      return {} unless @build
+
+      @sheets.color_values.merge('home.exterior_color' => @sheets.exterior_color, 'home.interior_color' => @sheets.interior_color)
     end
 
     # Page 1's price ladder: base, options, freight, set-up, utilities, fees,

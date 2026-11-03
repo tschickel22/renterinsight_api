@@ -8,6 +8,15 @@ module Truebuild
   # options_total from here, so the two always agree. Retail only: cost never
   # reaches these sheets.
   class AgreementSheets
+    # A color or finish picked at no charge. It is a selection, not an upgrade:
+    # it fills the Colors sheet and the color references, and stays off Addendum A.
+    def self.free_color?(line)
+      line.kind == 'option' && line.option.present? && DealBuild.choice_set(line.option).present? &&
+        !line.tbd && line.retail.to_d.zero?
+    end
+
+    def self.color_key(set) = "color.#{set.to_s.parameterize(separator: '_')}"
+
     def initialize(build)
       @build = build
     end
@@ -49,6 +58,22 @@ module Truebuild
       end
     end
 
+    # The picks as references a contract can name: color.siding => "Clay". A
+    # shingle set goes by several names in the books ("3 Tab Shingles"), so it
+    # also answers to color.shingles.
+    def color_values
+      @color_values ||= color_rows.each_with_object({}) do |c, out|
+        next if c['choice'].blank?
+
+        out[self.class.color_key(c['set'])] = c['choice']
+        out['color.shingles'] ||= c['choice'] if c['set'].to_s.match?(/shingle/i)
+      end
+    end
+
+    # The general "exterior color" and "interior color" a contract can ask for.
+    def exterior_color = first_pick('Siding', 'Exterior', 'Body')
+    def interior_color = first_pick('Main panel', 'Interior walls', 'Interior', 'Walls')
+
     # What the sheets cannot say yet; the ready-to-send check lists these.
     def open_items
       unpicked = color_rows.select { |c| c['choice'].blank? && !c['skipped'] }.map { |c| c['set'] }
@@ -73,15 +98,13 @@ module Truebuild
     private
 
     def options
-      @options ||= begin
-        color_ids = FactoryOrder.color_option_ids(@build)
-        @build.lines.select do |l|
-          next false unless l.kind == 'option' || (l.kind == 'custom' && l.tax_category == 'factory_option')
-          next false if l.kind == 'option' && color_ids.include?(l.catalog_option_id) && !l.tbd && l.retail.to_d.zero?
-
-          true
-        end
+      @options ||= @build.lines.select do |l|
+        (l.kind == 'option' || (l.kind == 'custom' && l.tax_category == 'factory_option')) && !self.class.free_color?(l)
       end
+    end
+
+    def first_pick(*sets)
+      sets.filter_map { |set| color_values[self.class.color_key(set)] }.first
     end
 
     def status(line)

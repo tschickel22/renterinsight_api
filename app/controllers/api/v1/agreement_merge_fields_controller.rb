@@ -257,8 +257,8 @@ module Api
               { key: 'vehicle.square_feet', label: 'Approx Sq Ft', type: 'text', value: @vehicle.try(:square_feet)&.to_s },
               { key: 'vehicle.sleeps', label: 'Sleeps', type: 'text', value: (@vehicle.try(:sleeps) || @vehicle.try(:sleeping_capacity))&.to_s },
               # Colors & appearance
-              { key: 'vehicle.exterior_color', label: 'Exterior Color', type: 'text', value: @vehicle.try(:exterior_color) || @vehicle.try(:color) },
-              { key: 'vehicle.interior_color', label: 'Interior Color', type: 'text', value: @vehicle.try(:interior_color) },
+              { key: 'vehicle.exterior_color', label: 'Exterior Color', type: 'text', value: deal_sheet&.exterior_color || @vehicle.try(:exterior_color) || @vehicle.try(:color) },
+              { key: 'vehicle.interior_color', label: 'Interior Color', type: 'text', value: deal_sheet&.interior_color || @vehicle.try(:interior_color) },
               { key: 'vehicle.exterior_material', label: 'Exterior Material / Siding', type: 'text', value: @vehicle.try(:exterior_material) || @vehicle.try(:siding_type) },
               { key: 'vehicle.roof_material', label: 'Roof Material', type: 'text', value: @vehicle.try(:roof_material) || @vehicle.try(:roof_type) },
               # Home type & construction
@@ -333,6 +333,10 @@ module Api
               { key: 'invoice.amount_due', label: 'Amount Due', type: 'currency', value: @invoice&.amount_due },
               { key: 'invoice.draw_schedule_text', label: 'Draw Schedule', type: 'text', value: @invoice ? format_draw_schedule(@invoice) : nil }
             ]
+          },
+          colors: {
+            available: deal_sheet.present?,
+            fields: deal_sheet_color_fields
           },
           company: {
             available: true,
@@ -495,6 +499,25 @@ module Api
       # Attaches source_section / source_field_id / source_path to every field so the
       # frontend reverse-preview drawer can open to the right place. Unknown keys
       # (dynamic custom fields) get a generic path derived from the entity prefix.
+      # The Deal Sheet's standard sheets, for the color references. Colors never
+      # stop the rest of the fields from loading.
+      def deal_sheet
+        return @deal_sheet if defined?(@deal_sheet)
+
+        @deal_sheet = @deal&.home_build && Truebuild::AgreementSheets.new(@deal.home_build)
+      end
+
+      def deal_sheet_color_fields
+        return [] unless deal_sheet
+
+        deal_sheet.color_rows.map do |c|
+          { key: Truebuild::AgreementSheets.color_key(c['set']), label: c['set'], type: 'text', value: c['choice'] }
+        end
+      rescue StandardError => e
+        Rails.logger.error("[AgreementMergeFields] Deal Sheet colors failed: #{e.message}")
+        []
+      end
+
       def decorate_with_source_metadata(groups)
         groups.each do |_group_key, group|
           Array(group[:fields]).each do |field|

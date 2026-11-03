@@ -249,6 +249,14 @@ class AgreementPdfService
       values['vehicle.price'] = (vehicle.try(:price) || vehicle.try(:msrp) || vehicle.try(:sale_price)).to_s
     end
 
+    # The Deal Sheet's color and finish picks win over what the inventory record says.
+    if deal&.home_build
+      sheets = Truebuild::AgreementSheets.new(deal.home_build)
+      values.merge!(sheets.color_values)
+      values['vehicle.exterior_color'] = sheets.exterior_color if sheets.exterior_color
+      values['vehicle.interior_color'] = sheets.interior_color if sheets.interior_color
+    end
+
     values['company.name'] = @company.name.to_s
     values['company.email'] = @company.try(:email).to_s
     values['company.phone'] = @company.try(:phone).to_s
