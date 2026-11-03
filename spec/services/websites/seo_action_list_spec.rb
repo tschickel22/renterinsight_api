@@ -53,6 +53,20 @@ RSpec.describe Websites::SeoActionList do
       end
     end
 
+    it 'takes the label from the site itself, for a customer without settings access' do
+      website.update!(tracking_config: { 'google_ads_id' => 'AW-17782600637', 'google_ads_lead_label' => 'siteLabel_1' })
+
+      expect(keys).not_to include('google_ads_conversion')
+      expect(Websites::TrackingTags.new(website: website).call.head).to include('"AW-17782600637/siteLabel_1"')
+    end
+
+    it 'sends a customer to the website page, where they can type it' do
+      website.update!(tracking_config: { 'google_ads_id' => 'AW-17782600637' })
+      item = described_class.new(website: website).call.find { |i| i[:key] == 'google_ads_conversion' }
+
+      expect(item[:action]).to eq('website_settings')
+    end
+
     it 'puts nothing on the site without a label' do
       website.update!(tracking_config: { 'google_ads_id' => 'AW-17782600637' })
 

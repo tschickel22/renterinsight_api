@@ -46,6 +46,12 @@ RSpec.describe 'Saving website settings as a customer', type: :request do
       expect(website.seo_config['default_title']).to eq('Our title')
     end
 
+    it 'saves the Google Ads conversion label' do
+      save(person, tracking_config: { google_ads_id: 'AW-123456', google_ads_lead_label: 'abcDEF123_x' })
+
+      expect(website.tracking_config['google_ads_lead_label']).to eq('abcDEF123_x')
+    end
+
     it 'keeps the saved custom code rather than replacing or wiping it' do
       save(person, whole_form)
       expect(website.tracking_config.dig('custom_scripts', 'head')).to eq('<script>ours()</script>')
