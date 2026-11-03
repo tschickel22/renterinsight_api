@@ -2801,6 +2801,7 @@ Rails.application.routes.draw do
         
         member do
           post :resend_invitation
+          post :restore
         end
       end
       

@@ -18,7 +18,7 @@ module ApplicationCable
       token = request.params[:token].presence
       decoded = token && JsonWebToken.decode(token)
       user = decoded && User.find_by(id: decoded[:user_id])
-      user || reject_unauthorized_connection
+      user && !user.deactivated? ? user : reject_unauthorized_connection
     end
   end
 end

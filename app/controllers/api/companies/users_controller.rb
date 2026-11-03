@@ -5,12 +5,13 @@ module Api
     class UsersController < ApplicationController
       before_action :authenticate_user!
       before_action :set_company_and_verify_access
-      before_action :set_user, only: [:show, :update, :destroy, :resend_invitation]
+      before_action :set_user, only: [:show, :update, :destroy, :restore, :resend_invitation]
       
       # GET /api/companies/:company_id/users
       def index
         users = @company.users
-        
+        users = users.where(deleted_at: nil) unless ActiveModel::Type::Boolean.new.cast(params[:include_deleted])
+
         render json: {
           success: true,
           users: users.map { |user| serialize_user(user) }
@@ -84,6 +85,15 @@ module Api
           }, status: :forbidden
         end
         
+        # A deleted person keeps their email, so inviting it again would attach
+        # the invitation to an account nobody can sign in to.
+        if params[:email].present? && @company.users.where.not(deleted_at: nil).where('LOWER(email) = ?', params[:email].to_s.strip.downcase).exists?
+          return render json: {
+            success: false,
+            error: 'This email belongs to a deleted user. Turn on Include deleted users in the filters and restore them.'
+          }, status: :unprocessable_entity
+        end
+
         service = InvitationService.new(
           invited_by: current_user,
           company: @company
@@ -136,6 +146,18 @@ module Api
       
       # PATCH/PUT /api/companies/:company_id/users/:id
       def update
+        unless @user.id == current_user.id || can?('users', 'update')
+          return render json: { success: false, error: 'You do not have permission to edit users.' }, status: :forbidden
+        end
+        return refuse_higher_user('edit') if outranks_current_user?(@user)
+
+        # An empty list clears them (All Locations); no key leaves them alone.
+        # Refused out loud: a location change that quietly did nothing was the bug.
+        change_locations = params.key?(:location_ids)
+        if change_locations && !can?('users', 'update')
+          return render json: { success: false, error: 'You do not have permission to change user locations.' }, status: :forbidden
+        end
+
         # SECURITY: Prevent self-privilege escalation
         new_role = params[:user][:role] || params[:role]
         role_changed = new_role.present? && new_role != @user.role
@@ -157,7 +179,13 @@ module Api
           }, status: :forbidden
         end
         
-        if @user.update(user_params)
+        saved = ::User.transaction do
+          @user.update(user_params).tap do |ok|
+            sync_locations(Array(params[:location_ids]), params[:location_role]) if ok && change_locations
+          end
+        end
+
+        if saved
           # If role changed, update RBAC assignment
           if role_changed && @company.use_rbac_system
             @user.replace_rbac_role(
@@ -184,9 +212,17 @@ module Api
       
       # DELETE /api/companies/:company_id/users/:id
       def destroy
+        return unless authorize_action!('users', 'delete')
+
         reason = params[:reason] || 'No reason provided'
-        
-        if @user.destroy
+
+        if @user.id == current_user.id
+          return render json: { success: false, error: 'You cannot delete your own account.' }, status: :forbidden
+        end
+        return refuse_higher_user('delete') if outranks_current_user?(@user)
+
+        if @user.soft_delete
+          Rails.logger.info "[Companies::UsersController] User #{@user.id} deleted by #{current_user.id}: #{reason}"
           render json: {
             success: true,
             message: 'User deleted successfully',
@@ -201,6 +237,19 @@ module Api
         end
       end
       
+      # POST /api/companies/:company_id/users/:id/restore
+      def restore
+        return unless authorize_action!('users', 'delete')
+        return refuse_higher_user('restore') if outranks_current_user?(@user)
+
+        if @user.restore_deleted
+          Rails.logger.info "[Companies::UsersController] User #{@user.id} restored by #{current_user.id}: #{params[:reason]}"
+          render json: { success: true, user: serialize_user(@user), message: 'User restored successfully' }
+        else
+          render json: { success: false, errors: @user.errors.full_messages, error: @user.errors.full_messages.join(', ') }, status: :unprocessable_entity
+        end
+      end
+
       # POST /api/companies/:company_id/users/:id/resend_invitation
       def resend_invitation
         # For users with 'invited' status, create a new invitation
@@ -456,24 +505,51 @@ module Api
       def can_assign_role?(target_role)
         # Platform admins and super admins can assign any role
         return true if current_user.platform_admin? || current_user.super_admin?
-        
-        # Get current user's role level
-        current_level = ROLE_HIERARCHY[current_user.role] || 0
-        
-        # Check RBAC roles if the user has them
-        if @company&.use_rbac_system
-          current_user.roles_for_company(@company.id).each do |role|
-            role_level = ROLE_HIERARCHY[role.key] || ROLE_HIERARCHY[role.name] || 0
-            current_level = [current_level, role_level].max
-          end
-        end
-        
+
         # Get target role level
         target_level = ROLE_HIERARCHY[target_role] || 0
-        
+
         # Users can only assign roles at or below their level
         # But they cannot assign their own level (prevents lateral escalation)
-        current_level > target_level
+        role_level_of(current_user) > target_level
+      end
+
+      def role_level_of(user)
+        levels = [ROLE_HIERARCHY[user.role] || 0]
+        if @company&.use_rbac_system
+          user.roles_for_company(@company.id).each do |role|
+            levels << (ROLE_HIERARCHY[role.key] || ROLE_HIERARCHY[role.name] || 0)
+          end
+        end
+        levels.max
+      end
+
+      # Peers may manage each other (a dealer with two admins needs that);
+      # nobody may touch someone above them.
+      def outranks_current_user?(user)
+        return false if current_user.platform_admin? || current_user.super_admin? || user.id == current_user.id
+
+        role_level_of(user) > role_level_of(current_user)
+      end
+
+      def refuse_higher_user(verb)
+        render json: { success: false, error: "You cannot #{verb} someone with a higher role than yours." }, status: :forbidden
+      end
+
+      # Only this company's locations count. An existing row keeps its location
+      # role; the role sent applies to rows being added.
+      def sync_locations(location_ids, location_role)
+        keep = @company.locations.where(id: location_ids).pluck(:id)
+        @user.user_locations.where.not(location_id: keep).where(active: true).update_all(active: false, updated_at: Time.current)
+        keep.each do |location_id|
+          row = UserLocation.find_or_initialize_by(user_id: @user.id, location_id: location_id, company_id: @company.id)
+          row.location_role ||= location_role.presence || 'location_staff'
+          row.assigned_by ||= current_user.id.to_s
+          row.active = true
+          row.save!
+        end
+        # PermissionService keeps this for an hour, and the change must count now.
+        Rails.cache.delete("permissions:#{@user.id}:accessible_locations")
       end
       
       def serialize_invitation(invitation)

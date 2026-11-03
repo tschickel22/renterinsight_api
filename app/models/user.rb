@@ -72,6 +72,10 @@ class User < ApplicationRecord
 
   # Scopes
   scope :active,           -> { where(status: 'active') }
+  # Everyone who must not get in. The Edit User screen saves 'disabled', the
+  # bulk and delete paths save 'inactive', so one list covers them all.
+  DEACTIVATED_STATUSES = %w[inactive suspended disabled].freeze
+  scope :deactivated, -> { where(status: DEACTIVATED_STATUSES).or(where.not(deleted_at: nil)) }
   scope :platform_admins,  -> { where(role: %w[platform_admin super_admin]) }
   
   # Virtual attribute for full name (backward compatibility with 'name' field)
@@ -99,6 +103,38 @@ class User < ApplicationRecord
   
   def active?
     status == 'active'
+  end
+
+  def deactivated?
+    DEACTIVATED_STATUSES.include?(status) || deleted_at.present?
+  end
+
+  # Delete User keeps the person and everything they touched, and can be undone
+  # with restore_deleted. Their location rows are stamped with the same time as
+  # deleted_at so a restore brings back those and not older removed ones.
+  def soft_delete
+    at = Time.current.floor(6)
+    transaction do
+      update!(deleted_at: at, status: 'inactive')
+      user_locations.where(active: true).update_all(active: false, updated_at: at)
+    end
+    true
+  rescue ActiveRecord::RecordInvalid
+    false
+  end
+
+  # False with errors when the company has no free seat. Someone who was still
+  # waiting on an invitation goes back to waiting.
+  def restore_deleted
+    at = deleted_at
+    still_invited = invitation_id.present? && Invitation.where(id: invitation_id).where.not(status: 'accepted').exists?
+    transaction do
+      update!(deleted_at: nil, status: still_invited ? 'invited' : 'active')
+      user_locations.where(active: false, updated_at: at).update_all(active: true) if at
+    end
+    true
+  rescue ActiveRecord::RecordInvalid
+    false
   end
 
   # Record sign-in activity for "Last Login" reporting. Token refresh keeps a
