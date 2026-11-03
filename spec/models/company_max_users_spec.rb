@@ -23,6 +23,17 @@ RSpec.describe 'Company max_users', type: :model do
     expect(parked.errors.full_messages.join).to include('2 of 2 users')
   end
 
+  it "lets an active user's role change when full: they already hold a seat" do
+    user = company.users.first
+    expect(user.update(role: 'Company Administrator')).to be(true)
+  end
+
+  it 'refuses a role change that newly takes a seat when full' do
+    client = add_user(role: 'client')
+    expect(client.update(role: 'staff')).to be(false)
+    expect(client.errors.full_messages.join).to include('2 of 2 users')
+  end
+
   it 'still lets existing users be edited when full' do
     user = company.users.first
     expect(user.update(first_name: 'Renamed')).to be(true)

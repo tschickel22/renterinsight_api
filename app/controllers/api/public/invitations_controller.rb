@@ -167,17 +167,7 @@ module Api
           user_agent: request.user_agent
         )
         
-        if result[:success] && existing_account
-          # No session from the invite link: the person signs in as usual
-          # (with their MFA, if they use it) and picks the company from the
-          # switcher.
-          return render json: {
-            success: true,
-            existingAccount: true,
-            companyName: result[:user]&.company&.name,
-            message: 'Added. Sign in and choose the company from your menu.'
-          }
-        end
+        return render_linked_account_session(result[:user]) if result[:success] && existing_account
 
         if result[:success]
           user = result[:user]
@@ -248,6 +238,33 @@ module Api
       private
 
       # Build consistent user response with company subscription data
+      # They just proved who they are, so they go straight in, to the company that
+      # invited them. Anyone with MFA signs in as usual, because the invite link
+      # must not be a way around it.
+      def render_linked_account_session(user)
+        root = user.sign_in_account
+        added = { success: true, existingAccount: true, companyName: user.company&.name }
+        if root.mfa_enabled? || root.deactivated? || user.company&.access_blocked?
+          return render json: added.merge(message: 'Added. Sign in and choose the company from your menu.')
+        end
+
+        tokens = JsonWebToken.generate_token_pair(user)
+        now = Time.current
+        root.update_column(:last_sign_in_at, now)
+        user.update_column(:last_sign_in_at, now)
+        LoginActivity.record_login(user_id: user.id, user_type: 'User', ip_address: request.remote_ip, user_agent: request.user_agent)
+        cookies[:refresh_token] = {
+          value: tokens[:refresh_token], httponly: true, secure: Rails.env.production?, same_site: :strict, expires: 7.days.from_now
+        }
+
+        render json: added.merge(
+          message: 'Added.',
+          token: tokens[:access_token],
+          refreshToken: tokens[:refresh_token],
+          user: build_user_response(user)
+        )
+      end
+
       def build_user_response(user)
         company = user.company
         location_data = build_location_data(user, company)

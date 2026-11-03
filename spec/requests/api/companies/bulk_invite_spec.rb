@@ -202,7 +202,9 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
 
       accept(token, password: 'BrandNew123!')
       expect(body['success']).to be(true)
-      expect(body['token']).to be_nil
+      expect(body['token']).to be_present
+      expect(body['user']['company_id']).to eq(install.id)
+      expect(rep.reload.never_signed_in?).to be(false)
       expect(rep.reload.authenticate('BrandNew123!')).to be_truthy
       expect(rep.company_accounts.map(&:company_id)).to eq([dealer.id, install.id])
     end
@@ -243,6 +245,19 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
       expect(rep.reload.password_digest).to eq(digest)
     end
 
+    it 'sends someone with MFA on to sign in, with no session from the link' do
+      rep.update!(mfa_enabled: true)
+      tokens = capture_tokens
+      bulk_invite(as: platform_admin, people: [{ email: rep.email }])
+
+      accept(tokens[rep.email], password: 'Pass1234!')
+
+      expect(body['success']).to be(true)
+      expect(body['existingAccount']).to be(true)
+      expect(body['token']).to be_nil
+      expect(response.cookies['refresh_token']).to be_nil
+    end
+
     it 'does not offer a new password to a login with MFA on' do
       rep.update!(mfa_enabled: true)
       tokens = capture_tokens
@@ -273,7 +288,7 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
 
       accept(tokens[owner.email], password: 'Pass1234!')
       expect(body['success']).to be(true)
-      expect(body['token']).to be_nil
+      expect(body['user']['company_id']).to eq(tenant.id)
 
       linked = tenant.users.find_by!(email: owner.email)
       expect(linked.primary_user).to eq(owner)
