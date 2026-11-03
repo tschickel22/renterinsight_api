@@ -292,6 +292,7 @@ module Public
         @blog_post = @website.blog_posts.active.published_posts.find_by(slug: slug)
         return render_not_found if @blog_post.nil?
       end
+      return if redirect_legacy_blog_post
 
       @metadata = Websites::PageMetadata.new(
         website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle,
@@ -312,6 +313,24 @@ module Public
       return if target.nil?
 
       redirect_to target, status: :moved_permanently, allow_other_host: true
+    end
+
+    # An old /blog/<slug> link to a post we hold moves to the post's real address.
+    # Absolute on the canonical host: dealer traffic reaches us through a Worker
+    # that rewrites Host, so a relative redirect would send the visitor to Render.
+    def redirect_legacy_blog_post
+      return false unless @page.nil? && @blog_post.nil? && @vehicle.nil?
+
+      slug = Websites::BlogPostUrl.legacy_slug_from(@website, normalized_path)
+      return false if slug.blank?
+
+      post = @website.blog_posts.active.published_posts.find_by(slug: slug)
+      return false if post.nil?
+
+      query = request.query_string.presence
+      target = "https://#{@canonical_host}#{Websites::BlogPostUrl.path_for(@website, post)}#{"?#{query}" if query}"
+      redirect_to target, status: :moved_permanently, allow_other_host: true
+      true
     end
 
     # Host only. force_ssl is deliberately NOT enforced here: Cloudflare terminates TLS and
