@@ -95,6 +95,12 @@ RSpec.describe Websites::SeoActionList do
       ] }
     end
 
+    it "leaves page items off for someone who can't edit pages" do
+      items = described_class.new(website: website, report: report, can_edit_pages: false).call
+
+      expect(items.map { |i| i[:key] }).not_to include('descriptions')
+    end
+
     it 'lists only what the dealer writes, on pages they edit, and no technical check' do
       items = described_class.new(website: website, report: report).call
       page_item = items.find { |i| i[:key] == 'descriptions' }

@@ -477,10 +477,12 @@ class Api::V1::WebsitesController < ApplicationController
                             message: 'Add a page or some inventory and there will be something to check.' }
     end
 
-    actions = Websites::SeoActionList.new(website: website, report: report).call
+    platform_team = original_user&.platform_admin? || original_user&.super_admin?
+    actions = Websites::SeoActionList.new(website: website, report: report,
+                                          can_edit_pages: platform_team || website_access_level(website) >= 2).call
     # Customers get the things only they can do. The technical report is for
     # prospecting and for the platform team (Tom, 2026-11-03).
-    unless original_user&.platform_admin? || original_user&.super_admin? || @company.is_demo?
+    unless platform_team || @company.is_demo?
       return render json: { actions: actions }
     end
 
@@ -978,6 +980,33 @@ class Api::V1::WebsitesController < ApplicationController
     # admin may set it. Otherwise a dealer could give themselves the full editor.
     permitted.delete(:client_access_level) unless current_user.platform_admin?
 
-    permitted
+    platform_only_website_fields(permitted)
+  end
+
+  # SEO settings and custom code are ours to look after, and the settings page
+  # hides them from customers (Tom, 2026-11-03). The page still sends everything
+  # it holds on save, so hiding alone would let a save change or wipe them. A
+  # managed site's owner changes tracking ids here and nothing else.
+  def platform_only_website_fields(permitted)
+    return permitted if original_user&.platform_admin? || original_user&.super_admin?
+
+    permitted.delete(:seo_config)
+    if permitted[:tracking_config]
+      saved_scripts = @website&.tracking_config.to_h.deep_stringify_keys['custom_scripts']
+      tracking = permitted[:tracking_config].to_h.except('custom_scripts', :custom_scripts)
+      tracking['custom_scripts'] = saved_scripts if saved_scripts.present?
+      permitted[:tracking_config] = tracking
+    end
+
+    @website && website_access_level(@website) <= 1 ? permitted.slice(:tracking_config) : permitted
+  end
+
+  # The site's own level when a platform admin chose one, else the plan's, else
+  # full (the same rule as resolveAccessLevel in the frontend).
+  def website_access_level(website)
+    return website.client_access_level unless website.client_access_level.nil?
+
+    config = ModuleAccessService.new(@company).module_configs['marketing.website'] || {}
+    (config['website_access_level'] || 3).to_i
   end
 end

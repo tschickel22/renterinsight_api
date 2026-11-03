@@ -21,9 +21,12 @@ module Websites
       'image_alt' => ['Describe your images', 'A short description helps search engines and people using screen readers.']
     }.freeze
 
-    def initialize(website:, report: nil)
+    # can_edit_pages: a managed site's owner can't edit pages, so telling them to
+    # would be a list item they can't act on.
+    def initialize(website:, report: nil, can_edit_pages: true)
       @website = website
       @report = report
+      @can_edit_pages = can_edit_pages
     end
 
     def call
@@ -71,6 +74,8 @@ module Websites
     # Pages only. Home pages are generated from the listing, so they are not
     # something the dealer edits as a page.
     def page_items
+      return [] unless @can_edit_pages
+
       Array(@report && @report['checks']).filter_map do |check|
         action = PAGE_ACTIONS[check['key'].to_s]
         next if action.nil? || check['status'] == 'pass'
