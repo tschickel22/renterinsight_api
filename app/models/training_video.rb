@@ -8,6 +8,11 @@
 class TrainingVideo < ApplicationRecord
   SETTING_KEY = 'training_videos_enabled'
 
+  # Wraps an upload so S3 stores captions as text/vtt.
+  class CaptionsFile < SimpleDelegator
+    def content_type = 'text/vtt'
+  end
+
   has_many :views, class_name: 'TrainingVideoView', dependent: :delete_all
   has_many :assignments, class_name: 'TrainingAssignment', dependent: :delete_all
 
@@ -144,6 +149,25 @@ class TrainingVideo < ApplicationRecord
                   public_views: public_views, from_staging: source_files.present?)
     end
     json
+  end
+
+  # Stores an MP4, poster or captions file in the assets bucket, through the
+  # server so nobody needs AWS keys. Captions also become the transcript, which
+  # is how the help assistant finds what the video says.
+  def attach_file!(kind, file, duration_seconds: nil)
+    ext = File.extname(file.original_filename.to_s).downcase
+    # The browser's type for a .vtt is often blank or text/plain.
+    upload = kind == 'captions' ? CaptionsFile.new(file) : file
+    stored = S3UploadService.new.upload(upload, key: "training-videos/#{slug}-#{Time.current.to_i}#{ext}")
+    case kind
+    when 'video'
+      update!(video_url: stored[:url], video_key: stored[:key], video_size: stored[:size],
+              duration_seconds: duration_seconds.presence&.to_i || self.duration_seconds)
+    when 'poster' then update!(poster_url: stored[:url])
+    when 'captions'
+      vtt = File.read(file.respond_to?(:tempfile) ? file.tempfile.path : file.path, encoding: 'UTF-8')
+      update!(captions_url: stored[:url], transcript: self.class.transcript_from_vtt(vtt))
+    end
   end
 
   # What the public watch page gets: nothing about publishing or the admin.

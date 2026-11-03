@@ -250,6 +250,8 @@ Rails.application.routes.draw do
       # Help approved on staging, for production to copy (E75); token protected.
       get 'guide_sync/approved', to: 'guide_sync#approved'
       # A training video's share link (E88): plays without signing in.
+      put 'training_video_drafts/:slug', to: 'training_video_drafts#upsert'
+      post 'training_video_drafts/:slug/files', to: 'training_video_drafts#file'
       get 'training_videos/series/:module_key', to: 'training_videos#series'
       get 'training_videos/:token', to: 'training_videos#show'
       post 'training_videos/:token/play', to: 'training_videos#play'

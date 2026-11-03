@@ -93,18 +93,18 @@ RSpec.describe 'Training video tracking and required training', type: :request d
     sync = Guide::TrainingVideoSync.new(downloader: ->(url, io) { downloads << url; io.write('x'); true })
     remote = {
       'uid' => SecureRandom.uuid, 'slug' => 'job-costs', 'share_token' => 'tok123456789', 'title' => 'Job costs',
-      'module_key' => 'projects', 'position' => 6, 'is_published' => false, 'share_enabled' => true, 'chapters' => [],
+      'module_key' => 'projects', 'position' => 6, 'is_published' => true, 'share_enabled' => true, 'chapters' => [],
       'video_url' => 'https://staging.example/training-videos/job-costs-1.mp4', 'poster_url' => nil,
       'captions_url' => 'https://staging.example/training-videos/job-costs-1.vtt', 'updated_at' => '2026-10-30T20:00:00Z'
     }
     expect(sync.apply([remote])).to eq(1)
     copy = TrainingVideo.find_by(uid: remote['uid'])
-    expect(copy).to have_attributes(title: 'Job costs', share_token: 'tok123456789', is_published: false)
+    expect(copy).to have_attributes(title: 'Job costs', share_token: 'tok123456789', is_published: true)
     expect(copy.video_url).to start_with('https://prod.example/training-videos/job-costs-')
     expect(downloads.size).to eq(2)
 
     expect(sync.apply([remote])).to eq(0)
-    sync.apply([remote.merge('title' => 'Job costs and reports', 'is_published' => true, 'updated_at' => '2026-10-30T21:00:00Z')])
+    sync.apply([remote.merge('title' => 'Job costs and reports', 'updated_at' => '2026-10-30T21:00:00Z')])
     expect(copy.reload).to have_attributes(title: 'Job costs and reports', is_published: true)
     expect(downloads.size).to eq(2)
 

@@ -53,18 +53,7 @@ module Api
         ext = File.extname(file.original_filename.to_s).downcase
         return render(json: { error: "A #{kind} must be #{rule[:ext].join(' or ')}" }, status: :unprocessable_entity) unless rule[:ext].include?(ext)
 
-        # The browser's type for a .vtt is often blank or text/plain.
-        upload_file = kind == 'captions' ? CaptionsFile.new(file) : file
-        stored = S3UploadService.new.upload(upload_file, key: "training-videos/#{@video.slug}-#{Time.current.to_i}#{ext}")
-        case kind
-        when 'video' then @video.update!(video_url: stored[:url], video_key: stored[:key], video_size: stored[:size],
-                                         duration_seconds: params[:duration_seconds].presence&.to_i || @video.duration_seconds)
-        when 'poster' then @video.update!(poster_url: stored[:url])
-        when 'captions'
-          # The narration, so the help assistant can find what the video says.
-          vtt = File.read(file.respond_to?(:tempfile) ? file.tempfile.path : file.path, encoding: 'UTF-8')
-          @video.update!(captions_url: stored[:url], transcript: TrainingVideo.transcript_from_vtt(vtt))
-        end
+        @video.attach_file!(kind, file, duration_seconds: params[:duration_seconds])
         render json: { video: @video.as_api_json(admin: true) }
       rescue RuntimeError => e
         render json: { error: e.message }, status: :bad_gateway
@@ -94,11 +83,6 @@ module Api
         params.require(:video).permit(:title, :slug, :description, :module_key, :position, :duration_seconds,
                                       :is_published, :share_enabled, chapters: %i[title start terms],
                                       covers: { routes: [], markers: [] })
-      end
-
-      # Wraps an upload so S3 stores captions as text/vtt.
-      class CaptionsFile < SimpleDelegator
-        def content_type = 'text/vtt'
       end
     end
   end
