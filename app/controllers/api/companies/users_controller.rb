@@ -36,8 +36,9 @@ module Api
           current_level = 100
         end
         
-        # Get all company-tier and location-tier roles from database
-        all_roles = Role.where(tier: ['company', 'location'], active: true).map do |role|
+        # The shared system roles plus this company's own. Another company's custom
+        # roles, and their names, are none of this company's business.
+        all_roles = Role.where(company_id: [nil, @company.id], tier: ['company', 'location'], active: true).map do |role|
           {
             key: role.key,
             name: role.name,

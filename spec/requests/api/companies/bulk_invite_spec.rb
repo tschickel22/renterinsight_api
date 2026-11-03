@@ -164,6 +164,18 @@ RSpec.describe 'Bulk invite and linked first logins', type: :request do
     end
   end
 
+  describe 'GET available-roles' do
+    it "offers system roles and this company's own, never another company's" do
+      mine = Role.create!(company_id: install.id, tier: 'company', key: 'install_lead', name: 'Install Lead')
+
+      get "/api/companies/#{install.id}/users/available-roles", headers: headers_for(platform_admin)
+
+      keys = body['roles'].map { |r| r['key'] }
+      expect(keys).to include(mine.key, staff_role.key)
+      expect(keys).not_to include(custom_role.key)
+    end
+  end
+
   describe 'someone who has never signed in' do
     let!(:rep) { dealer_user('rep@easy.example', rep_role, signed_in: false) }
 
