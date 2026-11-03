@@ -61,6 +61,8 @@ module Truebuild
                      .any? { |scope| (at = scope.maximum(:updated_at)) && at > build.priced_at }
 
       return true if terms_moved?(build)
+      # The home's status changed in inventory, or was set before status counted.
+      return true if build.vehicle && build.source != DealHomeBuild.source_for(build.vehicle)
 
       changed = build.deal.deal_products.maximum(:updated_at)
       changed.present? && changed > build.priced_at + 1.second
@@ -79,7 +81,7 @@ module Truebuild
       discounts = DISCOUNTS.transform_values { |field| terms[field]&.to_f || 0.0 }.merge('other_amount' => 0.0)
       first = !deal.home_builds.exists?
       build = deal.company.deal_home_builds.create!(
-        deal: deal, variant: variant, vehicle: vehicle, source: vehicle ? 'lot' : 'order', truebuild_design: design,
+        deal: deal, variant: variant, vehicle: vehicle, source: DealHomeBuild.source_for(vehicle), truebuild_design: design,
         location_id: deal.location_id || vehicle&.location_id, created_by: user, discounts: discounts,
         version_number: next_version(deal), label: label.presence, live: first
       )
@@ -227,7 +229,7 @@ module Truebuild
       DealHomeBuildLine.transaction do
         @build.lines.reload.select { |l| %w[base freight].include?(l.kind) || (l.kind == 'option' && !(same_maker && l.option&.dealer_upgrade?)) }
               .each(&:destroy!)
-        attrs = { variant: variant, vehicle: vehicle, source: vehicle ? 'lot' : 'order' }
+        attrs = { variant: variant, vehicle: vehicle, source: DealHomeBuild.source_for(vehicle) }
         unless same_maker
           terms = DealerCatalogTerm.effective(@build.company, variant.manufacturer_id)
           attrs[:discounts] = @build.discounts.to_h.merge(DISCOUNTS.transform_values { |field| terms[field]&.to_f || 0.0 })
@@ -448,6 +450,7 @@ module Truebuild
 
     def reprice!
       guard!
+      follow_home_status
       apply_doc_fee!
       lines = @build.lines.reload.to_a
       result = engine(option_ids: lines.filter_map(&:catalog_option_id), addon_ids: lines.filter_map(&:truebuild_addon_id))
@@ -851,6 +854,14 @@ module Truebuild
     end
 
     def tag_of(dp) = dp.notes.to_s[TAG, 1]
+
+    # On the lot or still to order, as the home's status says. A won deal stays as sold.
+    def follow_home_status
+      return if @build.vehicle.nil? || @build.deal.cost_snapshotted?
+
+      source = DealHomeBuild.source_for(@build.vehicle)
+      @build.update!(source: source) if @build.source != source
+    end
 
     def manual_home? = @build.variant.manual_home?
 

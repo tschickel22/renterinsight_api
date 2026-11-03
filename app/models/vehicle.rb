@@ -386,6 +386,12 @@ class Vehicle < ApplicationRecord
   end
 
   # Any immutable catalog row (Champion or generic import) — these clone-on-edit.
+  # Statuses that mean the home physically exists with the dealer. The others
+  # (available to order, ordered, RSO, on order) are still to come from a factory.
+  ON_LOT_STATUSES = %w[available reserved pending sold service trade_in].freeze
+
+  def on_lot? = ON_LOT_STATUSES.include?(status)
+
   def catalog_row?
     champion_sourced? || catalog_import?
   end

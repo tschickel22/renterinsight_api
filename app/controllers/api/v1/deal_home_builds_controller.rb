@@ -47,7 +47,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   # What PATCH changes besides a version's name.
   EDIT_KEYS = %w[variant_id manual_home construction notes deal freight_miles discounts].freeze
   # What changes a sheet. On a won deal, it also corrects the deal.
-  SHEET_EDITS = %i[make_live update reprice create_line update_line destroy_line remember create_color use_doc_fee].freeze
+  SHEET_EDITS = %i[make_live update reprice create_line update_line destroy_line remember create_color use_doc_fee home_status].freeze
 
   around_action :correction_in_one_piece, only: SHEET_EDITS
 
@@ -676,6 +676,33 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # Where this deal's home really is. A catalog home gets the dealer's own copy,
+  # and the deal and sheet move to it: the catalog row stays as it is.
+  def home_status
+    return unless authorize_action!('deals', 'update')
+
+    Truebuild::DealBuild.assert_editable!(@build)
+    vehicle = @build.vehicle
+    return render json: { error: 'This sheet has no home in inventory' }, status: :unprocessable_entity unless vehicle
+    return render json: { error: 'Choose a status' }, status: :unprocessable_entity unless Vehicle::STATUSES.include?(params[:status])
+
+    if vehicle.cloneable?
+      if params[:status] != vehicle.status
+        clone = VehicleCloneFromCatalogService.new(vehicle, status: params[:status], attributes: { location_id: @deal.location_id }.compact).call
+        return render json: { error: 'Could not make your copy of this catalog home' }, status: :unprocessable_entity unless clone
+
+        @deal.update!(vehicle_id: clone.id) if @deal.vehicle_id == vehicle.id
+        @build.update!(vehicle: clone)
+      end
+    else
+      vehicle.update!(status: params[:status])
+    end
+    service = sheet.reprice!
+    render json: build_json(@build.reload, service.warnings)
+  rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def use_doc_fee
     return unless authorize_action!('deals', 'update')
 
@@ -886,7 +913,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       model: model_json(variant, Truebuild::HomeMatcher.new).merge(specs_for_json(build)).merge(factory: variant.catalog_plan.factory&.name,
                                                                    series: variant.manual_home? ? nil : variant.catalog_plan.series,
                                                                    model_number: variant.shown_model_number),
-      vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number,
+      vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number, status: build.vehicle.status, on_lot: build.vehicle.on_lot?,
                                   title: [build.vehicle.year, build.vehicle.make, build.vehicle.model].compact.join(' ') },
       design_id: build.truebuild_design_id,
       deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_street: @deal.delivery_street,

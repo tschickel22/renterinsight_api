@@ -469,6 +469,82 @@ RSpec.describe 'Deal Sheet review fixes', type: :request do
       expect(line_named('Title work')['retail']).to eq(90.0)
     end
 
+    describe 'on the lot follows the home status' do
+      def home(status, source: nil)
+        company.vehicles.create!(listing_type: 'manufactured_home', status: status, year: 2025, make: 'Champion', model: 'Apex', serial_number: "SN-#{SecureRandom.hex(3)}",
+                                 bedrooms: 3, bathrooms: 2.0, sale_price: 80_000, dealer_cost: 45_000, location_id: showroom.id, catalog_plan_variant_id: variant.id, **{ source: source }.compact)
+      end
+
+      def sheet_with(vehicle)
+        deal = new_deal
+        post path(deal), headers: headers, params: { variant_id: variant.id, vehicle_id: vehicle.id }.to_json
+        expect(response).to have_http_status(:created)
+        deal
+      end
+
+      it 'a home still to order prices and orders like a factory home' do
+        %w[available_to_order ordered on_order rso].each do |status|
+          sheet_with(home(status))
+          expect(body.dig('build', 'source')).to eq('order'), status
+        end
+        deal = sheet_with(home('available_to_order'))
+        post "#{path(deal)}/purchase_order", headers: headers, params: { supplier_name: 'Champion' }.to_json
+        expect(response).to have_http_status(:created)
+      end
+
+      it 'a home with an in-stock status is on the lot, with its real cost' do
+        %w[available reserved pending].each do |status|
+          sheet_with(home(status))
+          expect(body.dig('build', 'source')).to eq('lot'), status
+        end
+      end
+
+      it 'an older sheet corrects itself when opened, and a status change on the sheet moves it' do
+        vehicle = home('available_to_order')
+        deal = sheet_with(vehicle)
+        deal.home_build.update_columns(source: 'lot')
+        get path(deal), headers: headers
+        expect(body.dig('build', 'source')).to eq('order')
+
+        post "#{path(deal)}/home_status", headers: rep, params: { status: 'available' }.to_json
+        expect(response).to have_http_status(:ok)
+        expect(body.dig('build', 'source')).to eq('lot')
+        expect(body.dig('build', 'vehicle', 'status')).to eq('available')
+        expect(vehicle.reload.status).to eq('available')
+      end
+
+      it 'a catalog home gets a dealer copy on a status change, and the catalog row stays' do
+        catalog = home('available_to_order', source: 'catalog_import')
+        deal = sheet_with(catalog)
+        deal.update!(vehicle_id: catalog.id)
+        post "#{path(deal)}/home_status", headers: headers, params: { status: 'ordered' }.to_json
+        expect(response).to have_http_status(:ok)
+        expect(catalog.reload.status).to eq('available_to_order')
+        copy = deal.reload.home_build.vehicle
+        expect(copy).not_to eq(catalog)
+        expect(copy).to have_attributes(status: 'ordered', cloned_from_id: catalog.id)
+        expect(deal.vehicle_id).to eq(copy.id)
+      end
+
+      it 'a signed sheet stays as it is' do
+        vehicle = home('available_to_order')
+        deal = sheet_with(vehicle)
+        deal.home_build.update!(status: 'locked', source: 'lot')
+        get path(deal), headers: headers
+        expect(body.dig('build', 'source')).to eq('lot')
+        post "#{path(deal)}/home_status", headers: headers, params: { status: 'available' }.to_json
+        expect(response).to have_http_status(:conflict)
+      end
+    end
+
+    it 'editing a catalog home makes a copy that stays available to order' do
+      catalog = company.vehicles.create!(listing_type: 'manufactured_home', status: 'available_to_order', year: 2025, make: 'Champion', model: 'Apex', serial_number: "SN-#{SecureRandom.hex(3)}", bedrooms: 3, bathrooms: 2.0, source: 'catalog_import')
+      patch "/api/v1/vehicles/#{catalog.id}", headers: headers, params: { vehicle: { sale_price: 90_000 } }.to_json
+      expect(body['cloned']).to be(true)
+      expect(company.vehicles.find(body['clone_id'])).to have_attributes(status: 'available_to_order', sale_price: 90_000)
+      expect(catalog.reload.status).to eq('available_to_order')
+    end
+
     it 'a picked option set TBD comes back decided when picked again' do
       deal = sheet_for
       add_line(deal, kind: 'option', option_id: dishwasher.id)
