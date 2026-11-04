@@ -776,7 +776,14 @@ class Api::V1::DealHomeBuildsController < ApplicationController
     typed = params.require(:manual_home).permit(:price, :cost, :pack, :discount_pct, :discount_amount)
     # The rep saw these in the form, so they replace the defaults a new sheet starts with.
     service.set_discounts('savings_pct' => 0, 'sale_pct' => typed[:discount_pct].to_f, 'preferred_pct' => 0, 'other_amount' => typed[:discount_amount].to_f) if typed.key?(:discount_pct) || typed.key?(:discount_amount)
-    @deal.update_columns(pack_amount: typed[:pack].to_d) if typed[:pack].present? && !@deal.cost_snapshotted?
+    if typed[:pack].present? && !@deal.cost_snapshotted?
+      # Typed over one already on the deal, it is the rep's figure now and stays if the sheet is cleared.
+      if @deal.pack_amount.present?
+        @deal.update_columns(pack_amount: typed[:pack].to_d)
+      else
+        service.fill_deal_pack!(typed[:pack].to_d)
+      end
+    end
     prices = typed.slice(:price, :cost).to_h.compact_blank
     base = service.build.lines.find_by(kind: 'base')
     service.update_line(base, { unit_retail: prices['price'], unit_cost: prices['cost'] }.compact) if base && prices.any?

@@ -529,7 +529,7 @@ module Truebuild
                             city_tax_rate: collected ? rates['city'] : nil, total_amount: t['contract_total'] || 0,
                             unpaid_balance: t['unpaid_balance'] || 0, updated_at: Time.current)
         # Commissions take the pack off from here. A pack someone set on the deal stays, and a closed deal keeps its figures.
-        deal.update_columns(pack_amount: t['pack']) if t['pack'].to_d.positive? && deal.pack_amount.blank? && !deal.cost_snapshotted?
+        fill_deal_pack!(t['pack']) if t['pack'].to_d.positive?
       end
     end
 
@@ -551,7 +551,20 @@ module Truebuild
     end
 
     # Clearing the build: its add-on lines go; the home line stays as a plain line.
+    # The sheet fills a deal's blank pack and remembers it did, so clearing the
+    # sheet takes it back off. A pack someone set on the deal stays either way.
+    def fill_deal_pack!(amount)
+      deal = @build.deal
+      return if deal.pack_amount.present? || deal.cost_snapshotted?
+
+      deal.update_columns(pack_amount: amount)
+      @build.update_columns(metadata: @build.metadata.to_h.merge('pack_filled' => amount.to_f))
+    end
+
     def release_deal!
+      deal = @build.deal
+      filled = @build.metadata.to_h['pack_filled']
+      deal.update_columns(pack_amount: nil) if filled && deal.pack_amount.to_f == filled.to_f && !deal.cost_snapshotted?
       @build.deal.deal_products.select { |dp| dp.notes.to_s.match?(TAG) }.each do |dp|
         if tag_of(dp) == 'home'
           dp.update!(notes: dp.notes.to_s.gsub(/,?\s*deal_sheet:home/, ''))

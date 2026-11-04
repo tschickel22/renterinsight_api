@@ -137,6 +137,21 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
       expect(deal.reload.pack_amount).to eq(3000)
     end
 
+    it 'takes back a pack it filled when the sheet is cleared, and leaves one someone set' do
+      deal = new_deal
+      post sheet_path(deal), headers: headers, params: { manual_home: { description: '2018 Clayton', cost: 50_000, pack: 3_000, price: 100_000 } }.to_json
+      expect(deal.reload.pack_amount).to eq(3000)
+      delete sheet_path(deal), headers: headers
+      expect(response).to have_http_status(:no_content)
+      expect(deal.reload.pack_amount).to be_nil
+
+      set = new_deal(pack_amount: 2_500)
+      post sheet_path(set), headers: headers, params: { manual_home: { description: '2019 Clayton', cost: 50_000, price: 100_000 } }.to_json
+      expect(set.reload.pack_amount).to eq(2500)
+      delete sheet_path(set), headers: headers
+      expect(set.reload.pack_amount).to eq(2500)
+    end
+
     it 'shows what inventory says about a home with no catalog model' do
       vehicle = company.vehicles.create!(vin: SecureRandom.hex(8), make: 'Clayton', model: 'Ultra', year: 2018, dealer_cost: 40_000, msrp: 80_000, pack_amount: 1_500,
                                          special_discount_enabled: true, discount_type: '$ Flat Amount', discount_value: 5_000)
