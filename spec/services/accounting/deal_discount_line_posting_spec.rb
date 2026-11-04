@@ -75,6 +75,45 @@ RSpec.describe Accounting::DealAccountingService, 'discount lines' do
       expect(taxed_on(deal.reload)).to eq((5_000 * 0.07).round(2))
     end
 
+    it 'lists the untaxed discount and a home marked not taxable for the approver, not the doc fee' do
+      deal = deal_with(tax: 0, notes: 'category:fee, taxable:no')
+      add_line(deal, 'Doc fee', 500, tax: 0, notes: 'category:fee, taxable:no')
+      deal.deal_products.find_by(product_name: 'Home').update!(notes: 'category:home, taxable:no')
+      lines = described_class.new(deal.reload).sales_tax_preview[:untaxed_lines]
+      expect(lines).to contain_exactly(
+        { name: 'Home', amount: 100_000.0, kind: 'home' },
+        { name: 'Manager Discount', amount: -10_000.0, kind: 'discount' }
+      )
+    end
+
+    it 'does not list a taxed line' do
+      expect(described_class.new(deal_with(tax: -700)).sales_tax_preview[:untaxed_lines]).to eq([])
+    end
+
+    # Taxable switched on after the deal posted: the tax difference posts, and the
+    # invoice, which bills total_tax_amount, follows it.
+    it 'moves the saved tax total when a correction changes the tax' do
+      deal = deal_with(tax: 0, notes: 'category:fee, taxable:no')
+      service = described_class.new(deal)
+      before = service.posting_lines
+      deal.update_columns(gl_posted: true, total_tax_amount: 4550, tax_posted: true)
+      deal.deal_products.find_by(product_name: 'Manager Discount').update!(tax: -700, notes: 'category:fee')
+      deal.reload
+      je = described_class.new(deal).post_change_adjustment!(before: before, memo: 'Deal changed after approval')
+      expect(je).to be_present
+      expect(deal.total_tax_amount).to eq((90_000 * 0.65 * 0.07).round(2))
+      expect(DealInvoiceService.new(deal).deal_total).to eq(90_000 + (90_000 * 0.65 * 0.07).round(2))
+    end
+
+    it 'leaves the saved tax total alone when a correction moves no tax' do
+      deal = deal_with(tax: 0, notes: 'category:fee, taxable:no')
+      before = described_class.new(deal).posting_lines
+      deal.update_columns(gl_posted: true, total_tax_amount: 4550)
+      deal.deal_products.find_by(product_name: 'Manager Discount').update!(unit_price: -5_000)
+      described_class.new(deal.reload).post_change_adjustment!(before: before, memo: 'Deal changed after approval')
+      expect(deal.total_tax_amount).to eq(4550)
+    end
+
     it 'leaves the taxed price alone for a discount marked not taxable' do
       expect(taxed_on(deal_with(tax: 0, notes: 'category:fee, taxable:no'))).to eq((100_000 * 0.65 * 0.07).round(2))
     end

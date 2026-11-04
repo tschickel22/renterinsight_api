@@ -236,11 +236,25 @@ module Accounting
     # state it is taxed in, each slot's rate and amount, or why none posts.
     def sales_tax_preview
       plan = sales_tax_plan
-      return { skipped: plan[:skipped], state_code: deal_state_code, slots: [], total: 0.0 } if plan[:skipped]
+      return { skipped: plan[:skipped], state_code: deal_state_code, slots: [], total: 0.0, untaxed_lines: [] } if plan[:skipped]
 
       slots = plan[:slots].map { |s| { slot: s[:slot], rate: s[:rate].to_f, amount: s[:amount].to_f } }
       { skipped: nil, state_code: plan[:state_code], rates: plan[:rates].transform_values(&:to_f),
-        slots: slots, total: slots.sum { |s| s[:amount] }.round(2) }
+        slots: slots, total: slots.sum { |s| s[:amount] }.round(2), untaxed_lines: untaxed_lines }
+    end
+
+    # Lines the approver should look at before tax posts: a discount or other
+    # line with no tax on it, and a home marked not taxable (posting still taxes
+    # the home price). A document fee is left out: it is routinely untaxed.
+    def untaxed_lines
+      (@deal.try(:deal_products) || []).filter_map do |product|
+        amount = pre_tax(product)
+        home = product.home_line_item?
+        flagged = home ? product.notes.to_s.include?('taxable:no') : (product.tax.to_d.zero? && !amount.zero? && !Deal.doc_fee_name?(product.product_name))
+        next unless flagged
+
+        { name: product.product_name, amount: amount.to_f, kind: home ? 'home' : (amount.negative? ? 'discount' : 'line') }
+      end
     end
 
     def sales_tax_lines
@@ -271,6 +285,7 @@ module Accounting
           sample[key] ||= l
         end
       end
+      now = posting_lines
       lines = delta.reject { |_, amount| amount.round(2).zero? }.map do |key, amount|
         amount = amount.round(2)
         sample[key].slice(:chart_of_account_id, :location_id, :department, :deal_id, :vehicle_id)
@@ -281,6 +296,10 @@ module Accounting
       je = ManualPostingService.new(@company).post_complex!(lines: lines, memo: "#{memo}: #{deal_description}",
                                                              entry_date: Date.current, source_entity: @deal, posted_by: user)
       raise ActiveRecord::RecordInvalid.new(@deal), 'The change could not be posted to the GL' unless je
+
+      # The invoice bills total_tax_amount: when the tax moved, it follows the books.
+      tax_now = tax_in(now)
+      @deal.update_columns(total_tax_amount: tax_now, tax_posted: tax_now.positive?) unless tax_now == tax_in(before)
 
       je
     end
@@ -456,6 +475,12 @@ module Accounting
             @deal.try(:billing_state).presence ||
             @deal.try(:location)&.try(:state).presence
       raw&.to_s&.strip&.upcase.presence
+    end
+
+    def tax_in(lines)
+      accounts = AccountingSettings.for_company(@company).tax_accounts.values.compact.map(&:id)
+      lines.select { |l| accounts.include?(l[:chart_of_account_id]) }
+           .sum(0.to_d) { |l| l[:credit_amount].to_d - l[:debit_amount].to_d }.round(2)
     end
 
     # The deal's other lines that carry tax on the deal screen: taxable fees and
