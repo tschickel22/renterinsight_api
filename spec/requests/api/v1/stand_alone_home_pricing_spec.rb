@@ -107,6 +107,46 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
     end
   end
 
+  describe 'the price list grid' do
+    let(:grid_path) { '/api/v1/truebuild_pricing/price_list/grid' }
+    let(:admin_headers) do
+      user = User.create!(email: "pa-#{SecureRandom.hex(4)}@example.com", first_name: 'P', last_name: 'A', password: 'Pass1234!', company_id: company.id, role: 'platform_admin')
+      { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: user.id, company_id: company.id)}", 'Content-Type' => 'application/json' }
+    end
+
+    it 'gives a dealer their own three columns in one save, and keeps the shared book from them' do
+      post grid_path, headers: headers, params: { book_id: book.id, kind: 'base', rows: [
+        { price_id: double_price.id, cost: 49_000, surcharge: 3_500, price: 99_000 }, { price_id: single_price.id, surcharge: 700 }
+      ] }.to_json
+      expect(response).to have_http_status(:ok)
+      row = body['rows'].first
+      expect(row).to include('your_cost' => 49_000.0, 'your_surcharge' => 3500.0, 'your_price' => 99_000.0)
+      expect(surcharge_on(single)).to eq(700)
+
+      post grid_path, headers: headers, params: { book_id: book.id, kind: 'base', rows: [{ price_id: double_price.id, factory_surcharge: 1 }] }.to_json
+      expect(response).to have_http_status(:forbidden)
+      expect(double_price.reload.total_base_price).to eq(51_000)
+    end
+
+    it 'lets a platform admin correct the factory base and surcharge, keeping the surcharge when only the base moves' do
+      get '/api/v1/truebuild_pricing/price_list', headers: admin_headers, params: { book_id: book.id }
+      expect(body['can_edit_factory']).to be(true)
+      post grid_path, headers: admin_headers, params: { book_id: book.id, kind: 'base', rows: [
+        { price_id: double_price.id, factory_cost: 52_000 }, { price_id: single_price.id, factory_surcharge: 2_500 }
+      ] }.to_json
+      expect(response).to have_http_status(:ok)
+      expect(double_price.reload).to have_attributes(net_base_price: 52_000, total_base_price: 53_000)
+      expect(single_price.reload).to have_attributes(net_base_price: 30_000, total_base_price: 32_500)
+      expect(CatalogPriceCorrection.where(price_book: book).count).to eq(3)
+    end
+
+    it 'saves nothing when one row is bad' do
+      post grid_path, headers: headers, params: { book_id: book.id, kind: 'base', rows: [{ price_id: double_price.id, price: 99_000 }, { price_id: single_price.id, surcharge: -5 }] }.to_json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(company.dealer_markup_rules.where(markup_type: 'manual').count).to eq(0)
+    end
+  end
+
   describe 'All other homes' do
     before { company.dealer_catalog_terms.find_by(manufacturer_id: nil).update!(dealer_pack: 2_000, sale_discount_pct: 10) }
 

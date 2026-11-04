@@ -330,6 +330,7 @@ Rails.application.routes.draw do
       get    'truebuild_pricing/surcharge_rules', to: 'truebuild_pricing#surcharge_rules'
       put    'truebuild_pricing/surcharge_rules', to: 'truebuild_pricing#save_surcharge_rules'
       post   'truebuild_pricing/price_list/remember', to: 'truebuild_pricing#remember_price'
+      post   'truebuild_pricing/price_list/grid', to: 'truebuild_pricing#save_price_grid'
       post   'truebuild_pricing/colors', to: 'truebuild_pricing#create_color'
       patch  'truebuild_pricing/colors/:id', to: 'truebuild_pricing#update_color'
       delete 'truebuild_pricing/colors/:id', to: 'truebuild_pricing#destroy_color'

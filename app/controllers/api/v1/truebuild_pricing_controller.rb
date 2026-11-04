@@ -288,7 +288,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return render json: color_list(book, own) if params[:kind] == 'color'
 
     page = [params[:page].to_i, 1].max
-    per_page = [(params[:per_page] || 50).to_i, 200].min
+    per_page = [(params[:per_page] || 50).to_i, 500].min
     q = params[:search].present? ? "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%" : nil
     if params[:kind] == 'option'
       scope = book.option_prices.joins(option: :group).where(catalog_options: { company_id: nil }).where.not(catalog_options: { kind: 'color' })
@@ -308,8 +308,46 @@ class Api::V1::TruebuildPricingController < ApplicationController
                   .offset((page - 1) * per_page).limit(per_page).map { |vp| price_list_base(vp, prices) }
       groups = []
     end
-    render json: { book: { id: book.id, name: book.name, manufacturer_id: book.manufacturer_id }, rows: rows, groups: groups,
+    render json: { book: { id: book.id, name: book.name, manufacturer_id: book.manufacturer_id }, rows: rows, groups: groups, can_edit_factory: factory_editor?,
                    meta: { total: total, page: page, per_page: per_page, total_pages: (total.to_f / per_page).ceil } }
+  end
+
+  # POST /api/v1/truebuild_pricing/price_list/grid
+  #   { book_id, kind, rows: [{ price_id, factory_cost?, factory_surcharge?, suggested_retail?, cost?, surcharge?, price? }] }
+  # The price list's edit-all grid: every row changed together or none. The dealer's
+  # own columns are theirs to change. A factory figure is the shared book, every
+  # dealer on it, so only a platform admin changes those.
+  def save_price_grid
+    return unless authorize_action!('company_settings', 'update')
+
+    book = CatalogPriceBook.published.find_by(id: params[:book_id])
+    return render json: { error: 'Choose a published price book' }, status: :not_found unless book
+
+    home = params[:kind] != 'option'
+    rows = Array(params[:rows]).first(1000)
+    if !factory_editor? && rows.any? { |r| (r.keys & FACTORY_GRID_FIELDS).any? }
+      return render json: { error: 'Only the platform team can change a factory figure, because every dealer on this book uses it. Use your own columns.' }, status: :forbidden
+    end
+
+    corrector = Truebuild::PriceCorrector.new(book: book, user: original_user, reprice: false)
+    corrected = false
+    saved = []
+    ActiveRecord::Base.transaction do
+      rows.each do |raw|
+        row = (home ? book.variant_prices : book.option_prices).find_by(id: raw[:price_id])
+        raise ArgumentError, 'That price is not in this book' unless row
+
+        corrected = true if correct_factory_figures(corrector, row, raw).any?
+        remember_own_figures(row, raw)
+        saved << row
+      end
+    end
+    CatalogPriceCorrectionJob.perform_later(book.id) if corrected
+    fresh = Truebuild::DealerPrices.new(@company)
+    own = Truebuild::DealerOptions.new(@company, book.manufacturer_id)
+    render json: { rows: saved.map { |r| home ? price_list_base(r.reload, fresh) : price_list_option(r.reload, fresh, own) } }
+  rescue ArgumentError, ActiveRecord::RecordInvalid, Truebuild::PriceCorrector::Invalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   # GET /api/v1/truebuild_pricing/home_defaults?location_id=
@@ -505,6 +543,42 @@ class Api::V1::TruebuildPricingController < ApplicationController
   STATUS_WORDS = { 'open' => 'Waiting on review', 'dealer_only' => 'Kept for you', 'applied' => 'Fixed for everyone',
                    'dismissed' => 'Turned down' }.freeze
 
+  FACTORY_GRID_FIELDS = %w[factory_cost factory_surcharge suggested_retail].freeze
+
+  # Original user, so an admin viewing as a dealer can still fix the book.
+  def factory_editor? = original_user&.platform_admin? || original_user&.super_admin? || false
+
+  def correct_factory_figures(corrector, row, raw)
+    if row.is_a?(CatalogVariantPrice)
+      changes = {}
+      changes['net_base_price'] = raw[:factory_cost] if raw.key?(:factory_cost)
+      net = (changes['net_base_price'].presence || row.net_base_price).to_d
+      # The book keeps base plus surcharge, so a new base carries the surcharge with it.
+      if raw.key?(:factory_surcharge)
+        changes['total_base_price'] = raw[:factory_surcharge].blank? ? nil : (net + BigDecimal(raw[:factory_surcharge].to_s.delete(',$'))).to_s
+      elsif raw.key?(:factory_cost) && row.total_base_price
+        changes['total_base_price'] = (net + Truebuild::DealerPrices.book_surcharge(row)).to_s
+      end
+      changes.any? ? corrector.apply(row, changes, reason: 'Edited on the price list grid') : []
+    else
+      changes = {}
+      changes['dealer_cost'] = raw[:factory_cost] if raw.key?(:factory_cost)
+      changes['suggested_retail'] = raw[:suggested_retail] if raw.key?(:suggested_retail)
+      changes.any? ? corrector.apply(row, changes, reason: 'Edited on the price list grid') : []
+    end
+  rescue TypeError
+    raise ArgumentError, 'That is not an amount'
+  end
+
+  def remember_own_figures(row, raw)
+    home = row.is_a?(CatalogVariantPrice)
+    target = home ? row.variant : row.option
+    label = home ? "#{target.catalog_plan.name} #{target.model_number}" : "#{target.name} (#{row.price_book.name})"
+    Truebuild::DealerPrices.set_retail!(company: @company, target: target, value: raw[:price]) if raw.key?(:price)
+    Truebuild::DealerPrices.set!(company: @company, row: row, value: raw[:cost], label: home ? "#{label} base price" : label, user: current_user) if raw.key?(:cost)
+    Truebuild::DealerPrices.set_surcharge!(company: @company, row: row, value: raw[:surcharge], label: "#{label} surcharge", user: current_user) if home && raw.key?(:surcharge)
+  end
+
   def surcharge_rule_json(r)
     r.slice(:id, :factory_id, :building_code, :section, :basis).merge(amount: r.amount.to_f)
   end
@@ -550,6 +624,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     sreq = prices.surcharge_request_for(vp)
     { id: vp.id, kind: 'base', variant_id: v.id, model_number: v.model_number, plan: v.catalog_plan.name, series: v.catalog_plan.series,
       size: [v.width_ft, v.length_ft].all? ? "#{v.width_ft}' x #{v.length_ft}'" : nil,
+      square_feet: DealerSurchargeRule.square_feet_of(v), section: DealerSurchargeRule.section_of(v), building_code: v.building_code,
       factory_cost: vp.net_base_price&.to_f, your_cost: req&.suggested_value&.to_f, cost_status: req && STATUS_WORDS[req.status],
       factory_surcharge: Truebuild::DealerPrices.book_surcharge(vp).to_f, your_surcharge: sreq&.suggested_value&.to_f,
       surcharge_status: sreq && STATUS_WORDS[sreq.status], rule_surcharge: prices.rule_surcharge(vp)&.to_f, your_price: prices.manual_retail(v)&.to_f }
