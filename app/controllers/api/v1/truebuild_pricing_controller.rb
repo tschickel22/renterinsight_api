@@ -47,7 +47,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
       { id: mfr.id, name: mfr.name,
         plants: bs.map { |b| { book_id: b.id, book: b.name, plant: b.factory&.name, published_at: b.published_at } },
         series: CatalogPlan.where(manufacturer_id: mfr.id).distinct.order(:series).pluck(:series),
-        groups: CatalogOptionGroup.where(manufacturer_id: mfr.id).order(:position, :name).map { |g| { id: g.id, name: g.name } },
+        groups: rule_groups(mfr),
         terms: terms && term_json(terms) }
     end
 
@@ -569,6 +569,14 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
   def term_json(t)
     t.slice(:id, :manufacturer_id, *TERM_FIELDS, *BUYER_LISTS).transform_values { |v| v.is_a?(BigDecimal) ? v.to_f : v }
+  end
+
+  # Each plant has its own copy of a group, and a rule covers only the copy it
+  # names, so a repeated name carries its plant.
+  def rule_groups(mfr)
+    groups = CatalogOptionGroup.where(manufacturer_id: mfr.id).includes(:factory).order(:position, :name, :id).to_a
+    repeated = groups.map(&:name).tally
+    groups.map { |g| { id: g.id, name: g.name, plant: (g.factory&.name if repeated[g.name] > 1) } }
   end
 
   def rule_json(r)
