@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_03_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_04_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3221,6 +3221,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_03_160000) do
     t.index ["company_id"], name: "index_dealer_price_book_adoptions_on_company_id"
     t.index ["decided_by_id"], name: "index_dealer_price_book_adoptions_on_decided_by_id"
     t.index ["previous_book_id"], name: "index_dealer_price_book_adoptions_on_previous_book_id"
+  end
+
+  create_table "dealer_surcharge_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.bigint "factory_id"
+    t.string "section", default: "any", null: false
+    t.string "basis", default: "per_sq_ft", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "company_id, manufacturer_id, COALESCE(factory_id, (0)::bigint), section", name: "idx_dealer_surcharge_rules_one_per_scope", unique: true
+    t.index ["company_id"], name: "index_dealer_surcharge_rules_on_company_id"
+    t.index ["factory_id"], name: "index_dealer_surcharge_rules_on_factory_id"
+    t.index ["manufacturer_id"], name: "index_dealer_surcharge_rules_on_manufacturer_id"
   end
 
   create_table "deals", force: :cascade do |t|
@@ -8379,6 +8395,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_03_160000) do
     t.string "overlay_text", comment: "Promotional overlay text for listings"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.decimal "pack_amount", precision: 10, scale: 2
     t.decimal "dealer_cost", precision: 10, scale: 2, comment: "Base invoice cost from manufacturer"
     t.decimal "freight_cost", precision: 10, scale: 2, comment: "Transportation/shipping cost to dealership"
     t.decimal "pdi_cost", precision: 10, scale: 2, comment: "Pre-delivery inspection and setup cost"
@@ -9306,6 +9323,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_03_160000) do
   add_foreign_key "dealer_markup_rules", "companies"
   add_foreign_key "dealer_markup_rules", "locations"
   add_foreign_key "dealer_markup_rules", "manufacturers"
+  add_foreign_key "dealer_surcharge_rules", "companies"
+  add_foreign_key "dealer_surcharge_rules", "factories"
+  add_foreign_key "dealer_surcharge_rules", "manufacturers"
   add_foreign_key "dealer_price_book_adoptions", "catalog_price_books"
   add_foreign_key "dealer_price_book_adoptions", "catalog_price_books", column: "previous_book_id"
   add_foreign_key "dealer_price_book_adoptions", "companies"

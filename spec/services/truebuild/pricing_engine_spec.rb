@@ -26,7 +26,6 @@ RSpec.describe Truebuild::PricingEngine do
 
   it 'carries the pack for one manufacturer only, off the line and PO cost but in the totals' do
     company.dealer_markup_rules.create!(scope_type: 'all', markup_type: 'multiplier', value: 1.85)
-    company.dealer_catalog_terms.create!(manufacturer_id: nil, dealer_pack: 3000)
     plain = described_class.new(company: company, variant: variant, book: book).call
     expect(plain.totals[:pack]).to eq(0)
 

@@ -34,6 +34,7 @@ class DealerCatalogTerm < ApplicationRecord
                     buyer_view buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups
                     factory_po_hide_prices website_designer].freeze
   PER_MANUFACTURER = %i[program_discount_pct sale_discount_pct dealer_savings_pct preferred_payment_pct dealer_pack].freeze
+  ALL_OTHER_HOMES = %i[dealer_pack sale_discount_pct].freeze
   # The dealer's hauler, so set once for the company; a manufacturer row can
   # still override (a plant that ships its own homes).
   #   freight_per_mile            per mile, per section hauled
@@ -63,6 +64,9 @@ class DealerCatalogTerm < ApplicationRecord
     merged = company.dealer_catalog_terms.new(manufacturer_id: manufacturer_id)
     COMPANY_WIDE.each { |f| merged[f] = base[f] if base }
     PER_MANUFACTURER.each { |f| merged[f] = specific[f] if specific }
+    # All other homes: a builder with no figure of its own takes the company's.
+    # $0 on a builder keeps it out; blank on the company changes nothing.
+    ALL_OTHER_HOMES.each { |f| merged[f] = base[f] if merged[f].nil? && base }
     FREIGHT.each { |f| merged[f] = specific&.[](f).nil? ? base&.[](f) : specific[f] }
     merged
   end

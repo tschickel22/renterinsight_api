@@ -51,12 +51,18 @@ RSpec.describe 'Deal Sheet dealer pack', type: :request do
     expect(deal.commissionable_front_gross).to eq(deal.front_gross - 3000)
   end
 
-  it 'charges no pack for a builder without one, even with a company row left over' do
-    company.dealer_catalog_terms.find_by(manufacturer_id: nil).update!(dealer_pack: 3000)
+  it 'charges no pack for a builder without one until All other homes is set, and $0 keeps a builder out' do
     deal = deal_with_sheet
-
     expect(totals).to include('pack' => 0.0, 'gross' => 101_980.0, 'cost' => 51_650.0)
     expect(deal.reload.pack_amount).to be_nil
+
+    company.dealer_catalog_terms.find_by(manufacturer_id: nil).update!(dealer_pack: 3000)
+    deal_with_sheet
+    expect(totals).to include('pack' => 3000.0)
+
+    company.dealer_catalog_terms.create!(manufacturer_id: mfr.id, dealer_pack: 0)
+    deal_with_sheet
+    expect(totals).to include('pack' => 0.0)
   end
 
   it 'keeps a pack already set on the deal' do

@@ -42,7 +42,7 @@ module Truebuild
     # include_freight: false for anything a buyer sees. The website price never has
     # freight; the dealer adds it on the deal sheet (Tom, 2026-11-02).
     def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false,
-                   freight_miles: nil, assume_freight: false, surcharge: nil, include_freight: true)
+                   freight_miles: nil, assume_freight: false, surcharge: nil, include_freight: true, pack: nil)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
@@ -65,6 +65,8 @@ module Truebuild
       @options_cost_book = book || OptionSource.current_for(variant) || @cost_book
       @options_book = book || OptionSource.book_for(company, variant) || @book
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
+      # The pack on this very home, ahead of the dealer's terms.
+      @pack = (pack.presence || @terms.dealer_pack).to_d
       @dealer_prices = DealerPrices.new(company)
       @dealer_options = DealerOptions.new(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
@@ -112,7 +114,7 @@ module Truebuild
       # The dealer's pack is overhead: marked up with the home and counted in the
       # totals' cost, but it is not factory cost, so it stays off this line and the
       # factory PO. A manual price ignores it.
-      pack = @terms.dealer_pack.to_d
+      pack = @pack
       retail = rule ? rule.apply((retail_basis(vp) || cost) + pack) : nil
       @warnings << 'No markup rule covers this home, so it has no retail price. Add a markup rule.' unless rule
       {
@@ -247,7 +249,7 @@ module Truebuild
 
     def totals_for(lines)
       # The pack counts against margin on any home with a factory cost (Deal#pack_amount on a deal).
-      pack = lines.any? { |l| l[:kind] == 'base' && l[:cost] } ? @terms.dealer_pack.to_d : 0.to_d
+      pack = lines.any? { |l| l[:kind] == 'base' && l[:cost] } ? @pack : 0.to_d
       cost = lines.sum { |l| l[:cost].to_d } + pack
       priced = lines.all? { |l| !l[:retail].nil? }
       retail = priced ? lines.sum { |l| l[:retail].to_d } : nil

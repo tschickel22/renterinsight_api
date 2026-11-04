@@ -37,7 +37,7 @@ module Truebuild
     # The lines written to the deal as lines of their own (the rest roll into the home line).
     EXTRA_KINDS = %w[addon template custom].freeze
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
-    TOTALS_VERSION = 8
+    TOTALS_VERSION = 9
     DOC_FEE_LABEL = 'Doc fee'
     DOC_FEE_LOCKED = 'This document fee comes from Settings, TrueBuild pricing, and cannot be changed on a Deal Sheet.'
     DOC_FEE_MISSING = 'No document fee is set. Enter it under Settings, TrueBuild pricing (0 if you do not charge one).'
@@ -57,7 +57,7 @@ module Truebuild
       return true if books.any? { |b| (at = b.metadata.to_h['corrected_at']).present? && Time.zone.parse(at) > build.priced_at }
       # The dealer changed their price list, names or colors, or the admin decided on one of those.
       company = build.company
-      return true if [company.dealer_markup_rules, company.dealer_catalog_terms, company.catalog_price_requests, company.catalog_option_requests, company.dealer_colors]
+      return true if [company.dealer_markup_rules, company.dealer_catalog_terms, company.catalog_price_requests, company.catalog_option_requests, company.dealer_colors, company.dealer_surcharge_rules]
                      .any? { |scope| (at = scope.maximum(:updated_at)) && at > build.priced_at }
 
       return true if terms_moved?(build)
@@ -669,7 +669,7 @@ module Truebuild
       surcharge = @build.lines.find_by(kind: 'base')&.metadata.to_h['set_surcharge']
       result = PricingEngine.new(company: @build.company, variant: @build.variant, option_ids: option_ids, addon_ids: addon_ids,
                                  location: @build.location, construction: @build.construction, quote: true,
-                                 freight_miles: freight_miles, assume_freight: true, surcharge: surcharge).call
+                                 freight_miles: freight_miles, assume_freight: true, surcharge: surcharge, pack: @build.vehicle&.pack_amount).call
       # The engine's margin check is for its own sum; the build checks its own totals.
       @warnings = result.warnings.reject { |w| w.start_with?('Margin ') || w.include?(' is not offered on ') }
       result
@@ -745,6 +745,7 @@ module Truebuild
       terms = DealerCatalogTerm.effective(@build.company, @build.variant.manufacturer_id)
       retail = PricingEngine.round_retail(retail, terms) if retail
       discounts = discounts_for(lines, retail)
+      warn_inventory_price(lines, discounts)
       # Lines someone added in Products (not written by the sheet) are part of
       # the sale too: their price, cost and tax count here.
       others = other_deal_lines
@@ -871,11 +872,31 @@ module Truebuild
 
     def manual_home? = @build.variant.manual_home?
 
-    # One pack per deal: what the deal says (commissions read it too), else this
-    # builder's pack from the dealer's terms, else the location or company default.
+    # One pack per deal: what the deal says (commissions read it too), else the
+    # pack on this home in inventory, else the dealer's terms for this builder or
+    # their All other homes figure, else the location or company default.
     def pack_for(terms)
       deal = @build.deal
-      (deal.pack_amount.presence || terms.dealer_pack.presence || deal.effective_pack_amount).to_d
+      (deal.pack_amount.presence || @build.vehicle&.pack_amount.presence || terms.dealer_pack.presence || deal.effective_pack_amount).to_d
+    end
+
+    # A catalog home prices from the book and the dealer's rules, which stay in
+    # charge (Tom, 2026-11-04). Inventory can advertise something else, and a buyer
+    # may have seen that figure, so the rep is told.
+    def warn_inventory_price(lines, discounts)
+      vehicle = @build.vehicle
+      return if vehicle.nil? || manual_home? || @build.deal.cost_snapshotted?
+
+      listed = vehicle.discounted_price.presence || vehicle.sale_price.presence || vehicle.msrp.presence
+      retail = lines.find { |l| l.kind == 'base' }&.retail
+      return unless listed.to_d.positive? && retail
+
+      sheet = retail.to_d - discounts['savings'] - discounts['sale']
+      return if (sheet - listed.to_d).abs < 1
+
+      words = ActiveSupport::NumberHelper
+      @warnings << "Inventory lists this home at #{words.number_to_currency(listed, precision: 0)}, but this sheet prices it at " \
+                   "#{words.number_to_currency(sheet, precision: 0)} from the price book and your markup rules. Change one if the buyer was quoted the other."
     end
 
     # What a lot home really cost, unless the rep set the base cost; nil otherwise.

@@ -773,7 +773,11 @@ class Api::V1::DealHomeBuildsController < ApplicationController
   def type_manual_prices(service)
     return if params[:manual_home].blank?
 
-    prices = params.require(:manual_home).permit(:price, :cost).to_h.compact_blank
+    typed = params.require(:manual_home).permit(:price, :cost, :pack, :discount_pct, :discount_amount)
+    # The rep saw these in the form, so they replace the defaults a new sheet starts with.
+    service.set_discounts('savings_pct' => 0, 'sale_pct' => typed[:discount_pct].to_f, 'preferred_pct' => 0, 'other_amount' => typed[:discount_amount].to_f) if typed.key?(:discount_pct) || typed.key?(:discount_amount)
+    @deal.update_columns(pack_amount: typed[:pack].to_d) if typed[:pack].present? && !@deal.cost_snapshotted?
+    prices = typed.slice(:price, :cost).to_h.compact_blank
     base = service.build.lines.find_by(kind: 'base')
     service.update_line(base, { unit_retail: prices['price'], unit_cost: prices['cost'] }.compact) if base && prices.any?
   end
@@ -895,7 +899,9 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       home: vehicle && { vehicle_id: vehicle.id, title: [vehicle.year, vehicle.make, vehicle.model].compact.join(' '),
                          stock_number: vehicle.stock_number,
                          model: vehicle.catalog_plan_variant && matcher.variant_json(vehicle.catalog_plan_variant),
-                         suggestions: vehicle.catalog_plan_variant_id ? [] : matcher.suggest(vehicle) },
+                         suggestions: vehicle.catalog_plan_variant_id ? [] : matcher.suggest(vehicle),
+                         inventory: vehicle.catalog_plan_variant_id ? nil : Truebuild::StandAlonePricing.inventory_figures(vehicle) },
+      typed_defaults: Truebuild::StandAlonePricing.new(@company, location: @deal.location).defaults,
       designs: designs.map { |d| { design_id: d.id, name: d.name, buyer_name: d.buyer_name, model: matcher.variant_json(d.variant), saved_at: d.created_at } }
     }
   end

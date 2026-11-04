@@ -12,7 +12,7 @@ module Api
       NULLABLE_INLINE_FIELDS = %i[
         dealer_cost freight_cost pdi_cost total_cost
         holdback_amount target_gross minimum_price
-        reconditioning_cost
+        reconditioning_cost pack_amount
       ].freeze
 
       # Media-only edits on a catalog row don't fork the row into a clone.
@@ -1802,6 +1802,7 @@ module Api
           overlayText: :overlay_text,
           # RBAC Cost Detail Fields - NEW
           dealerCost: :dealer_cost,
+          packAmount: :pack_amount,
           freightCost: :freight_cost,
           pdiCost: :pdi_cost,
           totalCost: :total_cost,
@@ -1869,7 +1870,7 @@ module Api
           :deposit_amount, :lot_rent, :price_currency, :utilities, :terms,
           :repo, :sale_pending, :package_type,
           # Cost details
-          :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
+          :dealer_cost, :freight_cost, :pdi_cost, :total_cost, :pack_amount,
           :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
@@ -1973,7 +1974,7 @@ module Api
           :generator_make, :generator_hours, :generator_fuel_type,
           :video_url, :virtual_tour_url, :matterport_url, :special_features, :overlay_text,
           # RBAC Cost Detail Fields - NEW
-          :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
+          :dealer_cost, :freight_cost, :pdi_cost, :total_cost, :pack_amount,
           :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
@@ -2176,6 +2177,7 @@ module Api
             floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
             # RBAC Cost Detail Fields - NEW
             dealerCost: vehicle.dealer_cost&.to_f,
+            packAmount: vehicle.pack_amount&.to_f,
             freightCost: vehicle.freight_cost&.to_f,
             pdiCost: vehicle.pdi_cost&.to_f,
             totalCost: vehicle.total_cost&.to_f,
@@ -2286,6 +2288,7 @@ module Api
             # cost field rendered as "—" regardless of the stored value (e.g. a seeded or
             # invoice-derived dealer_cost). dealerCost is the "Home Cost" field.
             dealerCost: vehicle.dealer_cost&.to_f,
+            packAmount: vehicle.pack_amount&.to_f,
             freightCost: vehicle.freight_cost&.to_f,
             pdiCost: vehicle.pdi_cost&.to_f,
             totalCost: vehicle.total_cost&.to_f,
