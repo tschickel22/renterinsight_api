@@ -3,7 +3,7 @@
 module Api
   module Platform
     class CommunicationsController < ApplicationController
-      before_action :set_entity, only: [:history, :stats, :destroy]
+      before_action :set_entity, only: [:history, :stats, :channels, :destroy]
       before_action :authorize_communication_access!, only: [:email, :sms]
 
       # GET /api/platform/communications/:entity_type/:entity_id/history
@@ -101,6 +101,16 @@ module Api
         end
       end
 
+      # GET /api/platform/communications/:entity_type/:entity_id/channels
+      # What the phone conversation screen has to say before anyone types: has
+      # this person opted out, and will an answer to a text come back to us.
+      def channels
+        render json: {
+          sms: channel_state('sms', :opt_out_sms, :opt_out_sms_at).merge(repliesReach: sms_replies_reach?),
+          email: channel_state('email', :opt_out_email, :opt_out_email_at)
+        }, status: :ok
+      end
+
       # DELETE /api/platform/communications/:entity_type/:entity_id/messages/:id
       def destroy
         communication = Communication.find_by(
@@ -122,6 +132,27 @@ module Api
       end
 
       private
+
+      # Two records of an opt-out exist. A contact has its own columns (set from
+      # the contact page); anyone can have a CommunicationPreference (a STOP text
+      # lands there, and it is the only place a lead's opt-out lives).
+      def channel_state(channel, flag, flag_at)
+        preference = CommunicationPreference.where(recipient: @entity, channel: channel, category: nil).first
+        by_preference = preference.present? && !preference.opted_in?
+        by_flag = @entity.try(flag) == true
+
+        {
+          optedOut: by_flag || by_preference,
+          optedOutAt: (by_flag ? @entity.try(flag_at) : preference&.opted_out_at)&.iso8601
+        }
+      end
+
+      # An inbound text only reaches a tenant through a number that tenant owns;
+      # the shared platform number cannot say whose customer is answering.
+      def sms_replies_reach?
+        account = resolve_sms_usage_company&.twilio_account
+        account.present? && account.active? && account.phone_number.present?
+      end
 
       def set_entity
         @entity_type = params[:entity_type]

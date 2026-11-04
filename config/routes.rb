@@ -3526,6 +3526,7 @@ Rails.application.routes.draw do
       # Unified communications API for all entity types
       get 'communications/:entity_type/:entity_id/history', to: 'communications#history'
       get 'communications/:entity_type/:entity_id/stats', to: 'communications#stats'
+      get 'communications/:entity_type/:entity_id/channels', to: 'communications#channels'
       delete 'communications/:entity_type/:entity_id/messages/:id', to: 'communications#destroy'
       post 'communications/email', to: 'communications#email'
       post 'communications/sms', to: 'communications#sms'
