@@ -8,6 +8,7 @@ module Api
         before_action :authorize_communications_access!
         before_action :set_template, only: [:show, :update, :destroy, :test]
         before_action :authorize_template_access!, only: [:show, :update, :destroy, :test]
+        before_action :authorize_template_change!, only: [:update, :destroy]
         
         # GET /api/platform/communications/templates
         def index
@@ -88,7 +89,7 @@ module Api
         # POST /api/platform/communications/templates/:id/test
         def test
           recipient = params[:recipient]
-          company_id = params[:company_id] || @template.company_id
+          company_id = current_user_is_platform_admin? ? (params[:company_id] || @template.company_id) : @company&.id
           
           unless recipient.present?
             return render json: {
@@ -168,19 +169,15 @@ module Api
         private
         
         def set_company_scope_for_templates
-          # Get company from header or params
-          company_id = request.headers['X-Company-ID'] || params[:company_id]
-          
-          if company_id.present?
-            @company = ::Company.find_by(id: company_id)
+          if current_user_is_platform_admin?
+            # Only the platform team may name a company. Anyone else's header or
+            # param is ignored, or they could reach another dealer's templates.
+            company_id = request.headers['X-Company-ID'] || params[:company_id]
+            @company = ::Company.find_by(id: company_id) if company_id.present?
+          else
+            @company = current_company
           end
-          
-          # For non-platform admins, we need a company context
-          unless current_user_is_platform_admin? || @company.present?
-            # Try to get company from user
-            @company = current_user.companies.first if current_user.respond_to?(:companies)
-          end
-          
+
           Rails.logger.info "[TemplatesController] Company scope: #{@company&.name} (ID: #{@company&.id}) for user: #{current_user&.email}"
         end
         
@@ -220,6 +217,18 @@ module Api
           end
         end
         
+        # A template with no company is the standard one every dealer falls back
+        # on. A company reads and tests it but changes its own copy instead.
+        def authorize_template_change!
+          return if current_user_is_platform_admin?
+          return if @template.company_id.present?
+
+          render json: {
+            success: false,
+            error: 'This is a standard template shared by every company. Make a copy to change it.'
+          }, status: :forbidden
+        end
+
         def set_template
           @template = CommunicationTemplate.find(params[:id])
         rescue ActiveRecord::RecordNotFound
@@ -242,12 +251,12 @@ module Api
             :description
           )
           
-          # Non-platform admins cannot set is_default or change company_id to another company
+          # Only the platform team sets is_default or moves a template between
+          # companies. A blank company_id would turn a company's template into a
+          # standard one for everybody; create sets the company itself.
           unless current_user_is_platform_admin?
             permitted.delete(:is_default)
-            if permitted[:company_id].present? && permitted[:company_id].to_i != @company&.id
-              permitted[:company_id] = @company&.id
-            end
+            permitted.delete(:company_id)
           end
           
           permitted
