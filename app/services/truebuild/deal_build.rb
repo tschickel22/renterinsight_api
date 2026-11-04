@@ -37,7 +37,7 @@ module Truebuild
     # The lines written to the deal as lines of their own (the rest roll into the home line).
     EXTRA_KINDS = %w[addon template custom].freeze
     # Bumped when totals gain or change a figure: an older sheet reprices when opened.
-    TOTALS_VERSION = 7
+    TOTALS_VERSION = 8
     DOC_FEE_LABEL = 'Doc fee'
     DOC_FEE_LOCKED = 'This document fee comes from Settings, TrueBuild pricing, and cannot be changed on a Deal Sheet.'
     DOC_FEE_MISSING = 'No document fee is set. Enter it under Settings, TrueBuild pricing (0 if you do not charge one).'
@@ -528,6 +528,8 @@ module Truebuild
                             state_tax_rate: collected ? rates['state'] : nil, county_tax_rate: collected ? rates['county'] : nil,
                             city_tax_rate: collected ? rates['city'] : nil, total_amount: t['contract_total'] || 0,
                             unpaid_balance: t['unpaid_balance'] || 0, updated_at: Time.current)
+        # Commissions take the pack off from here. A pack someone set on the deal stays, and a closed deal keeps its figures.
+        deal.update_columns(pack_amount: t['pack']) if t['pack'].to_d.positive? && deal.pack_amount.blank? && !deal.cost_snapshotted?
       end
     end
 
@@ -748,6 +750,10 @@ module Truebuild
       others = other_deal_lines
       other_net = others.sum { |dp| net(dp) }
       cost += others.sum { |dp| dp.line_cost_total.to_d }
+      # The pack is overhead on this sheet's margin. It is never on a line, so the
+      # factory PO, the home's cost and the books stay at what the factory bills.
+      pack = pack_for(terms)
+      cost += pack
       selling = retail && (retail - discounts.values.sum + other_net)
       tax = tax_for(counted, selling, others)
       # A use-tax state (Ohio) has the dealer owe tax on its own cost: a cost of the sale.
@@ -764,7 +770,7 @@ module Truebuild
       unpriced = counted.select { |l| l.retail.nil? }.map(&:label)
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
       @warnings << DOC_FEE_MISSING if terms.doc_fee.nil?
-      { version: TOTALS_VERSION, cost: cost.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
+      { version: TOTALS_VERSION, cost: cost.round(2).to_f, pack: pack.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
         discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
         other_lines_total: other_net.round(2).to_f,
         margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f,
@@ -864,6 +870,13 @@ module Truebuild
     end
 
     def manual_home? = @build.variant.manual_home?
+
+    # One pack per deal: what the deal says (commissions read it too), else this
+    # builder's pack from the dealer's terms, else the location or company default.
+    def pack_for(terms)
+      deal = @build.deal
+      (deal.pack_amount.presence || terms.dealer_pack.presence || deal.effective_pack_amount).to_d
+    end
 
     # What a lot home really cost, unless the rep set the base cost; nil otherwise.
     def lot_home_cost(lines)

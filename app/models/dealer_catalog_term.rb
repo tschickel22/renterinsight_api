@@ -28,12 +28,12 @@ class DealerCatalogTerm < ApplicationRecord
   validates :freight_miles, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
 
   # Settled once per dealer: what buyers see, how new books arrive, margin
-  # floor, rounding, the document fee every Deal Sheet charges. Set per manufacturer: program discount and the buyer
-  # discounts a deal sheet starts from.
-  COMPANY_WIDE = %i[price_update_policy price_display margin_floor_pct round_retail_to doc_fee dealer_pack
+  # floor, rounding, the document fee every Deal Sheet charges. Set per manufacturer: program discount, the buyer
+  # discounts a deal sheet starts from, and the dealer pack (a price sheet can carry one for one builder only).
+  COMPANY_WIDE = %i[price_update_policy price_display margin_floor_pct round_retail_to doc_fee
                     buyer_view buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups
                     factory_po_hide_prices website_designer].freeze
-  PER_MANUFACTURER = %i[program_discount_pct sale_discount_pct dealer_savings_pct preferred_payment_pct].freeze
+  PER_MANUFACTURER = %i[program_discount_pct sale_discount_pct dealer_savings_pct preferred_payment_pct dealer_pack].freeze
   # The dealer's hauler, so set once for the company; a manufacturer row can
   # still override (a plant that ships its own homes).
   #   freight_per_mile            per mile, per section hauled

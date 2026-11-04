@@ -592,7 +592,9 @@ class Api::V1::TruebuildPricingController < ApplicationController
     when 'series' then "#{r.manufacturer&.name} #{r.scope_value}"
     when 'plan' then CatalogPlan.find_by(id: r.scope_id)&.name
     when 'variant' then CatalogPlanVariant.find_by(id: r.scope_id)&.model_number
-    when 'option_group' then "#{CatalogOptionGroup.find_by(id: r.scope_id)&.name} options"
+    when 'option_group'
+      group = CatalogOptionGroup.includes(:factory).find_by(id: r.scope_id)
+      "#{group&.name} options#{" (#{group.factory.name})" if group&.factory}"
     when 'option' then CatalogOption.find_by(id: r.scope_id)&.name
     end
   end

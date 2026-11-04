@@ -109,8 +109,9 @@ module Truebuild
       list_surcharge = @dealer_prices.surcharge_for(vp) || DealerPrices.book_surcharge(vp)
       own = @dealer_prices.cost_for(vp)
       rule = rule_for(:base)
-      # The dealer's pack is marked up with the home, but it is not factory cost:
-      # it stays off the line's cost and the factory PO. A manual price ignores it.
+      # The dealer's pack is overhead: marked up with the home and counted in the
+      # totals' cost, but it is not factory cost, so it stays off this line and the
+      # factory PO. A manual price ignores it.
       pack = @terms.dealer_pack.to_d
       retail = rule ? rule.apply((retail_basis(vp) || cost) + pack) : nil
       @warnings << 'No markup rule covers this home, so it has no retail price. Add a markup rule.' unless rule
@@ -245,7 +246,9 @@ module Truebuild
     # ---- totals --------------------------------------------------------
 
     def totals_for(lines)
-      cost = lines.sum { |l| l[:cost].to_d }
+      # The pack counts against margin on any home with a factory cost (Deal#pack_amount on a deal).
+      pack = lines.any? { |l| l[:kind] == 'base' && l[:cost] } ? @terms.dealer_pack.to_d : 0.to_d
+      cost = lines.sum { |l| l[:cost].to_d } + pack
       priced = lines.all? { |l| !l[:retail].nil? }
       retail = priced ? lines.sum { |l| l[:retail].to_d } : nil
       retail = round_retail(retail) if retail
@@ -254,7 +257,7 @@ module Truebuild
       if margin_pct && @terms.margin_floor_pct && margin_pct < @terms.margin_floor_pct.to_d
         @warnings << "Margin #{margin_pct}% is under your #{@terms.margin_floor_pct.to_d.to_s('F')}% floor."
       end
-      { cost: money(cost), retail: money(retail), margin: money(margin), margin_pct: margin_pct&.to_f,
+      { cost: money(cost), pack: money(pack), retail: money(retail), margin: money(margin), margin_pct: margin_pct&.to_f,
         rounded_to: @terms.round_retail_to&.to_f }
     end
 
