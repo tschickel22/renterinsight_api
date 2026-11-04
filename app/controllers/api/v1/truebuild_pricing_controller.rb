@@ -330,7 +330,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   # PUT /api/v1/truebuild_pricing/surcharge_rules
-  #   { manufacturer_id, rules: [{ factory_id?, section, basis, amount }], preview? }
+  #   { manufacturer_id, rules: [{ factory_id?, building_code, section, basis, amount }], preview? }
   # The whole set for one manufacturer. preview: true works out the effect and saves nothing.
   def save_surcharge_rules
     return unless authorize_action!('company_settings', params[:preview].present? ? 'read' : 'update')
@@ -342,17 +342,17 @@ class Api::V1::TruebuildPricingController < ApplicationController
     invalid = wanted.find(&:invalid?)
     return render json: { error: invalid.errors.full_messages.first }, status: :unprocessable_entity if invalid
 
-    keys = wanted.map { |r| [r.factory_id, r.section] }
-    return render json: { error: 'Two rows cover the same plant and section' }, status: :unprocessable_entity if keys.uniq.size != keys.size
+    keys = wanted.map { |r| [r.factory_id, r.building_code, r.section] }
+    return render json: { error: 'Two rows cover the same plant, home type and section' }, status: :unprocessable_entity if keys.uniq.size != keys.size
 
     return render json: { effect: surcharge_effect(manufacturer, wanted) } if ActiveModel::Type::Boolean.new.cast(params[:preview])
 
     DealerSurchargeRule.transaction do
-      existing = @company.dealer_surcharge_rules.where(manufacturer_id: manufacturer.id).index_by { |r| [r.factory_id, r.section] }
+      existing = @company.dealer_surcharge_rules.where(manufacturer_id: manufacturer.id).index_by { |r| [r.factory_id, r.building_code, r.section] }
       # Turned off rather than deleted: a sheet priced before this has to notice the change.
       existing.each { |key, r| r.update!(active: false) if r.active && !keys.include?(key) }
       wanted.each do |r|
-        row = existing[[r.factory_id, r.section]] || r
+        row = existing[[r.factory_id, r.building_code, r.section]] || r
         row.update!(basis: r.basis, amount: r.amount, active: true)
       end
     end
@@ -506,16 +506,16 @@ class Api::V1::TruebuildPricingController < ApplicationController
                    'dismissed' => 'Turned down' }.freeze
 
   def surcharge_rule_json(r)
-    r.slice(:id, :factory_id, :section, :basis).merge(amount: r.amount.to_f)
+    r.slice(:id, :factory_id, :building_code, :section, :basis).merge(amount: r.amount.to_f)
   end
 
   def surcharge_rules_from_params(manufacturer)
     plants = CatalogPriceBook.published.where(manufacturer_id: manufacturer.id).pluck(:factory_id).compact
     Array(params[:rules]).map do |raw|
-      attrs = raw.permit(:factory_id, :section, :basis, :amount)
+      attrs = raw.permit(:factory_id, :building_code, :section, :basis, :amount)
       factory_id = attrs[:factory_id].presence&.to_i
       factory_id = nil unless plants.include?(factory_id)
-      @company.dealer_surcharge_rules.build(manufacturer_id: manufacturer.id, factory_id: factory_id, section: attrs[:section].presence || 'any',
+      @company.dealer_surcharge_rules.build(manufacturer_id: manufacturer.id, factory_id: factory_id, building_code: attrs[:building_code].presence || 'any', section: attrs[:section].presence || 'any',
                                             basis: attrs[:basis].presence || 'per_sq_ft', amount: attrs[:amount])
     end
   end

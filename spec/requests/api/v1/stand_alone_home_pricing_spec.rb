@@ -90,6 +90,17 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
       end
     end
 
+    it 'keeps a HUD rule off modular homes at the same plant, the way the books really are' do
+      modular = CatalogPlanVariant.create!(catalog_plan: plan, manufacturer: mfr, model_number: 'M2856', width_ft: 28, length_ft: 56, building_code: 'MOD')
+      CatalogVariantPrice.create!(price_book: book, variant: modular, net_base_price: 60_000, total_base_price: 69_000)
+      company.dealer_surcharge_rules.create!(manufacturer: mfr, building_code: 'HUD', section: 'double', amount: 2.65)
+      expect(surcharge_on(double)).to eq(4155.2)
+      expect(surcharge_on(modular)).to be_nil
+      company.dealer_surcharge_rules.create!(manufacturer: mfr, building_code: 'MOD', section: 'double', basis: 'flat', amount: 8_000)
+      expect(Truebuild::DealerPrices.new(company).surcharge_for(CatalogVariantPrice.find_by!(catalog_plan_variant_id: modular.id))).to eq(8000)
+      expect(surcharge_on(double)).to eq(4155.2)
+    end
+
     it 'refuses two rows for the same plant and section' do
       put rules_path, headers: headers, params: { manufacturer_id: mfr.id, rules: [{ section: 'double', amount: 1 }, { section: 'double', amount: 2 }] }.to_json
       expect(response).to have_http_status(:unprocessable_entity)

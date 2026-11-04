@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
 # A surcharge worked out instead of typed home by home. The most specific rule
-# wins: one plant over all plants, one section count over any. A home's own
+# wins: one plant over all plants, one home type over any, one section count over
+# any. A home's own
 # surcharge on the price list or on a Deal Sheet still beats a rule.
 class DealerSurchargeRule < ApplicationRecord
   SECTIONS = %w[any single double triple].freeze
   BASES = %w[per_sq_ft flat].freeze
+  # HUD and modular surcharges differ at the same plant.
+  CODES = %w[any HUD MOD].freeze
   # Same line the model filter draws: 18 feet wide or less ships as one section.
   SINGLE_MAX_WIDTH = 18
   DOUBLE_MAX_WIDTH = 36
@@ -16,6 +19,7 @@ class DealerSurchargeRule < ApplicationRecord
 
   validates :section, inclusion: { in: SECTIONS }
   validates :basis, inclusion: { in: BASES }
+  validates :building_code, inclusion: { in: CODES }
   validates :amount, numericality: { greater_than_or_equal_to: 0 }
 
   scope :active, -> { where(active: true) }
@@ -36,8 +40,10 @@ class DealerSurchargeRule < ApplicationRecord
 
   def self.best_for(rules, variant, factory_id)
     section = section_of(variant)
-    rules.select { |r| (r.factory_id.nil? || r.factory_id == factory_id) && (r.section == 'any' || r.section == section) }
-         .max_by { |r| [r.factory_id ? 1 : 0, r.section == 'any' ? 0 : 1] }
+    rules.select do |r|
+      (r.factory_id.nil? || r.factory_id == factory_id) && (r.section == 'any' || r.section == section) &&
+        (r.building_code == 'any' || r.building_code == variant.building_code)
+    end.max_by { |r| [r.factory_id ? 1 : 0, r.building_code == 'any' ? 0 : 1, r.section == 'any' ? 0 : 1] }
   end
 
   # Dollars for this home; nil when a per square foot rule has no size to work from.
