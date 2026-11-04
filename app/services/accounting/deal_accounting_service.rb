@@ -392,12 +392,13 @@ module Accounting
       return { skipped: 'missing_ar_account' } unless ar_account
 
       selling_price = BigDecimal((@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || 0).to_s)
-      return { skipped: 'no_selling_price' } if selling_price <= 0
+      taxed_price = selling_price + taxed_other_lines
+      return { skipped: 'no_selling_price' } if taxed_price <= 0
 
       # The taxing state's rules (Tax::DealTax, backlog E45): Indiana taxes 65% of
       # the price after trade, Michigan collects at titling, Ohio has the dealer
       # owe use tax instead. Other states: the whole price, as before.
-      tax = Tax::DealTax.new(deal: @deal, selling_price: [selling_price - taxable_credits, 0].max, trade: @deal.try(:trade_allowance) || 0,
+      tax = Tax::DealTax.new(deal: @deal, selling_price: taxed_price, trade: @deal.try(:trade_allowance) || 0,
                              cost_basis: @deal.landed_cost || 0, used: @deal.try(:vehicle)&.condition.to_s.casecmp?('used')).call
       return { skipped: "not_collected_in_#{tax[:state]}" } if tax[:payer] && tax[:payer] != 'dealer_collects'
 
@@ -457,12 +458,13 @@ module Accounting
       raw&.to_s&.strip&.upcase.presence
     end
 
-    # Negative lines marked taxable (they carry negative tax on the deal) lower the
-    # taxed price, as the deal screen shows. One marked not taxable leaves it alone.
-    def taxable_credits
+    # The deal's other lines that carry tax on the deal screen: taxable fees and
+    # accessories raise the taxed price, taxable discounts lower it. A line with no
+    # tax on it (marked not taxable, or no rate) leaves the price alone.
+    def taxed_other_lines
       (@deal.try(:deal_products) || []).reject(&:home_line_item?)
-            .select { |p| p.tax.to_d.negative? && pre_tax(p).negative? }
-            .sum { |p| -pre_tax(p) }
+            .reject { |p| p.tax.to_d.zero? }
+            .sum(0.to_d) { |p| pre_tax(p) }
     end
 
     def pre_tax(product)
