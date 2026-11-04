@@ -47,7 +47,7 @@ RSpec.describe 'Deal Sheet dealer pack', type: :request do
 
     deal.reload
     expect(deal.pack_amount).to eq(3000)
-    expect(deal.home_line_item.cost).to eq(50_000)
+    expect(deal.home_line_item.cost).to eq(51_650) # base plus freight, no pack
     expect(deal.commissionable_front_gross).to eq(deal.front_gross - 3000)
   end
 
