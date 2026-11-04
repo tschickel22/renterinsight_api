@@ -37,6 +37,37 @@ RSpec.describe Communication, type: :model do
   end
 
   describe '.without_internal_notifications' do
+    it 'hides a workflow alert sent as transactional mail to one of the company staff' do
+      staff = User.create!(email: "rep-#{SecureRandom.hex(4)}@dealership.com", first_name: 'R', last_name: 'P',
+                           password: 'Pass1234!', company_id: company.id, role: 'sales_rep')
+      alert = build_comm(to_address: staff.email.upcase, metadata: { 'category' => 'transactional' })
+
+      expect(scoped).not_to include(alert)
+    end
+
+    it 'keeps transactional mail that went to someone who is not staff' do
+      kept = build_comm(to_address: 'cobuyer@example.com', metadata: { 'category' => 'transactional' })
+
+      expect(scoped).to include(kept)
+    end
+
+    it "does not treat another company's user as staff" do
+      other = create(:company)
+      outsider = User.create!(email: "out-#{SecureRandom.hex(4)}@example.com", first_name: 'O', last_name: 'T',
+                              password: 'Pass1234!', company_id: other.id, role: 'sales_rep')
+      kept = build_comm(to_address: outsider.email, metadata: { 'category' => 'transactional' })
+
+      expect(scoped).to include(kept)
+    end
+
+    it 'keeps a transactional email to the customer even if they are also a user' do
+      User.create!(email: 'customer@example.com', first_name: 'C', last_name: 'U',
+                   password: 'Pass1234!', company_id: company.id, role: 'sales_rep')
+      kept = build_comm(to_address: 'customer@example.com', metadata: { 'category' => 'transactional' })
+
+      expect(scoped).to include(kept)
+    end
+
     it 'hides an intake alert addressed to a rep' do
       comm = build_comm
       expect(scoped).not_to include(comm)

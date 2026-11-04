@@ -3,6 +3,8 @@
 module Api
   module Platform
     class CommunicationsController < ApplicationController
+      include EnforcesCommunicationOptOut
+
       before_action :set_entity, only: [:history, :stats, :channels, :destroy]
       before_action :authorize_communication_access!, only: [:email, :sms]
 
@@ -106,8 +108,8 @@ module Api
       # this person opted out, and will an answer to a text come back to us.
       def channels
         render json: {
-          sms: channel_state('sms', :opt_out_sms, :opt_out_sms_at).merge(repliesReach: sms_replies_reach?),
-          email: channel_state('email', :opt_out_email, :opt_out_email_at)
+          sms: channel_state('sms', @entity.try(:phone)).merge(repliesReach: sms_replies_reach?),
+          email: channel_state('email', @entity.try(:email))
         }, status: :ok
       end
 
@@ -133,18 +135,24 @@ module Api
 
       private
 
-      # Two records of an opt-out exist. A contact has its own columns (set from
-      # the contact page); anyone can have a CommunicationPreference (a STOP text
-      # lands there, and it is the only place a lead's opt-out lives).
-      def channel_state(channel, flag, flag_at)
-        preference = CommunicationPreference.where(recipient: @entity, channel: channel, category: nil).first
-        by_preference = preference.present? && !preference.opted_in?
-        by_flag = @entity.try(flag) == true
+      def channel_state(channel, address)
+        result = CommunicationOptOut.check(channel: channel, company: resolve_sms_usage_company, record: @entity, address: address)
+        { optedOut: result.opted_out?, optedOutAt: result.at.respond_to?(:iso8601) ? result.at.iso8601 : nil }
+      end
 
-        {
-          optedOut: by_flag || by_preference,
-          optedOutAt: (by_flag ? @entity.try(flag_at) : preference&.opted_out_at)&.iso8601
-        }
+      # The record a send names, for the opt-out check. Whitelisted and scoped
+      # here, unlike set_entity, because this runs on every send.
+      def sending_to_record
+        klass = { 'Lead' => ::Lead, 'Contact' => ::Contact, 'Account' => ::Account, 'Deal' => ::Deal }[params[:entity_type].to_s]
+        return nil if klass.nil? || params[:entity_id].blank?
+
+        klass.where(company_id: current_company_id).find_by(id: params[:entity_id])
+      end
+
+      def platform_opt_out_refusal(channel, address)
+        record = sending_to_record
+        communication_opt_out_refusal(channel: channel, company: resolve_sms_usage_company, record: record,
+                                      address: address, name: communication_recipient_name(record))
       end
 
       # An inbound text only reaches a tenant through a number that tenant owns;
@@ -204,6 +212,9 @@ module Api
       end
 
       def send_email_unified
+        refusal = platform_opt_out_refusal('email', params[:to])
+        return refusal if refusal
+
         # Get settings
         settings = get_effective_settings
         email_config = settings.dig(:communications, :email) || settings.dig('communications', 'email') || {}
@@ -382,6 +393,9 @@ module Api
       end
 
       def send_sms_unified
+        refusal = platform_opt_out_refusal('sms', params[:to])
+        return refusal if refusal
+
         # Get settings
         settings = get_effective_settings
         sms_config = own_account_sms_config ||
