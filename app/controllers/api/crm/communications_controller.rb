@@ -2,6 +2,8 @@
 module Api
   module Crm
     class CommunicationsController < ApplicationController
+      include EnforcesCommunicationOptOut
+
       include RbacAuthorization
       rbac_resource :communications,
         read_actions: [:index],
@@ -32,6 +34,8 @@ module Api
       # POST /api/crm/leads/:lead_id/communications/email
       # POST /api/crm/leads/:lead_id/communications/send_email
       def send_email
+        return if refuse_opted_out_lead('email', params[:to] || params[:toEmail])
+
         # USER EMAIL CONNECTION WATERFALL: Check if user has their own email connection first
         if current_user&.has_email_connection?
           Rails.logger.info "[CommunicationsController#send_email] Using user #{current_user.id} email connection"
@@ -126,6 +130,8 @@ module Api
       # POST /api/crm/leads/:lead_id/communications/sms
       # POST /api/crm/leads/:lead_id/communications/send_sms
       def send_sms
+        return if refuse_opted_out_lead('sms', params[:to] || params[:toPhone])
+
         # Check if SMS is configured.
         # NOTE: previously used the controller's local get_effective_settings waterfall,
         # which returned the platform fromNumber even when the company had its own
@@ -272,6 +278,17 @@ module Api
           }, status: :not_found
           return
         end
+      end
+
+      # Answers with the refusal and returns true when this lead has opted out.
+      def refuse_opted_out_lead(channel, to)
+        address = to.presence || (channel == 'sms' ? @lead&.phone : @lead&.email)
+        refusal = communication_opt_out_refusal(channel: channel, company: @company, record: @lead,
+                                                address: address, name: communication_recipient_name(@lead))
+        return false unless refusal
+
+        render json: refusal, status: :unprocessable_entity
+        true
       end
 
       def set_lead_from_params

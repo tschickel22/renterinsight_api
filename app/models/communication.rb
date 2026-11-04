@@ -119,15 +119,32 @@ class Communication < ApplicationRecord
   def self.internal_notification_sql(email_expression:, phone_expression:)
     <<~SQL.squish
       COALESCE(communications.direction, '') = 'outbound'
-      AND COALESCE(#{metadata_category_sql}, '') = 'system'
       AND COALESCE(TRIM(communications.to_address), '') <> ''
-      AND CASE WHEN communications.channel = 'sms' THEN
-        #{normalized_phone_sql(phone_expression)} = ''
-        OR #{normalized_phone_sql('communications.to_address')} <> #{normalized_phone_sql(phone_expression)}
-      ELSE
-        COALESCE(TRIM(#{email_expression}), '') = ''
-        OR LOWER(TRIM(communications.to_address)) <> LOWER(TRIM(COALESCE(#{email_expression}, '')))
-      END
+      AND (
+        (
+          COALESCE(#{metadata_category_sql}, '') = 'system'
+          AND CASE WHEN communications.channel = 'sms' THEN
+            #{normalized_phone_sql(phone_expression)} = ''
+            OR #{normalized_phone_sql('communications.to_address')} <> #{normalized_phone_sql(phone_expression)}
+          ELSE
+            COALESCE(TRIM(#{email_expression}), '') = ''
+            OR LOWER(TRIM(communications.to_address)) <> LOWER(TRIM(COALESCE(#{email_expression}, '')))
+          END
+        )
+        OR (
+          /* Workflow alerts (a Champion lead expiring) go out as transactional mail.
+             The category alone cannot say they were for staff, so these also have to
+             be addressed to one of the company's own users. */
+          COALESCE(#{metadata_category_sql}, '') = 'transactional'
+          AND communications.channel = 'email'
+          AND LOWER(TRIM(communications.to_address)) <> LOWER(TRIM(COALESCE(#{email_expression}, '')))
+          AND EXISTS (
+            SELECT 1 FROM users internal_users
+            WHERE internal_users.company_id = communications.company_id
+              AND LOWER(internal_users.email) = LOWER(TRIM(communications.to_address))
+          )
+        )
+      )
     SQL
   end
 

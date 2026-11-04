@@ -3,6 +3,8 @@
 module Api
   module V1
     class AccountCommunicationsController < ApplicationController
+      include EnforcesCommunicationOptOut
+
       include RbacAuthorization
       rbac_resource :communications,
         read_actions: [:index],
@@ -32,6 +34,10 @@ module Api
           render json: { ok: false, error: 'Account has no email address' }, status: :unprocessable_entity
           return
         end
+
+        refusal = communication_opt_out_refusal(channel: 'email', company: @account.company, record: @account,
+                                                address: recipient, name: @account.name)
+        return render(json: refusal, status: :unprocessable_entity) if refusal
 
         # Send email via CommunicationService with user email connection waterfall
         result = CommunicationService.send_email(
@@ -69,6 +75,10 @@ module Api
           render json: { ok: false, error: 'Account has no phone number' }, status: :unprocessable_entity
           return
         end
+
+        refusal = communication_opt_out_refusal(channel: 'sms', company: @account.company, record: @account,
+                                                address: @account.phone, name: @account.name)
+        return render(json: refusal, status: :unprocessable_entity) if refusal
 
         # Get effective settings
         settings = get_effective_communication_settings

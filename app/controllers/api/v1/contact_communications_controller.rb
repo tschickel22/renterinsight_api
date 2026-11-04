@@ -3,6 +3,8 @@
 module Api
   module V1
     class ContactCommunicationsController < ApplicationController
+      include EnforcesCommunicationOptOut
+
       include RbacAuthorization
       rbac_resource :communications,
         read_actions: [:index],
@@ -26,9 +28,9 @@ module Api
 
       # POST /api/v1/contacts/:contact_id/communications/email
       def email
-        # Check if contact opted out
-        if @contact.opt_out_email?
-          render json: { ok: false, error: 'Contact has opted out of email communications' }, status: :unprocessable_entity
+        refusal = contact_opt_out_refusal('email', @contact.email)
+        if refusal
+          render json: refusal, status: :unprocessable_entity
           return
         end
 
@@ -71,8 +73,9 @@ module Api
 
       # POST /api/v1/contacts/:contact_id/communications/sms
       def sms
-        if @contact.opt_out_sms?
-          render json: { ok: false, error: 'Contact has opted out of SMS communications' }, status: :unprocessable_entity
+        refusal = contact_opt_out_refusal('sms', @contact.phone)
+        if refusal
+          render json: refusal, status: :unprocessable_entity
           return
         end
 
@@ -146,6 +149,11 @@ module Api
       end
 
       private
+
+      def contact_opt_out_refusal(channel, address)
+        communication_opt_out_refusal(channel: channel, company: @contact.company || @contact.account&.company,
+                                      record: @contact, address: address, name: @contact.first_name)
+      end
 
       def set_contact
         # STRICT TENANT ISOLATION: Only find contacts within company
