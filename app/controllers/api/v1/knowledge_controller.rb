@@ -37,6 +37,17 @@ module Api
         }
       end
 
+      # GET /api/v1/knowledge/for_screen?path=/settings&tab=users
+      # The Learn icon: what teaches the screen this person is on (E91).
+      def for_screen
+        help = Knowledge::ScreenHelp.new(path: params[:path], tab: params[:tab], admin: platform_admin?)
+        render json: {
+          videos: help.videos.map { |v| { id: v.id, title: copy(v.title), duration_seconds: v.duration_seconds, draft: !v.is_published } },
+          tours: help.tours.map { |t| { id: t.id, name: copy(t.name), steps: t.steps.size, draft: t.approved_at.nil? } },
+          articles: help.articles.map { |a| { slug: a.slug, title: copy(a.title), minutes: read_minutes(a) } }
+        }
+      end
+
       # GET /api/v1/knowledge/articles/:slug
       def article
         scope = platform_admin? ? Knowledge::Article.all : Knowledge::Article.published
@@ -325,6 +336,10 @@ module Api
           note: 'AI generation unavailable - template provided.',
           content: "## Overview\n\n[Describe what #{topic} is]\n\n## Getting Started\n\n1. Navigate to the relevant module\n2. [Add steps]\n\n## Tips\n\n> **Tip:** [Add tips here]"
         }
+      end
+
+      def read_minutes(article)
+        [(article.content.to_s.split.size / 200.0).ceil, 1].max
       end
 
       def article_payload(article, include_body: false)
