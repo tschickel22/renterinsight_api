@@ -76,10 +76,10 @@ module Accounting
       recon_dedicated = recon_cost > 0 && recon_cogs && recon_wip
       folded_recon = recon_dedicated ? BigDecimal('0') : recon_cost
 
-      if selling_price > 0
-        revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
-                          settings.default_sales_revenue_account
+      revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
+                        settings.default_sales_revenue_account
 
+      if selling_price > 0
         if revenue_account && ar_account
           lines << { chart_of_account_id: ar_account.id, debit_amount: selling_price, credit_amount: 0,
                      memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
@@ -139,7 +139,22 @@ module Accounting
       fi_products = (@deal.try(:deal_products) || []).reject(&:home_line_item?)
       fi_products.each do |product|
         product_revenue = pre_tax(product)
-        next if product_revenue <= 0
+        # A negative line is a discount or credit on the sale: it comes back off
+        # revenue and off what the buyer owes, so the books match the deal.
+        if product_revenue.negative?
+          if revenue_account && ar_account
+            credit = -product_revenue
+            memo = "Discount: #{product.try(:product_name) || product.try(:name)}, #{deal_description}"
+            lines << { chart_of_account_id: revenue_account.id, debit_amount: credit, credit_amount: 0, memo: memo,
+                       location_id: deal_location_id, department: deal_department, deal_id: @deal.id,
+                       vehicle_id: @deal.try(:vehicle_id) }
+            lines << { chart_of_account_id: ar_account.id, debit_amount: 0, credit_amount: credit, memo: memo,
+                       location_id: deal_location_id, department: deal_department, deal_id: @deal.id,
+                       vehicle_id: @deal.try(:vehicle_id), contact_id: @deal.try(:contact_id) || @deal.try(:lead_id) }
+          end
+          next
+        end
+        next if product_revenue.zero?
 
         fi_revenue_account = resolve_fi_account(product) ||
                              @company.chart_of_accounts.find_by(account_number: '4110')
@@ -382,7 +397,7 @@ module Accounting
       # The taxing state's rules (Tax::DealTax, backlog E45): Indiana taxes 65% of
       # the price after trade, Michigan collects at titling, Ohio has the dealer
       # owe use tax instead. Other states: the whole price, as before.
-      tax = Tax::DealTax.new(deal: @deal, selling_price: selling_price, trade: @deal.try(:trade_allowance) || 0,
+      tax = Tax::DealTax.new(deal: @deal, selling_price: [selling_price - taxable_credits, 0].max, trade: @deal.try(:trade_allowance) || 0,
                              cost_basis: @deal.landed_cost || 0, used: @deal.try(:vehicle)&.condition.to_s.casecmp?('used')).call
       return { skipped: "not_collected_in_#{tax[:state]}" } if tax[:payer] && tax[:payer] != 'dealer_collects'
 
@@ -440,6 +455,14 @@ module Accounting
             @deal.try(:billing_state).presence ||
             @deal.try(:location)&.try(:state).presence
       raw&.to_s&.strip&.upcase.presence
+    end
+
+    # Negative lines marked taxable (they carry negative tax on the deal) lower the
+    # taxed price, as the deal screen shows. One marked not taxable leaves it alone.
+    def taxable_credits
+      (@deal.try(:deal_products) || []).reject(&:home_line_item?)
+            .select { |p| p.tax.to_d.negative? && pre_tax(p).negative? }
+            .sum { |p| -pre_tax(p) }
     end
 
     def pre_tax(product)
