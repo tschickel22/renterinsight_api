@@ -68,6 +68,9 @@ module Api
       # DELETE /api/crm/deals/:deal_id/products/:id
       def destroy
         @deal_product.destroy
+        # The deal sheet counts lines added here (and removes from it a line it
+        # wrote), so its totals and the deal follow the delete.
+        resync_deal_sheet
         head :no_content
       end
 
