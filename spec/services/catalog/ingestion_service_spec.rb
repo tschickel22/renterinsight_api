@@ -172,4 +172,110 @@ RSpec.describe Catalog::IngestionService do
       expect(code_for('1')).to be_nil
     end
   end
+
+  describe 'what a dealer did to a catalog home' do
+    def row(key = '1') = company.vehicles.find_by(catalog_source_id: source.id, catalog_source_key: key)
+    def home(key = '1', **attrs) = FakeCatalogAdapter.home(key, **attrs)
+    let(:mine) { [{ 'url' => 'https://lot.example/mine.jpg' }] }
+
+    it 'keeps photos the dealer added when the home is unchanged' do
+      ingest([home])
+      row.update_columns(images: mine, photo_url: mine.first['url'])
+
+      expect(ingest([home]).unchanged).to eq(1)
+      expect(row.reload.images).to eq(mine)
+      expect(row.photo_url).to eq(mine.first['url'])
+    end
+
+    it 'keeps photos the dealer added when the home changes' do
+      ingest([home])
+      row.update_columns(images: mine, photo_url: mine.first['url'])
+      ingest([home(square_feet: 2500)])
+
+      expect(row.reload.images).to eq(mine)
+      expect(row.square_feet).to eq(2500)
+    end
+
+    it 'keeps the order and cover the dealer chose' do
+      pictures = [{ 'url' => 'https://cdn/1.jpg' }, { 'url' => 'https://cdn/2.jpg' }]
+      with_two = home(images: pictures.map { |p| { 'source_url' => p['url'], 'alt' => '' } })
+      ingest([with_two])
+      row.update_columns(images: row.images.reverse, photo_url: 'https://cdn/2.jpg')
+      ingest([with_two])
+
+      expect(row.reload.images.map { |i| i['url'] }).to eq(%w[https://cdn/2.jpg https://cdn/1.jpg])
+      expect(row.photo_url).to eq('https://cdn/2.jpg')
+    end
+
+    it 'still carries our own copy of a picture onto an untouched home, and records it' do
+      ingest([home])
+      source_url = row.images.first['url']
+      rehosted = home
+      rehosted.images = rehosted.images.map { |i| i.merge('local_url' => 'https://assets.example/copy.jpg') }
+      ingest([rehosted])
+
+      expect(row.reload.images.first['url']).to eq('https://assets.example/copy.jpg')
+      expect(row.photo_url).to eq('https://assets.example/copy.jpg')
+      expect(row.catalog_last_synced_values['images'].first['url']).to eq('https://assets.example/copy.jpg')
+      expect(source_url).not_to eq('https://assets.example/copy.jpg')
+    end
+
+    it 'recognizes a copy made before last synced was recorded' do
+      ingest([home])
+      rehosted = home
+      rehosted.images = rehosted.images.map { |i| i.merge('local_url' => 'https://assets.example/copy.jpg') }
+      row.update_columns(images: [{ 'url' => 'https://assets.example/copy.jpg', 'alt' => '' }])
+      ingest([rehosted])
+
+      expect(row.reload.catalog_last_synced_values['images'].first['url']).to eq('https://assets.example/copy.jpg')
+    end
+
+    it 'keeps an upload the dealer added at the end, stored as a plain address' do
+      ingest([home])
+      row.update_columns(images: row.images + ['/uploads/2026/08/lot.jpg'])
+      ingest([home])
+
+      expect(row.reload.images.last).to eq('/uploads/2026/08/lot.jpg')
+    end
+
+    it 'never touches an edited copy, even after the home leaves the feed' do
+      ingest([home, home('2'), home('3')])
+      copy = VehicleCloneFromCatalogService.new(
+        row, status: 'available_to_order', attributes: { model: 'Dealer Name', square_feet: 1999, sale_price: 123_456 }
+      ).call
+
+      ingest([home(square_feet: 2500, model_name: 'Factory Renamed'), home('2'), home('3')])
+      expect(copy.reload).to have_attributes(model: 'Dealer Name', square_feet: 1999, status: 'available_to_order')
+      expect(copy.sale_price.to_i).to eq(123_456)
+
+      ingest([home('2'), home('3')])
+      expect(copy.reload.is_deleted).not_to eq(true)
+    end
+
+    describe 'when the home leaves the feed' do
+      before { ingest([home, home('2'), home('3')]) }
+
+      def gone_after_sync
+        ingest([home('2'), home('3')])
+        Vehicle.unscoped.find_by(company_id: company.id, catalog_source_key: '1').is_deleted
+      end
+
+      it('removes an untouched home') { expect(gone_after_sync).to be(true) }
+
+      it 'keeps a home with a status the dealer set' do
+        row.update_columns(status: 'sold')
+        expect(gone_after_sync).not_to be(true)
+      end
+
+      it 'keeps a home the dealer priced' do
+        row.update_columns(sale_price: 99_000)
+        expect(gone_after_sync).not_to be(true)
+      end
+
+      it 'keeps a home on a deal' do
+        allow_any_instance_of(Vehicle).to receive(:has_dealer_activity?).and_return(true)
+        expect(gone_after_sync).not_to be(true)
+      end
+    end
+  end
 end

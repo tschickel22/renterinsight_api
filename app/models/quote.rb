@@ -27,6 +27,7 @@ class Quote < ApplicationRecord
   belongs_to :deal_home_build, optional: true
   belongs_to :sales_rep, class_name: 'User', optional: true
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
+  has_many :invoices, dependent: :nullify
   has_many :quote_inventory_usages, dependent: :destroy
   
   # Tags (polymorphic association)
@@ -110,12 +111,16 @@ class Quote < ApplicationRecord
     )
   end
   
-  def accept!
+  # via: public_link and portal are the buyer; dealer is someone at the dealership.
+  def accept!(ip: nil, via: 'dealer', by: nil)
     return false unless %w[sent viewed].include?(status)
-    
+
     update!(
       status: 'accepted',
-      accepted_at: Time.current
+      accepted_at: Time.current,
+      accepted_ip: ip,
+      accepted_via: via,
+      accepted_by_name: by
     )
   end
   
@@ -195,6 +200,9 @@ class Quote < ApplicationRecord
       'resend_count' => resend_count || 0,
       'viewed_at' => viewed_at,
       'accepted_at' => accepted_at,
+      'accepted_ip' => accepted_ip,
+      'accepted_via' => accepted_via,
+      'accepted_by_name' => accepted_by_name,
       'rejected_at' => rejected_at,
       
       # Handle items - convert keys from snake_case to camelCase for frontend
@@ -333,6 +341,15 @@ class Quote < ApplicationRecord
   # What the public quote page (/q/:token) may show.
   # Totals only ('bundled'): each line without its price, credits summed as savings.
   PRICE_ITEM_KEY = /\A(unit_?price|total|line_?total|discount|discount_?type|tax|rate)\z/i
+
+  # One line for the printed quote: "Accepted by Jo Lee on Nov 5, 2026 at 3:12 PM MST from IP 1.2.3.4".
+  def acceptance_summary(zone = nil)
+    who = accepted_via == 'dealer' ? "Marked accepted by #{accepted_by_name.presence || 'the dealership'}" : "Accepted by #{accepted_by_name.presence || 'the buyer'}"
+    text = who
+    text += " on #{accepted_at.in_time_zone(zone || 'UTC').strftime('%b %-d, %Y at %-I:%M %p %Z')}" if accepted_at
+    text += " from IP #{accepted_ip}" if accepted_ip.present?
+    text
+  end
 
   def public_as_json
     json = as_json

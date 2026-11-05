@@ -320,7 +320,7 @@ module Api
         return unless authorize_action!('finance', 'update')
         
         set_quote
-        if @quote.accept!
+        if @quote.accept!(ip: request.remote_ip, via: 'dealer', by: current_user&.full_name)
           render json: @quote.as_json(include_account: true, include_contact: true)
         else
           render json: { error: 'Cannot accept quote in current status' }, status: :unprocessable_entity

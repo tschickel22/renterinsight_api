@@ -289,24 +289,67 @@ module Catalog
       # Nor a seeded inventory row. Those are the dealer's own homes, imported
       # once at onboarding; a floorplan run must not tombstone them, and a home
       # leaving the manufacturer's index does not un-sell it.
-      vehicle.source != SEEDED_VEHICLE_SOURCE
+      return false if vehicle.source == SEEDED_VEHICLE_SOURCE
+
+      # Nor a home the dealer has done work on: on a deal or quote, listed, has
+      # an edited copy, given a status, or priced. Sync never writes status or
+      # price, so either one was the dealer. The Champion sync keeps these too.
+      !(vehicle.has_dealer_activity? ||
+        vehicle.status != 'available_to_order' ||
+        vehicle.sale_price.to_f.positive?)
     end
 
     # Columns to rewrite when the ONLY thing that moved is where an image is
     # hosted. Returns {} when nothing was rehosted, so an unchanged home stays a
-    # single cheap update. Only ever swaps a URL for our own copy of the same
-    # picture — it can't introduce or drop images, because it maps over what the
-    # catalog produced this run.
+    # single cheap update. Photos a dealer added, removed, reordered or picked as
+    # the cover stay exactly as they are: this only swaps a URL for our own copy
+    # of the same picture. What it writes is also recorded as last synced, or the
+    # copy would read as a dealer edit on the next real change.
     def rehosted_columns(vehicle, home)
+      synced  = vehicle.catalog_last_synced_values || {}
+      columns = {}
+      record  = {}
+
       gallery = self.class.url_images(gallery_images_for(home))
       plans   = self.class.url_images(home.floorplan_images)
 
-      columns = {}
-      columns[:images] = gallery if url_list(vehicle.images) != url_list(gallery)
-      columns[:floor_plan_images] = plans if url_list(vehicle.floor_plan_images) != url_list(plans)
+      { images: gallery, floor_plan_images: plans }.each do |field, incoming|
+        next if incoming.empty?
+
+        current = url_list(vehicle.public_send(field))
+        prior   = url_list(synced[field.to_s])
+        next unless catalog_media?(current, prior, url_list(incoming))
+
+        columns[field] = incoming if current != url_list(incoming)
+        record[field.to_s] = incoming if prior != url_list(incoming)
+      end
+
       primary = gallery.first&.dig('url')
-      columns[:photo_url] = primary if primary.present? && vehicle.photo_url != primary
+      if primary.present? && catalog_cover?(vehicle, synced, gallery)
+        columns[:photo_url] = primary if vehicle.photo_url != primary
+        record['photo_url'] = primary if synced['photo_url'] != primary
+      end
+
+      columns[:catalog_last_synced_values] = synced.merge(record) if record.any?
       columns
+    end
+
+    # True when these photos are still the catalog's: what we last synced, or
+    # the same pictures in the same places with some now on our own copies. Rows
+    # rehosted before last-synced was recorded land in the second case.
+    def catalog_media?(current, prior, incoming)
+      return true if current == prior
+      return false if current.size != incoming.size
+
+      current.each_with_index.all? { |url, i| url == incoming[i] || url == prior[i] }
+    end
+
+    def catalog_cover?(vehicle, synced, gallery)
+      cover = vehicle.photo_url
+      return true if cover.blank? || cover == synced['photo_url'] || cover == gallery.first&.dig('url')
+      return false unless url_list(vehicle.images).first == cover
+
+      catalog_media?(url_list(vehicle.images), url_list(synced['images']), url_list(gallery))
     end
 
     # Mirrors catalog_attrs_from's gallery choice so the two cannot diverge.

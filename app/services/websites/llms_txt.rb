@@ -105,7 +105,7 @@ module Websites
     def home_links
       return [] if company.nil?
 
-      company.vehicles.where(is_deleted: [false, nil], status: HomeUrl::SERVABLE_STATUSES)
+      company.vehicles.where(is_deleted: [false, nil], status: HomeUrl::SERVABLE_STATUSES).dealer_preferred
              .order(updated_at: :desc).limit(MAX_HOMES).filter_map do |v|
         url = HomeUrl.url_for(v, @canonical_host)
         name = [v.try(:year), v.try(:make), v.try(:model)].compact.join(' ')

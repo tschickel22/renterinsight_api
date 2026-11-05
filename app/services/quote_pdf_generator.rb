@@ -22,6 +22,7 @@ class QuotePdfGenerator
     add_header(pdf, brand)
     pdf.move_down 20
     add_quote_info(pdf, accent)
+    add_acceptance_stamp(pdf)
     pdf.move_down 20
     add_line_items(pdf, accent)
     pdf.move_down 20
@@ -280,6 +281,18 @@ class QuotePdfGenerator
     end
 
     pdf.move_cursor_to meta_top - 100
+  end
+
+  # The green badge saying who accepted this quote, when, and from which address.
+  def add_acceptance_stamp(pdf)
+    return unless @quote.status == 'accepted'
+
+    lines = [@quote.acceptance_summary(@company.time_zone)]
+    pdf.move_down 10
+    pdf.table([[{ content: 'ACCEPTED', font_style: :bold, text_color: 'FFFFFF', background_color: '15803D', align: :center, valign: :center },
+                { content: lines.join("\n"), text_color: '14532D', background_color: 'F0FDF4', valign: :center }]],
+              width: pdf.bounds.width, column_widths: { 0 => 80 },
+              cell_style: { size: 9, borders: [], padding: [7, 10] })
   end
 
   # ── LINE ITEMS ──

@@ -219,13 +219,17 @@ class Vehicle < ApplicationRecord
   # `originals_only`:    catalog rows + manual entries; excludes clones (no dupes from edits)
   # `dealer_only`:       clones + manual entries; excludes raw catalog rows
   # `synced_only`:       just catalog rows (debugging / sync verification)
-  scope :originals_only, -> { where("source IS NULL OR source IN (?)", %w[manual champion_ims]) }
-  scope :dealer_only,    -> { where("source IS NULL OR source IN (?)", %w[manual champion_ims_clone]) }
-  scope :synced_only,    -> { where(source: 'champion_ims') }
+  CATALOG_ROW_SOURCES = %w[champion_ims catalog_import].freeze
+  CATALOG_CLONE_SOURCES = %w[champion_ims_clone catalog_import_clone].freeze
+  SEEDED_SOURCE = 'catalog_inventory'
+
+  scope :originals_only, -> { where("source IS NULL OR source IN (?)", ['manual', SEEDED_SOURCE, *CATALOG_ROW_SOURCES]) }
+  scope :dealer_only,    -> { where("source IS NULL OR source IN (?)", ['manual', SEEDED_SOURCE, *CATALOG_CLONE_SOURCES]) }
+  scope :synced_only,    -> { where(source: CATALOG_ROW_SOURCES) }
   scope :dealer_preferred, -> {
     # Subquery: catalog row IDs that have at least one non-deleted clone in scope.
     # We hide those catalog rows because the clone is the dealer-preferred version.
-    superseded_catalog_ids = where(source: 'champion_ims_clone', is_deleted: [false, nil])
+    superseded_catalog_ids = where(source: CATALOG_CLONE_SOURCES, is_deleted: [false, nil])
                               .where.not(cloned_from_id: nil)
                               .select(:cloned_from_id)
     where.not(id: superseded_catalog_ids)
@@ -409,6 +413,24 @@ class Vehicle < ApplicationRecord
   # The source value a clone of THIS catalog row should carry.
   def clone_source
     catalog_import? ? 'catalog_import_clone' : 'champion_ims_clone'
+  end
+
+  # Photos and tours a dealer changed in place on a Champion row. That sync
+  # rewrites its rows in full, so it needs telling which fields to leave alone.
+  # The other catalog sync works this out from catalog_last_synced_values.
+  DEALER_MEDIA_KEY = '__dealer_media__'
+
+  def dealer_media_fields
+    Array((catalog_last_synced_values || {})[DEALER_MEDIA_KEY])
+  end
+
+  def record_dealer_media_edit!(fields)
+    fields = fields.map(&:to_s)
+    fields |= %w[photo_url] if fields.include?('images')
+    return if fields.empty?
+
+    values = (catalog_last_synced_values || {})
+    update_columns(catalog_last_synced_values: values.merge(DEALER_MEDIA_KEY => dealer_media_fields | fields))
   end
 
   # True if any version of this row should NOT be cloned again on edit.

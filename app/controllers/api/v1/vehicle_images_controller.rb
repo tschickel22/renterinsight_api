@@ -56,6 +56,7 @@ module Api
         current_images = vehicle.images || []
         current_images << full_url
         vehicle.update!(images: current_images)
+        vehicle.record_dealer_media_edit!(%w[images]) if vehicle.champion_sourced?
 
         render json: {
           success: true,
@@ -90,6 +91,9 @@ module Api
           images: without.call(vehicle.images),
           floor_plan_images: without.call(vehicle.floor_plan_images)
         )
+        if vehicle.champion_sourced?
+          vehicle.record_dealer_media_edit!(vehicle.saved_changes.keys & %w[images floor_plan_images])
+        end
 
         # Delete from S3 if it's an S3 URL for our bucket
         if image_url.include?('amazonaws.com') || image_url.include?('renterinsight')

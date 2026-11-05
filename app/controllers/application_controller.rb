@@ -14,6 +14,7 @@ class ApplicationController < ActionController::API
 
   private
 
+
   # How long a user stays "active" between writes.
   #
   # One update per user per minute, not one per request. The guard reads an

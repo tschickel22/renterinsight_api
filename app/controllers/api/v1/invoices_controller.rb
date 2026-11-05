@@ -386,6 +386,8 @@ class Api::V1::InvoicesController < ApplicationController
       }, status: :unprocessable_entity
     end
     
+    quote_settings = Setting.get('Company', @company.id, 'quotes') || {}
+
     # Create invoice from quote
     invoice = @company.invoices.build(
       quote_id: quote.id,
@@ -394,20 +396,22 @@ class Api::V1::InvoicesController < ApplicationController
       sales_rep_id: params[:sales_rep_id] || current_user.id, # Default to current user
       invoice_date: Date.current,
       due_date: Date.current + 30.days, # Default 30 days
-      tax_rate: quote.tax || @company.settings.dig('quotes', 'defaultTaxRate') || 0,
+      deal_id: quote.deal_id,
+      tax_rate: quote.tax_rate || quote_settings['defaultTaxRate'] || 0,
       notes: quote.notes,
-      terms: params[:terms] || @company.settings.dig('quotes', 'defaultTermsConditions')
+      terms: params[:terms] || quote.terms.presence || quote_settings['defaultTermsConditions']
     )
     
     # Copy line items from quote
-    quote.items.each do |quote_item|
+    # Stored line keys vary by where the quote was built, so read them either way.
+    Array(quote.items).map(&:with_indifferent_access).each do |quote_item|
       invoice.invoice_items.build(
-        description: quote_item[:description] || quote_item['description'],
-        quantity: quote_item[:quantity] || quote_item['quantity'] || 1,
-        rate: quote_item[:unitPrice] || quote_item['unitPrice'] || quote_item[:unit_price] || 0,
-        item_type: quote_item[:itemType] || quote_item['itemType'] || 'custom',
-        itemable_type: quote_item[:itemable_type] || quote_item['itemable_type'],
-        itemable_id: quote_item[:itemable_id] || quote_item['itemable_id'],
+        description: quote_item[:description].presence || quote_item[:name],
+        quantity: quote_item[:quantity] || 1,
+        rate: quote_item[:unitPrice] || quote_item[:unit_price] || quote_item[:price] || 0,
+        item_type: quote_item[:itemType] || 'custom',
+        itemable_type: quote_item[:itemable_type],
+        itemable_id: quote_item[:itemable_id],
         commission_type: 'full_commission' # Default
       )
     end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_05_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_05_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6530,6 +6530,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_05_010000) do
     t.bigint "deal_home_build_id"
     t.integer "deal_sheet_version"
     t.boolean "show_home", default: false, null: false
+    t.string "accepted_ip"
+    t.string "accepted_via"
+    t.string "accepted_by_name"
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
