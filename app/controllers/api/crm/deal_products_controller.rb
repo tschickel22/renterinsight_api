@@ -67,10 +67,12 @@ module Api
 
       # DELETE /api/crm/deals/:deal_id/products/:id
       def destroy
+        from_products = @deal_product.notes.to_s.match?(Truebuild::DealBuild::TAG) == false && !@deal_product.home_line_item?
         @deal_product.destroy
-        # The deal sheet counts lines added here (and removes from it a line it
-        # wrote), so its totals and the deal follow the delete.
-        resync_deal_sheet
+        # The deal sheet counts a line added here, so its totals and the deal
+        # follow the delete. A line the sheet wrote is not resynced: the old
+        # delete-each-then-recreate save would lose the sheet line.
+        resync_deal_sheet if from_products
         head :no_content
       end
 

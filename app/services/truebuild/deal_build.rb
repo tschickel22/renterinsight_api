@@ -762,6 +762,7 @@ module Truebuild
       # Lines someone added in Products (not written by the sheet) are part of
       # the sale too: their price, cost and tax count here.
       others = other_deal_lines
+      warn_charged_twice(counted, others)
       other_net = others.sum { |dp| net(dp) }
       cost += others.sum { |dp| dp.line_cost_total.to_d }
       # The pack is overhead on this sheet's margin. It is never on a line, so the
@@ -818,6 +819,29 @@ module Truebuild
       Tax::DealTax.new(deal: deal, selling_price: [selling - untaxed, 0].max, trade: deal.trade_allowance,
                        cost_basis: core.sum { |l| l.cost.to_d }, freight_cost: freight.sum { |l| l.cost.to_d },
                        used: @build.vehicle&.condition.to_s.casecmp?('used'), home_sale: true).call
+    end
+
+    # A line added in Products that the sheet also carries is charged twice
+    # (Factory Direct deal 449, 2026-11-05: Package C and Summit Kitchen were in
+    # Products before the sheet, then picked on it). The names rarely match, so
+    # one name inside the other, or the same price and cost, counts as the same.
+    def warn_charged_twice(counted, others)
+      squash = ->(s) { s.to_s.downcase.gsub(/[^a-z0-9]/, '') }
+      sheet = counted.reject { |l| %w[base freight].include?(l.kind) }
+      others.each do |dp|
+        name = squash.call(dp.product_name)
+        price = net(dp)
+        twin = sheet.find do |l|
+          label = squash.call(l.label)
+          by_name = name.length >= 6 && label.length >= 6 && (label.include?(name) || name.include?(label))
+          by_price = price.positive? && l.retail.to_d == price && l.cost.to_d == dp.line_cost_total.to_d
+          by_name || by_price
+        end
+        next unless twin
+
+        @warnings << "#{dp.product_name} is on this sheet as #{twin.label.to_s.truncate(60)} and also on the deal from Products, " \
+                     'so it is charged twice. Remove one of them.'
+      end
     end
 
     # A deal line's price before tax: unit price x qty less its discount.

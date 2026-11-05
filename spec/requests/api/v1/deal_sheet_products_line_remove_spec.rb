@@ -57,4 +57,28 @@ RSpec.describe 'Removing a Products line from the deal sheet', type: :request do
     expect(body.dig('build', 'totals', 'retail')).to eq(without)
     expect(DealProduct.exists?(extra.id)).to be(false)
   end
+
+  it 'warns when a Products line is also on the sheet' do
+    contact = company.contacts.create!(first_name: 'Pat', last_name: 'Smith', email: "pat-#{SecureRandom.hex(3)}@example.com")
+    deal = company.deals.create!(name: 'Smith Apex', contact_id: contact.id)
+    post "/api/v1/deals/#{deal.id}/home_build", headers: headers, params: { variant_id: variant.id }.to_json
+    expect(response).to have_http_status(:created)
+    path = "/api/v1/deals/#{deal.id}/home_build/lines"
+    post path, headers: headers, params: { kind: 'custom', label: 'Package C - Sect DW Details', unit_retail: 23_243, unit_cost: 14_995 }.to_json
+    post path, headers: headers, params: { kind: 'custom', label: 'Summit Kitchen-Easton', unit_retail: 4417.5, unit_cost: 2850 }.to_json
+    post path, headers: headers, params: { kind: 'custom', label: 'Gutters', unit_retail: 800, unit_cost: 500 }.to_json
+    expect(response).to have_http_status(:created)
+
+    deal.deal_products.create!(product_name: "AP Package C<=60' Box Sect DW", quantity: 1, unit_price: 23_243, cost: 14_995,
+                               total: 23_243, tax: 0, notes: 'category:product, source:template', source_type: 'template')
+    deal.deal_products.create!(product_name: 'Summit Kitchen', quantity: 1, unit_price: 0, cost: 0, total: 0, tax: 0, notes: 'category:product')
+    deal.deal_products.create!(product_name: 'Skirting', quantity: 1, unit_price: 1200, cost: 700, total: 1200, tax: 0, notes: 'category:product')
+    Truebuild::DealBuild.new(deal.reload.home_build).reprice!
+    get "/api/v1/deals/#{deal.id}/home_build", headers: headers
+
+    twice = body.dig('build', 'totals', 'warnings').grep(/charged twice/)
+    expect(twice.size).to eq(2)
+    expect(twice.join).to include('AP Package C', 'Summit Kitchen is on this sheet as Summit Kitchen-Easton')
+    expect(twice.join).not_to include('Skirting')
+  end
 end
