@@ -247,7 +247,7 @@ module Truebuild
       guard!
       freight = @build.lines.reload.select { |l| l.kind == 'freight' }
       if point == 'lot' then freight.each(&:destroy!)
-      elsif freight.empty? then add_line(kind: 'freight', label: 'Freight to homesite', tax_category: 'delivery')
+      elsif freight.empty? then add_line(kind: 'freight', label: 'Freight', tax_category: 'delivery')
       end
     end
 
@@ -282,7 +282,7 @@ module Truebuild
     def add_freight
       guard!
       line = @build.lines.find_by(kind: 'freight') ||
-             add_line(kind: 'freight', label: 'Freight to homesite', tax_category: 'delivery')
+             add_line(kind: 'freight', label: 'Freight', tax_category: 'delivery')
       reprice!
       line
     end
@@ -784,6 +784,12 @@ module Truebuild
       unpriced = counted.select { |l| l.retail.nil? }.map(&:label)
       @warnings << "No retail price yet for #{unpriced.to_sentence}." if unpriced.any?
       @warnings << DOC_FEE_MISSING if terms.doc_fee.nil?
+      # Both can be right: freight from the plant, then delivery to the buyer's
+      # site. Both can also be the same trip, so the rep gets asked, not overruled.
+      delivery = lines.find { |l| l.kind.in?(%w[addon template custom]) && l.label.to_s.match?(/deliver/i) }
+      if delivery && lines.any? { |l| l.kind == 'freight' }
+        @warnings << "This sheet has Freight and #{delivery.label}. Keep both if they are separate trips. Take one off if they are the same trip."
+      end
       { version: TOTALS_VERSION, cost: cost.round(2).to_f, pack: pack.round(2).to_f, gross: retail&.round(2)&.to_f, retail: selling&.round(2)&.to_f,
         discounts: discounts.transform_values { |v| v.round(2).to_f }, discount_total: discounts.values.sum.round(2).to_f,
         other_lines_total: other_net.round(2).to_f,

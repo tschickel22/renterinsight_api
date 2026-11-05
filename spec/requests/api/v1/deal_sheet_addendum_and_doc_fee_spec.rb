@@ -68,6 +68,11 @@ RSpec.describe 'Deal Sheet Addendum A, dealer upgrades and the document fee', ty
     expect(response).to have_http_status(:ok)
   end
 
+  before do
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
+  end
+
   describe 'a typed line ticked for Addendum A' do
     it 'stays off Addendum A until ticked, then counts on it and the contract ladder' do
       deal = sheet_for(company, headers)

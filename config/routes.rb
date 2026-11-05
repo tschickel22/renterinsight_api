@@ -342,6 +342,7 @@ Rails.application.routes.draw do
       delete 'truebuild_pricing/upgrades/:id', to: 'truebuild_pricing#destroy_upgrade'
       get    'truebuild_pricing/addons', to: 'truebuild_pricing#addons'
       post   'truebuild_pricing/addons', to: 'truebuild_pricing#create_addon'
+      post   'truebuild_pricing/fees', to: 'truebuild_pricing#create_fee'
       patch  'truebuild_pricing/addons/:id', to: 'truebuild_pricing#update_addon'
       delete 'truebuild_pricing/addons/:id', to: 'truebuild_pricing#destroy_addon'
       get    'truebuild_designs', to: 'truebuild_designs#index'

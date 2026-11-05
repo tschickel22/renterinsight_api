@@ -37,11 +37,13 @@ class Api::V1::TruebuildPricingController < ApplicationController
   # The buyer view's lists (BuyerView); company-wide like price_display.
   BUYER_LISTS = %i[buyer_featured_option_ids buyer_hidden_option_ids buyer_hidden_groups].freeze
 
+  CUSTOM_FEE_TYPES = (FeeTemplate::FEE_TYPES - %w[doc]).freeze
+
   # GET /api/v1/truebuild_pricing
   def show
     return unless authorize_action!('company_settings', 'read')
 
-    books = CatalogPriceBook.published.includes(:manufacturer, :factory).to_a
+    books = visible_books.includes(:manufacturer, :factory).to_a
     manufacturers = books.group_by(&:manufacturer).map do |mfr, bs|
       terms = @company.dealer_catalog_terms.find_by(manufacturer_id: mfr.id)
       { id: mfr.id, name: mfr.name,
@@ -58,7 +60,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
       locations: @company.locations.order(:name).map { |l| { id: l.id, name: l.name } },
       # What the deal sheet uses for freight until the dealer sets their own.
       freight_assumptions: DealerCatalogTerm::FREIGHT_ASSUMPTIONS,
-      updates: @company.dealer_price_book_adoptions.where.not(previous_book_id: nil).where.not(status: 'superseded')
+      updates: @company.dealer_price_book_adoptions.where(catalog_price_book_id: own_factory_books.select(:id)).where.not(previous_book_id: nil).where.not(status: 'superseded')
                        .includes(price_book: %i[manufacturer factory]).order(created_at: :desc).limit(20)
                        .map { |a| update_json(a) }
     }
@@ -85,6 +87,29 @@ class Api::V1::TruebuildPricingController < ApplicationController
       render json: addon_json(addon), status: :created
     else
       render json: { errors: addon.errors.full_messages.presence || ['Choose one of your packages or fees'] }, status: :unprocessable_entity
+    end
+  end
+
+  # POST /api/v1/truebuild_pricing/fees   { name, fee_type, default_amount, taxable }
+  # A fee in the dealer's own wording. Also listed on Deal Desk. The document
+  # fee has its own setting, so it is not offered here.
+  def create_fee
+    return unless authorize_action!('company_settings', 'update')
+
+    name = params[:name].to_s.strip
+    if @company.fee_templates.active.where('LOWER(name) = ?', name.downcase).exists?
+      return render json: { errors: ["You already have a fee named #{name}"] }, status: :unprocessable_entity
+    end
+    unless params[:fee_type].in?(CUSTOM_FEE_TYPES)
+      return render json: { errors: ['Choose a kind of fee'] }, status: :unprocessable_entity
+    end
+
+    fee = @company.fee_templates.build(name: name, fee_type: params[:fee_type], default_amount: params[:default_amount].presence || 0,
+                                       taxable: ActiveModel::Type::Boolean.new.cast(params[:taxable]) || false, applies_to: 'all')
+    if fee.save
+      render json: { source_type: 'FeeTemplate', source_id: fee.id, name: fee.name, price: fee.default_amount.to_f, kind: fee.fee_type }, status: :created
+    else
+      render json: { errors: fee.errors.full_messages }, status: :unprocessable_entity
     end
   end
 
@@ -145,7 +170,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return unless authorize_action!('company_settings', 'update')
 
     manufacturer_id = params[:manufacturer_id].presence
-    if manufacturer_id && !CatalogPriceBook.published.exists?(manufacturer_id: manufacturer_id)
+    if manufacturer_id && !visible_books.exists?(manufacturer_id: manufacturer_id)
       return render json: { error: 'No published price book for that manufacturer' }, status: :unprocessable_entity
     end
 
@@ -197,7 +222,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def plans
     return unless authorize_action!('company_settings', 'read')
 
-    books = CatalogPriceBook.published.where(manufacturer_id: params[:manufacturer_id]).pluck(:id)
+    books = visible_books.where(manufacturer_id: params[:manufacturer_id]).pluck(:id)
     variants = CatalogVariantPrice.where(catalog_price_book_id: books).includes(variant: :catalog_plan).map(&:variant)
     plans = variants.group_by(&:catalog_plan).map do |plan, vs|
       { id: plan.id, name: plan.name, series: plan.series,
@@ -211,7 +236,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def options
     return unless authorize_action!('company_settings', 'read')
 
-    variant = CatalogPlanVariant.find(params[:variant_id])
+    variant = visible_variant(params[:variant_id])
     book = Truebuild::OptionSource.current_for(variant)
     return render json: { groups: [] } unless book
 
@@ -239,6 +264,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return render json: { items: [] } if q.length < 2
 
     scope = CatalogOption.where(status: 'active').where.not(kind: 'color').where('catalog_options.name ILIKE ?', "%#{q}%")
+    scope = scope.where(manufacturer_id: visible_books.select(:manufacturer_id))
     scope = scope.where(manufacturer_id: params[:manufacturer_id]) if params[:manufacturer_id].present?
     items = scope.joins(:group).limit(400).pluck('catalog_options.id', 'catalog_options.name', 'catalog_option_groups.name')
                  .group_by { |_, name, _| name.strip }
@@ -264,7 +290,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def preview
     return unless authorize_action!('company_settings', 'read')
 
-    variant = CatalogPlanVariant.find(params[:variant_id])
+    variant = visible_variant(params[:variant_id])
     location = params[:location_id].present? ? @company.locations.find(params[:location_id]) : nil
     book = params[:update_id].present? ? @company.dealer_price_book_adoptions.find(params[:update_id]).price_book : nil
     result = Truebuild::PricingEngine.new(company: @company, variant: variant, option_ids: Array(params[:option_ids]),
@@ -280,7 +306,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def price_list
     return unless authorize_action!('company_settings', 'read')
 
-    book = CatalogPriceBook.published.find_by(id: params[:book_id])
+    book = visible_books.find_by(id: params[:book_id])
     return render json: { error: 'Choose a published price book' }, status: :not_found unless book
 
     prices = Truebuild::DealerPrices.new(@company)
@@ -320,7 +346,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def save_price_grid
     return unless authorize_action!('company_settings', 'update')
 
-    book = CatalogPriceBook.published.find_by(id: params[:book_id])
+    book = visible_books.find_by(id: params[:book_id])
     return render json: { error: 'Choose a published price book' }, status: :not_found unless book
 
     home = params[:kind] != 'option'
@@ -373,7 +399,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def save_surcharge_rules
     return unless authorize_action!('company_settings', params[:preview].present? ? 'read' : 'update')
 
-    manufacturer = Manufacturer.joins(:catalog_price_books).merge(CatalogPriceBook.published).distinct.find_by(id: params[:manufacturer_id])
+    manufacturer = Manufacturer.where(id: visible_books.select(:manufacturer_id)).find_by(id: params[:manufacturer_id])
     return render json: { error: 'No published price book for that manufacturer' }, status: :unprocessable_entity unless manufacturer
 
     wanted = surcharge_rules_from_params(manufacturer)
@@ -405,7 +431,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     return unless authorize_action!('company_settings', 'update')
 
     row = (params[:kind] == 'option' ? CatalogOptionPrice : CatalogVariantPrice)
-          .joins(:price_book).merge(CatalogPriceBook.published).find_by(id: params[:price_id])
+          .where(catalog_price_book_id: visible_books.select(:id)).find_by(id: params[:price_id])
     return render json: { error: 'Not found' }, status: :not_found unless row
 
     target = row.is_a?(CatalogVariantPrice) ? row.variant : row.option
@@ -495,7 +521,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   # POST /api/v1/truebuild_pricing/upgrades
   def create_upgrade
     return unless authorize_action!('company_settings', 'update')
-    unless CatalogPriceBook.published.exists?(manufacturer_id: params[:manufacturer_id])
+    unless visible_books.exists?(manufacturer_id: params[:manufacturer_id])
       return render json: { error: 'No published price book for that manufacturer' }, status: :unprocessable_entity
     end
 
@@ -548,6 +574,32 @@ class Api::V1::TruebuildPricingController < ApplicationController
   # Original user, so an admin viewing as a dealer can still fix the book.
   def factory_editor? = original_user&.platform_admin? || original_user&.super_admin? || false
 
+  # Factory costs are confidential between dealers, so a dealer works only with
+  # the books of factories a platform admin gave them. A book that names no
+  # plant goes with its manufacturer. The dealer's own overrides are separate
+  # and always theirs. The platform team sees every book, to maintain them.
+  def visible_books = own_factory_books.published
+
+  def own_factory_books
+    return CatalogPriceBook.all if factory_editor?
+
+    given = @company.dealer_factories.pluck(:factory_id)
+    CatalogPriceBook.where(factory_id: given)
+                    .or(CatalogPriceBook.where(factory_id: nil, manufacturer_id: Factory.where(id: given).select(:manufacturer_id)))
+  end
+
+  def visible_variant(id)
+    variant = CatalogPlanVariant.find(id)
+    return variant if factory_editor?
+
+    given = @company.dealer_factories.pluck(:factory_id)
+    factory_id = variant.catalog_plan&.factory_id
+    allowed = factory_id ? given.include?(factory_id) : Factory.where(id: given, manufacturer_id: variant.manufacturer_id).exists?
+    raise ActiveRecord::RecordNotFound unless allowed
+
+    variant
+  end
+
   def correct_factory_figures(corrector, row, raw)
     if row.is_a?(CatalogVariantPrice)
       changes = {}
@@ -584,7 +636,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   def surcharge_rules_from_params(manufacturer)
-    plants = CatalogPriceBook.published.where(manufacturer_id: manufacturer.id).pluck(:factory_id).compact
+    plants = visible_books.where(manufacturer_id: manufacturer.id).pluck(:factory_id).compact
     Array(params[:rules]).map do |raw|
       attrs = raw.permit(:factory_id, :building_code, :section, :basis, :amount)
       factory_id = attrs[:factory_id].presence&.to_i
@@ -598,7 +650,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def surcharge_effect(manufacturer, wanted)
     current = Truebuild::DealerPrices.new(@company)
     proposed = Truebuild::DealerPrices.new(@company, surcharge_rules: wanted)
-    CatalogPriceBook.published.where(manufacturer_id: manufacturer.id).includes(:factory).map do |book|
+    visible_books.where(manufacturer_id: manufacturer.id).includes(:factory).map do |book|
       rows = book.variant_prices.joins(variant: :catalog_plan).includes(variant: :catalog_plan).order('catalog_plan_variants.model_number').map do |vp|
         { vp: vp, now: (current.surcharge_for(vp) || Truebuild::DealerPrices.book_surcharge(vp)).to_d,
           new: proposed.surcharge_for(vp), own: current.surcharge_request_for(vp).present?, rule: proposed.rule_surcharge(vp) }
@@ -697,7 +749,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   end
 
   def set_update
-    @update = @company.dealer_price_book_adoptions.find(params[:id])
+    @update = @company.dealer_price_book_adoptions.where(catalog_price_book_id: own_factory_books.select(:id)).find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Not found' }, status: :not_found
   end

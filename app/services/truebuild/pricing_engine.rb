@@ -228,7 +228,7 @@ module Truebuild
         @warnings << "Freight uses assumed #{f[:detail][:assumed].map { |a| a.tr('_', ' ') }.to_sentence} rates. " \
                      'Set your own under Settings, TrueBuild pricing.'
       end
-      { kind: 'freight', label: 'Freight to homesite', cost: money(f[:cost]), retail: money(f[:retail]), detail: f[:detail] }
+      { kind: 'freight', label: 'Freight', cost: money(f[:cost]), retail: money(f[:retail]), detail: f[:detail] }
     end
 
     # ---- the dealer's own add-ons ---------------------------------------

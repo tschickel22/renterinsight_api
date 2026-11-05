@@ -31,6 +31,10 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
   end
   let(:body) { JSON.parse(response.body) }
   let(:rules_path) { '/api/v1/truebuild_pricing/surcharge_rules' }
+  before do
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
+  end
 
   def new_deal(**attrs)
     contact = company.contacts.create!(first_name: 'Pat', last_name: 'Smith', email: "pat-#{SecureRandom.hex(3)}@example.com")

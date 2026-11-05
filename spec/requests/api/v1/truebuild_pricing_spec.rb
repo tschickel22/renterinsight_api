@@ -24,6 +24,11 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
 
   before { CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 57_995) }
 
+  before do
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
+  end
+
   it 'refuses a dealer whose plan does not include TrueBuild' do
     company.tenant_module_overrides.update_all(is_enabled: false)
     get '/api/v1/truebuild_pricing', headers: headers
