@@ -19,6 +19,33 @@ class LeadConversionCarry
     activity.update_columns(status: 'cancelled', reminder_sent: true, updated_at: Time.current)
   end
 
+  # One lead activity copied to the account as it was written, and the lead's copy
+  # retired if it was still open. The account's entry rules are for new entries; they
+  # silently dropped real calls (a lead's call needs no number) and follow-ups.
+  def self.copy_activity(la, account:, lead:)
+    aa = AccountActivity.new(
+      account_id: account.id, user_id: la.user_id, assigned_to_id: la.assigned_to_id,
+      activity_type: la.activity_type, subject: la.subject,
+      # account_activities.description is NOT NULL and lead_activities allows null.
+      description: la.description.presence || la.subject.presence || la.activity_type.to_s.humanize.presence || 'Activity',
+      status: la.status, priority: la.priority, due_date: la.due_date, start_time: la.start_time, end_time: la.end_time,
+      duration_minutes: la.duration_minutes, completed_at: la.completed_at,
+      call_direction: la.call_direction, call_outcome: la.call_outcome,
+      phone_number: la.phone_number.presence || lead.phone.presence || (la.activity_type == 'call' ? 'Not recorded' : nil),
+      meeting_location: la.meeting_location, meeting_link: la.meeting_link, meeting_attendees: la.meeting_attendees,
+      reminder_method: la.reminder_method, reminder_time: la.reminder_time, reminder_sent: la.reminder_sent,
+      estimated_hours: la.estimated_hours, actual_hours: la.actual_hours, outcome_notes: la.outcome_notes,
+      metadata: la.metadata, created_at: la.created_at, updated_at: la.updated_at
+    )
+    if aa.save || aa.save(validate: false)
+      retire_open_activity(la)
+      true
+    else
+      Rails.logger.warn("[LeadConversionCarry] activity #{la.id} not copied: #{aa.errors.full_messages.join(', ')}")
+      false
+    end
+  end
+
   def initialize(lead, account, reused_account)
     @lead = lead
     @account = account

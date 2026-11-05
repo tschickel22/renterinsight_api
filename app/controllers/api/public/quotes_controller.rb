@@ -51,6 +51,13 @@ module Api
           render json: { error: 'Quote cannot be accepted in current status' }, status: :unprocessable_entity
           return
         end
+
+        # Same rule as the client portal: past its Valid Until date, the dealer re-issues it.
+        if @quote.valid_until.present? && @quote.valid_until < Date.current
+          render json: { error: "This quote expired on #{@quote.valid_until.to_fs(:long)}. Please ask the dealer for an updated quote.", expired: true },
+                 status: :unprocessable_entity
+          return
+        end
         
         # Update quote status
         @quote.accept!(ip: request.remote_ip, via: 'public_link', by: @quote.contact&.full_name)

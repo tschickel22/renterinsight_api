@@ -32,6 +32,24 @@ RSpec.describe 'Quote acceptance stamp', type: :request do
     expect(quote.reload.accepted_ip).to eq('198.51.100.4')
   end
 
+  it 'will not take an acceptance after the quote expired' do
+    quote.update_columns(valid_until: Date.current - 1)
+
+    post "/q/#{quote.public_token}/accept"
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to include('expired' => true)
+    expect(quote.reload.status).to eq('sent')
+  end
+
+  it 'still takes it on its last valid day' do
+    quote.update_columns(valid_until: Date.current)
+
+    post "/q/#{quote.public_token}/accept"
+
+    expect(quote.reload.status).to eq('accepted')
+  end
+
   it 'does not stamp a second time' do
     quote.accept!(ip: '203.0.113.9', via: 'public_link')
 
