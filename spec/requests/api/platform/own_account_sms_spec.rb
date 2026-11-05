@@ -48,6 +48,21 @@ RSpec.describe 'Api::Platform SMS from a dealer\'s own Twilio account', type: :r
     expect(sent.last[:form]).not_to have_key('MessagingServiceSid')
   end
 
+  it 'sends a number we provisioned from that number, so a reply can find the company' do
+    Setting.set('Platform', 0, 'communications', {
+      'sms' => { 'provider' => 'twilio', 'isEnabled' => true, 'fromNumber' => '+17205752095',
+                 'twilioAccountSid' => 'ACmaster', 'twilioAuthToken' => 'mastertoken' }
+    })
+    company.update!(sms_provisioning_mode: 'dedicated')
+    TwilioAccount.create!(company: company, phone_number: '+17207308116', phone_number_sid: 'PNours', status: 'active')
+
+    send_text
+
+    expect(response).to have_http_status(:ok)
+    expect(sent.last[:path]).to include('/Accounts/ACmaster/')
+    expect(sent.last[:form]).to include('From' => '+17207308116')
+  end
+
   it 'keeps our Messaging Service off an account typed into settings' do
     Setting.set('Company', company.id, 'communications', {
       'sms' => { 'provider' => 'twilio', 'isEnabled' => true, 'fromNumber' => '1352-558-8888',
