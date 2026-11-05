@@ -391,6 +391,9 @@ module Api
         end
 
         if @vehicle.update(params_to_update)
+          if @vehicle.champion_sourced?
+            @vehicle.record_dealer_media_edit!(@vehicle.saved_changes.keys & (CATALOG_MEDIA_ONLY_FIELDS - %w[champion_images]))
+          end
           render json: { vehicle: vehicle_json(@vehicle, detailed: true) }
         else
           render json: { errors: @vehicle.errors.full_messages }, status: :unprocessable_entity

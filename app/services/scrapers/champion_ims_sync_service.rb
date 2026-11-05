@@ -265,11 +265,11 @@ module Scrapers
       end
     end
 
-    # Full upsert: writes ALL extractable fields. Catalog rows are sync-owned.
-    # Dealer edits to catalog rows are not preserved (and shouldn't exist —
-    # the controller should reject in-place edits and require cloning instead).
+    # Full upsert: writes every extractable field except photos and tours the
+    # dealer changed in place. Those are the only in-place edits the controller
+    # allows; any other edit makes a copy this sync never finds.
     def apply_attrs!(vehicle, home_data, client, is_new:)
-      attrs = build_full_attrs(home_data, client)
+      attrs = build_full_attrs(home_data, client).except(*vehicle.dealer_media_fields.map(&:to_sym))
       vehicle.assign_attributes(attrs)
 
       # Always-applied catalog defaults — these are corrected on every sync to
