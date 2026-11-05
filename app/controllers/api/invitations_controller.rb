@@ -74,7 +74,7 @@ module Api
         email: params[:email],
         phone: params[:phone],
         recipient_name: params[:recipient_name] || params[:recipientName],
-        recipient_data: params[:recipient_data] || {},
+        recipient_data: invitation_recipient_data,
         role: params[:role],
         permissions: platform_team ? (params[:permissions] || []) : [],
         delivery_method: params[:delivery_method] || params[:deliveryMethod] || 'email',
@@ -157,6 +157,17 @@ module Api
     end
     
     private
+
+    # The template picked on Add User travels with the invitation, so a resend
+    # uses the same one. InvitationService checks that it may be used.
+    def invitation_recipient_data
+      given = params[:recipient_data]
+      base = given.respond_to?(:to_unsafe_h) ? given.to_unsafe_h : {}
+      base.merge(
+        email_template_id: params[:emailTemplateId] || params[:email_template_id],
+        sms_template_id: params[:smsTemplateId] || params[:sms_template_id]
+      ).compact.deep_stringify_keys
+    end
     
     def set_invitation
       @invitation = @company.invitations.find_by(id: params[:id])

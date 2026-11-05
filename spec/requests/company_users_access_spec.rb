@@ -144,8 +144,37 @@ RSpec.describe 'Company users access', type: :request do
       theirs = make.call(other_company, 'Foreign')
       service = InvitationService.new(invited_by: admin, company: company)
       pick = ->(id) { service.send(:chosen_template, Invitation.new(invitation_type: 'company_user', recipient_data: { 'email_template_id' => id }), 'email') }
+      standard = CommunicationTemplate.create!(company_id: nil, name: 'Standard', template_type: 'company_user_invitation', channel: 'email', subject: 'S', body: 'B', is_active: true)
       expect(pick.call(mine.id)).to eq(mine)
+      expect(pick.call(standard.id)).to eq(standard)
       expect(pick.call(theirs.id)).to be_nil
+    end
+
+    it 'sends the template chosen on Add User, through the route Add User really calls' do
+      make = ->(name) { CommunicationTemplate.create!(company_id: company.id, name: name, template_type: 'company_user_invitation', channel: 'email', subject: "Subject #{name}", body: 'B', is_active: true) }
+      make.call('First')
+      second = make.call('Second')
+      sent = []
+      allow(CommunicationService).to receive(:send_email) { |**args| sent << args[:subject]; { success: true } }
+
+      expect(Rails.application.routes.recognize_path("/api/companies/#{company.id}/invitations", method: :post)[:controller]).to eq('api/invitations')
+      post "/api/companies/#{company.id}/invitations", params: { email: 'picked@example.com', role: 'company_staff', emailTemplateId: second.id.to_s }, headers: auth(admin), as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(sent).to eq(['Subject Second'])
+      expect(Invitation.find_by(email: 'picked@example.com').recipient_data).to include('email_template_id' => second.id.to_s)
+    end
+
+    it 'uses the company template when another company\'s is sent' do
+      theirs = CommunicationTemplate.create!(company_id: other_company.id, name: 'Foreign', template_type: 'company_user_invitation', channel: 'email', subject: 'Foreign', body: 'B', is_active: true)
+      CommunicationTemplate.create!(company_id: company.id, name: 'Mine', template_type: 'company_user_invitation', channel: 'email', subject: 'Mine', body: 'B', is_active: true)
+      sent = []
+      allow(CommunicationService).to receive(:send_email) { |**args| sent << args[:subject]; { success: true } }
+
+      post "/api/companies/#{company.id}/invitations", params: { email: 'foreign@example.com', role: 'company_staff', emailTemplateId: theirs.id }, headers: auth(admin), as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(sent).to eq(['Mine'])
     end
 
     it 'refuses a new invitation to a deleted email and says how to get them back' do

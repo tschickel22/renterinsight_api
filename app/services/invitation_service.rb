@@ -645,12 +645,13 @@ class InvitationService
   end
 
   # Find template for specific channel
-  # The template picked on Add User, if it's still usable and this company's.
+  # The template picked on Add User, if it's still usable: this company's own,
+  # or a standard one every company shares. Never another company's.
   def chosen_template(invitation, channel)
     id = invitation.recipient_data.to_h["#{channel}_template_id"]
     return unless id.present? && @company
 
-    CommunicationTemplate.active.for_company(@company.id)
+    CommunicationTemplate.active.where(company_id: [@company.id, nil])
                          .by_type("#{invitation.invitation_type}_invitation").for_channel(channel).find_by(id: id)
   end
 
