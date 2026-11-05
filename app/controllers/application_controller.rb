@@ -14,16 +14,6 @@ class ApplicationController < ActionController::API
 
   private
 
-  # The visitor's address. Requests reach us through Render's Cloudflare edge, and
-  # request.remote_ip returns that edge server, not the visitor. Cloudflare sets
-  # CF-Connecting-IP itself, overwriting anything the visitor sends.
-  def client_ip
-    candidate = request.headers['CF-Connecting-IP'].to_s.strip
-    IPAddr.new(candidate)
-    candidate
-  rescue IPAddr::Error
-    request.remote_ip
-  end
 
   # How long a user stays "active" between writes.
   #

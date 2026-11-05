@@ -35,6 +35,8 @@ module RenterinsightApi
     config.api_only = true
     
     # Enable sessions for OAuth flows (QuickBooks, etc.)
+    require_relative '../lib/cloudflare_client_ip'
+    config.middleware.insert_after ActionDispatch::RemoteIp, CloudflareClientIp
     config.middleware.use ActionDispatch::Cookies
     config.middleware.use ActionDispatch::Session::CookieStore
     

@@ -903,7 +903,8 @@ module Api
                   completed_at: la.completed_at,
                   call_direction: la.call_direction,
                   call_outcome: la.call_outcome,
-                  phone_number: la.phone_number,
+                  # An account's call needs a number, a lead's does not.
+                  phone_number: la.phone_number.presence || @lead.phone.presence || (la.activity_type == 'call' ? 'Not recorded' : nil),
                   meeting_location: la.meeting_location,
                   meeting_link: la.meeting_link,
                   meeting_attendees: la.meeting_attendees,
@@ -918,12 +919,21 @@ module Api
                   updated_at: la.updated_at
                 )
                 
-                aa.save
+                # History is copied as it was written. The account's entry rules are for new
+                # entries, and they silently dropped real calls and follow-ups here.
+                if aa.save || aa.save(validate: false)
+                  LeadConversionCarry.retire_open_activity(la)
+                else
+                  Rails.logger.warn "[ConvertLead] Activity #{la.id} not copied: #{aa.errors.full_messages.join(', ')}"
+                end
               end
-              
+
               Rails.logger.info "✅ [ConvertLead] Migrated #{activity_count} activities"
             end
             
+            # 4b. TAGS, NOTES AND OPEN FOLLOW-UPS
+            LeadConversionCarry.call(lead: @lead, account: account, reused_account: !account.previously_new_record?)
+
             # 5. COPY CUSTOM FIELD VALUES VIA MIGRATION MAPPINGS
             cf_result = CustomFieldMigrationService.copy_values(
               @lead, contact: contact, account: account, deal: deal

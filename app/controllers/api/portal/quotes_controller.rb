@@ -75,7 +75,7 @@ module Api
 
         # accepted_at was never written, so the dealer had a status with no date
         # against it and the buyer's acceptance could not be evidenced.
-        @quote.accept!(ip: client_ip, via: 'portal', by: @quote.contact&.full_name)
+        @quote.accept!(ip: request.remote_ip, via: 'portal', by: @quote.contact&.full_name)
 
         # Accept notes from client (multiple param names supported)
         notes = params[:notes] || params[:note] || params[:message]
