@@ -204,7 +204,9 @@ module InboundEmail
       [
         "Email reply from #{entity_name}",
         (%("#{snippet}") if snippet.present?),
-        "Open: #{Brand.app_url}#{entity_link}"
+        # Sent from our number, so answering this text never reaches the customer.
+        'Tap the link to answer. Replying to this text will not reach them.',
+        "#{Brand.app_url}#{entity_link}"
       ].compact.join("\n")
     end
 

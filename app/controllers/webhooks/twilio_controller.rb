@@ -479,9 +479,11 @@ module Webhooks
       nil
     end
 
+    SMS_FORWARD_LIMIT = 320
+
     def forward_sms_to_sender(to_cell:, from_number:, body:, communicable:, reply_token: nil)
-      entity_label = communicable ? "#{communicable.class.name} ##{communicable.id}" : 'Unknown contact'
-      base_body    = "DMS Reply from #{from_number} (#{entity_label}): #{body}"
+      full_name = [communicable.try(:first_name), communicable.try(:last_name)].compact_blank.join(' ')
+      who = full_name.presence || communicable.try(:name).presence || from_number
 
       if reply_token.present?
         # Prefer brand kernel so the reply link tracks whatever Platform
@@ -489,15 +491,21 @@ module Webhooks
         # wins if the kernel is missing; last-resort fallback is local dev.
         app_base     = Brand.current.app_url.presence || ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
         reply_url    = "#{app_base.chomp('/')}/reply/#{reply_token}"
-        forward_body = "#{base_body}\nReply here: #{reply_url}"
+        # This text comes from our number, not the customer's, so answering it
+        # goes nowhere near them and reps do try. The link has to survive a long
+        # message, so only what the customer wrote gets shortened.
+        head = "#{who} texted you:\n"
+        tail = "\nTap the link to answer. Replying to this text will not reach them.\n#{reply_url}"
+        room = [SMS_FORWARD_LIMIT - head.length - tail.length - 2, 40].max
+        forward_body = %(#{head}"#{body.to_s.truncate(room)}"#{tail})
       else
-        forward_body = base_body
+        forward_body = %(#{who} texted you: "#{body}").truncate(SMS_FORWARD_LIMIT)
       end
 
       # Send the forward via master account through the Messaging Service
       TwilioSmsService.send_via_master(
         to:   to_cell,
-        body: forward_body.truncate(320)
+        body: forward_body
       )
 
       Rails.logger.info "[TwilioWebhook] Forwarded reply with token to sender cell #{to_cell}"
