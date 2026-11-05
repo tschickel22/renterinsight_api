@@ -1,0 +1,97 @@
+# Help articles for the phone conversation screen and opt-outs.
+#
+# Loaded into knowledge_articles by db/migrate/20261105010000_load_communication_help_articles.rb
+# (Guide::ArticleLoader). Each entry is matched by slug. Write the product name as
+# {{brand}}; it is filled in when the article is shown. No em or en dashes.
+#
+# Screen names and button labels here were checked against the app as of
+# 2026-11-05. Change the text with the screen.
+
+articles:
+  - slug: phone-conversations
+    module: leads
+    title: Texting and emailing from your phone
+    article_type: guide
+    position: 101
+    excerpt: On a phone, a lead or contact opens on one conversation, with texts and emails together and a text box always on screen.
+    content: |
+      ## Overview
+      On a phone, a lead or contact opens right on **Messages**: every text and email with that person in one thread, newest at the bottom, with a text box always on screen. You can read what they said while you answer it. On a computer these records look the same as before.
+
+      ## The top of the screen
+      - **Phone icon**: calls them from your own phone, using your own number.
+      - **Three dots**: opens the actions for the record, such as Quick Log, Task, Appointment, Reminder and Schedule a call.
+      - **Messages, Activity, Details and More**: the sections of the record. Whatever you were writing stays there while you look at another section.
+
+      From another section, the bar at the bottom has **Text**, **Email** and **Quick Log**, so you are never far from answering.
+
+      ## Reading the conversation
+      Use **All**, **Texts** and **Emails** to choose what shows. The bottom of the screen follows your choice: pick **Emails** and it is ready to write an email, pick **Texts** and it is ready to write a text.
+
+      Tap an email to read all of it. To remove a message, tap it, then tap **Delete**. That takes it off the record, but does not unsend anything the person already received.
+
+      New replies show up by themselves within about 30 seconds.
+
+      ## Sending a text
+      1. Make sure **Text** is selected at the bottom. It shows the number it will go to.
+      2. Type your message, or tap the page icon to use a template.
+      3. Tap the send arrow.
+
+      There is no character limit. A long message shows how many texts it will be sent as. If a text does not go through, it stays in the box so you do not have to retype it.
+
+      ## Sending an email
+      1. Tap **Email** at the bottom. The email opens full screen, addressed to the email on the record.
+      2. Add a subject and your message. Use **Cc, Bcc**, **Template** and **Attach** if you need them.
+      3. Tap **Send**.
+
+      To answer an email they sent, tap **Reply** on it. Your reply goes to the address they wrote from.
+
+      Tap **X** to go back and re-read the conversation. Your draft stays until you send it or tap **Delete draft**, which clears it so the next email starts clean.
+
+      ## When someone answers
+      A reply lands on the record and you get a notice. If your user profile has a cell number, you also get a text about it.
+
+      **Tap the link in that text to answer.** The alert comes from a system number, so replying to the alert itself does not reach the customer.
+
+      ## Notices you may see
+      - **No mobile number on file**: add one under **Details**.
+      - **Your company has no texting number of its own, so replies may not reach you here**: your texts still go out, but answers do not come back to the record until your company has its own number.
+      - **Texting is not set up for your company yet**: ask your admin to turn it on.
+      - **Opted out**: see [When someone opts out of texts or email](opt-outs-texts-email).
+
+  - slug: opt-outs-texts-email
+    module: contacts
+    title: When someone opts out of texts or email
+    article_type: guide
+    position: 108
+    excerpt: What happens when you send to someone who has opted out. A text is not sent, and an email only goes if it is about their purchase.
+    content: |
+      ## Overview
+      When someone tells you to stop, {{brand}} holds you to it on the messages you type yourself, on every screen.
+
+      | | What happens |
+      |---|---|
+      | **Text** | It is not sent. There is no way around this. |
+      | **Email** | You are asked first. It only goes if it is about their purchase, not marketing. |
+
+      ## How someone becomes opted out
+      - They text **STOP** (or UNSUBSCRIBE, CANCEL, END or QUIT) to your company's number. Texting **START** turns texts back on.
+      - Someone on your team turns it off on a contact, in the **Communication Preferences** card.
+
+      The same person can be both a lead and a contact. If any record in your company with that number or email has opted out, it counts for all of them.
+
+      ## Sending a text
+      On a phone, the text box is replaced by a note saying they opted out, and when. On a computer, you see a message saying the text was not sent. Use email, or call them.
+
+      ## Sending an email
+      {{brand}} tells you they opted out and asks **Is this about their purchase?**
+
+      - **OK**: the email is sent. Use this for things they need as a buyer, such as paperwork, delivery dates and payment details.
+      - **Cancel**: nothing is sent, and your draft stays where it was.
+
+      Do not use this for marketing, offers or general follow-up. Your confirmation is logged.
+
+      The email screen on an **Account** shows the refusal but does not ask this question yet, so an email to someone who opted out cannot be sent from there.
+
+      ## Related
+      - [Texting and emailing from your phone](phone-conversations)
