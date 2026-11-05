@@ -905,7 +905,8 @@ module Truebuild
       return unless listed.to_d.positive? && retail
 
       sheet = retail.to_d - discounts['savings'] - discounts['sale']
-      return if (sheet - listed.to_d).abs < 1
+      # A dollar either way is rounding: a price sheet rounds its sale price, the sheet rounds retail first.
+      return if (sheet - listed.to_d).abs <= 1
 
       words = ActiveSupport::NumberHelper
       @warnings << "Inventory lists this home at #{words.number_to_currency(listed, precision: 0)}, but this sheet prices it at " \

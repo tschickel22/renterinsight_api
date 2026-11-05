@@ -210,8 +210,8 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
       expect(body.dig('build', 'totals', 'warnings').join).to include('Inventory lists this home at $90,000')
     end
 
-    it 'says nothing when they agree' do
-      vehicle.update!(msrp: 102_000)
+    it 'says nothing when they agree, or differ by a dollar of rounding' do
+      vehicle.update!(msrp: 102_001)
       post sheet_path(new_deal(vehicle: vehicle)), headers: headers, params: { variant_id: double.id, vehicle_id: vehicle.id }.to_json
       expect(body.dig('build', 'totals', 'warnings').join).not_to include('Inventory lists')
     end
