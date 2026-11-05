@@ -776,7 +776,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
   # Never company_id: rules are built on @company.
   def rule_params
     permitted = params.permit(:scope_type, :manufacturer_id, :scope_value, :scope_id, :applies_to, :markup_type, :value,
-                              :location_id, :active)
+                              :location_id, :active, :sliding_multiplier, :sliding_curve, :minimum_markup)
     if permitted[:location_id].present? && !@company.locations.exists?(id: permitted[:location_id])
       permitted[:location_id] = nil
     end
@@ -798,7 +798,8 @@ class Api::V1::TruebuildPricingController < ApplicationController
   def rule_json(r)
     { id: r.id, scope_type: r.scope_type, manufacturer_id: r.manufacturer_id, scope_value: r.scope_value,
       scope_id: r.scope_id, scope_label: scope_label(r), applies_to: r.applies_to, markup_type: r.markup_type,
-      value: r.value.to_f, location_id: r.location_id, location_name: r.location&.name, active: r.active }
+      value: r.value.to_f, location_id: r.location_id, location_name: r.location&.name, active: r.active,
+      sliding_multiplier: r.sliding_multiplier&.to_f, sliding_curve: r.sliding_curve&.to_f, minimum_markup: r.minimum_markup&.to_f }
   end
 
   def scope_label(r)
