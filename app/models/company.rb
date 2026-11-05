@@ -234,6 +234,7 @@ class Company < ApplicationRecord
   # Without a form there is no destination for an inventory ad to land on, so
   # the Meta feed carries no link and Meta rejects every home.
   after_create :seed_default_intake_form
+  after_create :seed_invitation_templates
   after_save :seed_installer_role, if: -> { saved_change_to_industry? && industry == 'installer' }
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
@@ -916,6 +917,24 @@ class Company < ApplicationRecord
   #
   # This seeds ONLY per-company data. The global RBAC catalog (Resource/Action/Role
   # seed_defaults) is seeded once per environment, not here.
+  # A new company starts with its own copy of the standard invitation email and
+  # text, so it has templates to choose from and to change. The standard ones are
+  # shared and read-only for companies. Existing companies are not touched.
+  STANDARD_INVITATION_COPIES = { 'email' => 'Invitation Email', 'sms' => 'Invitation Text' }.freeze
+
+  def seed_invitation_templates
+    STANDARD_INVITATION_COPIES.each do |channel, copy_name|
+      standard = CommunicationTemplate.active.platform_wide.by_type('company_user_invitation').for_channel(channel).order(:id).first
+      next unless standard
+
+      copy = standard.dup
+      copy.assign_attributes(company_id: id, name: copy_name, is_default: false)
+      copy.save!
+    end
+  rescue StandardError => e
+    Rails.logger.error "[Company#seed_invitation_templates] company=#{id} failed: #{e.message}"
+  end
+
   def seed_default_intake_form
     # Websites::DefaultLeadForm owns the shape of a basic contact form, and its
     # leadField mappings are the ones every other form uses, so a submission
