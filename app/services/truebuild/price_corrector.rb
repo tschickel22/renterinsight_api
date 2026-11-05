@@ -18,9 +18,11 @@ module Truebuild
 
     class Invalid < StandardError; end
 
-    def initialize(book:, user:)
+    # reprice: false when a caller corrects many rows and queues the one repricing itself.
+    def initialize(book:, user:, reprice: true)
       @book = book
       @user = user
+      @reprice = reprice
     end
 
     # target: a CatalogVariantPrice or CatalogOptionPrice in this book.
@@ -58,7 +60,7 @@ module Truebuild
         end
         @book.update!(metadata: @book.metadata.to_h.merge('corrected_at' => Time.current.iso8601(6)))
       end
-      CatalogPriceCorrectionJob.perform_later(@book.id) if log.any?
+      CatalogPriceCorrectionJob.perform_later(@book.id) if log.any? && @reprice
       log
     end
 

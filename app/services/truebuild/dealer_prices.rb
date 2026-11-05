@@ -12,8 +12,10 @@ module Truebuild
   # An override belongs to one row of one book: a new factory price book
   # brings new rows, and cost follows the factory again.
   class DealerPrices
-    def initialize(company)
+    # surcharge_rules: rules to price with instead of the saved ones (a preview).
+    def initialize(company, surcharge_rules: nil)
       @company = company
+      @surcharge_rules = surcharge_rules
     end
 
     # The dealer's cost for this row, or nil to use the book's.
@@ -25,9 +27,16 @@ module Truebuild
       overrides[[row.class.name, row.id]]
     end
 
-    # The dealer's surcharge for a home's row (every deal), or nil to use the book's.
+    # The dealer's surcharge for a home's row (every deal): the figure set on
+    # that home, else their surcharge rule, else nil to use the book's.
     def surcharge_for(vp)
-      surcharge_overrides[vp.id]&.suggested_value
+      surcharge_overrides[vp.id]&.suggested_value || rule_surcharge(vp)
+    end
+
+    # What the dealer's surcharge rule works out to for this row, or nil.
+    def rule_surcharge(vp)
+      rule = DealerSurchargeRule.best_for(surcharge_rules[vp.variant.manufacturer_id].to_a, vp.variant, factory_of(vp))
+      rule&.amount_for(vp.variant)
     end
 
     def surcharge_request_for(vp)
@@ -128,6 +137,15 @@ module Truebuild
     end
 
     private
+
+    def surcharge_rules
+      @surcharge_rules_by_maker ||= (@surcharge_rules || @company.dealer_surcharge_rules.active.to_a).group_by(&:manufacturer_id)
+    end
+
+    def factory_of(vp)
+      (@factories ||= {})[vp.catalog_price_book_id] ||= [vp.price_book.factory_id]
+      @factories[vp.catalog_price_book_id].first
+    end
 
     def manual_rules
       @manual_rules ||= @company.dealer_markup_rules.active.where(location_id: nil, markup_type: 'manual', scope_type: %w[variant option])

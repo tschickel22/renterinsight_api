@@ -14,7 +14,7 @@ module Truebuild
     def hold_for_review(book)
       return unless book.supersedes
 
-      subscribers(book.manufacturer_id).each do |company|
+      subscribers(book).each do |company|
         previous = BookResolver.accepted_before(company, book)
         next unless previous
 
@@ -48,10 +48,13 @@ module Truebuild
     end
 
     # Companies with any TrueBuild pricing set up for this manufacturer.
-    def subscribers(manufacturer_id)
-      ids = DealerMarkupRule.where(manufacturer_id: [nil, manufacturer_id]).distinct.pluck(:company_id) |
-            DealerCatalogTerm.where(manufacturer_id: [nil, manufacturer_id]).distinct.pluck(:company_id)
-      Company.where(id: ids).to_a
+    # Dealers who price this book and were given its factory. Telling anyone
+    # else would show them another factory's price changes.
+    def subscribers(book)
+      ids = DealerMarkupRule.where(manufacturer_id: [nil, book.manufacturer_id]).distinct.pluck(:company_id) |
+            DealerCatalogTerm.where(manufacturer_id: [nil, book.manufacturer_id]).distinct.pluck(:company_id)
+      plants = book.factory_id ? [book.factory_id] : Factory.where(manufacturer_id: book.manufacturer_id).select(:id)
+      Company.where(id: DealerFactory.where(company_id: ids, factory_id: plants).select(:company_id)).to_a
     end
 
     def notify(adoption, book, summary)

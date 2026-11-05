@@ -38,6 +38,11 @@ RSpec.describe 'Dealer price list and colors', type: :request do
   let!(:dual_black) { option(exterior, 'Dual Black', nil, color_set: 'Shingles') }
   let!(:dishwasher) { option(extras, 'Dishwasher', 340) }
   let!(:base_price) { CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 49_645) }
+  before do
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
+    other.dealer_factories.create!(factory: factory)
+  end
 
   def headers_for(co, role = 'company_admin')
     user = User.create!(email: "u-#{SecureRandom.hex(4)}@example.com", first_name: 'T', last_name: 'S', password: 'Pass1234!',

@@ -42,7 +42,7 @@ module Truebuild
     # include_freight: false for anything a buyer sees. The website price never has
     # freight; the dealer adds it on the deal sheet (Tom, 2026-11-02).
     def initialize(company:, variant:, option_ids: [], location: nil, construction: nil, book: nil, addon_ids: [], quote: false,
-                   freight_miles: nil, assume_freight: false, surcharge: nil, include_freight: true)
+                   freight_miles: nil, assume_freight: false, surcharge: nil, include_freight: true, pack: nil)
       @company = company
       @variant = variant
       @option_ids = Array(option_ids).map(&:to_i).uniq
@@ -65,6 +65,8 @@ module Truebuild
       @options_cost_book = book || OptionSource.current_for(variant) || @cost_book
       @options_book = book || OptionSource.book_for(company, variant) || @book
       @terms = DealerCatalogTerm.effective(company, variant.manufacturer_id)
+      # The pack on this very home, ahead of the dealer's terms.
+      @pack = (pack.presence || @terms.dealer_pack).to_d
       @dealer_prices = DealerPrices.new(company)
       @dealer_options = DealerOptions.new(company, variant.manufacturer_id)
       @rules = company.dealer_markup_rules.active.to_a
@@ -109,7 +111,11 @@ module Truebuild
       list_surcharge = @dealer_prices.surcharge_for(vp) || DealerPrices.book_surcharge(vp)
       own = @dealer_prices.cost_for(vp)
       rule = rule_for(:base)
-      retail = rule ? rule.apply(retail_basis(vp) || cost) : nil
+      # The dealer's pack is overhead: marked up with the home and counted in the
+      # totals' cost, but it is not factory cost, so it stays off this line and the
+      # factory PO. A manual price ignores it.
+      pack = @pack
+      retail = rule ? rule.apply((retail_basis(vp) || cost) + pack) : nil
       @warnings << 'No markup rule covers this home, so it has no retail price. Add a markup rule.' unless rule
       {
         kind: 'base', label: "#{@variant.catalog_plan.name} (#{@variant.model_number})",
@@ -117,7 +123,7 @@ module Truebuild
         detail: { net_base_price: money(own || vp.net_base_price), required_adders: vp.required_adders,
                   surcharge: money(@surcharge || list_surcharge), book_surcharge: money(list_surcharge),
                   dealer_surcharge_set: @dealer_prices.surcharge_for(vp).present?,
-                  program_discount: money(discount), rule: describe(rule),
+                  program_discount: money(discount), dealer_pack: (money(pack) if pack.positive?), rule: describe(rule),
                   factory_net_base_price: (money(vp.net_base_price) if own), dealer_cost_set: own.present? }.compact
       }
     end
@@ -222,7 +228,7 @@ module Truebuild
         @warnings << "Freight uses assumed #{f[:detail][:assumed].map { |a| a.tr('_', ' ') }.to_sentence} rates. " \
                      'Set your own under Settings, TrueBuild pricing.'
       end
-      { kind: 'freight', label: 'Freight to homesite', cost: money(f[:cost]), retail: money(f[:retail]), detail: f[:detail] }
+      { kind: 'freight', label: 'Freight', cost: money(f[:cost]), retail: money(f[:retail]), detail: f[:detail] }
     end
 
     # ---- the dealer's own add-ons ---------------------------------------
@@ -242,7 +248,9 @@ module Truebuild
     # ---- totals --------------------------------------------------------
 
     def totals_for(lines)
-      cost = lines.sum { |l| l[:cost].to_d }
+      # The pack counts against margin on any home with a factory cost (Deal#pack_amount on a deal).
+      pack = lines.any? { |l| l[:kind] == 'base' && l[:cost] } ? @pack : 0.to_d
+      cost = lines.sum { |l| l[:cost].to_d } + pack
       priced = lines.all? { |l| !l[:retail].nil? }
       retail = priced ? lines.sum { |l| l[:retail].to_d } : nil
       retail = round_retail(retail) if retail
@@ -251,7 +259,7 @@ module Truebuild
       if margin_pct && @terms.margin_floor_pct && margin_pct < @terms.margin_floor_pct.to_d
         @warnings << "Margin #{margin_pct}% is under your #{@terms.margin_floor_pct.to_d.to_s('F')}% floor."
       end
-      { cost: money(cost), retail: money(retail), margin: money(margin), margin_pct: margin_pct&.to_f,
+      { cost: money(cost), pack: money(pack), retail: money(retail), margin: money(margin), margin_pct: margin_pct&.to_f,
         rounded_to: @terms.round_retail_to&.to_f }
     end
 

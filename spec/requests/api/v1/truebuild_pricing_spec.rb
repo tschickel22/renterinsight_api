@@ -24,6 +24,11 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
 
   before { CatalogVariantPrice.create!(price_book: book, variant: variant, net_base_price: 57_995) }
 
+  before do
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
+  end
+
   it 'refuses a dealer whose plan does not include TrueBuild' do
     company.tenant_module_overrides.update_all(is_enabled: false)
     get '/api/v1/truebuild_pricing', headers: headers
@@ -37,6 +42,17 @@ RSpec.describe 'Api::V1::TruebuildPricing', type: :request do
                                            headers: { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: rep.id, company_id: company.id)}" }
     expect(response).to have_http_status(:forbidden)
     expect(company.dealer_catalog_terms).to be_empty
+  end
+
+  it 'names the plant on an option group each plant has its own copy of' do
+    decatur = mfr.factories.create!(name: 'Decatur', code: "DEC#{SecureRandom.hex(2)}")
+    CatalogOptionGroup.create!(manufacturer: mfr, factory: decatur, key: 'cabinets', name: 'Cabinets')
+    CatalogOptionGroup.create!(manufacturer: mfr, factory: decatur, key: 'roofing', name: 'Roofing')
+
+    get '/api/v1/truebuild_pricing', headers: headers
+
+    groups = JSON.parse(response.body)['manufacturers'].find { |m| m['id'] == mfr.id }['groups']
+    expect(groups.map { |g| g.slice('name', 'plant').values }).to contain_exactly(['Cabinets', 'Topeka'], ['Cabinets', 'Decatur'], ['Roofing', nil])
   end
 
   it 'lists manufacturers with published books, their series and groups, and saves terms' do

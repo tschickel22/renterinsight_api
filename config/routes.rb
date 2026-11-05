@@ -326,7 +326,11 @@ Rails.application.routes.draw do
       get    'truebuild_pricing/option_names', to: 'truebuild_pricing#option_names'
       post   'truebuild_pricing/preview', to: 'truebuild_pricing#preview'
       get    'truebuild_pricing/price_list', to: 'truebuild_pricing#price_list'
+      get    'truebuild_pricing/home_defaults', to: 'truebuild_pricing#home_defaults'
+      get    'truebuild_pricing/surcharge_rules', to: 'truebuild_pricing#surcharge_rules'
+      put    'truebuild_pricing/surcharge_rules', to: 'truebuild_pricing#save_surcharge_rules'
       post   'truebuild_pricing/price_list/remember', to: 'truebuild_pricing#remember_price'
+      post   'truebuild_pricing/price_list/grid', to: 'truebuild_pricing#save_price_grid'
       post   'truebuild_pricing/colors', to: 'truebuild_pricing#create_color'
       patch  'truebuild_pricing/colors/:id', to: 'truebuild_pricing#update_color'
       delete 'truebuild_pricing/colors/:id', to: 'truebuild_pricing#destroy_color'
@@ -338,6 +342,7 @@ Rails.application.routes.draw do
       delete 'truebuild_pricing/upgrades/:id', to: 'truebuild_pricing#destroy_upgrade'
       get    'truebuild_pricing/addons', to: 'truebuild_pricing#addons'
       post   'truebuild_pricing/addons', to: 'truebuild_pricing#create_addon'
+      post   'truebuild_pricing/fees', to: 'truebuild_pricing#create_fee'
       patch  'truebuild_pricing/addons/:id', to: 'truebuild_pricing#update_addon'
       delete 'truebuild_pricing/addons/:id', to: 'truebuild_pricing#destroy_addon'
       get    'truebuild_designs', to: 'truebuild_designs#index'
@@ -2299,6 +2304,7 @@ Rails.application.routes.draw do
       scope :knowledge, controller: :knowledge do
         post   'search',                action: :search
         get    'navigate',              action: :navigate
+        get    'for_screen',            action: :for_screen
         get    'articles',              action: :articles
         get    'articles/:slug',        action: :article, constraints: { slug: %r{[^/]+} }
         # IMPORTANT: generate must come before the :slug routes below so it

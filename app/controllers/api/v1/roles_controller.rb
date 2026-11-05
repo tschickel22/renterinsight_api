@@ -110,6 +110,8 @@ module Api
       # PUT /api/v1/roles/:id/permissions
       # Set permissions for a role (replaces all existing permissions)
       def set_permissions
+        return unless shared_role_change_allowed!
+
         Rails.logger.info "[RolesController] set_permissions called for role #{params[:id]}"
         Rails.logger.info "[RolesController] Received #{params[:permissions]&.length || 0} permissions"
         unless params[:permissions].is_a?(Array)
@@ -211,13 +213,8 @@ module Api
       
       # PATCH /api/v1/roles/:id
       def update
-        if @role.system_role? && !current_user.super_admin?
-          render json: {
-            error: 'Only platform administrators can modify system roles'
-          }, status: :forbidden
-          return
-        end
-        
+        return unless shared_role_change_allowed!
+
         if @role.update(role_params)
           render json: {
             role: serialize_role(@role, include_permissions: true),
@@ -342,6 +339,19 @@ module Api
         render json: { error: 'Role not found' }, status: :not_found
       end
       
+      # A system role is one row every company shares, so a change here changes
+      # what people can do at every dealer. Only the platform team may do that; a
+      # company duplicates the role and changes its own copy.
+      def shared_role_change_allowed!
+        return true unless @role.system_role?
+        return true if current_user.platform_admin? || current_user.super_admin?
+
+        render json: {
+          error: 'This is a standard role shared by every company. Duplicate it to make your own version.'
+        }, status: :forbidden
+        false
+      end
+
       def ensure_rbac_enabled
         unless current_company.use_rbac_system
           render json: {

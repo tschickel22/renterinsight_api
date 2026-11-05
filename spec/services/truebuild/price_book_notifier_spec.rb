@@ -36,6 +36,11 @@ RSpec.describe Truebuild::PriceBookNotifier do
     book
   end
 
+  before do
+    factory.update!(truebuild_released_at: Time.current)
+    company.dealer_factories.create!(factory: factory)
+  end
+
   it 'holds a reviewing dealer on their old prices until they accept, and tells their admins what moved' do
     company.dealer_catalog_terms.create!(price_update_policy: 'review')
     book = publish_new
@@ -78,6 +83,7 @@ RSpec.describe Truebuild::PriceBookNotifier do
     company.dealer_catalog_terms.create!(price_update_policy: 'auto_all')
     reviewer = Company.create!(name: "Reviewer #{SecureRandom.hex(3)}")
     reviewer.dealer_catalog_terms.create!(price_update_policy: 'review')
+    reviewer.dealer_factories.create!(factory: factory)
 
     book = publish_new
     described_class.deliver(book)

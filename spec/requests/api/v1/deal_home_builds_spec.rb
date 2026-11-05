@@ -64,8 +64,8 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     # + 2 x 150 permits = 1,650; the buyer pays 20% over.
     expect(build['lines'].map { |l| [l['kind'], l['tax_category']] }).to eq([%w[base home], %w[freight delivery]])
     expect(line('Apex (2856H32P01)')).to include('cost' => 49_645.0, 'retail' => 62_056.25)
-    expect(line('Freight to homesite')).to include('cost' => 1650.0, 'retail' => 1980.0)
-    expect(line('Freight to homesite')['freight']).to include('miles' => 150, 'sections' => 2)
+    expect(line('Freight')).to include('cost' => 1650.0, 'retail' => 1980.0)
+    expect(line('Freight')['freight']).to include('miles' => 150, 'sections' => 2)
     expect(line('Apex (2856H32P01)')['base']).to include('net_base_price' => 49_645.0, 'program_discount' => 0.0)
     expect(build['model']).to include('factory' => 'Decatur', 'series' => 'Prime Of Indiana', 'section' => 'multi')
     expect(build['totals']).to include('cost' => 51_295.0, 'gross' => 64_036.25, 'retail' => 64_036.25)
@@ -137,6 +137,16 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(build.reload.totals['warnings'].to_a.grep(/not offered/)).to be_empty
   end
 
+  it 'asks about Freight and a delivery charge on one sheet, and keeps both' do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    expect(body.dig('build', 'warnings').to_a.join).not_to include('separate trips')
+
+    post "#{path}/lines", headers: headers, params: { kind: 'custom', label: 'Delivery to homesite', unit_retail: 900 }.to_json
+    expect(body.dig('build', 'warnings').join).to include('This sheet has Freight and Delivery to homesite')
+    expect(line('Freight')).to be_present
+    expect(line('Delivery to homesite')).to be_present
+  end
+
   it 'keeps a price the rep set through repricing, and takes custom lines as typed' do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
     post "#{path}/lines", headers: headers, params: { kind: 'option', option_id: insulation.id }.to_json
@@ -171,7 +181,7 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(body.dig('build', 'discounts')).to include('sale_pct' => 10.0, 'savings_pct' => 5.0)
 
     patch path, headers: headers, params: { freight_miles: 300 }.to_json
-    expect(line('Freight to homesite')).to include('cost' => 3000.0, 'retail' => 3600.0) # 4.50 x 300 x 2 + 300
+    expect(line('Freight')).to include('cost' => 3000.0, 'retail' => 3600.0) # 4.50 x 300 x 2 + 300
     expect(body.dig('build', 'freight_miles_set')).to be(true)
 
     post "#{path}/lines", headers: headers, params: { kind: 'template', template_type: 'FeeTemplate', template_id: fee.id }.to_json
@@ -289,10 +299,10 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
 
   it "takes the hauler's real freight cost, and brings a stale sheet up to date when it is opened" do
     post path, headers: headers, params: { variant_id: variant.id }.to_json
-    freight = line('Freight to homesite')
+    freight = line('Freight')
     patch "#{path}/lines/#{freight['id']}", headers: headers, params: { unit_cost: 7065, unit_retail: 8815 }.to_json
     post "#{path}/reprice", headers: headers
-    expect(line('Freight to homesite')).to include('cost' => 7065.0, 'retail' => 8815.0, 'set_retail' => true)
+    expect(line('Freight')).to include('cost' => 7065.0, 'retail' => 8815.0, 'set_retail' => true)
 
     deal.deal_products.create!(product_name: 'Steps', product_sku: 'CUSTOM-s', unit_price: 600, quantity: 1, notes: 'category:accessory')
     deal.home_build.update_columns(priced_at: 1.minute.ago)

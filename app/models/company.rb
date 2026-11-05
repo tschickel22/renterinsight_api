@@ -163,6 +163,7 @@ class Company < ApplicationRecord
   # TrueBuild: this dealer's layer over the platform catalog
   has_many :dealer_catalog_terms, dependent: :destroy
   has_many :dealer_markup_rules, dependent: :destroy
+  has_many :dealer_surcharge_rules, dependent: :destroy
   has_many :dealer_price_book_adoptions, dependent: :destroy
   has_many :truebuild_designs, dependent: :destroy
   has_many :deal_home_builds, dependent: :destroy
