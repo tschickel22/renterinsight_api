@@ -55,6 +55,10 @@ RSpec.describe 'Api::Platform communication channels', type: :request do
     TwilioAccount.create!(company: company, phone_number: '+13525588888', phone_number_sid: 'PNown', status: 'active',
                           sub_account_sid: "AC#{'e8' * 16}", auth_token: 'token')
 
+    # A number the company is not set to send from still leaves replies with nowhere to land.
+    expect(channels_for('Contact', contact.id).dig('sms', 'repliesReach')).to be(false)
+
+    company.update!(sms_provisioning_mode: 'dedicated')
     expect(channels_for('Contact', contact.id).dig('sms', 'repliesReach')).to be(true)
   end
 

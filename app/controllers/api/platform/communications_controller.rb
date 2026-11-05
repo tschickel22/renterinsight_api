@@ -158,8 +158,7 @@ module Api
       # An inbound text only reaches a tenant through a number that tenant owns;
       # the shared platform number cannot say whose customer is answering.
       def sms_replies_reach?
-        account = resolve_sms_usage_company&.twilio_account
-        account.present? && account.active? && account.phone_number.present?
+        dedicated_twilio_account.present?
       end
 
       def set_entity
@@ -398,7 +397,7 @@ module Api
 
         # Get settings
         settings = get_effective_settings
-        sms_config = own_account_sms_config ||
+        sms_config = dedicated_number_sms_config ||
                      settings.dig(:communications, :sms) || settings.dig('communications', 'sms') || {}
         
         Rails.logger.info "[Platform::CommunicationsController#sms] SMS config: #{sms_config.keys}"
@@ -507,17 +506,26 @@ module Api
         }
       end
 
-      # A dealer's own Twilio number, connected as if we had provisioned it,
-      # sends from that number on their account, as the CRM send does. The
-      # settings waterfall below knows nothing of connected numbers.
-      def own_account_sms_config
-        company = resolve_sms_usage_company
-        ta = company&.twilio_account
-        return nil unless ta&.active? && ta.own_account? && company.sms_provisioning_mode == 'dedicated'
+      # A company with its own number texts from it, as the CRM send does, whether
+      # we provisioned it on our account or the dealer connected theirs. A reply
+      # only finds its company through the number that received it, so a text sent
+      # from the shared platform number can never be answered. The settings
+      # waterfall below knows nothing of these numbers.
+      def dedicated_number_sms_config
+        ta = dedicated_twilio_account
+        return nil unless ta
 
         sid, token = ta.api_credentials
+        return nil if sid.blank?
+
         { provider: 'twilio', isEnabled: true, fromNumber: ta.phone_number, twilioAccountSid: sid,
           twilioAuthToken: token, twilioMessagingServiceSid: ta.messaging_service_sid }.compact
+      end
+
+      def dedicated_twilio_account
+        company = resolve_sms_usage_company
+        ta = company&.twilio_account
+        ta if ta&.active? && ta.phone_number.present? && company.sms_provisioning_mode == 'dedicated'
       end
 
       def get_effective_settings
