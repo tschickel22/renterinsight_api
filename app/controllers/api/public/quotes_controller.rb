@@ -53,7 +53,7 @@ module Api
         end
         
         # Update quote status
-        @quote.update!(status: 'accepted', accepted_at: Time.current)
+        @quote.accept!(ip: client_ip, via: 'public_link', by: @quote.contact&.full_name)
         
         # Create note if provided
         notes = params[:notes]

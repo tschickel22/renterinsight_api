@@ -13,6 +13,9 @@ class QuotePresenter
       sent_at: quote.sent_at,
       viewed_at: quote.viewed_at,
       accepted_at: quote.accepted_at,
+      accepted_ip: quote.accepted_ip,
+      accepted_via: quote.accepted_via,
+      accepted_by_name: quote.accepted_by_name,
       rejected_at: quote.rejected_at,
       created_at: quote.created_at,
       updated_at: quote.updated_at

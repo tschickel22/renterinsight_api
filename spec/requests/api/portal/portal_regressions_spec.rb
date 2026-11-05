@@ -88,6 +88,8 @@ RSpec.describe 'Buyer portal regressions', type: :request do
       expect(response).to have_http_status(:ok)
       expect(quote.reload.status).to eq('accepted')
       expect(quote.accepted_at).to be_present
+      expect(quote.accepted_via).to eq('portal')
+      expect(quote.accepted_ip).to be_present
     end
 
     it 'refuses an expired quote rather than letting the buyer lock in stale pricing' do
