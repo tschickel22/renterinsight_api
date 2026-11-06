@@ -60,7 +60,7 @@ class Conversation < ApplicationRecord
   def note_message!(communication)
     attrs = {
       last_message_at: communication.created_at || Time.current,
-      last_message_preview: communication.body.to_s.squish.truncate(140)
+      last_message_preview: preview_text(communication)
     }
     if communication.direction == 'inbound'
       attrs[:last_inbound_at] = attrs[:last_message_at]
@@ -72,6 +72,15 @@ class Conversation < ApplicationRecord
   end
 
   private
+
+  # Plain text for the Inbox row: email bodies are HTML.
+  def preview_text(communication)
+    text = communication.body.to_s
+    text = ActionView::Base.full_sanitizer.sanitize(text) if text.include?('<')
+    text = text.gsub('&nbsp;', ' ').gsub('&amp;', '&').squish
+    text = communication.subject.to_s.squish if text.blank?
+    text.truncate(140)
+  end
 
   def normalize_numbers
     self.sender_number = self.class.normalize_phone(sender_number) if sender_number.present?

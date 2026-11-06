@@ -65,6 +65,9 @@ class Communication < ApplicationRecord
 
   after_create :notify_workflow_of_inbound, if: :should_notify_workflow?
   after_create :stop_nurture_on_reply, if: -> { direction == 'inbound' && communicable.present? }
+  # Email replies and a person's email answers belong in the Inbox (E96).
+  # Texts are threaded where they are sent and received, not here.
+  after_create_commit :thread_email_in_inbox, if: -> { channel == 'email' && %w[Lead Contact].include?(communicable_type) }
 
   # ActiveStorage attachments
   has_many_attached :attachments
@@ -346,6 +349,11 @@ class Communication < ApplicationRecord
   # Must be public - ActivityTrackable concern uses try(:company)
   def company
     super || communicable&.try(:company)
+  end
+
+
+  def thread_email_in_inbox
+    Assistant::Threading.track_email!(self)
   end
 
   private

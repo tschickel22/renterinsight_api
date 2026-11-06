@@ -12,6 +12,7 @@ module Assistant
       'appointment' => 'wants to set a time to visit',
       'unsure' => 'asked something the assistant could not answer',
       'rule_check' => 'the assistant could not write a safe answer',
+      'email_reply' => 'replied by email',
       'error' => 'the assistant hit an error',
       'other' => 'needs a person'
     }.freeze
