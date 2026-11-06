@@ -295,7 +295,9 @@ Rails.application.routes.draw do
       get 'deep_links/resolve', to: 'deep_links#resolve'
 
       # ==================== CATALOG SUBSCRIPTIONS (Surface A — dealer opt-in) ====================
-      resources :catalog_subscriptions, only: %i[index create destroy]
+      resources :catalog_subscriptions, only: %i[index create update destroy] do
+        get :homes, on: :member
+      end
       resources :truebuild_factories, only: %i[index create destroy]
 
       # ==================== TRACKED LINKS (Attachment Engagement) ====================

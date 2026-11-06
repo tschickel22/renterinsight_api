@@ -57,6 +57,32 @@ module Api
         render json: { subscription: subscription_json(existing) }, status: :ok
       end
 
+      # GET /api/v1/catalog_subscriptions/:id/homes
+      # The source's homes to tick: which this dealer carries, which wait for
+      # them (new homes held), and which a price book of theirs prices.
+      def homes
+        sub = @company.dealer_catalog_subscriptions.find(params[:id])
+        render json: Catalog::HomeChoice.homes(sub).merge(subscription: subscription_json(sub))
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Subscription not found' }, status: :not_found
+      end
+
+      # PATCH /api/v1/catalog_subscriptions/:id { shown_keys: [], kept_keys: [], new_homes: 'add'|'hold' }
+      # Saves which of the shown homes the dealer carries and applies it now.
+      def update
+        sub = @company.dealer_catalog_subscriptions.find(params[:id])
+        new_homes = params[:new_homes].presence || sub.new_homes
+        unless DealerCatalogSubscription::NEW_HOMES.include?(new_homes)
+          return render json: { error: 'new_homes must be add or hold' }, status: :unprocessable_entity
+        end
+
+        result = Catalog::HomeChoice.apply!(sub, shown_keys: Array(params[:shown_keys]).map(&:to_s),
+                                                 kept_keys: Array(params[:kept_keys]).map(&:to_s), new_homes: new_homes)
+        render json: { subscription: subscription_json(sub.reload), result: result }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Subscription not found' }, status: :not_found
+      end
+
       # DELETE /api/v1/catalog_subscriptions/:id — unsubscribe.
       # Removes the join. Pure catalog-imported vehicles get soft-deleted.
       # Supplement-stamped vehicles (dealer-originals we attached catalog data
@@ -163,7 +189,9 @@ module Api
         {
           id:              sub.id,
           catalogSourceId: sub.catalog_source_id,
-          locationIds:     Array(sub.location_ids).map(&:to_i)
+          locationIds:     Array(sub.location_ids).map(&:to_i),
+          newHomes:        sub.new_homes,
+          leftOutCount:    Array(sub.left_out_keys).size
         }
       end
     end
