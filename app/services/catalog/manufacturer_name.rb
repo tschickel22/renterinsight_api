@@ -29,6 +29,7 @@ module Catalog
       'clayton_epic_region' => 'Clayton',
       'clayton_retail_home_center' => 'Clayton',
       'cavco_retailer' => 'Cavco',
+      'cavco_plant' => 'Cavco',
       'champion_feed' => 'Champion',
       'tru_model_line' => 'TRU',
       'adventure_homes' => 'Adventure Homes',
