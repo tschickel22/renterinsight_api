@@ -27,7 +27,11 @@ module Assistant
       appointment unsure other
     ].freeze
 
-    Result = Struct.new(:reply, :qualification, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
+    # Who the buyer is, as they tell it. Copied onto the lead's own fields
+    # (AssistantReplyJob), the same fields the lead form fills.
+    CONTACT_FIELDS = %w[first_name last_name email street city state zip].freeze
+
+    Result = Struct.new(:reply, :qualification, :contact, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
 
     def initialize(conversation:, settings:, history:, feedback: nil)
       @conversation = conversation
@@ -45,6 +49,7 @@ module Assistant
       Result.new(
         reply: input['reply'].to_s.strip,
         qualification: input['qualification'].to_h.slice(*QUALIFICATION_FIELDS).compact_blank,
+        contact: input['contact'].to_h.slice(*CONTACT_FIELDS).transform_values { |v| v.to_s.strip }.compact_blank,
         handoff: input['handoff'] == true,
         handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : (input['handoff'] ? 'other' : nil),
         summary: input['summary'].to_s.strip.truncate(500),
@@ -64,7 +69,8 @@ module Assistant
         Your job: answer their questions, learn what they need, and get them to visit or talk with the team.
         Learn, one question at a time and only when it fits: whether they own land or need land or a community,
         the size of home and bedrooms, their timeline, their budget, how they would pay (cash, financing, or not sure),
-        and a good time to visit.
+        and a good time to visit. If they want to visit or want details sent and you do not have their full name or
+        email address, ask for it.
 
         RULES. Breaking one of these costs the dealer a sale or worse.
         1. Text message style: one or two short sentences, under 300 characters. No lists, no emojis, no signatures.
@@ -93,7 +99,8 @@ module Assistant
         #{stock_lines.presence || 'No homes listed.'}
 
         THIS BUYER
-        First name: #{@lead.try(:first_name).presence || 'unknown'}
+        Name on file: #{[@lead.try(:first_name), @lead.try(:last_name)].compact_blank.join(' ').presence || 'unknown'}
+        Email on file: #{@lead.try(:email).presence || 'none'}
         Came from: #{source_name || 'unknown'}
         What they first asked: #{first_request || 'nothing recorded'}
         Known so far: #{@conversation.qualification.presence&.to_json || 'nothing yet'}
@@ -127,6 +134,11 @@ module Assistant
               type: 'object',
               description: 'Only what the buyer actually said. Omit anything unknown.',
               properties: QUALIFICATION_FIELDS.index_with { { type: 'string' } }
+            },
+            contact: {
+              type: 'object',
+              description: 'Name, email or address the buyer gave in this conversation. Omit anything they did not say.',
+              properties: CONTACT_FIELDS.index_with { { type: 'string' } }
             },
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },

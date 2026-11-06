@@ -120,6 +120,27 @@ RSpec.describe 'Inbox conversations', type: :request do
     expect(assistant_has_it.last_person_reply_at).to be_present
   end
 
+  it 'texts the buyer the time of an appointment booked for them' do
+    sent = []
+    allow_any_instance_of(Providers::Sms::TwilioProvider).to receive(:send_message) do |_p, **args|
+      sent << args
+      { success: true, external_id: "SM#{SecureRandom.hex(6)}", provider: 'twilio' }
+    end
+    record = handed_off.conversable
+    appt = LeadActivity.create!(lead_id: record.id, user_id: admin.id, assigned_to_id: rep.id, activity_type: 'meeting',
+                                subject: 'Visit', status: 'pending', priority: 'medium', start_time: 2.days.from_now.change(hour: 15), end_time: 2.days.from_now.change(hour: 16),
+                                meeting_location: '123 Main St, Denver', send_calendar_invite: false)
+    post "/api/crm/conversations/#{handed_off.id}/confirm_appointment", headers: headers, params: { activity_id: appt.id }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(sent.last[:body]).to start_with('You are set for ').and include('at 123 Main St, Denver', 'Jordan will see you then')
+    expect(Communication.find(JSON.parse(response.body)['communication_id']).conversation_id).to eq(handed_off.id)
+
+    other = LeadActivity.create!(lead_id: assistant_has_it.conversable_id, user_id: admin.id, activity_type: 'meeting', subject: 'x',
+                                 status: 'pending', priority: 'medium', start_time: 1.day.from_now, end_time: 1.day.from_now + 1.hour, send_calendar_invite: false)
+    post "/api/crm/conversations/#{handed_off.id}/confirm_appointment", headers: headers, params: { activity_id: other.id }.to_json
+    expect(response).to have_http_status(:not_found)
+  end
+
   it 'saves the Lead Assistant settings only with the add-on' do
     patch '/api/crm/lead_assistant_settings', headers: headers, params: { settings: { enabled: true } }.to_json
     expect(response).to have_http_status(:forbidden)

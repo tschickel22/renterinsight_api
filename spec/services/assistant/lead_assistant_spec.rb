@@ -29,9 +29,9 @@ RSpec.describe 'Lead Assistant', type: :request do
     TwilioAccount.create!(company: company, phone_number: own_number, phone_number_sid: "PN#{SecureRandom.hex(8)}", status: 'active')
   end
 
-  def brain_says(reply:, handoff: false, reason: nil, qualification: {})
+  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {})
     allow_any_instance_of(Assistant::Brain).to receive(:call).and_return(
-      Assistant::Brain::Result.new(reply: reply, qualification: qualification, handoff: handoff,
+      Assistant::Brain::Result.new(reply: reply, qualification: qualification, contact: contact, handoff: handoff,
                                    handoff_reason: reason, summary: 'Wants a 3 bed on her land.', usage: {})
     )
   end
@@ -126,6 +126,20 @@ RSpec.describe 'Lead Assistant', type: :request do
       expect(conversation.reload.qualification).to include('bedrooms' => '3 bedrooms')
       expect(lead.reload.preferred_bedrooms).to eq(3)
       expect(Communication.where(conversation_id: conversation.id).order(:id).last.metadata).to include('sent_by' => 'assistant', 'source' => 'assistant')
+    end
+
+    it 'puts the name, email and address the buyer types onto the lead, without overwriting what is there' do
+      lead.update!(first_name: 'Text from (303) 555-0144', last_name: '', email: nil)
+      brain_says(reply: 'Thanks Tia, I will send that over.',
+                 contact: { 'first_name' => 'Tia', 'last_name' => 'May', 'email' => 'Tia.May@Example.com', 'zip' => '80601' })
+      buyer_texts("I'm Tia May, tia.may@example.com, zip 80601")
+      perform_enqueued_jobs
+      expect(lead.reload).to have_attributes(first_name: 'Tia', last_name: 'May', email: 'tia.may@example.com', zip: '80601')
+
+      brain_says(reply: 'Got it.', contact: { 'first_name' => 'Tee', 'email' => 'other@example.com' })
+      buyer_texts('or other@example.com')
+      perform_enqueued_jobs
+      expect(lead.reload).to have_attributes(first_name: 'Tia', email: 'tia.may@example.com')
     end
 
     it 'routes a reply to a pool number by the conversation, since the number names no dealer' do

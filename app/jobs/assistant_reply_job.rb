@@ -21,6 +21,7 @@ class AssistantReplyJob < ApplicationJob
     result = draft(conversation, settings)
     conversation.merge_qualification!(result.qualification) if result.qualification.present?
     copy_onto_lead(conversation, result.qualification)
+    copy_contact_onto_lead(conversation, result.contact)
 
     reason = result.handoff ? result.handoff_reason : nil
     reply = Assistant::Rules.tidy(result.reply)
@@ -28,6 +29,7 @@ class AssistantReplyJob < ApplicationJob
 
     if problem && !result.handoff
       retry_result = draft(conversation, settings, feedback: problem)
+      copy_contact_onto_lead(conversation, retry_result.contact)
       reply = Assistant::Rules.tidy(retry_result.reply)
       problem = Assistant::Rules.violation(reply)
       result = retry_result
@@ -68,7 +70,38 @@ class AssistantReplyJob < ApplicationJob
   # What the buyer told the assistant, on the lead where the lead has a place
   # for it. Only blank fields are filled, so nothing a rep typed is overwritten.
   LEAD_FIELDS = { 'bedrooms' => :preferred_bedrooms, 'budget' => :budget_range,
-                  'timeline' => :purchase_timeframe }.freeze
+                  'timeline' => :purchase_timeframe, 'home_type' => :preferred_home_type }.freeze
+
+  EMAIL = /\A[^@\s]+@[^@\s]+\.[a-z]{2,}\z/i
+  # Names the system gave a lead before anyone knew it ("Text from (303) ...").
+  PLACEHOLDER_NAME = /\Atext from\b|\Aunknown\z|\Anew lead\z/i
+
+  # Name, email and address the buyer typed, onto the lead's own fields, as
+  # the lead form would. Fills what is blank (or a placeholder name); never
+  # overwrites what a rep or a form already put there.
+  def copy_contact_onto_lead(conversation, contact)
+    lead = conversation.conversable
+    return if lead.nil? || contact.blank?
+
+    changes = {}
+    placeholder = lead.try(:first_name).to_s.match?(PLACEHOLDER_NAME) ||
+                  [lead.try(:first_name), lead.try(:last_name)].join(' ').match?(PLACEHOLDER_NAME)
+    %w[first_name last_name].each do |field|
+      next unless contact[field].present? && lead.has_attribute?(field)
+
+      changes[field] = contact[field].truncate(80) if lead[field].blank? || placeholder
+    end
+    email = contact['email'].to_s.downcase
+    changes['email'] = email if email.match?(EMAIL) && lead.has_attribute?(:email) && lead.email.blank?
+    %w[street city state zip].each do |field|
+      changes[field] = contact[field].truncate(120) if contact[field].present? && lead.has_attribute?(field) && lead[field].blank?
+    end
+    return if changes.empty?
+
+    lead.update!(changes)
+  rescue StandardError => e
+    Rails.logger.warn("[AssistantReplyJob] could not copy contact onto lead: #{e.message}")
+  end
 
   def copy_onto_lead(conversation, fields)
     lead = conversation.conversable
