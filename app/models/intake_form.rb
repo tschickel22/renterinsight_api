@@ -11,19 +11,26 @@ class IntakeForm < ApplicationRecord
   # Shown beside the marketing consent checkbox when a dealer has not written
   # their own. Deliberately plain: it names who is sending, what they will send,
   # and how to stop, which is what a consent record has to be able to prove was
-  # on screen. {{company}} is the only substitution. What they will send
-  # depends on the business: a software company does not send home offers.
+  # on screen. What they will send depends on the business: a software company
+  # does not send home offers. The texting disclosures (frequency, rates, STOP,
+  # HELP, not a condition of purchase, and that texts go through the platform)
+  # are what carriers check when they review a texting campaign (backlog E96),
+  # so they are part of the default rather than left to each dealer.
+  # Substitutions: {{company}} (the dealer) and {{platform}} (Brand.current).
+  SMS_DISCLOSURE = 'Message frequency varies. Message and data rates may apply. ' \
+                   'Reply STOP to opt out of texts or HELP for help. I can unsubscribe from email at any time. ' \
+                   'Consent is not a condition of purchase.'
   DEFAULT_MARKETING_CONSENT_TEXTS = {
-    'manufactured_housing' => 'homes, offers and events',
+    'manufactured_housing' => 'my inquiry, homes, appointments and offers',
     'installer'            => 'its services and offers',
     'rv'                   => 'RVs, offers and events',
     'saas'                 => 'its products, updates and offers',
     'property_management'  => 'rentals, availability and community news',
     'storage'              => 'storage units, availability and offers'
-  }.transform_values { |about| "Yes, {{company}} may email and text me about #{about}. I can unsubscribe at any time." }.freeze
+  }.transform_values { |about| "Yes, {{company}} may email and text me about #{about}, sent through {{platform}}. #{SMS_DISCLOSURE}" }.freeze
   DEFAULT_MARKETING_CONSENT_TEXT = DEFAULT_MARKETING_CONSENT_TEXTS['manufactured_housing']
   OTHER_MARKETING_CONSENT_TEXT =
-    'Yes, {{company}} may email and text me about its products, services and offers. I can unsubscribe at any time.'
+    "Yes, {{company}} may email and text me about its products, services and offers, sent through {{platform}}. #{SMS_DISCLOSURE}"
 
   def self.default_marketing_consent_text(industry)
     DEFAULT_MARKETING_CONSENT_TEXTS.fetch(industry.to_s, OTHER_MARKETING_CONSENT_TEXT)
@@ -140,7 +147,7 @@ class IntakeForm < ApplicationRecord
       'version' => marketing_consent_version,
       # What a blank wording box means for this company, for the editor's placeholder.
       'default_text' => default_marketing_consent_text
-    }
+    }.merge(consent_policy_links)
     json['hideName'] = json['hide_name']
     json['hideDescription'] = json['hide_description']
     json['marketingConsentEnabled'] = json['marketing_consent_enabled']
@@ -180,7 +187,7 @@ class IntakeForm < ApplicationRecord
         'enabled' => marketing_consent?,
         'text' => resolved_marketing_consent_text,
         'version' => marketing_consent_version
-      }
+      }.merge(consent_policy_links)
     }.compact
   end
 
@@ -212,6 +219,13 @@ class IntakeForm < ApplicationRecord
   def resolved_marketing_consent_text
     text = marketing_consent_text.presence || default_marketing_consent_text
     text.gsub('{{company}}', company&.name.to_s.presence || 'this dealership')
+        .gsub('{{platform}}', consent_brand.name.to_s)
+  end
+
+  # The platform's policies, linked under the checkbox. A texting campaign
+  # reviewer looks for them next to the consent wording.
+  def consent_policy_links
+    { 'privacy_url' => consent_brand.privacy_url, 'terms_url' => consent_brand.terms_url }
   end
 
   def default_marketing_consent_text
@@ -223,6 +237,10 @@ class IntakeForm < ApplicationRecord
   end
 
   private
+
+  def consent_brand
+    @consent_brand ||= Brand.current(company: company)
+  end
 
   # A new wording is a new version, so a consent record can say which one a
   # person saw. Blank and the default count as the same wording.
