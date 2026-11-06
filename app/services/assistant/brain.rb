@@ -130,7 +130,7 @@ module Assistant
             },
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
-            summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want.' }
+            summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' }
           },
           required: %w[reply handoff summary]
         }
