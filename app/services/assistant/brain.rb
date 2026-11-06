@@ -165,14 +165,12 @@ module Assistant
       turns
     end
 
+    # Company records only, not a website: a company can hold several sites,
+    # including demos built from templates that carry a sample business name
+    # and footer ("Coastal Breeze Homes" answered for Summit Park on staging).
+    # Texts go out under the company's name, so the facts must match it.
     def knowledge
-      @knowledge ||= Concierge::Knowledge.new(website: website, company: @company)
-    end
-
-    def website
-      @company.websites.order(updated_at: :desc).first
-    rescue StandardError
-      nil
+      @knowledge ||= Concierge::Knowledge.new(website: nil, company: @company)
     end
 
     def stock_lines

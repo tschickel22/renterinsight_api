@@ -198,6 +198,14 @@ RSpec.describe 'Lead Assistant', type: :request do
     expect(enqueued_jobs.select { |j| j['job_class'] == 'AssistantReplyJob' }).to be_empty
   end
 
+  it 'speaks for the company, never for a website built from a template' do
+    company.websites.new(name: 'Coastal Breeze Homes', slug: "cb-#{SecureRandom.hex(3)}", brand: { 'company_name' => 'Coastal Breeze Homes' }).save!(validate: false)
+    conversation = Conversation.create!(company: company, conversable: lead, sender_number: own_number, buyer_phone: lead.phone, started_at: Time.current)
+    prompt = Assistant::Brain.new(conversation: conversation, settings: Assistant::Settings.for(company), history: []).system_prompt
+    expect(prompt).to include(company.name)
+    expect(prompt).not_to include('Coastal Breeze')
+  end
+
   describe Assistant::Rules do
     it 'refuses links and payment figures, and allows ordinary prices' do
       expect(described_class.violation('See www.summitpark.com')).to eq('link')
