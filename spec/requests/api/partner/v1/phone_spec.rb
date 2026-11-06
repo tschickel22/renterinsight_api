@@ -120,13 +120,22 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
 
     it 'falls back to the record owner when the extension matches nobody, and tells them about a missed call' do
       post '/api/partner/v1/phone/calls',
-           params: report(call_type: 'Missed', agent_email: '', agent_name: 'Front Desk', duration: '0').to_json,
+           params: report(call_type: 'Missed', agent_email: '', agent_name: 'Front Desk', duration: '0',
+                          started_at: 5.minutes.ago.utc.iso8601).to_json,
            headers: headers
       act = lead.lead_activities.last
       expect(act.user_id).to eq(rep.id)
       expect(act.call_outcome).to eq('no_answer')
       expect(act.subject).to eq('Missed call')
       expect(Notification.where(recipient: rep, notification_type: 'missed_call').count).to eq(1)
+    end
+
+    it 'logs an old missed call from the history 3CX replays without telling anyone' do
+      post '/api/partner/v1/phone/calls',
+           params: report(call_type: 'Missed', duration: '0', started_at: 3.days.ago.utc.iso8601).to_json,
+           headers: headers
+      expect(lead.lead_activities.last.subject).to eq('Missed call')
+      expect(Notification.where(notification_type: 'missed_call').count).to eq(0)
     end
 
     it 'reads a .NET TimeSpan duration and an outbound unanswered call' do

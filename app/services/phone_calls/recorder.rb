@@ -16,8 +16,12 @@ module PhoneCalls
   #   (activities require a user).
   # - A missed call from someone already in the CRM tells their owner and
   #   followers, because 3CX's own missed-call emails need a mail server many
-  #   dealers never set up.
+  #   dealers never set up. Only for a call that ended within NOTIFY_WINDOW: when
+  #   a template is first saved 3CX replays weeks of history, and a missed call
+  #   from last week is not news.
   class Recorder
+    NOTIFY_WINDOW = 1.hour
+
     # 3CX [CallType] => [direction, outcome]
     CALL_TYPES = {
       'inbound' => %w[inbound answered],
@@ -55,7 +59,7 @@ module PhoneCalls
       )
       activity = record && user ? create_activity!(log, record, user) : nil
       log.update_columns(activity_type: activity.class.name, activity_id: activity.id) if activity
-      notify_missed(log, record) if record && direction == 'inbound' && outcome == 'no_answer'
+      notify_missed(log, record) if record && direction == 'inbound' && outcome == 'no_answer' && recent?(log)
       Result.new(log: log, record: record, activity: activity, duplicate: false)
     rescue ActiveRecord::RecordNotUnique
       existing = @company.phone_call_logs.find_by(dedupe_key: key)
@@ -149,6 +153,11 @@ module PhoneCalls
     def duration_label(secs)
       m, s = secs.divmod(60)
       m.zero? ? "#{s} sec" : "#{m} min #{s} sec"
+    end
+
+    def recent?(log)
+      ended = (log.started_at || Time.current) + log.duration_seconds.to_i.seconds
+      ended >= NOTIFY_WINDOW.ago
     end
 
     def notify_missed(log, record)
