@@ -29,6 +29,7 @@ module Api
         reads = ConversationRead.where(user_id: current_user.id, conversation_id: rows.map(&:id))
                                 .pluck(:conversation_id, :last_read_at).to_h
 
+        @next_appointments = next_appointments(rows)
         render json: {
           items: rows.map { |c| row_json(c, reads[c.id]) },
           meta: { total: total, page: page, per_page: PER_PAGE, total_pages: (total.to_f / PER_PAGE).ceil, counts: counts }
@@ -125,6 +126,26 @@ module Api
       end
 
       private
+
+      # The next pending visit for each conversation's lead or contact, in two
+      # queries for the page, so the Inbox can link to it on the calendar.
+      def next_appointments(conversations)
+        found = {}
+        { 'Lead' => [LeadActivity, :lead_id], 'Contact' => [ContactActivity, :contact_id] }.each do |type, (model, key)|
+          ids = conversations.select { |c| c.conversable_type == type }.map(&:conversable_id)
+          next if ids.empty?
+
+          model.where(key => ids, activity_type: 'meeting', status: 'pending').where('start_time >= ?', Time.current)
+               .order(:start_time).each { |a| found[[type, a.public_send(key)]] ||= a }
+        end
+        found
+      end
+
+      def next_appointment_json(c)
+        @next_appointments ||= next_appointments([c])
+        a = @next_appointments[[c.conversable_type, c.conversable_id]]
+        a && { id: a.id, start_time: a.start_time, subject: a.subject }
+      end
 
       def set_conversation
         @conversation = visible_scope.find(params[:id])
@@ -235,7 +256,8 @@ module Api
           last_message_at: c.last_message_at,
           last_message_preview: c.last_message_preview,
           snoozed_until: c.snoozed_until,
-          started_at: c.started_at
+          started_at: c.started_at,
+          next_appointment: next_appointment_json(c)
         }
       end
     end

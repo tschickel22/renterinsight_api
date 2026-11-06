@@ -120,6 +120,22 @@ RSpec.describe 'Inbox conversations', type: :request do
     expect(assistant_has_it.last_person_reply_at).to be_present
   end
 
+  it "names each conversation's next visit, for the calendar link" do
+    record = handed_off.conversable
+    allow(AppointmentInviteJob).to receive(:perform_later)
+    LeadActivity.create!(lead_id: record.id, user_id: admin.id, activity_type: 'meeting', subject: 'Past', status: 'pending',
+                         priority: 'medium', start_time: 2.days.ago, end_time: 2.days.ago + 1.hour, send_calendar_invite: false)
+    soon = LeadActivity.create!(lead_id: record.id, user_id: admin.id, activity_type: 'meeting', subject: 'Walk the Hawthorne',
+                                status: 'pending', priority: 'medium', start_time: 2.days.from_now, end_time: 2.days.from_now + 1.hour,
+                                send_calendar_invite: false)
+    row = list['items'].find { |r| r['id'] == handed_off.id }
+    expect(row['next_appointment']).to include('id' => soon.id, 'subject' => 'Walk the Hawthorne')
+    expect(list['items'].find { |r| r['id'] == answered.id }['next_appointment']).to be_nil
+
+    get "/api/crm/conversations/#{handed_off.id}", headers: headers, params: { location_id: 'all' }
+    expect(JSON.parse(response.body)['next_appointment']['id']).to eq(soon.id)
+  end
+
   it 'saves the Lead Assistant settings only with the add-on' do
     patch '/api/crm/lead_assistant_settings', headers: headers, params: { settings: { enabled: true } }.to_json
     expect(response).to have_http_status(:forbidden)
