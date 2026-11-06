@@ -90,10 +90,7 @@ module PhoneCalls
       from_entity = a[:entity_id] && lookup.find_entity(a[:entity_id])
       return from_entity if from_entity
 
-      digits = a[:number].to_s.gsub(/\D/, '')
-      return nil if digits.length < 7
-
-      IdentityResolver.new(@company, phone: digits).resolve&.record
+      lookup.resolve(a[:number])&.last
     end
 
     def resolve_user(a, record)

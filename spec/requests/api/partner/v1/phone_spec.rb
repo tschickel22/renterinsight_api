@@ -50,6 +50,18 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
       expect(c['url']).to end_with("/crm/leads/#{lead.id}")
     end
 
+    it 'matches the seven digits 3CX sends when its digits-to-match setting is 7' do
+      post '/api/partner/v1/phone/lookup', params: { number: '5550101' }.to_json, headers: headers
+      c = response.parsed_body['contacts'].first
+      expect(c['id']).to eq("lead-#{lead.id}")
+      expect(c['phone']).to eq('5550101')
+    end
+
+    it 'logs a call reported with seven digits on the right lead' do
+      post '/api/partner/v1/phone/calls', params: report(number: '5550101').to_json, headers: headers
+      expect(lead.lead_activities.where(activity_type: 'call').count).to eq(1)
+    end
+
     it 'returns an empty list for an unknown number' do
       get '/api/partner/v1/phone/lookup', params: { number: '+19995550000' }, headers: headers.except('Content-Type')
       expect(response.parsed_body['contacts']).to eq([])
@@ -149,6 +161,7 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
       expect(doc.at_xpath("//Parameter[@Name='ApiKey']")['Default']).to eq('ri_live_abc&<x>')
       expect(doc.at_xpath("//Parameter[@Name='Url']")['Default']).to eq('https://api.example.com')
       expect(doc.at_xpath("//Parameter[@Name='CreateContactEnabled']")['Default']).to eq('False')
+      expect(doc.at_xpath('//Number')['MaxLength']).to eq('10')
     end
   end
 end

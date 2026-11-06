@@ -10,6 +10,8 @@ module PhoneCalls
   # Format follows 3CX's server-side CRM template, checked against public
   # templates that work on V20 (FreeITSM, Pipedrive, a clinic's own). 3CX sends
   # no call id, so PhoneCalls::Recorder dedupes on number + start + extension.
+  # MaxLength is 10, not 3CX's own "digits to match" ([MaxLength], often 7),
+  # so a lookup carries the area code. Lookup still copes with 7.
   #
   # The key is written into the template as the default of a Password parameter,
   # so the admin only uploads the file. It is a leads-only partner API key and is
@@ -27,7 +29,7 @@ module PhoneCalls
       <<~XML
         <?xml version="1.0" encoding="utf-8"?>
         <Crm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Country="US" Name="#{e(@brand)}" Version="1" SupportsEmojis="true">
-          <Number Prefix="AsIs" MaxLength="[MaxLength]" />
+          <Number Prefix="AsIs" MaxLength="10" />
           <Connection MaxConcurrentRequests="4" />
           <Parameters>
             <Parameter Name="Url" Type="String" Parent="General Configuration" Editor="String" Title="#{e(@brand)} address:" Default="#{e(@base)}" />
