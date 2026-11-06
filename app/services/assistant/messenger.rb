@@ -24,9 +24,10 @@ module Assistant
       body = Assistant::Rules.tidy(body)
       body = pool_prefix(conversation) + body if conversation.pool? && !body.start_with?(pool_prefix(conversation))
 
-      metadata = (extra_metadata || {}).to_h.stringify_keys.merge(
-        'sent_by' => sent_by, 'conversation_id' => conversation.id,
-        'source' => SOURCES.fetch(sent_by, 'manual')
+      # Symbol keys: CommunicationService fills in :source with ||=, so a string
+      # 'source' key was overwritten with 'manual'.
+      metadata = (extra_metadata || {}).to_h.symbolize_keys.merge(
+        sent_by: sent_by, conversation_id: conversation.id, source: SOURCES.fetch(sent_by, 'manual')
       )
       CommunicationService.send_sms(
         communicable: lead, to: conversation.buyer_phone, from: conversation.sender_number, body: body,

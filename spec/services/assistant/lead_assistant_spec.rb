@@ -125,7 +125,7 @@ RSpec.describe 'Lead Assistant', type: :request do
       expect(sent.last[:body]).to eq('Happy to help. Are you placing it on your own land?')
       expect(conversation.reload.qualification).to include('bedrooms' => '3 bedrooms')
       expect(lead.reload.preferred_bedrooms).to eq(3)
-      expect(Communication.where(conversation_id: conversation.id).order(:id).last.metadata['sent_by']).to eq('assistant')
+      expect(Communication.where(conversation_id: conversation.id).order(:id).last.metadata).to include('sent_by' => 'assistant', 'source' => 'assistant')
     end
 
     it 'routes a reply to a pool number by the conversation, since the number names no dealer' do
