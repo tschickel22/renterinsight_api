@@ -124,42 +124,7 @@ module Api
         render json: row_json(@conversation.reload, nil)
       end
 
-      # Texts the buyer the time of an appointment just booked for them (the
-      # calendar invite goes by email from the appointment itself, E77), on
-      # the conversation's number so it lands in the same thread.
-      def confirm_appointment
-        return unless authorize_action!('leads', 'update')
-        return render(json: { error: 'This conversation is closed' }, status: :unprocessable_entity) if @conversation.status == 'closed'
-
-        activity = appointment_for(@conversation, params[:activity_id])
-        return render(json: { error: 'Appointment not found' }, status: :not_found) unless activity&.start_time
-
-        result = Assistant::Messenger.deliver!(@conversation, body: appointment_text(activity), sent_by: 'user', user: current_user)
-        if result[:success]
-          render json: { ok: true, communication_id: result[:communication]&.id }
-        else
-          render json: { error: result[:error] || 'Could not send the text' }, status: :unprocessable_entity
-        end
-      end
-
       private
-
-      def appointment_for(conversation, id)
-        case conversation.conversable_type
-        when 'Lead' then LeadActivity.find_by(id: id, lead_id: conversation.conversable_id, activity_type: 'meeting')
-        when 'Contact' then ContactActivity.find_by(id: id, contact_id: conversation.conversable_id, activity_type: 'meeting')
-        end
-      end
-
-      def appointment_text(activity)
-        place = activity.try(:meeting_location).presence || activity.try(:location).presence ||
-                Concierge::Knowledge.new(website: nil, company: @company).contact[:address]
-        rep = (activity.assigned_to || activity.try(:user))&.try(:first_name).presence
-        text = "You are set for #{Appointments::TimeText.for(activity, @company)}"
-        text += " at #{place}" if place.present?
-        text += ". #{rep ? "#{rep} will" : 'We will'} see you then. Reply here if you need to change the time."
-        text
-      end
 
       def set_conversation
         @conversation = visible_scope.find(params[:id])

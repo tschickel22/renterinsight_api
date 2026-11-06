@@ -2872,7 +2872,6 @@ Rails.application.routes.draw do
           post :reopen
           post :take_over
           post :hand_back
-          post :confirm_appointment
         end
       end
       resource :lead_assistant_settings, only: %i[show update]
