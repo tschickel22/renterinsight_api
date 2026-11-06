@@ -73,7 +73,10 @@ module Assistant
         # The Inbox thread, which works on a phone: the rep answers from there,
         # on the conversation's number. Texted to the mobile number in their
         # account settings when that notification is on (default on).
-        action_url: "/inbox?c=#{conversation.id}"
+        action_url: "/inbox?c=#{conversation.id}",
+        # Without this NotificationService only saves it (in-app and push);
+        # email and the text to the rep's phone go out only when asked.
+        deliver_now: true
       )
     rescue StandardError => e
       Rails.logger.error("[Assistant::Handoff] notify failed: #{e.class}: #{e.message}")

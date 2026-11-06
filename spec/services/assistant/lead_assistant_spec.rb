@@ -174,6 +174,8 @@ RSpec.describe 'Lead Assistant', type: :request do
     end
 
     it 'hands off when the buyer asks about payments, and tells the rep' do
+      rep.update!(phone: '3035550199')
+      allow(NotificationService).to receive(:send_sms)
       brain_says(reply: 'Our finance manager will go over that with you. I have asked Jordan to text you.',
                  handoff: true, reason: 'finance_or_credit')
       buyer_texts('What would my payment be?')
@@ -184,6 +186,7 @@ RSpec.describe 'Lead Assistant', type: :request do
       notice = Notification.find_by(notification_type: 'assistant_handoff', recipient_id: rep.id)
       expect(notice.computed_action_url).to eq("/inbox?c=#{conversation.id}")
       expect(NotificationPreference.get_or_create_for(rep, :assistant_handoff).sms_enabled).to be(true)
+      expect(NotificationService).to have_received(:send_sms).with(notice, rep)
     end
 
     it 'never sends a payment figure or a link: it tries again, then hands off' do
