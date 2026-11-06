@@ -84,4 +84,10 @@ RSpec.describe 'Sliding scale markup' do
       expect(result.lines.last[:retail]).to eq(7_700)
     end
   end
+
+  it 'hands its settings to typed-in and inventory homes, which have no book to price them' do
+    rule
+    markup = Truebuild::StandAlonePricing.new(company).defaults[:markup]
+    expect(markup).to include(type: 'sliding', times: nil, sliding_multiplier: 85.0, sliding_curve: 0.454, minimum_markup: 27_368.0)
+  end
 end
