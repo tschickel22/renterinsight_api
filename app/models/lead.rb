@@ -150,6 +150,25 @@ class Lead < ApplicationRecord
     end
   end
 
+  # Before this, forms asked one combined question ("email and text me about
+  # my inquiry, homes, appointments and offers"), so a lead who ticked it then
+  # did agree to texts about their inquiry. Since then that question is two
+  # boxes and opt_in_sms means marketing only.
+  INQUIRY_TEXT_CONSENT_SINCE = Time.utc(2026, 11, 7).freeze
+
+  # May the Lead Assistant and the lead response play text this person about
+  # their inquiry? Yes if they ticked the inquiry texts box, or gave the old
+  # combined consent before the boxes split. Marketing consent given since is
+  # not enough: the pool campaign is registered as conversational only, and
+  # its message flow promises exactly this rule (backlog E96, Twilio 30913).
+  # Named in play workflows as `entity.may_text_about_inquiry`, so keep it a
+  # method defined on Lead itself (WorkflowEngine::ConditionEvaluator).
+  def may_text_about_inquiry
+    return true if sms_inquiry_consent
+
+    opt_in_sms == true && created_at.present? && created_at < INQUIRY_TEXT_CONSENT_SINCE
+  end
+
   # Instance methods for conversion
   def converted?
     is_converted == true

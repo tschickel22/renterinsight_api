@@ -15,7 +15,7 @@ RSpec.describe 'Lead Assistant', type: :request do
   let(:source) { Source.create!(name: 'Website', source_type: 'website', is_active: true) }
   let(:lead) do
     company.leads.create!(first_name: 'Tia', last_name: 'May', phone: '(303) 555-0144', email: 'tia@example.com',
-                          owner_id: rep.id, source_id: source.id, opt_in_sms: true)
+                          owner_id: rep.id, source_id: source.id, sms_inquiry_consent: true)
   end
   let(:own_number) { '+17205550100' }
   let(:sent) { [] }
@@ -74,10 +74,10 @@ RSpec.describe 'Lead Assistant', type: :request do
       expect(Assistant::Starter.for(lead).takes_over?).to be(false)
 
       turn_on!
-      lead.update!(opt_in_sms: false)
+      lead.update!(sms_inquiry_consent: false)
       expect(Assistant::Starter.for(lead).takes_over?).to be(false)
 
-      lead.update!(opt_in_sms: true, source_id: Source.create!(name: 'Mobile Home Guys', source_type: 'partner', is_active: true).id)
+      lead.update!(sms_inquiry_consent: true, source_id: Source.create!(name: 'Mobile Home Guys', source_type: 'partner', is_active: true).id)
       expect(Assistant::Starter.for(lead).takes_over?).to be(false)
     end
 
@@ -162,7 +162,7 @@ RSpec.describe 'Lead Assistant', type: :request do
 
     it 'routes a reply to a pool number by the conversation, since the number names no dealer' do
       Setting.set('Platform', 0, 'assistant_pool', { 'live' => true, 'numbers' => [{ 'number' => '+19704632673', 'messaging_service_sid' => 'MGpool' }] })
-      other = company.leads.create!(first_name: 'Ray', last_name: 'B', phone: '3035550199', owner_id: rep.id, opt_in_sms: true, source_id: source.id)
+      other = company.leads.create!(first_name: 'Ray', last_name: 'B', phone: '3035550199', owner_id: rep.id, sms_inquiry_consent: true, source_id: source.id)
       TwilioAccount.where(company: company).destroy_all
       Assistant::Starter.for(other).send_first_text!(body: 'Hi Ray!')
       pool_conversation = Conversation.find_by(conversable: other)

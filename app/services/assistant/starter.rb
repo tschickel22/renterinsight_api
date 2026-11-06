@@ -28,7 +28,7 @@ module Assistant
     end
 
     def eligible?
-      return false unless lead.is_a?(Lead) && lead.phone.present? && lead.opt_in_sms
+      return false unless lead.is_a?(Lead) && lead.phone.present? && lead.may_text_about_inquiry
       return false if lead.source&.name.to_s.match?(PARTNER_AI_SOURCE)
 
       settings = Assistant::Settings.for(lead.company)

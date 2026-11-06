@@ -8,29 +8,46 @@ class IntakeForm < ApplicationRecord
   # does not exist.
   CUSTOM_FIELD_PREFIX = 'custom:'
 
-  # Shown beside the marketing consent checkbox when a dealer has not written
-  # their own. Deliberately plain: it names who is sending, what they will send,
-  # and how to stop, which is what a consent record has to be able to prove was
-  # on screen. What they will send depends on the business: a software company
-  # does not send home offers. The texting disclosures (frequency, rates, STOP,
-  # HELP, not a condition of purchase, and that texts go through the platform)
-  # are what carriers check when they review a texting campaign (backlog E96),
-  # so they are part of the default rather than left to each dealer.
+  # Two consent questions, asked as two separate checkboxes, both unchecked by
+  # default. Carriers reject a texting campaign whose opt-in asks for marketing
+  # and for conversational texts in one tick (Twilio 30913, rejected
+  # 2026-11-06, backlog E96), and every dealer's own texting campaign is
+  # registered as mixed, so it needs both answers kept apart:
+  #
+  # 1. Texts about the inquiry (SMS_CONSENT): answers, appointment times and
+  #    reminders, a hand-off to staff. Not marketing. Sets the lead's
+  #    sms_inquiry_consent, which the Lead Assistant and the lead response
+  #    play check. Never sets opt_in_sms.
+  # 2. Marketing (MARKETING_CONSENT): emails and texts about homes, offers and
+  #    events. Sets marketing preferences and opt_in_sms, which campaign
+  #    audiences select on.
+  #
+  # Each wording names who is sending, what they will send and how to stop,
+  # which is what a consent record has to prove was on screen, plus the
+  # texting disclosures carriers check (frequency, rates, STOP, HELP, not a
+  # condition of purchase, sent through the platform). Never fold the two back
+  # into one sentence, and never put appointments or the inquiry into the
+  # marketing wording or offers into the inquiry wording.
   # Substitutions: {{company}} (the dealer) and {{platform}} (Brand.current).
   SMS_DISCLOSURE = 'Message frequency varies. Message and data rates may apply. ' \
                    'Reply STOP to opt out of texts or HELP for help. I can unsubscribe from email at any time. ' \
                    'Consent is not a condition of purchase.'
   DEFAULT_MARKETING_CONSENT_TEXTS = {
-    'manufactured_housing' => 'my inquiry, homes, appointments and offers',
+    'manufactured_housing' => 'homes, offers and events',
     'installer'            => 'its services and offers',
     'rv'                   => 'RVs, offers and events',
     'saas'                 => 'its products, updates and offers',
     'property_management'  => 'rentals, availability and community news',
     'storage'              => 'storage units, availability and offers'
-  }.transform_values { |about| "Yes, {{company}} may email and text me about #{about}, sent through {{platform}}. #{SMS_DISCLOSURE}" }.freeze
+  }.transform_values { |about| "Yes, {{company}} may send me marketing emails and texts about #{about}, sent through {{platform}}. #{SMS_DISCLOSURE}" }.freeze
   DEFAULT_MARKETING_CONSENT_TEXT = DEFAULT_MARKETING_CONSENT_TEXTS['manufactured_housing']
   OTHER_MARKETING_CONSENT_TEXT =
-    "Yes, {{company}} may email and text me about its products, services and offers, sent through {{platform}}. #{SMS_DISCLOSURE}"
+    "Yes, {{company}} may send me marketing emails and texts about its products, services and offers, sent through {{platform}}. #{SMS_DISCLOSURE}"
+
+  DEFAULT_SMS_CONSENT_TEXT =
+    'Yes, {{company}} may text me about my inquiry, including answers to my questions and appointment ' \
+    'times and reminders, sent through {{platform}}. Message frequency varies. Message and data rates may apply. ' \
+    'Reply STOP to opt out or HELP for help. Consent is not a condition of purchase.'
 
   def self.default_marketing_consent_text(industry)
     DEFAULT_MARKETING_CONSENT_TEXTS.fetch(industry.to_s, OTHER_MARKETING_CONSENT_TEXT)
@@ -55,6 +72,7 @@ class IntakeForm < ApplicationRecord
   before_create :generate_public_id
   before_save :save_rotation
   before_save :bump_marketing_consent_version
+  before_save :bump_sms_consent_version
   after_save :update_submission_count
 
   validates :name, presence: true
@@ -148,6 +166,15 @@ class IntakeForm < ApplicationRecord
       # What a blank wording box means for this company, for the editor's placeholder.
       'default_text' => default_marketing_consent_text
     }.merge(consent_policy_links)
+    json['sms_consent'] = {
+      'enabled' => sms_consent?,
+      'text' => resolved_sms_consent_text,
+      'version' => sms_consent_version,
+      'default_text' => DEFAULT_SMS_CONSENT_TEXT
+    }.merge(consent_policy_links)
+    json['smsConsentEnabled'] = json['sms_consent_enabled']
+    json['smsConsentText'] = json['sms_consent_text']
+    json['smsConsentVersion'] = json['sms_consent_version']
     json['hideName'] = json['hide_name']
     json['hideDescription'] = json['hide_description']
     json['marketingConsentEnabled'] = json['marketing_consent_enabled']
@@ -187,6 +214,11 @@ class IntakeForm < ApplicationRecord
         'enabled' => marketing_consent?,
         'text' => resolved_marketing_consent_text,
         'version' => marketing_consent_version
+      }.merge(consent_policy_links),
+      'sms_consent' => {
+        'enabled' => sms_consent?,
+        'text' => resolved_sms_consent_text,
+        'version' => sms_consent_version
       }.merge(consent_policy_links)
     }.compact
   end
@@ -217,9 +249,12 @@ class IntakeForm < ApplicationRecord
   # submit time, and copied onto the submission, so a later edit cannot rewrite
   # what somebody already agreed to.
   def resolved_marketing_consent_text
-    text = marketing_consent_text.presence || default_marketing_consent_text
-    text.gsub('{{company}}', company&.name.to_s.presence || 'this dealership')
-        .gsub('{{platform}}', consent_brand.name.to_s)
+    fill_consent(marketing_consent_text.presence || default_marketing_consent_text)
+  end
+
+  # The inquiry texting box, resolved the same way.
+  def resolved_sms_consent_text
+    fill_consent(sms_consent_text.presence || DEFAULT_SMS_CONSENT_TEXT)
   end
 
   # The platform's policies, linked under the checkbox. A texting campaign
@@ -236,7 +271,16 @@ class IntakeForm < ApplicationRecord
     marketing_consent_enabled
   end
 
+  def sms_consent?
+    sms_consent_enabled
+  end
+
   private
+
+  def fill_consent(text)
+    text.gsub('{{company}}', company&.name.to_s.presence || 'this dealership')
+        .gsub('{{platform}}', consent_brand.name.to_s)
+  end
 
   def consent_brand
     @consent_brand ||= Brand.current(company: company)
@@ -250,6 +294,14 @@ class IntakeForm < ApplicationRecord
     return if was.strip == now.strip
     n = marketing_consent_version.to_s[/\d+/].to_i
     self.marketing_consent_version = "v#{n + 1}"
+  end
+
+  def bump_sms_consent_version
+    return if new_record? || !will_save_change_to_sms_consent_text?
+    was, now = attribute_change_to_be_saved(:sms_consent_text).map { |t| t.presence || DEFAULT_SMS_CONSENT_TEXT }
+    return if was.strip == now.strip
+    n = sms_consent_version.to_s[/\d+/].to_i
+    self.sms_consent_version = "v#{n + 1}"
   end
 
   # Only this company's active users join the rotation; anything else in the

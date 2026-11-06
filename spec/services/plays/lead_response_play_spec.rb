@@ -77,7 +77,7 @@ RSpec.describe Plays::LeadResponsePlay do
     it "sends a Facebook lead to its location's rep: text, email, call within 15 minutes, then waits" do
       install(described_class)
       lead = Lead.create!(company_id: company.id, source_id: source('Facebook').id, location_id: second_location.id,
-                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', opt_in_sms: true)
+                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', sms_inquiry_consent: true)
 
       run = advance(run_for(lead))
 
@@ -103,7 +103,7 @@ RSpec.describe Plays::LeadResponsePlay do
     it 'joins the weekly homes email right away, then texts, sends the contact card, emails and sets a call' do
       install(described_class)
       lead = Lead.create!(company_id: company.id, source_id: source('Website').id, location_id: main_location.id,
-                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', opt_in_sms: true)
+                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', sms_inquiry_consent: true)
 
       run = advance(run_for(lead))
 
@@ -120,7 +120,7 @@ RSpec.describe Plays::LeadResponsePlay do
     it 'sends no texts, the card included, to a lead who did not agree to texts' do
       install(described_class)
       lead = Lead.create!(company_id: company.id, source_id: source('Website').id, location_id: main_location.id,
-                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', opt_in_sms: false)
+                          first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035551212', sms_inquiry_consent: false)
 
       advance(run_for(lead))
 
@@ -160,7 +160,7 @@ RSpec.describe Plays::LeadResponsePlay do
       entered_by = make_user
       lead = Lead.create!(company_id: company.id, source_id: source('Walk-In').id, location_id: main_location.id,
                           owner_id: entered_by.id, first_name: 'Sam', last_name: 'Lee', email: 'sam@example.com',
-                          phone: '3035550000', opt_in_sms: true)
+                          phone: '3035550000', sms_inquiry_consent: true)
 
       run = advance(run_for(lead))
       expect(run.wait_reason).to eq('delay')

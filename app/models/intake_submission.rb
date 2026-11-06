@@ -276,6 +276,7 @@ class IntakeSubmission < ApplicationRecord
     self.resolved_entity = new_lead
     update_columns(lead_id: new_lead.id, lead_created: true)
     record_marketing_consent!(new_lead)
+    record_sms_consent!(new_lead)
     
     Rails.logger.info "Created lead #{new_lead.id} from intake submission #{id}"
     
@@ -345,6 +346,7 @@ class IntakeSubmission < ApplicationRecord
     # true (a lead exists for this submission), but we did not create a new one.
     update_columns(lead_id: existing_lead.id, lead_created: true)
     record_marketing_consent!(existing_lead)
+    record_sms_consent!(existing_lead)
 
     # Build the note: standard submission detail + any fill-empty conflicts.
     begin
@@ -896,6 +898,39 @@ class IntakeSubmission < ApplicationRecord
     end
   rescue StandardError => e
     Rails.logger.error("[IntakeSubmission##{id}] could not record marketing consent: #{e.class}: #{e.message}")
+  end
+
+  # The separate "text me about my inquiry" box. Marks the lead so the Lead
+  # Assistant and the lead response play may text them about this inquiry,
+  # and keeps the record a reviewer asks for (wording, page, time, IP) on a
+  # transactional SMS preference. Never touches opt_in_sms or any marketing
+  # preference: this consent is not marketing consent (Twilio 30913).
+  # Like marketing consent, only ever written, never revoked here, and never
+  # allowed to fail the submission.
+  def record_sms_consent!(lead)
+    return unless sms_consent? && lead.is_a?(Lead)
+
+    at = sms_consent_at || Time.current
+    lead.update_columns(sms_inquiry_consent: true, sms_inquiry_consent_at: at) unless lead.sms_inquiry_consent
+
+    preference = CommunicationPreferenceService.opt_in(
+      recipient: lead, channel: 'sms', category: 'transactional',
+      ip_address: ip_address, user_agent: user_agent
+    )
+    preference.update!(
+      compliance_metadata: (preference.compliance_metadata || {}).merge(
+        'source' => 'intake_form',
+        'kind' => 'inquiry_texts',
+        'intake_form_id' => intake_form_id,
+        'intake_submission_id' => id,
+        'consent_text' => sms_consent_text,
+        'consent_version' => intake_form&.sms_consent_version,
+        'page_url' => referrer,
+        'consented_at' => at.iso8601
+      )
+    )
+  rescue StandardError => e
+    Rails.logger.error("[IntakeSubmission##{id}] could not record inquiry text consent: #{e.class}: #{e.message}")
   end
 
   # True when this form has its own SMS opt-in field, i.e. it asked about

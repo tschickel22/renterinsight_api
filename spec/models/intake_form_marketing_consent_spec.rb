@@ -8,7 +8,7 @@ RSpec.describe IntakeForm, 'marketing consent wording', type: :model do
 
   it 'uses the standard wording for the industry, with the company name, until one is written' do
     expect(form.resolved_marketing_consent_text)
-      .to eq("Yes, DealerTide App may email and text me about its products, updates and offers, sent through #{Brand.current.name}. " \
+      .to eq("Yes, DealerTide App may send me marketing emails and texts about its products, updates and offers, sent through #{Brand.current.name}. " \
              'Message frequency varies. Message and data rates may apply. Reply STOP to opt out of texts or HELP for help. ' \
              'I can unsubscribe from email at any time. Consent is not a condition of purchase.')
     expect(form.as_json['marketing_consent']['default_text']).to include('{{company}}', 'products, updates')
@@ -17,7 +17,7 @@ RSpec.describe IntakeForm, 'marketing consent wording', type: :model do
   it 'follows the company when its industry changes' do
     form
     company.update!(industry: 'manufactured_housing')
-    expect(form.reload.resolved_marketing_consent_text).to include('about my inquiry, homes, appointments and offers')
+    expect(form.reload.resolved_marketing_consent_text).to include('about homes, offers and events')
   end
 
   it 'has wording for every industry, and plain wording for one it does not know' do

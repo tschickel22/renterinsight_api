@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_010100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3742,6 +3742,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.boolean "marketing_consent_enabled", default: true, null: false
     t.text "marketing_consent_text"
     t.string "marketing_consent_version", default: "v1", null: false
+    t.boolean "sms_consent_enabled", default: true, null: false
+    t.text "sms_consent_text"
+    t.string "sms_consent_version", default: "v1", null: false
     t.boolean "hide_name", default: false, null: false
     t.boolean "hide_description", default: false, null: false
     t.string "assignment_mode"
@@ -3769,6 +3772,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.boolean "marketing_consent", default: false, null: false
     t.text "marketing_consent_text"
     t.datetime "marketing_consent_at"
+    t.boolean "sms_consent", default: false, null: false
+    t.text "sms_consent_text"
+    t.datetime "sms_consent_at"
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 
@@ -4471,6 +4477,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.datetime "last_activity_scored_at"
     t.boolean "email_invalid", default: false, null: false
     t.boolean "opt_in_sms", default: false, null: false
+    t.boolean "sms_inquiry_consent", default: false, null: false
+    t.datetime "sms_inquiry_consent_at"
     t.string "champion_salesforce_id"
     t.string "champion_status"
     t.jsonb "champion_lead_data", default: {}
