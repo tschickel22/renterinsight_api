@@ -72,6 +72,7 @@ module Truebuild
       @rules = company.dealer_markup_rules.active.to_a
                       .select { |r| r.location_id.nil? || r.location_id == location&.id }
       @warnings = []
+      @sliding_options = []
     end
 
     def call
@@ -84,6 +85,7 @@ module Truebuild
                      'Review the new price book to update your prices.'
       end
       lines = [base_line, *option_lines, freight_line, *addon_lines].compact
+      spread_sliding_markup
       totals = totals_for(lines)
       Result.new(book: @book, cost_book: @cost_book, options_book: @options_cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
@@ -141,6 +143,46 @@ module Truebuild
     # The accepted book's cost for this home, less the same program
     # discount: what the dealer's retail is marked up from while they hold a
     # new book for review. Nil when both books are the same.
+    # What a sliding scale measures a home by: the same figure the home's own
+    # line is marked up from. Nil when the home has no price.
+    def home_basis
+      return @home_basis if defined?(@home_basis)
+
+      vp = @cost_book.variant_prices.find_by(catalog_plan_variant_id: @variant.id)
+      @home_basis =
+        if vp
+          gross = @dealer_prices.base_cost(vp, surcharge: @surcharge)
+          (retail_basis(vp) || (gross - (gross * @terms.program_discount_pct.to_d / 100).round(2))) + @pack
+        end
+    end
+
+    # A sliding scale prices the whole home: base, options and fees together. One
+    # option is what it adds to the home's price, so a home on the minimum adds
+    # only its cost.
+    def sliding_option_retail(rule, basis)
+      return basis unless home_basis
+
+      rule.apply(home_basis + basis) - rule.apply(home_basis)
+    end
+
+    # Several options together must come to what the scale says for the whole
+    # home, so they share what the scale adds, by cost.
+    def spread_sliding_markup
+      @sliding_options.group_by { |entry| entry[:rule] }.each_value do |entries|
+        rule = entries.first[:rule]
+        total = entries.sum { |entry| entry[:basis] }
+        next if entries.size < 2 || !total.positive? || !home_basis
+
+        pool = rule.apply(home_basis + total) - rule.apply(home_basis)
+        left = pool
+        entries.each_with_index do |entry, i|
+          share = i == entries.size - 1 ? left : (pool * entry[:basis] / total).round(2)
+          entry[:line][:retail] = money(share)
+          left -= share
+        end
+      end
+    end
+
     def retail_basis(cost_vp)
       return nil if @book == @cost_book
 
@@ -204,15 +246,19 @@ module Truebuild
       # A price the dealer set on their own color or upgrade beats a general
       # markup; a rule written for that one option still beats it.
       own_retail = option.dealer_color? ? retail_price.suggested_retail : nil
+      own_retail_used = own_retail && rule&.scope_type != 'option'
       retail, source =
-        if own_retail && rule&.scope_type != 'option' then [own_retail.to_d, 'your set price']
+        if own_retail_used then [own_retail.to_d, 'your set price']
+        elsif rule&.sliding? then [sliding_option_retail(rule, basis), describe(rule)]
         elsif rule then [rule.apply(basis), describe(rule)]
         elsif retail_price.suggested_retail then [retail_price.suggested_retail.to_d, "factory suggested retail"]
         else [basis, 'no markup']
         end
-      { kind: 'option', option_id: option.id, label: label, group: option.group.name,
+      line = { kind: 'option', option_id: option.id, label: label, group: option.group.name,
         cost: money(cost), retail: money(retail),
         detail: { rule: source, factory_code: option.factory_code, dealer_cost_set: (true if own), dealer_color: (true if option.dealer_color?) }.compact }
+      @sliding_options << { rule: rule, basis: basis, line: line } if rule&.sliding? && !own_retail_used
+      line
     end
 
     # ---- freight -------------------------------------------------------
@@ -307,6 +353,7 @@ module Truebuild
             when 'percent' then "#{number}% over cost"
             when 'multiplier' then "#{number} x cost"
             when 'flat' then "cost + #{ActiveSupport::NumberHelper.number_to_currency(value, precision: value.frac.zero? ? 0 : 2)}"
+            when 'sliding' then "sliding scale, at least #{ActiveSupport::NumberHelper.number_to_currency(rule.minimum_markup.to_d, precision: 0)} over cost"
             when 'manual' then "set price #{ActiveSupport::NumberHelper.number_to_currency(value, precision: value.frac.zero? ? 0 : 2)}"
             end
       where = rule.location_id ? " at #{rule.location&.name}" : ''

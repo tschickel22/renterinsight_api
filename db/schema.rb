@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_05_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_05_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3199,6 +3199,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_05_170000) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "sliding_multiplier", precision: 12, scale: 4
+    t.decimal "sliding_curve", precision: 8, scale: 4
+    t.decimal "minimum_markup", precision: 12, scale: 2
     t.index "company_id, COALESCE(location_id, (0)::bigint), scope_type, COALESCE(manufacturer_id, (0)::bigint), COALESCE(scope_value, ''::character varying), COALESCE(scope_id, (0)::bigint), applies_to", name: "idx_dealer_markup_rules_unique_scope", unique: true
     t.index ["company_id"], name: "index_dealer_markup_rules_on_company_id"
     t.index ["location_id"], name: "index_dealer_markup_rules_on_location_id"

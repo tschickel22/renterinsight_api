@@ -8,7 +8,7 @@ class DealerSurchargeRule < ApplicationRecord
   SECTIONS = %w[any single double triple].freeze
   BASES = %w[per_sq_ft flat].freeze
   # HUD and modular surcharges differ at the same plant.
-  CODES = %w[any HUD MOD].freeze
+  CODES = %w[any HUD MOD ANSI].freeze
   # Same line the model filter draws: 18 feet wide or less ships as one section.
   SINGLE_MAX_WIDTH = 18
   DOUBLE_MAX_WIDTH = 36

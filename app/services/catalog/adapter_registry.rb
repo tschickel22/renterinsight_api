@@ -25,6 +25,9 @@ module Catalog
       'clayton_retail_home_center' => 'Catalog::Adapters::ClaytonRetailHomeCenterAdapter',
       'trove_catalog'              => 'Catalog::Adapters::TroveCatalogAdapter',
       'cavco_retailer'             => 'Catalog::Adapters::CavcoRetailerAdapter',
+      # Same engine, filtered by the plant that builds the model rather than
+      # the dealer Cavco assigned it to.
+      'cavco_plant'                => 'Catalog::Adapters::CavcoPlantAdapter',
       # Single-site type: adventurehomes.net runs a bespoke WordPress theme, so
       # unlike avada_sitemap or manufacturedhomes_platform there is no second
       # manufacturer to onboard behind it.
