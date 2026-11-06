@@ -181,7 +181,9 @@ RSpec.describe 'Lead Assistant', type: :request do
 
       expect(conversation.reload).to have_attributes(status: 'handed_off', handed_off_to_user_id: rep.id,
                                                      handoff_reason: 'finance_or_credit')
-      expect(Notification.where(notification_type: 'assistant_handoff', recipient_id: rep.id)).to exist
+      notice = Notification.find_by(notification_type: 'assistant_handoff', recipient_id: rep.id)
+      expect(notice.computed_action_url).to eq("/inbox?c=#{conversation.id}")
+      expect(NotificationPreference.get_or_create_for(rep, :assistant_handoff).sms_enabled).to be(true)
     end
 
     it 'never sends a payment figure or a link: it tries again, then hands off' do

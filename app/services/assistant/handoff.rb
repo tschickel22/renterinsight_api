@@ -69,7 +69,11 @@ module Assistant
       message += " #{summary}" if summary.present?
       NotificationService.create(
         recipient: user, notification_type: :assistant_handoff, notifiable: lead,
-        message: message.truncate(300), company_id: conversation.company_id, action_text: 'Open conversation'
+        message: message.truncate(300), company_id: conversation.company_id, action_text: 'Open conversation',
+        # The Inbox thread, which works on a phone: the rep answers from there,
+        # on the conversation's number. Texted to the mobile number in their
+        # account settings when that notification is on (default on).
+        action_url: "/inbox?c=#{conversation.id}"
       )
     rescue StandardError => e
       Rails.logger.error("[Assistant::Handoff] notify failed: #{e.class}: #{e.message}")

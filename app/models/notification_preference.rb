@@ -73,7 +73,8 @@ class NotificationPreference < ApplicationRecord
 
     # Communications notifications
     sms_reply_received: { in_app: true, email: true, sms: false, push: true },
-    assistant_handoff: { in_app: true, email: true, sms: false, push: true },
+    # Texted by default (Tom, 2026-11-06): the rep takes the buyer from their phone.
+    assistant_handoff: { in_app: true, email: true, sms: true, push: true },
     sms_new_lead: { in_app: true, email: true, sms: false, push: true },
     # Email off: 3CX sends its own missed-call email once the dealer sets up its
     # mail server, and two emails per missed call is noise. In-app and push carry
