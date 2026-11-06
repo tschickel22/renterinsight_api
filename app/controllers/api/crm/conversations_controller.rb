@@ -197,7 +197,12 @@ module Api
       end
 
       def apply_filters(scope)
-        scope = scope.where(channel: params[:channel]) if params[:channel].present? && Conversation::CHANNELS.include?(params[:channel])
+        # Any conversation with a message on that channel: one row is one person,
+        # so a text conversation they later answered by email is an email one too.
+        if params[:channel].present? && Conversation::CHANNELS.include?(params[:channel])
+          with_messages = Communication.where(channel: params[:channel]).where.not(conversation_id: nil).select(:conversation_id)
+          scope = scope.where(channel: params[:channel]).or(scope.where(id: with_messages))
+        end
         case params[:handled_by]
         when 'assistant' then scope = scope.where(status: 'active', assistant_enabled: true)
         when 'person' then scope = scope.where.not(status: 'active').or(scope.where(assistant_enabled: false))

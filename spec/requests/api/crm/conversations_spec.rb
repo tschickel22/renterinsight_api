@@ -64,6 +64,14 @@ RSpec.describe 'Inbox conversations', type: :request do
     expect(list(q: '0103')['items'].map { |r| r['id'] }).to eq([answered.id])
   end
 
+  it 'finds a text conversation under Email once they answered by email' do
+    Communication.create!(company_id: company.id, communicable: handed_off.conversable, channel: 'email', direction: 'inbound',
+                          status: 'delivered', from_address: 'ray@example.com', to_address: 'x@y.test', subject: 'Re', body: 'By email',
+                          metadata: { reply_tracking_token: "lead-#{handed_off.conversable_id}" })
+    expect(list(channel: 'email')['items'].map { |r| r['id'] }).to eq([handed_off.id])
+    expect(list(channel: 'sms')['items'].map { |r| r['id'] }).to match_array([handed_off.id, assistant_has_it.id, answered.id])
+  end
+
   it 'marks unread until opened' do
     expect(list['items'].find { |r| r['id'] == handed_off.id }['unread']).to be(true)
     post "/api/crm/conversations/#{handed_off.id}/read", headers: headers
