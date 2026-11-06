@@ -103,6 +103,23 @@ RSpec.describe 'Inbox conversations', type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  it 'sends a reply typed in the thread on the conversation, and takes it from the assistant' do
+    sent = []
+    allow_any_instance_of(Providers::Sms::TwilioProvider).to receive(:send_message) do |_p, **args|
+      sent << args
+      { success: true, external_id: "SM#{SecureRandom.hex(6)}", provider: 'twilio' }
+    end
+    record = assistant_has_it.conversable
+    post '/api/platform/communications/sms', headers: headers,
+         params: { entity_type: 'Lead', entity_id: record.id, to: record.phone, message: 'Hi Tia, Ada here - free Saturday?' }.to_json
+    expect(response.status).to be < 300
+    comm = Communication.find(JSON.parse(response.body)['id'])
+    expect(comm).to have_attributes(conversation_id: assistant_has_it.id, from_address: '+17205550100')
+    expect(sent.last[:body]).to eq('Hi Tia, Ada here - free Saturday?')
+    expect(assistant_has_it.reload).to have_attributes(status: 'handed_off', handed_off_to_user_id: admin.id)
+    expect(assistant_has_it.last_person_reply_at).to be_present
+  end
+
   it 'saves the Lead Assistant settings only with the add-on' do
     patch '/api/crm/lead_assistant_settings', headers: headers, params: { settings: { enabled: true } }.to_json
     expect(response).to have_http_status(:forbidden)

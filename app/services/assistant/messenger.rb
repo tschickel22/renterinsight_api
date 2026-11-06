@@ -21,7 +21,8 @@ module Assistant
         return { success: false, error: 'opted_out' }
       end
 
-      body = Assistant::Rules.tidy(body)
+      # The assistant's and plays' words follow house style; a person's are sent as typed.
+      body = Assistant::Rules.tidy(body) unless sent_by == 'user'
       body = pool_prefix(conversation) + body if conversation.pool? && !body.start_with?(pool_prefix(conversation))
 
       # Symbol keys: CommunicationService fills in :source with ||=, so a string
