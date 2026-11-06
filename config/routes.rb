@@ -2145,6 +2145,11 @@ Rails.application.routes.draw do
       post 'connected-apps/:id/undo_recent', to: 'connected_apps#undo_recent'
       resources :connected_apps, only: [:index, :destroy], path: 'connected-apps'
 
+      # Phone system integration (3CX): status, recent calls, template download
+      get 'phone-system', to: 'phone_system#show'
+      post 'phone-system/three-cx-template', to: 'phone_system#three_cx_template'
+      delete 'phone-system/three-cx', to: 'phone_system#disconnect'
+
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
         collection do
           get :available_resources
@@ -3793,6 +3798,11 @@ Rails.application.routes.draw do
         resources :users, only: [:index, :show]
         resources :payments, only: [:index, :show, :create, :update, :destroy]
         resources :loans, only: [:index, :show, :create, :update, :destroy]
+
+        # Phone systems (3CX CRM template): caller lookup, create lead, call journaling
+        match 'phone/lookup', to: 'phone#lookup', via: [:get, :post]
+        post 'phone/contacts', to: 'phone#create_contact'
+        post 'phone/calls', to: 'phone#calls'
 
         # Webhooks
         get 'webhook-events', to: 'webhook_events#index'

@@ -182,6 +182,7 @@ class Company < ApplicationRecord
   has_many :company_domains, dependent: :destroy
   # Partner API Associations
   has_many :api_keys, dependent: :destroy
+  has_many :phone_call_logs, dependent: :delete_all
   has_many :webhook_endpoints, dependent: :destroy
   # RBAC System Associations
   has_many :roles, dependent: :destroy

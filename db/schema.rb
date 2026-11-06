@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_05_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_06_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5610,6 +5610,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_05_180000) do
     t.index ["company_id"], name: "index_pending_import_links_on_company_id"
     t.index ["entity_type", "entity_id"], name: "idx_pending_links_entity"
     t.index ["import_job_id"], name: "index_pending_import_links_on_import_job_id"
+  end
+
+  create_table "phone_call_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "provider", default: "3cx", null: false
+    t.string "dedupe_key", null: false
+    t.string "call_type"
+    t.string "direction"
+    t.string "outcome"
+    t.string "number"
+    t.string "agent"
+    t.string "agent_name"
+    t.string "agent_email"
+    t.bigint "user_id"
+    t.datetime "started_at"
+    t.integer "duration_seconds"
+    t.string "loggable_type"
+    t.bigint "loggable_id"
+    t.string "activity_type"
+    t.bigint "activity_id"
+    t.jsonb "payload", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "created_at"], name: "index_phone_call_logs_on_company_id_and_created_at"
+    t.index ["company_id", "dedupe_key"], name: "index_phone_call_logs_on_company_id_and_dedupe_key", unique: true
+    t.index ["loggable_type", "loggable_id"], name: "index_phone_call_logs_on_loggable_type_and_loggable_id"
   end
 
   create_table "play_installations", force: :cascade do |t|
