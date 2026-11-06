@@ -1,0 +1,85 @@
+# frozen_string_literal: true
+
+module Assistant
+  # Opens a Lead Assistant conversation with the first text a play sends a new
+  # lead (backlog E96). The dealer's own words still go out; from then on the
+  # buyer's replies are answered by the assistant.
+  class Starter
+    # Leads from a partner that runs its own AI on the buyer (Mobile Home Guys
+    # through GoHighLevel, E95). Two bots on one buyer is the worst outcome.
+    PARTNER_AI_SOURCE = /mobile\s*home\s*guys|gohighlevel|\bmhg\b/i
+
+    attr_reader :lead
+
+    def self.for(entity)
+      new(entity)
+    end
+
+    def initialize(lead)
+      @lead = lead
+    end
+
+    def existing
+      @existing ||= Assistant::Threading.open_conversation_for(lead, lead.try(:phone))
+    end
+
+    def takes_over?
+      existing.present? || (eligible? && sender.present?)
+    end
+
+    def eligible?
+      return false unless lead.is_a?(Lead) && lead.phone.present? && lead.opt_in_sms
+      return false if lead.source&.name.to_s.match?(PARTNER_AI_SOURCE)
+
+      settings = Assistant::Settings.for(lead.company)
+      return false unless settings.enabled? && settings.answers_source?(lead.source_id)
+
+      !CommunicationOptOut.check(channel: 'sms', company: lead.company, record: lead, address: lead.phone).opted_out?
+    end
+
+    # The dealer's own live number, else a free pool number, else nil.
+    def sender
+      @sender ||= own_number || pool_number
+    end
+
+    def send_first_text!(body:, metadata: {})
+      conversation = existing || open!
+      body = identify(body, conversation)
+      Assistant::Messenger.deliver!(conversation, body: body, sent_by: 'play', extra_metadata: metadata)
+    end
+
+    def open!
+      s = sender
+      raise ArgumentError, 'no number to text from' unless s
+
+      Conversation.create!(
+        company_id: lead.company_id, location_id: lead.location_id, conversable: lead, channel: 'sms',
+        assigned_user_id: lead.try(:owner_id), sender_number: s[:number], buyer_phone: lead.phone,
+        pool: s[:pool], messaging_service_sid: s[:messaging_service_sid], status: 'active', started_at: Time.current
+      )
+    end
+
+    private
+
+    def own_number
+      accounts = TwilioAccount.active.where(company_id: lead.company_id)
+      account = accounts.find_by(location_id: lead.location_id) if lead.location_id
+      account ||= accounts.find_by(location_id: nil) || accounts.first
+      account && { number: Conversation.normalize_phone(account.phone_number), pool: false, messaging_service_sid: nil }
+    end
+
+    def pool_number
+      return nil unless Assistant::Pool.within_allowance?(lead.company)
+
+      entry = Assistant::Pool.pick_for(lead.phone)
+      entry && entry.merge(pool: true)
+    end
+
+    # The first text names the dealer, whatever the template says.
+    def identify(body, conversation)
+      return body if conversation.pool? # the pool prefix names the dealer
+      name = Assistant::Messenger.dealer_name(conversation)
+      body.to_s.downcase.include?(name.downcase) ? body : "#{name}: #{body}"
+    end
+  end
+end

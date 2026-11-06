@@ -68,6 +68,9 @@ class PlatformModule
     # tenant (TenantModuleOverride). Config keys live on those rows — see
     # PLAN_CONFIG_DEFAULTS for the marketing.website precedent.
     'marketing.text_us' => { name: 'Text Us Widget', category: 'Marketing', icon: 'MessageSquare', description: 'Web-to-text widget for any dealer site — visitors send a text, replies route to a rep or round-robin queue through the existing SMS pipeline' },
+    # Paid add-on (backlog E96), same shape as marketing.text_us: absent from
+    # every PLAN_TEMPLATE, attached per tenant with a TenantModuleOverride.
+    'marketing.lead_assistant' => { name: 'Lead Assistant', category: 'Marketing', icon: 'Bot', description: 'AI that texts new leads back within a minute, answers from your own homes and facts, learns what they want and hands the conversation to your team' },
     # Paid add-on, same shape as text_us and automation: absent from every
     # PLAN_TEMPLATE on purpose, so no tier grants it free and it can be sold to a
     # dealer who is on neither our website builder nor Text Us.

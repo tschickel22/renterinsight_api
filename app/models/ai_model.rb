@@ -25,7 +25,11 @@ module AiModel
     concierge:      'claude-haiku-4-5',
     # In-app help (backlog E75): drafting articles and tours for new features,
     # and later the help assistant. AI_MODEL_HELP moves it without a deploy.
-    help:           'claude-sonnet-4-6'
+    help:           'claude-sonnet-4-6',
+    # Lead Assistant (E96): texts real buyers under a dealer's name, extracts
+    # what they want and decides when to hand off. Sonnet, because a wrong
+    # answer here costs a sale. AI_MODEL_LEAD_ASSISTANT moves it.
+    lead_assistant: 'claude-sonnet-4-6'
   }.freeze
 
   def self.for(role)

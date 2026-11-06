@@ -97,6 +97,8 @@ class Notification < ApplicationRecord
 
     # SMS / Communications notifications
     sms_reply_received: { category: 'communications', priority: 'high', title: 'SMS Reply Received' },
+    # Lead Assistant (E96) passed a conversation to a person.
+    assistant_handoff: { category: 'communications', priority: 'high', title: 'Lead Assistant Needs You' },
     # A text from someone not in the CRM became a lead (ColdTextHandler).
     sms_new_lead: { category: 'crm', priority: 'high', title: 'New Lead by Text' },
     # A call from someone in the CRM went unanswered (PhoneCalls::Recorder, 3CX).
@@ -166,6 +168,7 @@ class Notification < ApplicationRecord
     mention_received
     approval_required
     sms_reply_received
+    assistant_handoff
     sms_new_lead
     missed_call
     email_reply_received

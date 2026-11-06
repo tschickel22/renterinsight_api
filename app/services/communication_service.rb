@@ -233,6 +233,20 @@ class CommunicationService
                    'Verify a sending domain, or send this campaign from a non-Google mailbox.'
     end
     
+    # Lead Assistant conversations (E96): every text in one goes out on the
+    # number the conversation runs on, so the buyer hears from one number, and
+    # a shared pool number carries conversation traffic only.
+    conversation = nil
+    if channel == 'sms' && direction == 'outbound'
+      conversation = options.delete(:conversation) || Assistant::Threading.open_conversation_for(communicable, to)
+      if conversation
+        from = conversation.sender_number if conversation.pool? || from.blank?
+        options[:pool_messaging_service_sid] = conversation.messaging_service_sid if conversation.pool?
+      elsif from.present? && Assistant::Pool.pool_number?(from)
+        raise Error, 'The shared assistant number only sends Lead Assistant conversation texts.'
+      end
+    end
+
     # Get default from address if not provided
     # User email connection takes highest priority in waterfall
     from ||= default_from_address(channel, communicable, user: @sending_user)
@@ -267,8 +281,10 @@ class CommunicationService
       bcc_addresses: options[:bcc],
       reply_to: options[:reply_to],
       portal_visible: portal_visible,
-      metadata: metadata.merge('category' => category)
+      metadata: metadata.merge('category' => category),
+      conversation_id: conversation&.id
     )
+    Assistant::Threading.outbound_sent(conversation, @communication, sender_user_id: sender_user_id) if conversation
     
     # Auto-generate reply-to address for tracking (if not already provided)
     if channel == 'email' && direction == 'outbound' && @communication.reply_to.blank?
