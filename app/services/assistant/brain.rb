@@ -31,7 +31,8 @@ module Assistant
     # (AssistantReplyJob), the same fields the lead form fills.
     CONTACT_FIELDS = %w[first_name last_name email street city state zip].freeze
 
-    Result = Struct.new(:reply, :qualification, :contact, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
+    Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :handoff, :handoff_reason, :summary, :usage,
+                        keyword_init: true)
 
     def initialize(conversation:, settings:, history:, feedback: nil)
       @conversation = conversation
@@ -50,6 +51,7 @@ module Assistant
         reply: input['reply'].to_s.strip,
         qualification: input['qualification'].to_h.slice(*QUALIFICATION_FIELDS).compact_blank,
         contact: input['contact'].to_h.slice(*CONTACT_FIELDS).transform_values { |v| v.to_s.strip }.compact_blank,
+        resend_invite: input['resend_invite'] == true,
         handoff: input['handoff'] == true,
         handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : (input['handoff'] ? 'other' : nil),
         summary: input['summary'].to_s.strip.truncate(500),
@@ -81,7 +83,11 @@ module Assistant
         4. Never send a link or a web address of any kind.
         5. Do not use dashes as punctuation.
         6. If they ask to talk with a person, are upset, ask about legal, warranty or a complaint, want a trade in
-           valued, or want an appointment time, hand off with a short friendly reply saying someone will text them.
+           valued, or want to book a new visit or change or cancel one, hand off with a short friendly reply saying
+           someone will text them.
+        8. If they ask about a visit already booked (when, where, with whom), answer from THEIR APPOINTMENTS below.
+           If they ask for the invite or the details again, set resend_invite and tell them the calendar invite is on
+           its way to their email (only when an email is on file; otherwise just text them the details).
         7. Do not repeat a question they already answered. Do not greet them again after the first message.
 
         Always call the respond tool.
@@ -104,6 +110,9 @@ module Assistant
         Came from: #{source_name || 'unknown'}
         What they first asked: #{first_request || 'nothing recorded'}
         Known so far: #{@conversation.qualification.presence&.to_json || 'nothing yet'}
+
+        THEIR APPOINTMENTS
+        #{appointment_lines.presence || 'None booked.'}
         #{@feedback ? "\nYour last draft could not be sent (#{@feedback}). Write a new one that follows the rules." : ''}
       PROMPT
     end
@@ -140,6 +149,7 @@ module Assistant
               description: 'Name, email or address the buyer gave in this conversation. Omit anything they did not say.',
               properties: CONTACT_FIELDS.index_with { { type: 'string' } }
             },
+            resend_invite: { type: 'boolean', description: 'True to email the calendar invite for their next appointment again.' },
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
             summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' }
@@ -194,6 +204,22 @@ module Assistant
         bits << "#{v.square_feet} sq ft" if v.square_feet.present?
         bits << "$#{v.sale_price.to_i}" if v.sale_price.to_i.positive?
         "- #{bits.join(', ')}"
+      end.join("\n")
+    rescue StandardError
+      ''
+    end
+
+    # Upcoming visits for this buyer, so "what time is my appointment?" is
+    # answered rather than handed off.
+    def upcoming_appointments
+      Assistant::Appointments.upcoming_for(@lead)
+    end
+
+    def appointment_lines
+      upcoming_appointments.map do |a|
+        rep = (a.assigned_to || a.user)&.try(:first_name).presence
+        place = a.try(:meeting_location).presence || a.try(:location).presence || knowledge.contact[:address]
+        "- #{::Appointments::TimeText.for(a, @company)}#{" at #{place}" if place}#{" with #{rep}" if rep}"
       end.join("\n")
     rescue StandardError
       ''

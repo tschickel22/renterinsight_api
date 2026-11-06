@@ -29,9 +29,9 @@ RSpec.describe 'Lead Assistant', type: :request do
     TwilioAccount.create!(company: company, phone_number: own_number, phone_number_sid: "PN#{SecureRandom.hex(8)}", status: 'active')
   end
 
-  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {})
+  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {}, resend_invite: false)
     allow_any_instance_of(Assistant::Brain).to receive(:call).and_return(
-      Assistant::Brain::Result.new(reply: reply, qualification: qualification, contact: contact, handoff: handoff,
+      Assistant::Brain::Result.new(reply: reply, qualification: qualification, contact: contact, resend_invite: resend_invite, handoff: handoff,
                                    handoff_reason: reason, summary: 'Wants a 3 bed on her land.', usage: {})
     )
   end
@@ -140,6 +140,24 @@ RSpec.describe 'Lead Assistant', type: :request do
       buyer_texts('or other@example.com')
       perform_enqueued_jobs
       expect(lead.reload).to have_attributes(first_name: 'Tia', email: 'tia.may@example.com')
+    end
+
+    it "knows the buyer's booked visit, and sends the calendar invite again when asked" do
+      allow(AppointmentInviteJob).to receive(:perform_later)
+      allow(AppointmentBookingTextJob).to receive(:perform_later)
+      start = 3.days.from_now.change(hour: 16)
+      appt = LeadActivity.create!(lead: lead, user: rep, assigned_to: rep, activity_type: 'meeting', subject: 'Visit', status: 'pending',
+                                  priority: 'medium', start_time: start, end_time: start + 1.hour, meeting_location: 'Sales office')
+      prompt = Assistant::Brain.new(conversation: conversation, settings: Assistant::Settings.for(company), history: []).system_prompt
+      expect(prompt).to include("#{Appointments::TimeText.for(appt, company)} at Sales office with Jordan")
+
+      resent = []
+      allow(AppointmentInviteJob).to receive(:perform_later) { |*args| resent << args }
+      brain_says(reply: 'You are set for Tuesday at 4 PM at our Sales office. I sent the invite to your email again.', resend_invite: true)
+      buyer_texts('What time is my appointment? Can you resend the invite?')
+      perform_enqueued_jobs(except: [AppointmentInviteJob])
+      expect(resent).to eq([['LeadActivity', appt.id, 'REQUEST']])
+      expect(conversation.reload.status).to eq('active')
     end
 
     it 'routes a reply to a pool number by the conversation, since the number names no dealer' do

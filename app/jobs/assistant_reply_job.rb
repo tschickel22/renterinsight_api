@@ -36,6 +36,8 @@ class AssistantReplyJob < ApplicationJob
       reason = retry_result.handoff ? retry_result.handoff_reason : nil
     end
 
+    Assistant::Appointments.resend_invite(conversation.conversable) if result.resend_invite && !problem
+
     if problem
       Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)
     elsif reason
