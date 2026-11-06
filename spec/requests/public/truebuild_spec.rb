@@ -218,6 +218,25 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(body['option_ids']).to eq([fridge.id])
   end
 
+  it 'asks texts about the inquiry and marketing as two boxes, worded as recorded' do
+    expect { get "/public/truebuild/models/#{variant.id}", params: { token: token, website_id: site.id } }
+      .not_to change(IntakeForm, :count) # a page view creates no form
+    consent = JSON.parse(response.body)['consent']
+    expect(consent['sms_consent']).to include('enabled' => true)
+    expect(consent['sms_consent']['text']).to include('may text me about my inquiry')
+    expect(consent['marketing_consent']['text']).to include('marketing emails and texts')
+
+    post '/public/truebuild/designs', params: {
+      token: token, website_id: site.id, variant_id: variant.id, vehicle_id: vehicle.id, option_ids: [fridge.id],
+      contact: { first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '3035550142', sms_consent: true }
+    }
+    expect(response).to have_http_status(:created)
+    submission = TruebuildDesign.last.intake_submission
+    expect(submission).to have_attributes(sms_consent: true, marketing_consent: false)
+    expect(submission.sms_consent_text).to eq(consent['sms_consent']['text'])
+    expect(TruebuildDesign.last.lead).to have_attributes(sms_inquiry_consent: true, opt_in_sms: false)
+  end
+
   it 'saves a design, creates the lead through the TrueBuild form, and opens by share link' do
     expect do
       post '/public/truebuild/designs', params: {

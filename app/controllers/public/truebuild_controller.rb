@@ -27,7 +27,7 @@ class Public::TruebuildController < ApplicationController
     variant = vehicle.catalog_plan_variant
     return not_designable unless Truebuild::BuyerCatalog.designable_home?(@company, vehicle)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).for_buyer.merge(vehicle_id: vehicle.id)
+    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).for_buyer.merge(vehicle_id: vehicle.id, consent: consent_questions)
   end
 
   # GET /public/truebuild/models   Every model this dealer offers, for a site block.
@@ -47,7 +47,7 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, show_prices: @preview == true).for_buyer
+    render json: Truebuild::BuyerCatalog.new(@company, variant, show_prices: @preview == true).for_buyer.merge(consent: consent_questions)
   end
 
   # GET /public/truebuild/models/:variant_id/trueview
@@ -83,7 +83,7 @@ class Public::TruebuildController < ApplicationController
 
     design = Truebuild::DesignSaver.new(
       company: @company, variant: variant, vehicle: vehicle, option_ids: params[:option_ids], addon_ids: params[:addon_ids],
-      contact: params.fetch(:contact, {}).permit(:first_name, :last_name, :email, :phone, :message, :marketing_consent).to_h,
+      contact: params.fetch(:contact, {}).permit(:first_name, :last_name, :email, :phone, :message, :marketing_consent, :sms_consent).to_h,
       context: params.fetch(:context, {}).permit(:page_url, :utm_source, :utm_medium, :utm_campaign, :utm_content, :utm_term).to_h,
       request: request, copied_from: params[:copied_from],
       buyer_access: Truebuild::BuyerPass.resolve(params[:as], @company)
@@ -144,6 +144,10 @@ class Public::TruebuildController < ApplicationController
 
   # A buyer saves a design or two; a script saves hundreds. Ten an hour per
   # address per dealer is plenty for a family on one connection.
+  def consent_questions
+    Truebuild::DesignSaver.consent_questions(@company)
+  end
+
   def throttled?
     key = "truebuild:saves:#{@company.id}:#{request.remote_ip}"
     count = Rails.cache.increment(key, 1, expires_in: 1.hour) || Rails.cache.write(key, 1, expires_in: 1.hour) && 1

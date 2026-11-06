@@ -52,12 +52,16 @@ module Truebuild
       form = self.class.form_for(@company)
       # As on every intake form: absence is refusal, and the wording is copied as shown.
       consented = form.marketing_consent? && ActiveModel::Type::Boolean.new.cast(@contact['marketing_consent']) == true
+      sms_consented = form.sms_consent? && ActiveModel::Type::Boolean.new.cast(@contact['sms_consent']) == true
       submission = form.intake_submissions.create!(
         data: submission_data(design, price, form),
         ip_address: @request&.remote_ip, user_agent: @request&.user_agent, referrer: @request&.referer,
         submitted_at: Time.current, marketing_consent: consented,
         marketing_consent_text: (form.resolved_marketing_consent_text if consented),
-        marketing_consent_at: (Time.current if consented)
+        marketing_consent_at: (Time.current if consented),
+        sms_consent: sms_consented,
+        sms_consent_text: (form.resolved_sms_consent_text if sms_consented),
+        sms_consent_at: (Time.current if sms_consented)
       )
       design.update!(intake_submission: submission, lead_id: submission.reload.lead_id)
       PortalAccess.call(design)
@@ -70,6 +74,19 @@ module Truebuild
         @copied_from.track!('copied', copy_id: design.id, copied_by: design.buyer_name.presence)
       end
       design
+    end
+
+    # The consent questions the save sheet shows, worded by the same form the
+    # save is recorded on, so what a buyer sees is what their consent record
+    # says. Two separate boxes (texts about the inquiry, and marketing): one box
+    # for both is what carriers reject (Twilio 30913). Read only: a page view
+    # must not create the form, so an unsaved one stands in for its defaults.
+    def self.consent_questions(company)
+      source = company.sources.find_by(name: SOURCE)
+      form = (source && company.intake_forms.where(source_id: source.id, is_active: true).order(:created_at).first) ||
+             IntakeForm.new(company: company)
+      json = form.public_as_json
+      { 'sms_consent' => json['sms_consent'], 'marketing_consent' => json['marketing_consent'] }
     end
 
     # The dealer's TrueBuild intake form: the play's, or one made now.

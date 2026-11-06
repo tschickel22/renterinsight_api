@@ -39,6 +39,36 @@ module FacebookLeads
     # column value. 'notes' and 'survey_answers' are the same thing now: every
     # such answer lands in both, so a dealer sees it on the lead either way.
     ANSWER_TARGETS = %w[notes survey_answers].freeze
+
+    # Consent on a Facebook lead form lives in its custom disclaimer: two
+    # separate optional checkboxes, the same two questions our own forms ask
+    # (IntakeForm: texts about the inquiry, and marketing). Never one box for
+    # both: carriers reject a texting campaign whose opt-in combines them
+    # (Twilio 30913). Meta returns each box as custom_disclaimer_responses
+    # [{ checkbox_key, is_checked }], keyed by the key the dealer gives the box,
+    # so the Facebook settings card tells them which keys to use.
+    CONSENT_KEYS = { 'inquiry_texts' => :inquiry, 'marketing' => :marketing }.freeze
+
+    # The two checkboxes to put in a Facebook form's custom disclaimer, with the
+    # dealer's name filled in. Same wording as their website forms.
+    def self.consent_checkboxes(company)
+      brand = Brand.current(company: company)
+      fill = ->(t) { t.gsub('{{company}}', company.name.to_s).gsub('{{platform}}', brand.name.to_s) }
+      [
+        { key: 'inquiry_texts', text: fill.(IntakeForm::DEFAULT_SMS_CONSENT_TEXT) },
+        { key: 'marketing', text: fill.(IntakeForm.default_marketing_consent_text(company.industry)) }
+      ]
+    end
+
+    # { inquiry: true/false, marketing: true/false } from a lead's checkbox
+    # answers. A key we do not know counts as neither: guessing a yes is how
+    # somebody gets texted without having agreed.
+    def self.consents(raw)
+      Array(raw && raw['custom_disclaimer_responses']).each_with_object({ inquiry: false, marketing: false }) do |r, h|
+        kind = CONSENT_KEYS[r['checkbox_key'].to_s.strip.downcase]
+        h[kind] = true if kind && ActiveModel::Type::Boolean.new.cast(r['is_checked']) == true
+      end
+    end
     IGNORE_TARGET  = 'ignore'
 
     # attrs:       the lead's attributes, ready for Lead.create!
@@ -84,6 +114,11 @@ module FacebookLeads
         origin:      Lead::ORIGIN_FACEBOOK,
         notes: notes(raw, leadgen_id, form_id, answers)
       ).compact
+      # Set on the new lead itself, so a play starting from lead.created sees it.
+      if self.class.consents(raw)[:inquiry]
+        lead_attrs[:sms_inquiry_consent] = true
+        lead_attrs[:sms_inquiry_consent_at] = consent_time(raw)
+      end
 
       Result.new(attrs: lead_attrs, answers: answers, cf_values: cf_values, cf_consumed: cf_consumed)
     end
@@ -116,6 +151,26 @@ module FacebookLeads
       Rails.logger.error "[FacebookLeads::LeadBuilder] answers note failed for lead #{lead.id}: #{e.class}: #{e.message}"
     end
 
+    # The record of what this person agreed to on the Facebook form, beside the
+    # opt-in, the way IntakeSubmission keeps it for our own forms. Only ever
+    # writes a yes. Never fails the lead.
+    def record_consents!(lead, raw, leadgen_id)
+      given = self.class.consents(raw)
+      return unless given.values.any?
+
+      meta = { 'source' => 'facebook_lead_form', 'leadgen_id' => leadgen_id.to_s, 'form_id' => raw['form_id'].to_s,
+               'page_id' => @integration.page_id.to_s, 'consented_at' => consent_time(raw).iso8601 }
+      if given[:inquiry]
+        lead.update_columns(sms_inquiry_consent: true, sms_inquiry_consent_at: consent_time(raw)) unless lead.try(:sms_inquiry_consent) || !lead.has_attribute?(:sms_inquiry_consent)
+        stamp(lead, 'sms', 'transactional', meta.merge('kind' => 'inquiry_texts', 'checkbox_key' => 'inquiry_texts'))
+      end
+      if given[:marketing]
+        %w[email sms].each { |channel| stamp(lead, channel, 'marketing', meta.merge('checkbox_key' => 'marketing')) }
+      end
+    rescue StandardError => e
+      Rails.logger.error "[FacebookLeads::LeadBuilder] consent record failed for #{lead.class.name} #{lead.id}: #{e.class}: #{e.message}"
+    end
+
     def source_label
       ['Facebook Lead Ads', @integration.page_name.presence].compact.join(': ')
     end
@@ -127,6 +182,17 @@ module FacebookLeads
     end
 
     private
+
+    def consent_time(raw)
+      Time.zone.parse(raw['created_time'].to_s) || Time.current
+    rescue ArgumentError
+      Time.current
+    end
+
+    def stamp(recipient, channel, category, meta)
+      preference = CommunicationPreferenceService.opt_in(recipient: recipient, channel: channel, category: category)
+      preference.update!(compliance_metadata: (preference.compliance_metadata || {}).merge(meta))
+    end
 
     def parse_field_data(field_data)
       field_data.each_with_object({}) do |entry, h|

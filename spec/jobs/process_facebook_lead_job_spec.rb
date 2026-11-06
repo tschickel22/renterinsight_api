@@ -41,6 +41,45 @@ RSpec.describe ProcessFacebookLeadJob do
     Lead.where(company_id: company.id)
   end
 
+  describe 'consent checkboxes' do
+    def with_boxes(*responses)
+      graph_lead.merge('custom_disclaimer_responses' => responses.map { |k, v| { 'checkbox_key' => k, 'is_checked' => v } })
+    end
+
+    it 'marks inquiry texts from its own box, on the lead as created, without marketing' do
+      allow(MetaGraphApi).to receive(:fetch_lead).and_return(with_boxes(['inquiry_texts', '1'], ['marketing', '']))
+      lead = deliver.reload
+
+      expect(lead).to have_attributes(sms_inquiry_consent: true, opt_in_sms: false)
+      pref = CommunicationPreference.find_by(recipient: lead, channel: 'sms', category: 'transactional')
+      expect(pref.compliance_metadata).to include('source' => 'facebook_lead_form', 'checkbox_key' => 'inquiry_texts')
+      expect(CommunicationPreference.marketing_consent?(recipient: lead)).to be(false)
+    end
+
+    it 'records marketing from the marketing box only' do
+      allow(MetaGraphApi).to receive(:fetch_lead).and_return(with_boxes(['marketing', true]))
+      lead = deliver.reload
+
+      expect(lead.sms_inquiry_consent).to be(false)
+      expect(CommunicationPreference.marketing_consent?(recipient: lead, channel: 'sms')).to be(true)
+      expect(lead.opt_in_sms).to be(true)
+    end
+
+    it 'counts no consent from a box with a key it does not know, or from no boxes' do
+      allow(MetaGraphApi).to receive(:fetch_lead).and_return(with_boxes(['texts_and_offers', true]))
+      expect(deliver.reload).to have_attributes(sms_inquiry_consent: false, opt_in_sms: false)
+      allow(MetaGraphApi).to receive(:fetch_lead).and_return(graph_lead)
+      expect(deliver('lg-2').reload.sms_inquiry_consent).to be(false)
+    end
+
+    it 'gives the dealer the two boxes to paste, with keys and their wording' do
+      boxes = FacebookLeads::LeadBuilder.consent_checkboxes(company)
+      expect(boxes.map { |b| b[:key] }).to eq(%w[inquiry_texts marketing])
+      expect(boxes.first[:text]).to include("#{company.name} may text me about my inquiry")
+      expect(boxes.last[:text]).to include('marketing emails and texts')
+    end
+  end
+
   describe 'location' do
     it "lands the lead at the company's default location, not corporate" do
       lead = deliver

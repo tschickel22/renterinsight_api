@@ -46,13 +46,16 @@ class ProcessFacebookLeadJob < ApplicationJob
     if (match = builder.identity_match(lead_attrs))
       # The absorber lists the raw answers itself, so hand it the metadata-only
       # note or every answer would appear twice.
-      repeat_attrs = lead_attrs.merge(notes: builder.notes(raw, leadgen_id, form_id, {}))
+      repeat_attrs = lead_attrs.except(:sms_inquiry_consent, :sms_inquiry_consent_at)
+                               .merge(notes: builder.notes(raw, leadgen_id, form_id, {}))
       absorb_repeat_inquiry(integration, builder, company, match, repeat_attrs, built)
+      builder.record_consents!(match.record, raw, leadgen_id)
       return match.record
     end
 
     lead = Lead.create!(lead_attrs)
     builder.write_answers_note(lead, built.answers)
+    builder.record_consents!(lead, raw, leadgen_id)
 
     integration.with_lock do
       integration.increment!(:lead_count)
