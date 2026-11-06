@@ -2145,6 +2145,10 @@ Rails.application.routes.draw do
       post 'connected-apps/:id/undo_recent', to: 'connected_apps#undo_recent'
       resources :connected_apps, only: [:index, :destroy], path: 'connected-apps'
 
+      # The signed-in person's saved list filters (leads, contacts, accounts, deals)
+      get 'me/list-filters', to: 'list_filters#show'
+      put 'me/list-filters', to: 'list_filters#update'
+
       # Phone system integration (3CX): status, recent calls, template download
       get 'phone-system', to: 'phone_system#show'
       post 'phone-system/three-cx-template', to: 'phone_system#three_cx_template'

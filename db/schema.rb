@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_06_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_06_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8206,6 +8206,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_150000) do
     t.string "sms_signature"
     t.bigint "primary_user_id"
     t.boolean "platform_admin", default: false
+    t.jsonb "list_filter_preferences", default: {}, null: false
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
