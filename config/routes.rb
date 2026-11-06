@@ -2861,6 +2861,21 @@ Rails.application.routes.draw do
 
     # ==================== CRM NAMESPACE ====================
     namespace :crm do
+      # ==================== INBOX AND LEAD ASSISTANT (E96) ====================
+      resources :conversations, only: %i[index show] do
+        collection { get :for_record }
+        member do
+          post :read
+          post :assign
+          post :snooze
+          post :done
+          post :reopen
+          post :take_over
+          post :hand_back
+        end
+      end
+      resource :lead_assistant_settings, only: %i[show update]
+
       # ==================== SOURCES ====================
       resources :sources, only: %i[index create update destroy] do
         member { get :stats }

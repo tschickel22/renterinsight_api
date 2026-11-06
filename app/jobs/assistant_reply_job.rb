@@ -67,7 +67,8 @@ class AssistantReplyJob < ApplicationJob
 
   # What the buyer told the assistant, on the lead where the lead has a place
   # for it. Only blank fields are filled, so nothing a rep typed is overwritten.
-  LEAD_FIELDS = { 'bedrooms' => :preferred_bedrooms, 'budget' => :budget_range }.freeze
+  LEAD_FIELDS = { 'bedrooms' => :preferred_bedrooms, 'budget' => :budget_range,
+                  'timeline' => :purchase_timeframe }.freeze
 
   def copy_onto_lead(conversation, fields)
     lead = conversation.conversable

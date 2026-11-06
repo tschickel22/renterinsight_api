@@ -186,6 +186,18 @@ RSpec.describe 'Lead Assistant', type: :request do
     end
   end
 
+  it 'puts a reply from a lead the assistant is not handling in the inbox, for a person' do
+    own_account!
+    CommunicationService.send_sms(communicable: lead, to: lead.phone, from: own_number, body: 'Hi Tia, it is Jordan.', sender_user_id: rep.id)
+    buyer_texts('Hi Jordan, is Saturday ok?')
+
+    conversation = Conversation.find_by(conversable: lead)
+    expect(conversation).to have_attributes(assistant_enabled: false, status: 'active', sender_number: own_number)
+    expect(conversation.last_message_preview).to eq('Hi Jordan, is Saturday ok?')
+    expect(Communication.where(direction: 'inbound').last.conversation_id).to eq(conversation.id)
+    expect(enqueued_jobs.select { |j| j['job_class'] == 'AssistantReplyJob' }).to be_empty
+  end
+
   describe Assistant::Rules do
     it 'refuses links and payment figures, and allows ordinary prices' do
       expect(described_class.violation('See www.summitpark.com')).to eq('link')

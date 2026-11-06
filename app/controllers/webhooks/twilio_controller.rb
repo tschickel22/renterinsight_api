@@ -285,6 +285,10 @@ module Webhooks
         # The assistant answers this one; the rep hears about it if it hands off.
         assistant_answering = assistant_conversation.present? &&
                               Assistant::Inbound.received(assistant_conversation, inbound_comm, keyword: keyword_reply?(stripped_body))
+        unless assistant_conversation || keyword_reply?(stripped_body)
+          Assistant::Threading.track_inbound!(company: company, record: communicable, communication: inbound_comm,
+                                              our_number: to_number, buyer_number: from_number)
+        end
 
         # Notify the assigned user in-app that a reply arrived
         notify_user_id = sender_user_id || assigned_user_id
@@ -368,6 +372,8 @@ module Webhooks
                                        body: body, message_sid: message_sid).call
             Rails.logger.info "[TwilioWebhook] Cold text from #{from_number} -> #{cold.record.class.name} ##{cold.record.id}" \
                               "#{cold.created_lead ? ' (new lead)' : ''}"
+            Assistant::Threading.track_inbound!(company: company, record: cold.record, communication: cold.communication,
+                                                our_number: to_number, buyer_number: from_number)
           rescue StandardError => e
             Rails.logger.error "[TwilioWebhook] Cold text handling failed for #{from_number}: #{e.class}: #{e.message}"
           end
