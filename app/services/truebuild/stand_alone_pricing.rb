@@ -37,12 +37,19 @@ module Truebuild
     private
 
     # The rule as something to multiply by; nil when it is not one (a flat or
-    # manual rule says nothing about a home no one has priced).
+    # manual rule says nothing about a home no one has priced). A sliding scale
+    # depends on the home's cost, so it comes back as its settings and the
+    # screen works the price out from cost + pack, as the engine does.
     def markup
       rule = @company.dealer_markup_rules.active.where(scope_type: 'all', applies_to: %w[base base_and_options]).to_a
                      .select { |r| r.location_id.nil? || r.location_id == @location&.id }
                      .max_by(&:rank)
       return nil unless rule
+
+      if rule.sliding?
+        return { times: nil, type: 'sliding', sliding_multiplier: rule.sliding_multiplier.to_f,
+                 sliding_curve: rule.sliding_curve.to_f, minimum_markup: rule.minimum_markup.to_f }
+      end
 
       times = case rule.markup_type
               when 'multiplier' then rule.value.to_f
