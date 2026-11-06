@@ -32,7 +32,10 @@ module Api
         @next_appointments = next_appointments(rows)
         render json: {
           items: rows.map { |c| row_json(c, reads[c.id]) },
-          meta: { total: total, page: page, per_page: PER_PAGE, total_pages: (total.to_f / PER_PAGE).ceil, counts: counts }
+          meta: { total: total, page: page, per_page: PER_PAGE, total_pages: (total.to_f / PER_PAGE).ceil, counts: counts,
+                  # The Lead Assistant is a paid add-on; without it the Inbox shows
+                  # no assistant controls.
+                  assistant: assistant_meta }
         }
       end
 
@@ -145,6 +148,11 @@ module Api
         @next_appointments ||= next_appointments([c])
         a = @next_appointments[[c.conversable_type, c.conversable_id]]
         a && { id: a.id, start_time: a.start_time, subject: a.subject }
+      end
+
+      def assistant_meta
+        settings = Assistant::Settings.for(@company)
+        { available: settings.add_on?, enabled: settings.enabled?, name: settings.assistant_name }
       end
 
       def set_conversation

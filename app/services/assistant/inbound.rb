@@ -21,7 +21,7 @@ module Assistant
       # A reply already waiting moves later, never earlier, so the job for the
       # newest text is the one that answers and the earlier ones step aside.
       pending = conversation.reply_due_at
-      due = pending + 1.second if pending && pending.future? && pending >= due
+      due = [due, pending + 1.second].max if pending&.future?
       conversation.update_columns(reply_due_at: due, updated_at: Time.current)
       AssistantReplyJob.set(wait_until: due).perform_later(conversation.id, due.to_f)
       true

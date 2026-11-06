@@ -10,9 +10,12 @@ module Assistant
     TONES = %w[friendly professional].freeze
     HANDOFF_MODES = %w[owner user].freeze
 
+    # The name the assistant goes by when a dealer has not chosen one.
+    DEFAULT_NAME = 'Avery'
+
     DEFAULTS = {
       'enabled' => false,
-      'assistant_name' => '',
+      'assistant_name' => DEFAULT_NAME,
       'tone' => 'friendly',
       # 'all', or an array of Source ids the assistant answers leads from.
       'source_ids' => 'all',
@@ -50,7 +53,7 @@ module Assistant
       end
       %w[quiet_start_hour quiet_end_hour].each { |k| clean[k] = clean[k].to_i.clamp(0, 23) if clean.key?(k) }
       clean['extra_facts'] = clean['extra_facts'].to_s.truncate(2000) if clean.key?('extra_facts')
-      clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40) if clean.key?('assistant_name')
+      clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
       Setting.set('Company', company.id, KEY, to_h.merge(clean))
       @to_h = nil
       to_h
@@ -74,7 +77,7 @@ module Assistant
     end
 
     def assistant_name
-      to_h['assistant_name'].presence
+      to_h['assistant_name'].presence || DEFAULT_NAME
     end
 
     def [](key)
