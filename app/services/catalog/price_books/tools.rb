@@ -19,7 +19,7 @@ module Catalog
           properties: {
             plant: { type: 'string', description: 'Plant or brand in the header, e.g. DUTCH HOUSING, PRIME OF INDIANA' },
             series: { type: 'string', description: 'Series in the header, e.g. ASPIRE HUD - 28 SECTIONAL' },
-            building_code: { type: 'string', enum: %w[HUD MOD mixed unknown] },
+            building_code: { type: 'string', enum: %w[HUD MOD ANSI mixed unknown], description: 'ANSI for park models (ANSI A119.5)' },
             effective_date: { type: 'string', description: 'ISO date if printed' },
             fob: { type: 'string' },
             rows: {
@@ -87,7 +87,7 @@ module Catalog
                       width_ft: { type: 'integer' },
                       section_type: { type: 'string', enum: %w[single multi any] },
                       construction: { type: 'string', enum: %w[vog drywall partial_drywall any] },
-                      building_code: { type: 'string', enum: %w[HUD MOD any] },
+                      building_code: { type: 'string', enum: %w[HUD MOD ANSI any] },
                       model_numbers: { type: 'array', items: { type: 'string' } }
                     }
                   },

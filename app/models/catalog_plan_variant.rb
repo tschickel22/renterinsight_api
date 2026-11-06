@@ -5,7 +5,8 @@
 # number can mean a different home in another series (2848M32160 is an Aspire
 # Lancaster and a Genesis ranch), so the series is part of the identity.
 class CatalogPlanVariant < ApplicationRecord
-  BUILDING_CODES = %w[HUD MOD].freeze
+  # ANSI: a park model (ANSI A119.5), e.g. Cavco Ocala's Eagle line. Never HUD-labelled.
+  BUILDING_CODES = %w[HUD MOD ANSI].freeze
   STATUSES = %w[active discontinued].freeze
 
   belongs_to :catalog_plan

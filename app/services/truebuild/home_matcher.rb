@@ -129,13 +129,13 @@ module Truebuild
       end
     end
 
-    # HUD or MOD, the two builds a price book prices; nil when either build
-    # fits the home (HUD_MOD) or neither does (a park model), so no build is
-    # ruled out. Homes saved before building_code existed fall back to their
+    # HUD, MOD or ANSI (a park model), the builds a price book prices; nil
+    # when either HUD or MOD fits the home (HUD_MOD), so no build is ruled
+    # out. Homes saved before building_code existed fall back to their
     # home type.
     def building_code(vehicle)
       code = vehicle.try(:building_code)
-      return code if [BuildingCode::HUD, BuildingCode::MOD].include?(code)
+      return code if [BuildingCode::HUD, BuildingCode::MOD, BuildingCode::ANSI].include?(code)
       return nil if code.present?
 
       vehicle.try(:home_type).to_s.match?(/\bmod(ular)?\b/i) ? 'MOD' : 'HUD'
