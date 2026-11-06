@@ -11,7 +11,7 @@ module Assistant
     HANDOFF_MODES = %w[owner user].freeze
 
     # The name the assistant goes by when a dealer has not chosen one.
-    DEFAULT_NAME = 'Avery'
+    DEFAULT_NAME = 'Quinn'
 
     DEFAULTS = {
       'enabled' => false,

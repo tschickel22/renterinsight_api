@@ -52,7 +52,7 @@ RSpec.describe 'Inbox conversations', type: :request do
     expect(states).to eq(handed_off.id => 'Needs you', assistant_has_it.id => 'Assistant', answered.id => 'Waiting on buyer')
     expect(body['meta']['counts']).to include('needs_you' => 1, 'unassigned' => 1)
     expect(body['items'].first['handoff_label']).to eq('asked about payments or credit')
-    expect(body['meta']['assistant']).to eq('available' => false, 'enabled' => false, 'name' => 'Avery')
+    expect(body['meta']['assistant']).to eq('available' => false, 'enabled' => false, 'name' => 'Quinn')
   end
 
   it 'has the views from the mockup' do
@@ -155,7 +155,7 @@ RSpec.describe 'Inbox conversations', type: :request do
     body = JSON.parse(response.body)
     expect(body['settings']).to include('enabled' => true, 'assistant_name' => 'Judy', 'tone' => 'professional')
     patch '/api/crm/lead_assistant_settings', headers: headers, params: { settings: { assistant_name: '  ' } }.to_json
-    expect(JSON.parse(response.body)['settings']['assistant_name']).to eq('Avery')
+    expect(JSON.parse(response.body)['settings']['assistant_name']).to eq('Quinn')
     expect(body['texting']['sends_from']).to eq('none')
   end
 end
