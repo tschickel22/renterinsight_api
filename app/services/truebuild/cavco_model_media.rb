@@ -66,28 +66,42 @@ module Truebuild
     def match(variant, docs, variants)
       number = variant.model_number.to_s.upcase
       if number.match?(NUMBER)
-        same = docs.select { |d| d['model_number'].to_s.upcase == number }
-        agreeing = same.select { |d| agrees?(variant, d) }
-        return agreeing.first if agreeing.size == 1
-        return nil if agreeing.size > 1
+        same = docs.select { |d| number_of(d) == number }
+        # The closest name wins: Craft Select 15763A shares "select" with
+        # Cavco Select 15763A but both words with Craft Select.
+        scored = same.map { |d| [d, agreement(variant, d)] }.select { |_, n| n.positive? }
+        best = scored.map(&:last).max
+        top = scored.select { |_, n| n == best }.map(&:first)
+        return top.first if top.size == 1
+        return nil if top.size > 1
 
         # One model each side with this number: the number alone is enough.
         sharing = variants.count { |o| o.model_number.to_s.upcase == number }
         same.size == 1 && sharing == 1 ? same.first : nil
       else
-        named = docs.select { |d| d['model_number'].to_s !~ /\d{5}/ && name_words(d['name']).intersect?(name_words(plan_name(variant))) }
+        named = docs.select { |d| number_of(d).nil? && name_words(d['name']).intersect?(name_words(plan_name(variant))) }
         named.size == 1 ? named.first : nil
       end
     end
 
-    # "Ashley" is Elite's Ashley 28603A, not Craft Select 28603A.
-    def agrees?(variant, doc)
+    # Words the names and series share: "Ashley" is Elite's Ashley 28603A,
+    # not Craft Select 28603A.
+    def agreement(variant, doc)
       ours = name_words(plan_name(variant)) | name_words(variant.catalog_plan&.series)
       theirs = name_words(doc['name']) | name_words(doc['series'])
-      ours.intersect?(theirs)
+      (ours & theirs).size
     end
 
-    def plan_name(variant) = variant.catalog_plan&.name.to_s.sub(/\s*#{Regexp.escape(variant.model_number.to_s)}\z/i, '')
+    # Cavco writes some numbers with words in front ("1 Bedroom 13431S").
+    def number_of(doc) = doc['model_number'].to_s.upcase[/\d{5}[A-Z0-9]\z/]
+
+    # A plan name ending in its model number loses it; a name-keyed model
+    # (Cumberland, number CUMBERLAND) keeps its name.
+    def plan_name(variant)
+      name = variant.catalog_plan&.name.to_s
+      number = variant.model_number.to_s
+      number.match?(NUMBER) ? name.sub(/\s*#{Regexp.escape(number)}\z/i, '') : name
+    end
 
     def name_words(text)
       text.to_s.downcase.scan(/[a-z]+/).reject { |w| w.size < 3 || GENERIC.include?(w) }.to_set

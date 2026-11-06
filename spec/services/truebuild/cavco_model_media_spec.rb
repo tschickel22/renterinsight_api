@@ -26,7 +26,11 @@ RSpec.describe Truebuild::CavcoModelMedia do
                                               26_340_ashley_el28603a_livingroom_002_web_1.jpg]),
      doc('d2', 'Craft Select', '28603A', 'Craft Select', %w[340cs28603a_rf0_621_10.jpg]),
      doc('d3', 'Roanoke', 'Duplex', 'Anthem', %w[23_fw_270_anthem_theroanoke_bath_013.jpg]),
-     doc('d4', 'Eagle', '11341A', 'Eagle', %w[chariot_eagle_eagle_eg12341a_kit_0319_1.jpg chariot_eagle_eagle_eg12341a_bunks_0581_1.jpg])]
+     doc('d4', 'Eagle', '11341A', 'Eagle', %w[chariot_eagle_eagle_eg12341a_kit_0319_1.jpg chariot_eagle_eagle_eg12341a_bunks_0581_1.jpg]),
+     doc('d5', 'Cavco Select', '15763A', 'Cavco Select', %w[340cvs15763a_rf0_1.jpg]),
+     doc('d6', 'Craft Select', '15763A', 'Craft Select', %w[340cs15763a_rf0_1.jpg]),
+     doc('d7', 'Cumberland', 'Duplex', 'Anthem', %w[23_fw_270_anthem_thecumberland_kitchen_008.jpg]),
+     doc('d8', 'The Wedge', '1 Bedroom 13431S', 'Hawk', %w[hawk_wedge_kit_1.jpg])]
   end
 
   before do
@@ -59,6 +63,20 @@ RSpec.describe Truebuild::CavcoModelMedia do
 
     expect(roanoke.reload.media['photos'].first).to include('room' => 'bath')
     expect(eagle.reload.media['photos'].map { |p| p['room'] }).to eq(%w[kitchen bedroom])
+  end
+
+  it 'picks the closer name when two series share a word, and reads odd numbers and name keys' do
+    cavco = variant('Cavco Select', 'Cavco Select 15763A', '15763A', 15, 76)
+    craft = variant('Craft Select', 'Craft Select 15763A', '15763A', 15, 76)
+    cumberland = variant('Anthem', 'Cumberland', 'CUMBERLAND', 16, 76)
+    wedge = variant('Hawk', 'The Wedge 1 Bedroom', '13431S', 13, 43)
+
+    described_class.refresh!(mfr)
+
+    expect(cavco.reload.external_ids['cavco_floorplan_id']).to eq('d5')
+    expect(craft.reload.external_ids['cavco_floorplan_id']).to eq('d6')
+    expect(cumberland.reload.external_ids['cavco_floorplan_id']).to eq('d7')
+    expect(wedge.reload.external_ids['cavco_floorplan_id']).to eq('d8')
   end
 
   it 'keeps what an admin chose for TrueView' do
