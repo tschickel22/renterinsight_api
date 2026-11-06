@@ -262,6 +262,11 @@ class Vehicle < ApplicationRecord
   # Park's Prime Monte, Pike and Pinnacle sat unlinked for two weeks).
   before_save :link_catalog_variant,
               if: -> { champion_model_id.present? && catalog_plan_variant_id.nil? }
+  # A feed home links by the feed's own key when a priced model was matched
+  # to it (HomeMatcher#by_feed_key): Clayton's "DOGWOOD", Cavco's "28603A".
+  before_save :link_catalog_variant_by_feed_key,
+              if: -> { champion_model_id.blank? && catalog_plan_variant_id.nil? && catalog_source_key.present? &&
+                       condition.to_s.downcase != 'used' && (new_record? || will_save_change_to_catalog_source_key?) }
   # A home with no Champion id (a site scan, typed in) links when its model
   # text carries a priced model number and its size agrees (HomeMatcher#confident).
   before_save :link_catalog_variant_by_number,
@@ -477,6 +482,10 @@ class Vehicle < ApplicationRecord
 
   def link_catalog_variant
     self.catalog_plan_variant_id = Catalog::PriceBooks::InventoryLinker.variant_for(self)&.id
+  end
+
+  def link_catalog_variant_by_feed_key
+    self.catalog_plan_variant_id = Truebuild::HomeMatcher.new.by_feed_key(self)&.id
   end
 
   def link_catalog_variant_by_number

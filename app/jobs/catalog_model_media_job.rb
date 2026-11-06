@@ -2,7 +2,8 @@
 
 # Pulls model photos from the manufacturer's site (Truebuild::ModelMedia,
 # Truebuild::CavcoModelMedia for Cavco plants, Truebuild::FeedModelMedia for
-# feeds keyed by the book's model numbers).
+# feeds keyed by the book's model numbers), then links dealers' listings of
+# those homes to the models.
 class CatalogModelMediaJob < ApplicationJob
   queue_as :low
 
@@ -18,5 +19,8 @@ class CatalogModelMediaJob < ApplicationJob
     Truebuild::FeedModelMedia.sources.each do |source|
       Truebuild::FeedModelMedia.refresh!(source) if Array(source.config['factory_ids']).map(&:to_i).intersect?(plants)
     end
+    # Dealers' listings of those homes link to the models just matched, so
+    # "Design this home" and TrueView reach them.
+    Truebuild::HomeMatcher.new.link_by_feed_key_all(Vehicle.where(is_deleted: [false, nil]))
   end
 end

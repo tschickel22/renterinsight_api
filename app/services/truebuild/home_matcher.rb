@@ -65,6 +65,45 @@ module Truebuild
       end
     end
 
+    # The priced model a feed home is, by the feed's own key: when a book's
+    # photos were linked, each model kept the key of the feed home it is
+    # (CavcoModelMedia: the Cavco floorplan id; FeedModelMedia: the feed key,
+    # Clayton's SKU). Works where the listing's name carries no number
+    # ("DOGWOOD") or one too short to trust alone (Cavco's "28603A").
+    FEED_KEYS = %w[cavco_floorplan_id feed_key].freeze
+
+    def by_feed_key(vehicle)
+      key = vehicle.catalog_source_key.to_s
+      return nil if key.blank? || vehicle.condition.to_s.downcase == 'used'
+
+      found = feed_keyed[key]
+      found&.one? ? found.first : nil
+    end
+
+    # { feed key => [priced models] }, loaded once.
+    def feed_keyed
+      @feed_keyed ||= CatalogPlanVariant.active.where(id: priced_ids.to_a)
+                                        .where(FEED_KEYS.map { |k| "external_ids ? '#{k}'" }.join(' OR ')).to_a
+                                        .each_with_object(Hash.new { |h, k| h[k] = [] }) do |v, out|
+        FEED_KEYS.filter_map { |k| v.external_ids[k].presence&.to_s }.uniq.each { |k| out[k] << v }
+      end
+    end
+
+    # Links every unlinked feed home whose key names one priced model.
+    # Returns [vehicle id, model number] pairs; dry_run links none.
+    def link_by_feed_key_all(vehicles, dry_run: false)
+      keys = feed_keyed.keys
+      return [] if keys.empty?
+
+      vehicles.where(catalog_plan_variant_id: nil, catalog_source_key: keys)
+              .where("vehicles.condition IS NULL OR lower(vehicles.condition) <> 'used'")
+              .find_each.filter_map do |vehicle|
+        variant = by_feed_key(vehicle) or next
+        vehicle.update_columns(catalog_plan_variant_id: variant.id, updated_at: Time.current) unless dry_run
+        [vehicle.id, variant.model_number]
+      end
+    end
+
     # Up to three likely models, best first, with why.
     def suggest(vehicle)
       numbered = by_number(vehicle)
