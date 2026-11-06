@@ -20,6 +20,10 @@ module Catalog
       return Totals.new(added: 0, updated: 0, inactivated: 0, held: 0) if company.nil?
 
       totals = Hash.new(0)
+      # The homes this dealer carries; the rest the crawl saw come off their
+      # inventory now instead of reading as missing (backlog E94).
+      wanted, not_wanted = homes.partition { |home| subscription.wants?(home.source_key) }
+      not_wanted_keys = not_wanted.map { |home| home.source_key.to_s }
 
       subscription.ingest_location_ids.each do |location_id|
         result = IngestionService.new(
@@ -27,7 +31,7 @@ module Catalog
           source:         subscription.catalog_source,
           location_id:    location_id,
           protect_blanks: degraded
-        ).call(homes)
+        ).call(wanted, not_wanted: not_wanted_keys)
 
         totals[:added]       += result.added
         totals[:updated]     += result.updated

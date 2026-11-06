@@ -118,8 +118,12 @@ module Catalog
     end
 
     # @param homes [Array<NormalizedHome>]
+    # @param not_wanted [Array<String>] keys the crawl saw that this dealer
+    #   does not carry (DealerCatalogSubscription#wants?). They are not
+    #   missing, so they never count toward the mass-removal hold: their rows
+    #   come off now, unless the dealer has done work on one.
     # @return [Result]
-    def call(homes)
+    def call(homes, not_wanted: [])
       result    = Result.new(added: 0, updated: 0, unchanged: 0, inactivated: 0, held: 0)
       seen_keys = []
 
@@ -132,7 +136,9 @@ module Catalog
         end
       end
 
-      inactivate_missing(seen_keys, result)
+      not_wanted = not_wanted.map(&:to_s)
+      result.inactivated += remove_not_wanted(not_wanted)
+      inactivate_missing(seen_keys + not_wanted, result)
       result
     end
 
@@ -277,7 +283,20 @@ module Catalog
       end
 
       missing.each { |vehicle| vehicle.update_columns(is_deleted: true, deleted_at: Time.current) }
-      result.inactivated = missing.size
+      result.inactivated += missing.size
+    end
+
+    # Rows of homes the dealer left out (or has not decided on, while new
+    # homes are held). Same protection as a home leaving the feed: one the
+    # dealer has worked on stays. Ticking the home back restores the row on
+    # the next ingest (upsert finds it and clears is_deleted).
+    def remove_not_wanted(keys)
+      return 0 if keys.empty?
+
+      rows = @company.vehicles.where(catalog_source_id: @source.id, location_id: @location_id, is_deleted: [false, nil],
+                                     catalog_source_key: keys).select { |vehicle| removable?(vehicle) }
+      rows.each { |vehicle| vehicle.update_columns(is_deleted: true, deleted_at: Time.current) }
+      rows.size
     end
 
     def removable?(vehicle)

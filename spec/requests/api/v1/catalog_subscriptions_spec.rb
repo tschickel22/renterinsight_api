@@ -256,4 +256,32 @@ RSpec.describe 'Api::V1::CatalogSubscriptions', type: :request do
       expect(JSON.parse(response.body).dig('backfill', 'mode')).to eq('crawl_queued')
     end
   end
+
+  describe 'choosing homes' do
+    let(:source) { selectable_source('Cavco plant') }
+    let(:sub) { create(:dealer_catalog_subscription, company: company, catalog_source: source) }
+
+    def feed_home(key) = Catalog::NormalizedHome.new(source_key: key, source_url: "https://example.com/#{key}", model_name: "Home #{key}",
+                                                     model_id: key.upcase, series: 'S', bedrooms: 3, bathrooms: 2, dimensions: '28x60')
+
+    before { Catalog::ParsedHomeCache.write(source, [feed_home('a'), feed_home('b')]) }
+
+    it 'lists the feed and applies a choice now' do
+      get "/api/v1/catalog_subscriptions/#{sub.id}/homes", headers: headers
+      expect(JSON.parse(response.body)['homes'].map { |h| h['key'] }).to eq(%w[a b])
+
+      patch "/api/v1/catalog_subscriptions/#{sub.id}",
+            params: { shown_keys: %w[a b], kept_keys: %w[a], new_homes: 'hold' }.to_json, headers: headers
+      body = JSON.parse(response.body)
+      expect(body['subscription']).to include('newHomes' => 'hold', 'leftOutCount' => 1)
+      expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: [false, nil]).pluck(:catalog_source_key)).to eq(%w[a])
+    end
+
+    it "does not reach another company's subscription" do
+      get "/api/v1/catalog_subscriptions/#{sub.id}/homes", headers: other_headers
+      expect(response).to have_http_status(:not_found)
+      patch "/api/v1/catalog_subscriptions/#{sub.id}", params: { shown_keys: %w[a], kept_keys: [] }.to_json, headers: other_headers
+      expect(response).to have_http_status(:not_found)
+    end
+  end
 end
