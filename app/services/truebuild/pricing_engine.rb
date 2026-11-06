@@ -90,6 +90,14 @@ module Truebuild
       Result.new(book: @book, cost_book: @cost_book, options_book: @options_cost_book, variant: @variant, lines: lines, totals: totals, warnings: @warnings)
     end
 
+    # The home alone at the dealer's price: their set price or their markup
+    # on cost, surcharge, program discount and pack, before options, fees and
+    # rounding. What their price list shows beside the factory's figures. Nil
+    # when no rule covers the home.
+    def home_retail
+      base_line[:retail]
+    end
+
     # What the dealer sells one option row for on this model, before it is
     # on a sheet: their set price, their markup, or the factory's suggested
     # retail, as a sheet would price it. Nil when the factory gives no price.

@@ -272,4 +272,13 @@ RSpec.describe 'Dealer price list and colors', type: :request do
     patch "/api/v1/truebuild_pricing/colors/#{company.dealer_colors.first.id}", headers: headers_for(other), params: { name: 'Mine' }.to_json
     expect(response).to have_http_status(:not_found)
   end
+
+  it 'shows what the markup sells each home for, not only homes with a price typed in' do
+    get "/api/v1/truebuild_pricing/price_list?book_id=#{book.id}&kind=base", headers: headers
+    expect(body['rows'].first).to include('factory_cost' => 49_645.0, 'your_price' => nil, 'markup_price' => 62_056.25)
+
+    company.dealer_markup_rules.destroy_all
+    get "/api/v1/truebuild_pricing/price_list?book_id=#{book.id}&kind=base", headers: headers
+    expect(body['rows'].first['markup_price']).to be_nil
+  end
 end

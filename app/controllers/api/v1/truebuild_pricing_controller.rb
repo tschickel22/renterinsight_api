@@ -331,7 +331,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
       scope = scope.where('catalog_plan_variants.model_number ILIKE :q OR catalog_plans.name ILIKE :q OR catalog_plans.series ILIKE :q', q: q) if q
       total = scope.count
       rows = scope.order('catalog_plans.series, catalog_plans.name, catalog_plan_variants.model_number')
-                  .offset((page - 1) * per_page).limit(per_page).map { |vp| price_list_base(vp, prices) }
+                  .offset((page - 1) * per_page).limit(per_page).map { |vp| price_list_base(vp, prices, book) }
       groups = []
     end
     render json: { book: { id: book.id, name: book.name, manufacturer_id: book.manufacturer_id }, rows: rows, groups: groups, can_edit_factory: factory_editor?,
@@ -371,7 +371,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     CatalogPriceCorrectionJob.perform_later(book.id) if corrected
     fresh = Truebuild::DealerPrices.new(@company)
     own = Truebuild::DealerOptions.new(@company, book.manufacturer_id)
-    render json: { rows: saved.map { |r| home ? price_list_base(r.reload, fresh) : price_list_option(r.reload, fresh, own) } }
+    render json: { rows: saved.map { |r| home ? price_list_base(r.reload, fresh, book) : price_list_option(r.reload, fresh, own) } }
   rescue ArgumentError, ActiveRecord::RecordInvalid, Truebuild::PriceCorrector::Invalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
@@ -450,7 +450,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
       end
     end
     fresh = Truebuild::DealerPrices.new(@company)
-    render json: row.is_a?(CatalogVariantPrice) ? price_list_base(row, fresh) : price_list_option(row, fresh, Truebuild::DealerOptions.new(@company, row.option.manufacturer_id))
+    render json: row.is_a?(CatalogVariantPrice) ? price_list_base(row, fresh, row.price_book) : price_list_option(row, fresh, Truebuild::DealerOptions.new(@company, row.option.manufacturer_id))
   rescue ArgumentError, ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
@@ -670,7 +670,7 @@ class Api::V1::TruebuildPricingController < ApplicationController
     end
   end
 
-  def price_list_base(vp, prices)
+  def price_list_base(vp, prices, book = nil)
     v = vp.variant
     req = prices.request_for(vp)
     sreq = prices.surcharge_request_for(vp)
@@ -679,7 +679,16 @@ class Api::V1::TruebuildPricingController < ApplicationController
       square_feet: DealerSurchargeRule.square_feet_of(v), section: DealerSurchargeRule.section_of(v), building_code: v.building_code,
       factory_cost: vp.net_base_price&.to_f, your_cost: req&.suggested_value&.to_f, cost_status: req && STATUS_WORDS[req.status],
       factory_surcharge: Truebuild::DealerPrices.book_surcharge(vp).to_f, your_surcharge: sreq&.suggested_value&.to_f,
-      surcharge_status: sreq && STATUS_WORDS[sreq.status], rule_surcharge: prices.rule_surcharge(vp)&.to_f, your_price: prices.manual_retail(v)&.to_f }
+      surcharge_status: sreq && STATUS_WORDS[sreq.status], rule_surcharge: prices.rule_surcharge(vp)&.to_f, your_price: prices.manual_retail(v)&.to_f,
+      markup_price: (markup_price(v, book) if book) }
+  end
+
+  # What the dealer's markup sells the home for, so every row shows a figure
+  # and not only the ones with a price typed in. Nil when no rule covers it.
+  def markup_price(variant, book)
+    Truebuild::PricingEngine.new(company: @company, variant: variant, book: book, include_freight: false).home_retail
+  rescue ArgumentError
+    nil
   end
 
   def price_list_option(op, prices, own)
