@@ -5,6 +5,9 @@ module Api
     # Company Settings, Integrations, Phone System (3CX). Hands an admin the 3CX
     # CRM template with a fresh leads-only key in it, shows the calls 3CX has
     # reported, and disconnects by revoking the key.
+    #
+    # Platform admins only (works while impersonating): a dealer downloading a new
+    # template silently breaks the one already in their 3CX, so we set it up.
     class PhoneSystemController < ApplicationController
       before_action :set_company_scope
 
@@ -13,7 +16,7 @@ module Api
 
       # GET /api/v1/phone-system
       def show
-        return unless authorize_action!('api_keys', 'read')
+        return unless require_platform_admin!
 
         key = current_key
         logs = @company.phone_call_logs.recent.includes(:user, :loggable).limit(RECENT)
@@ -35,7 +38,7 @@ module Api
       # A new key every time: the old one is revoked so only the template the
       # admin just uploaded keeps working.
       def three_cx_template
-        return unless authorize_action!('api_keys', 'create')
+        return unless require_platform_admin!
 
         key = nil
         ApiKey.transaction do
@@ -53,7 +56,7 @@ module Api
 
       # DELETE /api/v1/phone-system/three-cx
       def disconnect
-        return unless authorize_action!('api_keys', 'delete')
+        return unless require_platform_admin!
 
         count = 0
         @company.api_keys.active.where(name: KEY_NAME).find_each { |k| k.revoke! && count += 1 }
