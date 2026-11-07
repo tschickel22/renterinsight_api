@@ -35,7 +35,9 @@ module Assistant
                         :question_topic, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
 
     # opener: write the first text to a new lead (Quinn starts it, E96).
-    def initialize(conversation:, settings:, history:, feedback: nil, opener: false)
+    # showing: names of homes the website chat shows as cards under this reply.
+    def initialize(conversation:, settings:, history:, feedback: nil, opener: false, showing: [])
+      @showing = Array(showing)
       @conversation = conversation
       @opener = opener
       @web = conversation.web_chat?
@@ -121,6 +123,7 @@ module Assistant
 
         THEIR APPOINTMENTS
         #{appointment_lines.presence || 'None booked.'}
+        #{@showing.any? ? "\nThe chat shows these homes as cards under your reply, matching their search: #{@showing.join('; ')}. You may refer to them; do not list them again." : ''}
         #{@feedback ? "\nYour last draft could not be sent (#{@feedback}). Write a new one that follows the rules." : ''}
       PROMPT
     end
