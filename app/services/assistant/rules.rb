@@ -17,13 +17,19 @@ module Assistant
     module_function
 
     # nil when the text may be sent; otherwise the reason it may not.
-    def violation(text)
+    # allowed_urls: the only web addresses this text may carry (a home's own
+    # page, on a number registered for links).
+    def violation(text, allowed_urls: [])
       return 'empty' if text.to_s.strip.empty?
-      return 'link' if text.match?(URL)
+      return 'link' if without(text, allowed_urls).match?(URL)
       return 'finance_figure' if text.match?(MONEY) && text.match?(FINANCE_WORDS)
       return 'too_long' if text.length > MAX_LENGTH
 
       nil
+    end
+
+    def without(text, urls)
+      Array(urls).reduce(text.to_s) { |t, u| u.present? ? t.gsub(u, ' ') : t }
     end
 
     # House style: no em or en dashes in anything a buyer reads.
