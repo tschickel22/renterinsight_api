@@ -17,7 +17,11 @@ module Api
                                  .index_by { |v| [v.user_id, v.training_video_id] }
         render json: {
           enabled: TrainingVideo.enabled?,
-          videos: videos.map { |v| v.as_api_json.slice(:id, :title, :module_key, :duration_seconds, :poster_url) },
+          # Description for the hover, and what the preview player needs, so an
+          # admin can watch a video before requiring it without leaving the page.
+          videos: videos.map do |v|
+            v.as_api_json.slice(:id, :title, :description, :module_key, :duration_seconds, :poster_url, :video_url, :captions_url, :chapters)
+          end,
           new_user_video_ids: TrainingAssignment.new_user_video_ids(@company.id) & videos.map(&:id),
           users: users.map do |u|
             {
