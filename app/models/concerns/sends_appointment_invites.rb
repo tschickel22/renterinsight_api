@@ -39,6 +39,7 @@ module SendsAppointmentInvites
 
     bump_invite_sequence!(0)
     AppointmentInviteJob.perform_later(self.class.name, id, 'REQUEST')
+    AppointmentBookingTextJob.perform_later(self.class.name, id, 'booked') if status == 'pending'
   end
 
   def send_invite_on_change
@@ -52,6 +53,12 @@ module SendsAppointmentInvites
 
     bump_invite_sequence!
     AppointmentInviteJob.perform_later(self.class.name, id, cancelling ? 'CANCEL' : 'REQUEST')
+    # The customer hears by text only when the time or the outcome changed for them.
+    if cancelling
+      AppointmentBookingTextJob.perform_later(self.class.name, id, 'cancelled')
+    elsif saved_change_to_start_time?
+      AppointmentBookingTextJob.perform_later(self.class.name, id, 'moved')
+    end
     cancel_for_former_rep unless cancelling
   end
 

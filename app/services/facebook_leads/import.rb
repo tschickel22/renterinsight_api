@@ -78,7 +78,7 @@ module FacebookLeads
       end
       remember(attrs)
 
-      create!(attrs, built, submitted, form) unless @dry_run
+      create!(attrs, built, submitted, form, raw) unless @dry_run
       progress.imported += 1
     rescue ActiveRecord::RecordNotUnique
       progress.already_imported += 1
@@ -90,7 +90,7 @@ module FacebookLeads
       Rails.logger.error "[FacebookLeads::Import] integration=#{@integration.id} lead=#{raw['id']}: #{e.class}: #{e.message}"
     end
 
-    def create!(attrs, built, submitted, form)
+    def create!(attrs, built, submitted, form, raw)
       stamp = submitted ? submitted.in_time_zone.strftime('%b %-d, %Y') : 'an unknown date'
       header = "Imported from Facebook on #{Time.current.strftime('%b %-d, %Y')}. " \
                "Submitted #{stamp} on the form \"#{form['name']}\"."
@@ -101,6 +101,7 @@ module FacebookLeads
       Current.set(suppress_workflow_events: true) do
         lead.save!
         @builder.write_answers_note(lead, built.answers)
+        @builder.record_consents!(lead, raw, lead.facebook_leadgen_id)
       end
     end
 

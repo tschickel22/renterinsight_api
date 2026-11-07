@@ -166,7 +166,10 @@ class Api::V1::FacebookIntegrationsController < ApplicationController
       token_expires_at:    i.token_expires_at,
       location_id:         i.location_id,
       created_at:          i.created_at,
-      updated_at:          i.updated_at
+      updated_at:          i.updated_at,
+      # The two checkboxes to add to the Facebook form's custom disclaimer,
+      # with the keys our lead import reads (FacebookLeads::LeadBuilder).
+      consent_checkboxes:  FacebookLeads::LeadBuilder.consent_checkboxes(@company)
     }
     base[:metadata] = i.metadata if detailed
     base

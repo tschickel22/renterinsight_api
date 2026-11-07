@@ -39,7 +39,7 @@ class MetaGraphApi
   class << self
     # Fetch the full lead data for a Lead Ads leadgen_id.
     def fetch_lead(leadgen_id, access_token)
-      get("/#{leadgen_id}", access_token, fields: 'id,created_time,field_data,ad_id,form_id,campaign_id,campaign_name,adset_id,adset_name,ad_name,platform')
+      get("/#{leadgen_id}", access_token, fields: 'id,created_time,field_data,ad_id,form_id,campaign_id,campaign_name,adset_id,adset_name,ad_name,platform,custom_disclaimer_responses')
     end
 
     # Exchange a short-lived user access token for a long-lived one.
@@ -420,7 +420,8 @@ class MetaGraphApi
           limit:  50)
     end
 
-    LEAD_FIELDS = 'id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,platform'
+    # custom_disclaimer_responses: the consent checkboxes (FacebookLeads::LeadBuilder::CONSENT_KEYS).
+    LEAD_FIELDS = 'id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,platform,custom_disclaimer_responses'
 
     # Every lead form on a Page, across pages of results.
     def each_lead_form(page_id, access_token, &block)

@@ -73,6 +73,12 @@ module Webhooks
       )
       company = twilio_account&.company
 
+      # Lead Assistant (E96): an open conversation on this number with this
+      # buyer says whose reply it is. On a shared pool number it is the only
+      # thing that does, since the number belongs to no dealer.
+      assistant_conversation = find_assistant_conversation(to_number, from_number, company)
+      company ||= assistant_conversation&.company
+
       # Campaign STOP/HELP/START handler (Phase A.5). Runs before the legacy
       # opt-out logic below — only handles inbound messages whose number ever
       # appeared as a campaign recipient. Returns handled=false otherwise.
@@ -171,6 +177,7 @@ module Webhooks
           pref = CommunicationPreference.find_or_create_for(recipient: recipient, channel: 'sms')
 
           if stop_keywords.include?(stripped_body)
+            assistant_conversation&.update(status: 'closed', ended_at: Time.current, handoff_reason: 'opted_out')
             pref.opt_out!('SMS STOP keyword received')
             Rails.logger.info "[TwilioWebhook] STOP received from #{from_number} — opted out"
           else
@@ -235,7 +242,7 @@ module Webhooks
       ).order(created_at: :desc).first
 
       if original_communication
-        communicable     = original_communication.communicable
+        communicable     = assistant_conversation&.conversable || original_communication.communicable
         company        ||= original_communication.company
         # sender_user_id is who pressed send — this is who should receive the forwarded reply
         sender_user_id   = original_communication.metadata&.dig('sender_user_id')
@@ -257,6 +264,7 @@ module Webhooks
           status:        'delivered',
           sent_at:       Time.current,
           delivered_at:  Time.current,
+          conversation_id: assistant_conversation&.id,
           metadata: {
             message_sid:          message_sid,
             sender_user_id:       sender_user_id,
@@ -274,8 +282,18 @@ module Webhooks
           communication_id: inbound_comm&.id
         )
 
+        # The assistant answers this one; the rep hears about it if it hands off.
+        assistant_answering = assistant_conversation.present? &&
+                              Assistant::Inbound.received(assistant_conversation, inbound_comm, keyword: keyword_reply?(stripped_body))
+        unless assistant_conversation || keyword_reply?(stripped_body)
+          Assistant::Threading.track_inbound!(company: company, record: communicable, communication: inbound_comm,
+                                              our_number: to_number, buyer_number: from_number)
+        end
+
         # Notify the assigned user in-app that a reply arrived
         notify_user_id = sender_user_id || assigned_user_id
+        notify_user_id = assistant_conversation.handed_off_to_user_id || notify_user_id if assistant_conversation&.handed_off?
+        notify_user_id = nil if assistant_answering
         if notify_user_id
           notify_user = User.find_by(id: notify_user_id)
           if notify_user
@@ -296,7 +314,7 @@ module Webhooks
 
         # Followers of the record hear about the reply in-app too (backlog E86).
         # The phone forward below stays with the rep who sent the text.
-        if communicable.respond_to?(:followers)
+        if communicable.respond_to?(:followers) && !assistant_answering
           contact_label = communicable.respond_to?(:display_name) ? communicable.display_name : from_number
           communicable.followers.select(&:active?).each do |follower|
             next if follower.id == notify_user_id.to_i
@@ -315,7 +333,8 @@ module Webhooks
         # Forward reply to the user who originally sent the SMS
         # Generates a tokenized reply link so they can respond without logging in
         forward_to_id = sender_user_id || assigned_user_id
-        if forward_to_id
+        forward_to_id = assistant_conversation.handed_off_to_user_id || forward_to_id if assistant_conversation&.handed_off?
+        if forward_to_id && !assistant_answering
           forward_user = User.find_by(id: forward_to_id)
           # User model has no phone field — try is safe and returns nil if method absent
           user_cell = forward_user&.try(:phone).presence || forward_user&.try(:mobile_phone).presence
@@ -353,6 +372,8 @@ module Webhooks
                                        body: body, message_sid: message_sid).call
             Rails.logger.info "[TwilioWebhook] Cold text from #{from_number} -> #{cold.record.class.name} ##{cold.record.id}" \
                               "#{cold.created_lead ? ' (new lead)' : ''}"
+            Assistant::Threading.track_inbound!(company: company, record: cold.record, communication: cold.communication,
+                                                our_number: to_number, buyer_number: from_number)
           rescue StandardError => e
             Rails.logger.error "[TwilioWebhook] Cold text handling failed for #{from_number}: #{e.class}: #{e.message}"
           end
@@ -393,7 +414,24 @@ module Webhooks
     end
 
     private
-    
+
+    KEYWORD_REPLIES = %w[STOP STOPALL UNSUBSCRIBE CANCEL END QUIT START YES UNSTOP SUBSCRIBE HELP INFO].freeze
+
+    def keyword_reply?(stripped_body)
+      KEYWORD_REPLIES.include?(stripped_body)
+    end
+
+    def find_assistant_conversation(to_number, from_number, company)
+      conversation = Conversation.open_for_numbers(sender_number: to_number, buyer_phone: from_number)
+      return nil if conversation.nil?
+      return nil if company && conversation.company_id != company.id
+
+      conversation
+    rescue StandardError => e
+      Rails.logger.error "[TwilioWebhook] Lead Assistant lookup failed: #{e.class}: #{e.message}"
+      nil
+    end
+
     # Twilio signs every webhook with the auth token of the account it came from.
     # This used to read the token from ENV only; production has it in Platform
     # Settings instead, so every request was let through unchecked. Turning the

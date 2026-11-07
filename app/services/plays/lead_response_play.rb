@@ -922,12 +922,12 @@ module Plays
     end
 
     # The play makes the call task, so the form's own task is turned off (the
-    # rep would get two); the consent box is turned on, since the play texts
-    # only a lead who ticked it. A form with no source gets the preset's, so
+    # rep would get two); both consent boxes are turned on, since the play
+    # texts only a lead who ticked the inquiry texts box. A form with no source gets the preset's, so
     # its leads start the play. Each change is recorded to be put back.
     def adopt_form!(form, adopted)
       adopted = (adopted || { 'id' => form.id, 'previous' => {}, 'applied' => {} }).deep_stringify_keys
-      changes = { 'auto_create_activity' => false, 'marketing_consent_enabled' => true }
+      changes = { 'auto_create_activity' => false, 'marketing_consent_enabled' => true, 'sms_consent_enabled' => true }
       if form.source_id.nil?
         changes['source_id'] = @company.sources.find_or_create_by!(name: self.class.forms.first[:source]) { |s| s.is_active = true }.id
       end
@@ -997,11 +997,11 @@ module Plays
         auto_create_lead: true,
         # The play creates its own call task for the assigned rep.
         auto_create_activity: false,
-        # The play texts only a lead who agreed. Every form's own consent box
-        # ("email and text me") is that agreement: ticking it sets opt_in_sms.
-        # Named here because the play depends on it; a second SMS box of its
-        # own drew two consent questions on one form.
+        # The play texts only a lead who agreed to texts about their inquiry:
+        # the form's own inquiry texts box (Lead#may_text_about_inquiry).
+        # Marketing consent is a separate box and is not that agreement.
         marketing_consent_enabled: true,
+        sms_consent_enabled: true,
         submit_button_text: 'Send',
         thank_you_message: "Thanks for reaching out. Someone from #{@company.name} will be in touch shortly."
       )
@@ -1138,7 +1138,7 @@ module Plays
 
       if texting? || card_texting?
         first_sms = texting? ? 'text_hello' : 'text_card'
-        branch('consent', { 'field' => 'entity.opt_in_sms', 'operator' => 'equals', 'value' => true }, first_sms, email_entry)
+        branch('consent', { 'field' => 'entity.may_text_about_inquiry', 'operator' => 'equals', 'value' => true }, first_sms, email_entry)
       end
       if texting?
         node('text_hello', 'send_sms', { 'to' => '{{entity.phone}}', 'body' => message_text(content['first_text']['body']) },

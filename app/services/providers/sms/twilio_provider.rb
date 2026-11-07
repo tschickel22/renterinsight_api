@@ -19,14 +19,21 @@ module Providers
         
         Rails.logger.info "📱 Sending SMS via Twilio to #{to} from #{from_number}"
         
+        # A Lead Assistant pool number (E96) lives on our master account, on its
+        # own Messaging Service and campaign, whatever this company's own
+        # settings say.
+        pool_service = options[:pool_messaging_service_sid].presence
+        account_sid, auth_token =
+          pool_service ? TwilioSmsService.master_credentials : [config[:twilio_account_sid], config[:twilio_auth_token]]
+
         # Send SMS via direct HTTP (same as Platform test SMS)
         result = send_via_http(
           to: to,
           from: from_number,
           body: body,
-          account_sid: config[:twilio_account_sid],
-          auth_token: config[:twilio_auth_token],
-          messaging_service_sid: config[:messaging_service_sid] || config[:twilio_messaging_service_sid]
+          account_sid: account_sid,
+          auth_token: auth_token,
+          messaging_service_sid: pool_service || config[:messaging_service_sid] || config[:twilio_messaging_service_sid]
         )
         
         if result[:success]

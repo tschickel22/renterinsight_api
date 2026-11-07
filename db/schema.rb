@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_010100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2243,10 +2243,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.index ["company_id"], name: "index_communication_templates_on_company_id"
     t.index ["is_active"], name: "index_communication_templates_on_is_active"
     t.index ["name"], name: "index_communication_templates_on_name"
-    t.index ["template_type"], name: "index_communication_templates_on_template_type"
     t.index ["scope_type", "scope_id"], name: "index_communication_templates_on_scope_type_and_scope_id"
     t.index ["template_type", "channel", "scope_type", "scope_id"], name: "idx_comm_templates_type_channel_scope"
     t.index ["template_type", "channel"], name: "index_communication_templates_on_template_type_and_channel"
+    t.index ["template_type"], name: "index_communication_templates_on_template_type"
   end
 
   create_table "communication_threads", force: :cascade do |t|
@@ -2298,6 +2298,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.integer "company_id"
     t.integer "user_id"
     t.bigint "workflow_run_id"
+    t.bigint "conversation_id"
     t.string "workflow_step_id"
     t.bigint "campaign_send_id"
     t.index ["campaign_send_id"], name: "index_communications_on_campaign_send_id"
@@ -2305,6 +2306,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
     t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
     t.index ["company_id"], name: "index_communications_on_company_id"
+    t.index ["conversation_id"], name: "index_communications_on_conversation_id"
     t.index ["created_at"], name: "index_communications_on_created_at"
     t.index ["direction"], name: "index_communications_on_direction"
     t.index ["external_id"], name: "index_communications_on_external_id"
@@ -2715,6 +2717,53 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.index ["reviewed_by_id"], name: "index_contractor_assignments_on_reviewed_by_id"
     t.index ["status"], name: "index_contractor_assignments_on_status"
     t.index ["vendor_id"], name: "index_contractor_assignments_on_vendor_id"
+  end
+
+  create_table "conversation_reads", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "last_read_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "user_id"], name: "index_conversation_reads_on_conversation_id_and_user_id", unique: true
+    t.index ["user_id"], name: "index_conversation_reads_on_user_id"
+  end
+
+  create_table "conversations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "conversable_type"
+    t.bigint "conversable_id"
+    t.string "channel", default: "sms", null: false
+    t.bigint "assigned_user_id"
+    t.datetime "snoozed_until"
+    t.string "sender_number"
+    t.string "buyer_phone"
+    t.boolean "pool", default: false, null: false
+    t.string "messaging_service_sid"
+    t.string "status", default: "active", null: false
+    t.boolean "assistant_enabled", default: true, null: false
+    t.bigint "handed_off_to_user_id"
+    t.string "handoff_reason"
+    t.datetime "handed_off_at"
+    t.jsonb "qualification", default: {}, null: false
+    t.integer "unanswered_count", default: 0, null: false
+    t.integer "failed_answer_count", default: 0, null: false
+    t.datetime "last_inbound_at"
+    t.datetime "last_outbound_at"
+    t.datetime "last_message_at"
+    t.string "last_message_preview"
+    t.datetime "reply_due_at"
+    t.datetime "started_at"
+    t.datetime "ended_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.datetime "last_person_reply_at"
+    t.index ["assigned_user_id"], name: "index_conversations_on_assigned_user_id"
+    t.index ["company_id", "status", "last_message_at"], name: "idx_on_company_id_status_last_message_at_4e838304a7"
+    t.index ["company_id"], name: "index_conversations_on_company_id"
+    t.index ["conversable_type", "conversable_id"], name: "index_conversations_on_conversable_type_and_conversable_id"
+    t.index ["sender_number", "buyer_phone"], name: "index_conversations_open_by_numbers", unique: true, where: "((status)::text = ANY (ARRAY[('active'::character varying)::text, ('handed_off'::character varying)::text]))"
   end
 
   create_table "credit_memo_applications", force: :cascade do |t|
@@ -3693,6 +3742,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.boolean "marketing_consent_enabled", default: true, null: false
     t.text "marketing_consent_text"
     t.string "marketing_consent_version", default: "v1", null: false
+    t.boolean "sms_consent_enabled", default: true, null: false
+    t.text "sms_consent_text"
+    t.string "sms_consent_version", default: "v1", null: false
     t.boolean "hide_name", default: false, null: false
     t.boolean "hide_description", default: false, null: false
     t.string "assignment_mode"
@@ -3720,6 +3772,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.boolean "marketing_consent", default: false, null: false
     t.text "marketing_consent_text"
     t.datetime "marketing_consent_at"
+    t.boolean "sms_consent", default: false, null: false
+    t.text "sms_consent_text"
+    t.datetime "sms_consent_at"
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 
@@ -4422,6 +4477,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.datetime "last_activity_scored_at"
     t.boolean "email_invalid", default: false, null: false
     t.boolean "opt_in_sms", default: false, null: false
+    t.boolean "sms_inquiry_consent", default: false, null: false
+    t.datetime "sms_inquiry_consent_at"
     t.string "champion_salesforce_id"
     t.string "champion_status"
     t.jsonb "champion_lead_data", default: {}
@@ -6950,6 +7007,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
     t.index ["company_id", "location_id"], name: "index_service_tickets_on_company_id_and_location_id"
+    t.index ["company_id", "status"], name: "index_service_tickets_on_company_id_and_status"
     t.index ["company_id", "ticket_number"], name: "index_service_tickets_on_company_id_and_ticket_number", unique: true
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
@@ -6967,7 +7025,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.index ["status"], name: "index_service_tickets_on_status"
     t.index ["vehicle_id"], name: "index_service_tickets_on_vehicle_id"
     t.index ["warranty_claim_id"], name: "index_service_tickets_on_warranty_claim_id"
-    t.index ["company_id", "status"], name: "index_service_tickets_on_company_id_and_status"
   end
 
   create_table "settings", force: :cascade do |t|
@@ -7857,6 +7914,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.index ["user_id", "training_video_id"], name: "index_training_assignments_on_user_id_and_training_video_id", unique: true
   end
 
+  create_table "training_video_views", force: :cascade do |t|
+    t.bigint "training_video_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "company_id"
+    t.integer "furthest_seconds", default: 0, null: false
+    t.integer "watched_seconds", default: 0, null: false
+    t.integer "plays", default: 0, null: false
+    t.datetime "completed_at"
+    t.datetime "last_watched_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_training_video_views_on_company_id"
+    t.index ["training_video_id"], name: "index_training_video_views_on_training_video_id"
+    t.index ["user_id", "training_video_id"], name: "index_training_video_views_on_user_id_and_training_video_id", unique: true
+  end
+
   create_table "training_videos", force: :cascade do |t|
     t.string "title", null: false
     t.string "slug", null: false
@@ -7875,31 +7948,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
     t.boolean "share_enabled", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["module_key", "position"], name: "index_training_videos_on_module_key_and_position"
     t.uuid "uid", default: -> { "gen_random_uuid()" }, null: false
     t.text "transcript"
     t.integer "public_views", default: 0, null: false
     t.jsonb "source_files", default: {}, null: false
     t.jsonb "covers", default: {}, null: false
+    t.index ["module_key", "position"], name: "index_training_videos_on_module_key_and_position"
     t.index ["share_token"], name: "index_training_videos_on_share_token", unique: true
     t.index ["slug"], name: "index_training_videos_on_slug", unique: true
     t.index ["uid"], name: "index_training_videos_on_uid", unique: true
-  end
-
-  create_table "training_video_views", force: :cascade do |t|
-    t.bigint "training_video_id", null: false
-    t.bigint "user_id", null: false
-    t.bigint "company_id"
-    t.integer "furthest_seconds", default: 0, null: false
-    t.integer "watched_seconds", default: 0, null: false
-    t.integer "plays", default: 0, null: false
-    t.datetime "completed_at"
-    t.datetime "last_watched_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id"], name: "index_training_video_views_on_company_id"
-    t.index ["training_video_id"], name: "index_training_video_views_on_training_video_id"
-    t.index ["user_id", "training_video_id"], name: "index_training_video_views_on_user_id_and_training_video_id", unique: true
   end
 
   create_table "truebuild_addons", force: :cascade do |t|
@@ -9360,13 +9417,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_06_230000) do
   add_foreign_key "dealer_markup_rules", "companies"
   add_foreign_key "dealer_markup_rules", "locations"
   add_foreign_key "dealer_markup_rules", "manufacturers"
-  add_foreign_key "dealer_surcharge_rules", "companies"
-  add_foreign_key "dealer_surcharge_rules", "factories"
-  add_foreign_key "dealer_surcharge_rules", "manufacturers"
   add_foreign_key "dealer_price_book_adoptions", "catalog_price_books"
   add_foreign_key "dealer_price_book_adoptions", "catalog_price_books", column: "previous_book_id"
   add_foreign_key "dealer_price_book_adoptions", "companies"
   add_foreign_key "dealer_price_book_adoptions", "users", column: "decided_by_id"
+  add_foreign_key "dealer_surcharge_rules", "companies"
+  add_foreign_key "dealer_surcharge_rules", "factories"
+  add_foreign_key "dealer_surcharge_rules", "manufacturers"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"

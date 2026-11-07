@@ -305,6 +305,10 @@ module Api
             :marketing_consent_enabled, :marketingConsentEnabled,
             :marketing_consent_text, :marketingConsentText,
             :marketing_consent_version, :marketingConsentVersion,
+            # The separate box for texts about the inquiry (never marketing).
+            :sms_consent_enabled, :smsConsentEnabled,
+            :sms_consent_text, :smsConsentText,
+            :sms_consent_version, :smsConsentVersion,
             # Who new leads go to: one person (notified_user_id) or a rotation.
             # The rotation is saved as reps, never as a list id from the browser.
             :assignment_mode, :assignmentMode,
@@ -365,7 +369,10 @@ module Api
             {
               marketingConsentEnabled: :marketing_consent_enabled,
               marketingConsentText:    :marketing_consent_text,
-              marketingConsentVersion: :marketing_consent_version
+              marketingConsentVersion: :marketing_consent_version,
+              smsConsentEnabled:       :sms_consent_enabled,
+              smsConsentText:          :sms_consent_text,
+              smsConsentVersion:       :sms_consent_version
             }.each do |camel, snake|
               if p.key?(snake)
                 p.delete(camel)
@@ -373,8 +380,8 @@ module Api
                 p[snake] = p.delete(camel)
               end
             end
-            if p.key?(:marketing_consent_enabled)
-              p[:marketing_consent_enabled] = ActiveModel::Type::Boolean.new.cast(p[:marketing_consent_enabled])
+            %i[marketing_consent_enabled sms_consent_enabled].each do |key|
+              p[key] = ActiveModel::Type::Boolean.new.cast(p[key]) if p.key?(key)
             end
 
             { assignmentMode: :assignment_mode, rotationUserIds: :rotation_user_ids }.each do |camel, snake|

@@ -65,6 +65,13 @@ module Public
       consented = @form.marketing_consent? &&
                   ActiveModel::Type::Boolean.new.cast(consent_raw) == true
 
+      # The separate box for texts about this inquiry. Same rules: pulled out
+      # of the answers, and absence is refusal.
+      sms_raw = data.delete('sms_consent')
+      data.delete('smsConsent').tap { |v| sms_raw = v if sms_raw.nil? }
+      sms_consented = @form.sms_consent? &&
+                      ActiveModel::Type::Boolean.new.cast(sms_raw) == true
+
       submission = @form.intake_submissions.build(
         data: data,
         ip_address: request.remote_ip,
@@ -75,7 +82,10 @@ module Public
         # The wording copied as shown, not referenced, so editing the form later
         # cannot rewrite what this person agreed to.
         marketing_consent_text: (@form.resolved_marketing_consent_text if consented),
-        marketing_consent_at: (Time.current if consented)
+        marketing_consent_at: (Time.current if consented),
+        sms_consent: sms_consented,
+        sms_consent_text: (@form.resolved_sms_consent_text if sms_consented),
+        sms_consent_at: (Time.current if sms_consented)
       )
       
       if submission.save

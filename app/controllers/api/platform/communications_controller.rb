@@ -395,6 +395,12 @@ module Api
         refusal = platform_opt_out_refusal('sms', params[:to])
         return refusal if refusal
 
+        # A text to someone in an Inbox / Lead Assistant conversation (E96) goes
+        # out on that conversation's number and is recorded on it, so the
+        # assistant steps back and the Inbox knows a person answered.
+        conversation = inbox_conversation_for_send
+        return send_sms_in_conversation(conversation) if conversation
+
         # Get settings
         settings = get_effective_settings
         sms_config = dedicated_number_sms_config ||
@@ -504,6 +510,29 @@ module Api
           success: false,
           error: e.message
         }
+      end
+
+      def inbox_conversation_for_send
+        return nil unless %w[Lead Contact].include?(params[:entity_type].to_s) && params[:entity_id].present?
+
+        entity = params[:entity_type].to_s.constantize.find_by(id: params[:entity_id], company_id: current_company_id)
+        entity && Assistant::Threading.open_conversation_for(entity, params[:to])
+      rescue StandardError => e
+        Rails.logger.warn("[Platform::CommunicationsController#sms] conversation lookup failed: #{e.message}")
+        nil
+      end
+
+      def send_sms_in_conversation(conversation)
+        body = extract_sms_params[:content]
+        return { ok: false, success: false, error: 'Message is required' } if body.blank?
+
+        result = Assistant::Messenger.deliver!(conversation, body: body, sent_by: 'user', user: current_user)
+        comm = result[:communication]
+        { ok: result[:success], success: result[:success], id: comm&.id, messageId: comm&.external_id,
+          provider: 'twilio', error: result[:error] }.compact
+      rescue StandardError => e
+        Rails.logger.error("[Platform::CommunicationsController#sms] conversation send failed: #{e.class}: #{e.message}")
+        { ok: false, success: false, error: e.message }
       end
 
       # A company with its own number texts from it, as the CRM send does, whether
