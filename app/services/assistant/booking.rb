@@ -101,6 +101,14 @@ module Assistant
       outcome(visit, 'cancelled')
     end
 
+    # Quinn's own words before the confirmation, only when short: the
+    # confirmation carries the time and place, and repeating them reads badly.
+    def self.combine(reply, outcome)
+      lead_in = reply.to_s.strip
+      lead_in = '' if lead_in.length > 60 || lead_in.match?(/\d{1,2}(:\d{2})?\s*(am|pm)|\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*day\b/i)
+      [lead_in.presence, outcome.text].compact.join(' ')
+    end
+
     private
 
     def create_visit!(slot)

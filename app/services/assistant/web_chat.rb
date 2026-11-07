@@ -120,7 +120,7 @@ module Assistant
 
       if !problem && booking && (outcome = booking.apply(result))
         if outcome.ok
-          reply = [reply.presence, outcome.text].compact.join(' ')
+          reply = Assistant::Booking.combine(reply, outcome)
           reason = nil if %w[appointment visit_time].include?(reason)
         elsif outcome.text.present?
           reply = outcome.text
