@@ -35,6 +35,11 @@ default: &default
     class: AssistantFollowUpJob
     queue: low
     schedule: every 15 minutes
+  # Busy times from reps' own calendar feeds, for Quinn AI's open times (E96).
+  busy_feed_sync:
+    class: BusyFeedSyncJob
+    queue: low
+    schedule: every 15 minutes
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob

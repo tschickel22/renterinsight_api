@@ -101,19 +101,33 @@ module Assistant
     def brain_answer!(matches = [])
       history = conversation.history(Assistant::Brain::HISTORY)
       showing = matches.map { |m| m[:name] }
-      brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, showing: showing)
+      # A visitor with a lead can book in the chat (phase 2).
+      booking = conversation.conversable ? Assistant::Booking.new(conversation) : nil
+      brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, showing: showing, booking: booking)
       result = brain.call
       Assistant::Learn.apply!(conversation, result)
 
       reply = Assistant::Rules.tidy(result.reply)
       problem = Assistant::Rules.violation(reply, allowed_urls: brain.allowed_urls, max_length: MAX_REPLY)
       if problem && !result.handoff
-        result = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: problem, showing: showing).call
+        result = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: problem, showing: showing,
+                                      booking: booking).call
         Assistant::Learn.apply!(conversation, result)
         reply = Assistant::Rules.tidy(result.reply)
         problem = Assistant::Rules.violation(reply, allowed_urls: brain.allowed_urls, max_length: MAX_REPLY)
       end
       reason = result.handoff ? result.handoff_reason : nil
+
+      if !problem && booking && (outcome = booking.apply(result))
+        if outcome.ok
+          reply = [reply.presence, outcome.text].compact.join(' ')
+          reason = nil if %w[appointment visit_time].include?(reason)
+        elsif outcome.text.present?
+          reply = outcome.text
+        else
+          reason ||= 'appointment'
+        end
+      end
 
       lead_from_chat!(result.contact)
       Assistant::Learn.record_question(conversation, result, reason, problem)

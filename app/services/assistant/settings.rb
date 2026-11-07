@@ -70,7 +70,12 @@ module Assistant
       # and the question waits in the dealer's list.
       'handoff_on_unknown' => true,
       # Hand to a rep after this many buyer messages (0: never).
-      'handoff_after' => 0
+      'handoff_after' => 0,
+      # Quinn books, moves and cancels visits itself (phase 2).
+      'books_visits' => true,
+      'visit_minutes' => 60,
+      # How far ahead the earliest time it offers is.
+      'booking_notice_hours' => 2
     }.freeze
     EMAIL_REPLIES = %w[answer draft rep].freeze
     HANDOFF_AFTER = [0, 5, 8, 12].freeze
@@ -120,7 +125,9 @@ module Assistant
       clean['follow_up_channels'] = 'mix' if clean.key?('follow_up_channels') && !FOLLOW_UP_CHANNELS.include?(clean['follow_up_channels'])
       clean['auto_start'] = ActiveModel::Type::Boolean.new.cast(clean['auto_start']) == true if clean.key?('auto_start')
       clean['use_website_text'] = ActiveModel::Type::Boolean.new.cast(clean['use_website_text']) == true if clean.key?('use_website_text')
-      %w[handoff_on_ready handoff_on_unknown].each do |k|
+      clean['visit_minutes'] = [30, 45, 60, 90, 120].include?(clean['visit_minutes'].to_i) ? clean['visit_minutes'].to_i : 60 if clean.key?('visit_minutes')
+      clean['booking_notice_hours'] = clean['booking_notice_hours'].to_i.clamp(0, 72) if clean.key?('booking_notice_hours')
+      %w[handoff_on_ready handoff_on_unknown books_visits].each do |k|
         clean[k] = ActiveModel::Type::Boolean.new.cast(clean[k]) == true if clean.key?(k)
       end
       clean['email_replies'] = 'answer' if clean.key?('email_replies') && !EMAIL_REPLIES.include?(clean['email_replies'])
@@ -160,6 +167,18 @@ module Assistant
 
     def chat_sites
       Array(to_h['chat_sites'])
+    end
+
+    def books_visits?
+      to_h['books_visits'] != false
+    end
+
+    def visit_minutes
+      (to_h['visit_minutes'].presence || 60).to_i
+    end
+
+    def booking_notice_hours
+      (to_h['booking_notice_hours'].presence || 2).to_i
     end
 
     def email_replies

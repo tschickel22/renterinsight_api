@@ -21,6 +21,9 @@ class AssistantReplyJob < ApplicationJob
     inbound = Communication.where(conversation_id: conversation.id, direction: 'inbound').order(:id).last
     @channel = inbound&.channel == 'email' ? :email : :text
     @inbound = inbound
+    # Quinn books visits itself (phase 2), except in a draft a rep approves
+    # later: a visit must not be booked on a reply nobody has sent yet.
+    @booking = Assistant::Booking.new(conversation) unless @channel == :email && settings.email_replies == 'draft'
 
     # A long back and forth goes to a person, when the dealer asked for that.
     limit = settings.handoff_after
@@ -42,6 +45,17 @@ class AssistantReplyJob < ApplicationJob
       problem = check(reply)
       result = retry_result
       reason = retry_result.handoff ? retry_result.handoff_reason : nil
+    end
+
+    if !problem && @booking && (outcome = @booking.apply(result))
+      if outcome.ok
+        reply = [reply.presence, outcome.text].compact.join(' ')
+        reason = nil if %w[appointment visit_time].include?(reason)
+      elsif outcome.text.present?
+        reply = outcome.text
+      else
+        reason ||= 'appointment'
+      end
     end
 
     Assistant::Appointments.resend_invite(conversation.conversable) if result.resend_invite && !problem
@@ -74,7 +88,8 @@ class AssistantReplyJob < ApplicationJob
   def draft(conversation, settings, feedback: nil)
     history = conversation.history(Assistant::Brain::HISTORY)
     brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: feedback,
-                                 reply_channel: @channel, purpose: @channel == :email ? 'email_reply' : 'text_reply')
+                                 reply_channel: @channel, purpose: @channel == :email ? 'email_reply' : 'text_reply',
+                                 booking: @booking)
     result = brain.call
     @allowed_urls = @channel == :email ? brain.home_urls : brain.allowed_urls
     Rails.logger.info("[AssistantReplyJob] conversation #{conversation.id} model=#{result.usage[:model]} " \
