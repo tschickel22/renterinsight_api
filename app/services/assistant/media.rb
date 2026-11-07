@@ -31,9 +31,18 @@ module Assistant
       base && "#{base.chomp('/')}#{path}"
     end
 
+    # The site the dealer chose in Quinn's settings; else their live custom
+    # domain; else their most recently published site. A company can hold
+    # demo and landing-page sites, which is why the choice is theirs.
     def published_site_url(company)
-      company.websites.where(status: :published).order(published_at: :desc)
-             .lazy.map { |site| site.public_url rescue nil }.find(&:present?)
+      chosen = Assistant::Settings.for(company)['link_website_id']
+      sites = company.websites.where(status: :published, is_deleted: [false, nil])
+      if chosen && (site = sites.find_by(id: chosen))
+        url = (site.public_url rescue nil)
+        return url if url.present?
+      end
+      first_url = ->(scope) { scope.order(published_at: :desc).lazy.map { |site| site.public_url rescue nil }.find(&:present?) }
+      first_url.call(sites.where.not(domain: [nil, ''])) || first_url.call(sites.where(kind: 'site')) || first_url.call(sites)
     end
 
     def photos(vehicle)

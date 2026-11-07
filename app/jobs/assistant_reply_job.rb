@@ -37,6 +37,7 @@ class AssistantReplyJob < ApplicationJob
     end
 
     Assistant::Appointments.resend_invite(conversation.conversable) if result.resend_invite && !problem
+    record_question(conversation, result, reason, problem)
 
     if problem
       Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)
@@ -49,7 +50,7 @@ class AssistantReplyJob < ApplicationJob
       Assistant::Messenger.deliver!(conversation, body: reply, media_urls: photos_for(conversation, result))
     end
   rescue StandardError => e
-    Rails.logger.error("[AssistantReplyJob] conversation #{conversation_id}: #{e.class}: #{e.message}")
+    Rails.logger.error("[AssistantReplyJob] conversation #{conversation_id}: #{e.class}: #{e.message} #{e.backtrace.first(4).join(" | ")}")
     if conversation&.assistant_answering?
       begin
         Assistant::Handoff.perform!(conversation, reason: 'error', summary: nil, buyer_text: nil)
@@ -69,6 +70,24 @@ class AssistantReplyJob < ApplicationJob
     Rails.logger.info("[AssistantReplyJob] conversation #{conversation.id} model=#{result.usage[:model]} " \
                       "in=#{result.usage[:input_tokens]} out=#{result.usage[:output_tokens]} handoff=#{result.handoff}")
     result
+  end
+
+  # Every question a buyer asks is kept (AssistantQuestion): the ones Quinn
+  # could not answer are the dealer's list of answers to add, and all of them
+  # show DealerTide what buyers ask.
+  def record_question(conversation, result, reason, problem)
+    return if result.question.blank?
+
+    status = if reason || problem then 'handed_off'
+             elsif result.question_answered then 'answered'
+             else 'unanswered'
+             end
+    inbound = Communication.where(conversation_id: conversation.id, direction: 'inbound').order(:id).last
+    AssistantQuestion.create!(company_id: conversation.company_id, conversation_id: conversation.id, communication_id: inbound&.id,
+                              question: result.question, status: status, topic: result.question_topic,
+                              reply: problem ? nil : result.reply.to_s.truncate(600))
+  rescue StandardError => e
+    Rails.logger.warn("[AssistantReplyJob] could not record question: #{e.message}")
   end
 
   # Up to three photos of the home Quinn chose, sent with its reply.

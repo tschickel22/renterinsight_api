@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_020000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -712,6 +712,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_020000) do
     t.index ["contractor_assignment_id"], name: "index_assignment_work_logs_on_contractor_assignment_id"
     t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
     t.index ["vendor_id"], name: "index_assignment_work_logs_on_vendor_id"
+  end
+
+  create_table "assistant_questions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "conversation_id"
+    t.bigint "communication_id"
+    t.text "question", null: false
+    t.string "status", default: "answered", null: false
+    t.string "topic"
+    t.text "reply"
+    t.text "dealer_answer"
+    t.bigint "answered_by_user_id"
+    t.datetime "answered_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "created_at"], name: "idx_on_company_id_status_created_at_3a99b6356d"
+    t.index ["conversation_id"], name: "index_assistant_questions_on_conversation_id"
   end
 
   create_table "attachment_audiences", force: :cascade do |t|
