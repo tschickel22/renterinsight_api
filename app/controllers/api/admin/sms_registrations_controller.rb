@@ -9,7 +9,8 @@ class Api::Admin::SmsRegistrationsController < ApplicationController
   before_action :set_registration, only: %i[send_to_carriers check]
 
   def index
-    rows = SmsRegistration.includes(:company).where.not(status: 'draft').order(updated_at: :desc).limit(200)
+    rows = SmsRegistration.includes(:company, :submitted_by_user).where.not(status: 'draft')
+                          .order(Arel.sql("CASE status WHEN 'submitted' THEN 0 ELSE 1 END"), updated_at: :desc).limit(200)
     render json: { items: rows.map { |r| json(r) } }
   end
 
@@ -38,6 +39,10 @@ class Api::Admin::SmsRegistrationsController < ApplicationController
       legal_name: r.business['legal_name'], dealer_name: r.dealer_name, stages: r.stages, brand_status: r.brand_status,
       campaign_status: r.campaign_status, campaign_id: r.campaign_id, phone_number: r.phone_number,
       rejection_reason: r.rejection_reason, submitted_at: r.submitted_at, sent_to_carriers_at: r.sent_to_carriers_at,
-      live_at: r.live_at, events: Array(r.events).last(12), problems: r.problems }
+      live_at: r.live_at, events: Array(r.events).last(12), problems: r.problems,
+      # What the dealer entered, to check before sending (EIN shown in full:
+      # platform admins only, and it is what the carriers verify).
+      business: r.business, contact: r.contact, consent_sources: Array(r.consent['sources']),
+      preferred_area_code: r.preferred_area_code, submitted_by: r.submitted_by_user&.email }
   end
 end

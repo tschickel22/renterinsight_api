@@ -51,6 +51,8 @@ class SmsRegistration
       # text to a T-Mobile handset before telling the dealer (CLAUDE.md).
       r.update!(status: 'live', live_at: Time.current)
       r.log!('live', r.phone_number)
+      r.notify_platform_admins!("#{r.dealer_name} is approved and has its number #{r.phone_number}. " \
+                                'Send a test text to a T-Mobile phone before telling the dealer.')
     rescue StandardError => e
       Rails.logger.error("[SmsRegistration::StatusPoller] registration #{@registration.id}: #{e.class}: #{e.message}")
       @registration.log!('poll_failed', e.message.truncate(300))
@@ -65,6 +67,7 @@ class SmsRegistration
     def reject!(reason)
       @registration.update!(status: 'rejected', rejection_reason: reason.truncate(1000))
       @registration.log!('rejected', reason.truncate(300))
+      @registration.notify_platform_admins!("#{@registration.dealer_name}'s texting registration was turned down. #{reason.truncate(200)}")
     end
   end
 end

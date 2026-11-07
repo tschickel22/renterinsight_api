@@ -47,6 +47,8 @@ module Api
         registration.update!(status: 'submitted', submitted_at: Time.current, submitted_by_user_id: current_user.id,
                              rejection_reason: nil)
         registration.log!('submitted', current_user.email)
+        registration.notify_platform_admins!("#{registration.dealer_name} submitted their texting registration. " \
+                                             'Review it and send it to the carriers.')
         render json: payload(registration)
       end
 
