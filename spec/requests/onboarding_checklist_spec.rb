@@ -67,6 +67,7 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     expect(body['item']['files'].map { |f| f['name'] }).to eq(['users.csv'])
     post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep)
     expect(body['item']).to include('status' => 'done', 'done_by' => client_rep.full_name)
+    expect(body['item']['notes'].map { |n| [n['side'], n['body']] }).to eq([['client', 'Sending it today']])
 
     expect(bells(tom).pluck(:message)).to include(a_string_including('Sending it today'), a_string_including('uploaded users.csv'), a_string_including('finished'))
     expect(client.onboarding_events.pluck(:kind)).to include('note', 'upload', 'done')

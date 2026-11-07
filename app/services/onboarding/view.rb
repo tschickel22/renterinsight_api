@@ -8,14 +8,24 @@ module Onboarding
     module_function
 
     def items(company)
-      company.onboarding_items.ordered.includes(:assignee, :done_by, files_attachments: :blob).map { |i| item(i) }
+      notes = notes_by_item(company.onboarding_events.where(kind: 'note'))
+      company.onboarding_items.ordered.includes(:assignee, :done_by, files_attachments: :blob).map { |i| item(i, notes[i.id] || []) }
     end
 
-    def item(i)
+    # The notes on each item, oldest first: the conversation both sides see.
+    def notes_by_item(scope)
+      scope.where.not(onboarding_item_id: nil).includes(:user).order(:created_at).group_by(&:onboarding_item_id).transform_values do |es|
+        es.map { |e| { id: e.id, side: e.side, who: e.user&.full_name, body: e.body, at: e.created_at.iso8601 } }
+      end
+    end
+
+    def item(i, notes = nil)
+      notes ||= notes_by_item(i.events.where(kind: 'note'))[i.id] || []
       { id: i.id, section: i.section, title: i.title, detail: i.detail, owed_by: i.owed_by, status: i.status,
         overdue: i.overdue?, due_on: i.due_on&.iso8601, position: i.position, template_item_id: i.template_item_id,
         assignee: i.assignee && person(i.assignee), done_at: i.done_at&.iso8601, done_by: i.done_by&.full_name,
-        files: i.files.map { |f| { id: f.id, name: f.filename.to_s, size: f.byte_size, at: f.created_at.iso8601 } } }
+        files: i.files.map { |f| { id: f.id, name: f.filename.to_s, size: f.byte_size, at: f.created_at.iso8601 } },
+        notes: notes }
     end
 
     def events(company, limit: 30)
