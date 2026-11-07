@@ -148,6 +148,22 @@ module Api
                        visitor_on_page: @conversation.visitor_on_page? }
       end
 
+      # Sends Quinn AI's drafted email reply, as written or as the rep edited it.
+      def send_draft
+        return unless authorize_action!('leads', 'update')
+        return render(json: { error: 'No reply waiting' }, status: :unprocessable_entity) if @conversation.draft_reply.blank?
+
+        Assistant::Drafts.send!(@conversation, user: current_user, subject: params[:subject], body: params[:body])
+        render json: row_json(@conversation.reload, nil)
+      end
+
+      def discard_draft
+        return unless authorize_action!('leads', 'update')
+
+        Assistant::Drafts.discard!(@conversation)
+        render json: row_json(@conversation.reload, nil)
+      end
+
       def hand_back
         return unless authorize_action!('leads', 'update')
         settings = Assistant::Settings.for(@company)
@@ -215,9 +231,14 @@ module Api
 
       NEEDS_YOU_SQL = <<~SQL.squish
         conversations.status <> 'closed'
-        AND NOT (conversations.status = 'active' AND conversations.assistant_enabled)
-        AND conversations.last_inbound_at IS NOT NULL
-        AND (conversations.last_person_reply_at IS NULL OR conversations.last_inbound_at > conversations.last_person_reply_at)
+        AND (
+          conversations.draft_reply IS NOT NULL
+          OR (
+            NOT (conversations.status = 'active' AND conversations.assistant_enabled)
+            AND conversations.last_inbound_at IS NOT NULL
+            AND (conversations.last_person_reply_at IS NULL OR conversations.last_inbound_at > conversations.last_person_reply_at)
+          )
+        )
       SQL
 
       def apply_view(scope, view)
@@ -269,14 +290,16 @@ module Api
       end
 
       def needs_you?(c)
+        return true if c.status != 'closed' && c.draft_reply.present?
+
         c.status != 'closed' && !c.assistant_answering? && c.last_inbound_at.present? &&
           (c.last_person_reply_at.nil? || c.last_inbound_at > c.last_person_reply_at)
       end
 
       def handler_label(c)
         return 'Done' if c.status == 'closed'
-        return 'Assistant' if c.assistant_answering?
         return 'Needs you' if needs_you?(c)
+        return 'Assistant' if c.assistant_answering?
 
         'Waiting on buyer'
       end
@@ -310,6 +333,8 @@ module Api
           visitor_on_page: c.visitor_on_page?,
           # Quinn AI's next follow-up, while it is following up (E96).
           next_follow_up_at: c.next_follow_up_at,
+          # Quinn AI's email reply waiting for a rep to approve.
+          draft_reply: c.draft_reply.presence,
           follow_up_count: c.follow_up_count,
           chat_page_url: c.chat_page_url
         }

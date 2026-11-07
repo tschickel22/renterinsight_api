@@ -65,15 +65,28 @@ module Assistant
           assigned_user_id: record.try(:owner_id), status: 'active', assistant_enabled: false, started_at: Time.current
         )
         communication.update_columns(conversation_id: conversation.id)
-        conversation.note_message!(communication)
-        # The assistant texts; an email needs a person. The rep is already told
-        # by InboundEmail::ReplyNotifier, so no second notice.
-        if conversation.assistant_answering?
-          conversation.update!(status: 'handed_off', handoff_reason: 'email_reply', handed_off_at: Time.current,
-                               handed_off_to_user_id: conversation.assigned_user_id)
+        # By the dealer's choice Quinn answers the email (or drafts the answer
+        # for a rep), or a person takes it. The rep is already told by
+        # InboundEmail::ReplyNotifier, so no second notice for a handoff.
+        if conversation.assistant_answering? && Assistant::Settings.for(conversation.company).email_replies != 'rep'
+          answering = Assistant::Inbound.received(conversation, communication)
+          unless answering
+            conversation.update!(status: 'handed_off', handoff_reason: 'email_reply', handed_off_at: Time.current,
+                                 handed_off_to_user_id: conversation.assigned_user_id)
+          end
+        else
+          conversation.note_message!(communication)
+          if conversation.assistant_answering?
+            conversation.update!(status: 'handed_off', handoff_reason: 'email_reply', handed_off_at: Time.current,
+                                 handed_off_to_user_id: conversation.assigned_user_id)
+          end
         end
         conversation
       else
+        # Quinn's own emails go out under the lead owner's address; they are
+        # Quinn's, not a person's answer.
+        return nil if meta['sent_by'] == 'assistant'
+
         person = meta['sender_user_id'].presence || communication.try(:user_id)
         return nil if person.blank? || meta['campaign_send_id'].present?
 

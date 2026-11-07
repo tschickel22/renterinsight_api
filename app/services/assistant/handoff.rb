@@ -11,6 +11,8 @@ module Assistant
       'trade_in_value' => 'wants a trade in valued',
       'appointment' => 'wants to set a time to visit',
       'visit_time' => 'picked a time to visit; confirm it',
+      'ready_to_buy' => 'says they are ready to buy',
+      'long_conversation' => 'has written a lot; worth a person now',
       'ready_for_rep' => 'is ready to talk with the team',
       'unsure' => 'asked something the assistant could not answer',
       'rule_check' => 'the assistant could not write a safe answer',

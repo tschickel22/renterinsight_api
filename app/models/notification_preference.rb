@@ -75,6 +75,7 @@ class NotificationPreference < ApplicationRecord
     sms_reply_received: { in_app: true, email: true, sms: false, push: true },
     # Texted by default (Tom, 2026-11-06): the rep takes the buyer from their phone.
     assistant_handoff: { in_app: true, email: true, sms: true, push: true },
+    assistant_draft: { in_app: true, email: true, sms: false, push: true },
     # Platform admins: a dealer submitted, or the carriers decided (E96 phase 4).
     texting_registration: { in_app: true, email: true, sms: false, push: true },
     sms_new_lead: { in_app: true, email: true, sms: false, push: true },

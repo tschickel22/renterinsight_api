@@ -55,6 +55,33 @@ module Assistant
       { success: true, chat_message: message }
     end
 
+    # Quinn's email to the buyer (a reply to their email, a follow-up, or a
+    # draft a rep approved): from the lead owner's address like any email the
+    # dealer sends, with reply tracking so the answer comes back here.
+    def email!(conversation, subject:, body:, approved_by: nil, extra_metadata: {}, category: 'transactional')
+      lead = conversation.conversable
+      raise ArgumentError, 'no email address' if lead.try(:email).blank?
+
+      metadata = { 'sent_by' => 'assistant', 'conversation_id' => conversation.id }
+      metadata['approved_by_user_id'] = approved_by.id if approved_by
+      metadata.merge!((extra_metadata || {}).to_h.stringify_keys)
+      CommunicationService.send_email(
+        communicable: lead, to: lead.email, subject: subject.to_s.truncate(150), body: email_html(conversation, body),
+        category: category, user: lead.try(:owner), conversation: conversation, metadata: metadata
+      )
+    end
+
+    def email_html(conversation, body)
+      lead = conversation.conversable
+      first = lead.try(:first_name).to_s.strip
+      first = '' if first.match?(Assistant::Learn::PLACEHOLDER_NAME)
+      paragraphs = body.to_s.split(/\n{2,}/).map { |p| "<p>#{ERB::Util.html_escape(p).gsub("\n", '<br>')}</p>" }.join
+      paragraphs = paragraphs.gsub(%r{https?://[^\s<]+}) { |url| %(<a href="#{url}">#{url}</a>) }
+      name = Assistant::Settings.for(conversation.company).assistant_name
+      "<p>Hi#{" #{ERB::Util.html_escape(first)}" if first.present?},</p>#{paragraphs}" \
+        "<p>#{ERB::Util.html_escape(name)}<br>#{ERB::Util.html_escape(conversation.company.name)}</p>"
+    end
+
     def dealer_name(conversation)
       conversation.company.name.to_s
     end

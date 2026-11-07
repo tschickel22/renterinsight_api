@@ -2894,6 +2894,9 @@ Rails.application.routes.draw do
           # A website chat (E96): its messages, and a rep's reply in it.
           get :chat_messages
           post :chat_reply
+          # Quinn AI's email reply waiting for approval.
+          post :send_draft
+          post :discard_draft
         end
       end
       resource :lead_assistant_settings, only: %i[show update] do
@@ -3343,6 +3346,8 @@ Rails.application.routes.draw do
       # Which dealers have the AI connector and how much they use it (E53).
       get 'ai_connector_usage', to: 'ai_connector_usage#index'
       get 'assistant_questions', to: 'assistant_questions#index'
+      # What Quinn AI costs per dealer this month: AI tokens and messages (E96).
+      get 'assistant_usage', to: 'assistant_questions#usage'
       get 'sms_registrations', to: 'sms_registrations#index'
       post 'sms_registrations/:id/send_to_carriers', to: 'sms_registrations#send_to_carriers'
       post 'sms_registrations/:id/check', to: 'sms_registrations#check'
