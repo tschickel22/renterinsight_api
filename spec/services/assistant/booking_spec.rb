@@ -160,4 +160,19 @@ RSpec.describe 'Quinn AI books visits', type: :request do
                                            params: { block: { starts_at: 3.days.from_now.iso8601, ends_at: (3.days.from_now + 2.hours).iso8601, note: 'Dentist' } }.to_json
     expect(JSON.parse(response.body)['blocks'].first).to include('note' => 'Dentist')
   end
+
+  it 'texts kindly with two new times an hour after a rep marks a no-show, taking the conversation back' do
+    travel_to(monday_8am) do
+      visit = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',
+                                   start_time: monday_8am.change(hour: 7), end_time: monday_8am.change(hour: 8), status: 'pending',
+                                   send_calendar_invite: false, remind_customer: false)
+      conversation.update!(status: 'handed_off', handoff_reason: 'rep_replied')
+      expect { visit.update!(status: 'no_show') }.to have_enqueued_job(AssistantNoShowJob).with('LeadActivity', visit.id)
+
+      brain_says('No problem at all, things come up. Would Tuesday at 10 AM or 2 PM work instead?')
+      AssistantNoShowJob.perform_now('LeadActivity', visit.id)
+      expect(sent.last[:body]).to include('No problem at all')
+      expect(conversation.reload).to have_attributes(status: 'active', assistant_enabled: true)
+    end
+  end
 end
