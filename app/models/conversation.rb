@@ -33,6 +33,21 @@ class Conversation < ApplicationRecord
 
   scope :open_now, -> { where(status: OPEN_STATUSES) }
 
+  # Waiting on a person: the buyer wrote last and nobody answered, or Quinn
+  # AI's drafted reply waits for approval (the Inbox's Needs you, the
+  # Workqueue's Waiting on you in the Inbox).
+  NEEDS_YOU_SQL = <<~SQL.squish
+    conversations.status <> 'closed'
+    AND (
+      conversations.draft_reply IS NOT NULL
+      OR (
+        NOT (conversations.status = 'active' AND conversations.assistant_enabled)
+        AND conversations.last_inbound_at IS NOT NULL
+        AND (conversations.last_person_reply_at IS NULL OR conversations.last_inbound_at > conversations.last_person_reply_at)
+      )
+    )
+  SQL
+
   def self.normalize_phone(raw)
     digits = raw.to_s.gsub(/\D/, '')
     return nil if digits.blank?
