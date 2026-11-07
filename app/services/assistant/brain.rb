@@ -283,9 +283,11 @@ module Assistant
 
     def visit_rule
       if booking?
-        return 'VISITS: you book visits yourself. When they want to visit, offer two times from OPEN TIMES in plain words ' \
-               '(never the [id]). When they clearly accept one, set book_slot to its id; the confirmation with the day, time ' \
-               'and address is added to your reply for you, so keep your reply to a few warm words or leave it empty. If they ' \
+        return 'VISITS: you book visits yourself. When they want to visit, offer EXACTLY TWO times from OPEN TIMES in plain ' \
+               'words (never the [id], never a list of more), on different days or a morning and an afternoon; if they name a ' \
+               'day, offer two times that day. When they clearly accept one, set book_slot to its id. When you set book_slot or ' \
+               'cancel_visit, a confirmation with the day, time and address is sent for you, so your reply must be empty or a ' \
+               'few warm words that do not repeat the time (for example "Perfect, see you then."). If they ' \
                'want a time that is not listed, offer the closest listed ones. To move a booked visit, offer times and set ' \
                'book_slot for the new one. If they ask to cancel, set cancel_visit. Never say a visit is booked unless you set ' \
                'book_slot. If there are no open times, hand off (reason appointment).'
