@@ -120,6 +120,10 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     post "/api/admin/onboarding/#{client.id}/start", headers: headers_for(tom)
     expect(body['intro']).to be_nil
     expect(body['intro_people']).to include(client_admin.id)
+    copied = user(client, 'sales_rep')
+    copied.update_columns(role: 'Company Administrator (Copy)')
+    expect(Onboarding::Checklist.client_people(client)).to include(copied)
+    expect(Onboarding::Checklist.client_people(client)).not_to include(client_rep)
 
     expect do
       post "/api/admin/onboarding/#{client.id}/intro", headers: headers_for(tom),
