@@ -1,0 +1,9 @@
+<p>Hi <%= @user.first_name.presence || 'there' %>,</p>
+<p><%= @client ? "Here is what changed on your #{@brand.name} setup list since yesterday:" : 'Here is what clients did on their onboarding lists since yesterday:' %></p>
+<% @sections.each do |s| %>
+  <% unless @client && @sections.size == 1 %><h3 style="margin:16px 0 4px"><%= s[:name] %></h3><% end %>
+  <ul style="margin-top:0">
+    <% s[:lines].each do |line| %><li><%= line %></li><% end %>
+  </ul>
+<% end %>
+<p><a href="<%= @url %>"><%= @client ? 'Open Getting started' : 'Open Onboarding' %></a></p>

@@ -90,6 +90,7 @@ class Notification < ApplicationRecord
     truebuild_price_request: { category: 'sales', priority: 'normal', title: 'Price Book Correction' },
     truebuild_factory_run: { category: 'system', priority: 'normal', title: 'TrueView Factory Run' },
     new_homes_digest: { category: 'system', priority: 'normal', title: 'New Homes From the Feeds' },
+    onboarding_update: { category: 'system', priority: 'normal', title: 'Onboarding Checklist' },
     
     # Broadcast notifications
     broadcast_message: { category: 'broadcast', priority: 'normal', title: 'Company Announcement' },

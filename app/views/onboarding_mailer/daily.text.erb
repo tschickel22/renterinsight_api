@@ -1,0 +1,11 @@
+Hi <%= @user.first_name.presence || 'there' %>,
+
+<%= @client ? "Here is what changed on your #{@brand.name} setup list since yesterday:" : 'Here is what clients did on their onboarding lists since yesterday:' %>
+<% @sections.each do |s| %>
+<% unless @client && @sections.size == 1 %>
+<%= s[:name] %>
+<% end %>
+<% s[:lines].each do |line| %>- <%= line %>
+<% end %>
+<% end %>
+<%= @url %>

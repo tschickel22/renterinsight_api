@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_010100) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5330,6 +5330,65 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_010100) do
     t.index ["user_id"], name: "index_offline_sync_logs_on_user_id"
   end
 
+  create_table "onboarding_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "onboarding_item_id"
+    t.bigint "user_id"
+    t.string "kind", null: false
+    t.string "side", null: false
+    t.text "body"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "created_at"], name: "index_onboarding_events_on_company_id_and_created_at"
+    t.index ["company_id"], name: "index_onboarding_events_on_company_id"
+    t.index ["onboarding_item_id"], name: "index_onboarding_events_on_onboarding_item_id"
+    t.index ["user_id"], name: "index_onboarding_events_on_user_id"
+  end
+
+  create_table "onboarding_followers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "user_id"], name: "index_onboarding_followers_on_company_id_and_user_id", unique: true
+    t.index ["company_id"], name: "index_onboarding_followers_on_company_id"
+    t.index ["user_id"], name: "index_onboarding_followers_on_user_id"
+  end
+
+  create_table "onboarding_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "template_item_id"
+    t.string "section", null: false
+    t.string "title", null: false
+    t.text "detail"
+    t.string "owed_by", default: "client", null: false
+    t.string "status", default: "open", null: false
+    t.bigint "assignee_id"
+    t.date "due_on"
+    t.datetime "done_at"
+    t.bigint "done_by_id"
+    t.bigint "created_by_id"
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assignee_id"], name: "index_onboarding_items_on_assignee_id"
+    t.index ["company_id"], name: "index_onboarding_items_on_company_id"
+    t.index ["created_by_id"], name: "index_onboarding_items_on_created_by_id"
+    t.index ["done_by_id"], name: "index_onboarding_items_on_done_by_id"
+    t.index ["template_item_id"], name: "index_onboarding_items_on_template_item_id"
+  end
+
+  create_table "onboarding_template_items", force: :cascade do |t|
+    t.string "section", null: false
+    t.string "title", null: false
+    t.text "detail"
+    t.string "owed_by", default: "client", null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
   create_table "ops_marks", force: :cascade do |t|
     t.string "key", null: false
     t.datetime "at", null: false
@@ -9564,6 +9623,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_010100) do
   add_foreign_key "oauth_tokens", "oauth_grants"
   add_foreign_key "offline_sync_logs", "companies"
   add_foreign_key "offline_sync_logs", "users"
+  add_foreign_key "onboarding_events", "companies"
+  add_foreign_key "onboarding_events", "onboarding_items", on_delete: :nullify
+  add_foreign_key "onboarding_events", "users"
+  add_foreign_key "onboarding_followers", "companies"
+  add_foreign_key "onboarding_followers", "users"
+  add_foreign_key "onboarding_items", "companies"
+  add_foreign_key "onboarding_items", "onboarding_template_items", column: "template_item_id"
+  add_foreign_key "onboarding_items", "users", column: "assignee_id"
+  add_foreign_key "onboarding_items", "users", column: "created_by_id"
+  add_foreign_key "onboarding_items", "users", column: "done_by_id"
   add_foreign_key "package_templates", "companies"
   add_foreign_key "page_visit_events", "page_visits"
   add_foreign_key "page_visits", "campaigns"

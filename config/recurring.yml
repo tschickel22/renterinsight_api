@@ -15,6 +15,11 @@ default: &default
     class: ReviewItemNudgeJob
     queue: low
     schedule: every hour at minute 25
+  # Client onboarding lists: one morning summary per person (E97).
+  onboarding_daily_summary:
+    class: OnboardingDailySummaryJob
+    queue: low
+    schedule: every day at 7am America/Denver
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob

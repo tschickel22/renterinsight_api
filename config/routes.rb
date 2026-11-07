@@ -2329,6 +2329,16 @@ Rails.application.routes.draw do
         post   'categories',            action: :manage_category
       end
 
+      # A client's own onboarding list, in Getting started (E97).
+      scope :onboarding, controller: :onboarding do
+        get  '', action: :index, as: :onboarding
+        post 'items/:id/done', action: :done
+        post 'items/:id/reopen', action: :reopen
+        post 'items/:id/note', action: :note
+        post 'items/:id/files', action: :upload
+        get  'items/:id/files/:file_id', action: :download
+      end
+
       # In-app guidance: usage events and summary (backlog E75).
       scope :guide, controller: :guide do
         post 'events',    action: :events
@@ -3375,6 +3385,26 @@ Rails.application.routes.draw do
       # Dealer agreement packages (Agreements::PackageInstaller): which exist, and installing one for a company.
       get    'agreement_packages', to: 'agreement_packages#index'
       post   'agreement_packages', to: 'agreement_packages#create'
+      # Client onboarding checklists (E97).
+      get    'onboarding_template', to: 'onboarding#template'
+      post   'onboarding_template', to: 'onboarding#create_template'
+      patch  'onboarding_template/:id', to: 'onboarding#update_template'
+      delete 'onboarding_template/:id', to: 'onboarding#destroy_template'
+      get    'onboarding', to: 'onboarding#index'
+      get    'onboarding/:company_id', to: 'onboarding#show'
+      post   'onboarding/:company_id/start', to: 'onboarding#start'
+      post   'onboarding/:company_id/items', to: 'onboarding#create_item'
+      patch  'onboarding/:company_id/items/:id', to: 'onboarding#update_item'
+      delete 'onboarding/:company_id/items/:id', to: 'onboarding#destroy_item'
+      post   'onboarding/:company_id/items/:id/done', to: 'onboarding#done'
+      post   'onboarding/:company_id/items/:id/reopen', to: 'onboarding#reopen'
+      post   'onboarding/:company_id/items/:id/not_needed', to: 'onboarding#not_needed'
+      post   'onboarding/:company_id/items/:id/note', to: 'onboarding#note'
+      post   'onboarding/:company_id/items/:id/files', to: 'onboarding#upload'
+      get    'onboarding/:company_id/items/:id/files/:file_id', to: 'onboarding#download'
+      post   'onboarding/:company_id/items/:id/save_to_standard', to: 'onboarding#save_to_standard'
+      post   'onboarding/:company_id/followers', to: 'onboarding#add_follower'
+      delete 'onboarding/:company_id/followers/:user_id', to: 'onboarding#remove_follower'
       get    'truebuild_factories', to: 'truebuild_factories#index'
       put    'truebuild_factories/ready_share', to: 'truebuild_factories#update_ready_share'
       post   'truebuild_factories/:id/preview', to: 'truebuild_factories#preview'
