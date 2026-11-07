@@ -2887,6 +2887,12 @@ Rails.application.routes.draw do
         end
       end
       resource :lead_assistant_settings, only: %i[show update]
+      resources :assistant_questions, only: %i[index] do
+        member do
+          post :answer
+          post :dismiss
+        end
+      end
 
       # ==================== SOURCES ====================
       resources :sources, only: %i[index create update destroy] do
@@ -3320,6 +3326,7 @@ Rails.application.routes.draw do
       # on purpose: this is the platform operator's view.
       # Which dealers have the AI connector and how much they use it (E53).
       get 'ai_connector_usage', to: 'ai_connector_usage#index'
+      get 'assistant_questions', to: 'assistant_questions#index'
 
       resources :live_visitors, only: [:index] do
         collection do

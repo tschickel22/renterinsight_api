@@ -31,8 +31,8 @@ module Assistant
     # (AssistantReplyJob), the same fields the lead form fills.
     CONTACT_FIELDS = %w[first_name last_name email street city state zip].freeze
 
-    Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :handoff, :handoff_reason,
-                        :summary, :usage, keyword_init: true)
+    Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :question, :question_answered,
+                        :question_topic, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
 
     def initialize(conversation:, settings:, history:, feedback: nil)
       @conversation = conversation
@@ -53,6 +53,9 @@ module Assistant
         contact: input['contact'].to_h.slice(*CONTACT_FIELDS).transform_values { |v| v.to_s.strip }.compact_blank,
         resend_invite: input['resend_invite'] == true,
         photo_home_id: stock_ids.include?(input['photo_home_id'].to_i) ? input['photo_home_id'].to_i : nil,
+        question: input['buyer_question'].to_s.squish.truncate(300).presence,
+        question_answered: input['question_answered'] == true,
+        question_topic: AssistantQuestion::TOPICS.include?(input['question_topic']) ? input['question_topic'] : nil,
         handoff: input['handoff'] == true,
         handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : (input['handoff'] ? 'other' : nil),
         summary: input['summary'].to_s.strip.truncate(500),
@@ -102,6 +105,9 @@ module Assistant
         Brands carried: #{facts[:manufacturers].presence&.join(', ') || 'not provided'}
         Homes in stock: #{facts[:inventory_count]}#{facts[:price_range] ? ", priced $#{facts[:price_range][:min]} to $#{facts[:price_range][:max]}" : ''}
         #{@settings['extra_facts'].present? ? "More from the dealer: #{@settings['extra_facts'].to_s.squish}" : ''}
+
+        DEALER ANSWERS TO COMMON QUESTIONS
+        #{faq_lines.presence || 'None yet.'}
 
         HOMES (the only homes you may mention)
         #{stock_lines.presence || 'No homes listed.'}
@@ -153,6 +159,9 @@ module Assistant
             },
             resend_invite: { type: 'boolean', description: 'True to email the calendar invite for their next appointment again.' },
             photo_home_id: { type: 'integer', description: 'The [number] of one home from HOMES to send its photos with your reply, when they ask for pictures or to see it.' },
+            buyer_question: { type: 'string', description: 'If their latest message asks a question, that question in a few plain words. Omit if they did not ask one.' },
+            question_answered: { type: 'boolean', description: 'True only if you answered their question from the facts, homes or dealer answers given to you.' },
+            question_topic: { type: 'string', enum: AssistantQuestion::TOPICS },
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
             summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' }
@@ -212,6 +221,10 @@ module Assistant
     end
 
     public :allowed_urls, :links_allowed?
+
+    def faq_lines
+      Array(@settings['faqs']).map { |f| "Q: #{f['q']}\n  A: #{f['a']}" }.join("\n")
+    end
 
     def links_rule
       if links_allowed?

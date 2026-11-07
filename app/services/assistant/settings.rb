@@ -23,8 +23,14 @@ module Assistant
       'handoff_user_id' => nil,
       'extra_facts' => '',
       'quiet_start_hour' => 21,
-      'quiet_end_hour' => 8
+      'quiet_end_hour' => 8,
+      # Answers the dealer added for questions Quinn could not answer:
+      # [{ 'q' => ..., 'a' => ... }]. Quinn answers from these like any fact.
+      'faqs' => [],
+      # The site whose home pages Quinn links to (where links are allowed).
+      'link_website_id' => nil
     }.freeze
+    MAX_FAQS = 60
 
     attr_reader :company
 
@@ -53,6 +59,17 @@ module Assistant
       end
       %w[quiet_start_hour quiet_end_hour].each { |k| clean[k] = clean[k].to_i.clamp(0, 23) if clean.key?(k) }
       clean['extra_facts'] = clean['extra_facts'].to_s.truncate(2000) if clean.key?('extra_facts')
+      if clean.key?('faqs')
+        clean['faqs'] = Array(clean['faqs']).filter_map do |f|
+          f = f.to_h.stringify_keys
+          q = f['q'].to_s.squish.truncate(300)
+          a = f['a'].to_s.squish.truncate(600)
+          { 'q' => q, 'a' => a } if q.present? && a.present?
+        end.last(MAX_FAQS)
+      end
+      if clean.key?('link_website_id')
+        clean['link_website_id'] = company.websites.find_by(id: clean['link_website_id'])&.id
+      end
       clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
       Setting.set('Company', company.id, KEY, to_h.merge(clean))
       @to_h = nil

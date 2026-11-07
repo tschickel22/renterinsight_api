@@ -270,7 +270,8 @@ module Webhooks
             sender_user_id:       sender_user_id,
             assigned_user_id:     assigned_user_id,
             matched_outbound_id:  original_communication.id,
-            source:               twilio_account ? 'dedicated' : 'platform'
+            source:               twilio_account ? 'dedicated' : 'platform',
+            media_urls:           inbound_media_urls.presence
           }.compact
         )
 
@@ -416,6 +417,12 @@ module Webhooks
     private
 
     KEYWORD_REPLIES = %w[STOP STOPALL UNSUBSCRIBE CANCEL END QUIT START YES UNSTOP SUBSCRIBE HELP INFO].freeze
+
+    # Photos a buyer texted (MMS): Twilio sends NumMedia and MediaUrl0..N.
+    def inbound_media_urls
+      count = params['NumMedia'].to_i.clamp(0, 10)
+      (0...count).filter_map { |i| params["MediaUrl#{i}"].presence }.select { |u| u.start_with?('https://') }
+    end
 
     def keyword_reply?(stripped_body)
       KEYWORD_REPLIES.include?(stripped_body)

@@ -29,10 +29,12 @@ RSpec.describe 'Lead Assistant', type: :request do
     TwilioAccount.create!(company: company, phone_number: own_number, phone_number_sid: "PN#{SecureRandom.hex(8)}", status: 'active')
   end
 
-  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {}, resend_invite: false, photo_home_id: nil)
+  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {}, resend_invite: false, photo_home_id: nil,
+                 question: nil, question_answered: false)
     allow_any_instance_of(Assistant::Brain).to receive(:call).and_return(
       Assistant::Brain::Result.new(reply: reply, qualification: qualification, contact: contact, resend_invite: resend_invite,
-                                   photo_home_id: photo_home_id, handoff: handoff,
+                                   photo_home_id: photo_home_id, question: question, question_answered: question_answered,
+                                   question_topic: nil, handoff: handoff,
                                    handoff_reason: reason, summary: 'Wants a 3 bed on her land.', usage: {})
     )
   end
@@ -159,6 +161,24 @@ RSpec.describe 'Lead Assistant', type: :request do
       perform_enqueued_jobs(except: [AppointmentInviteJob])
       expect(resent).to eq([['LeadActivity', appt.id, 'REQUEST']])
       expect(conversation.reload.status).to eq('active')
+    end
+
+    it 'keeps photos the buyer texts on their message' do
+      brain_says(reply: 'Thanks for the photo!')
+      post '/webhooks/twilio/sms/inbound', params: { From: '+13035550144', To: own_number, Body: 'My lot', MessageSid: 'SMx1',
+                                                     NumMedia: '1', MediaUrl0: 'https://api.twilio.com/media/ME1' }
+      expect(Communication.where(direction: 'inbound').last.metadata['media_urls']).to eq(['https://api.twilio.com/media/ME1'])
+    end
+
+    it 'keeps every question, marked by whether it could answer' do
+      brain_says(reply: 'We are open 9 to 6 every day.', question: 'What are your hours?', question_answered: true)
+      buyer_texts('What are your hours?')
+      perform_enqueued_jobs
+      brain_says(reply: 'Let me check with the team on that.', question: 'Do you deliver to Wyoming?', question_answered: false)
+      buyer_texts('Do you deliver to Wyoming?')
+      perform_enqueued_jobs
+      expect(company.assistant_questions.order(:id).pluck(:question, :status))
+        .to eq([['What are your hours?', 'answered'], ['Do you deliver to Wyoming?', 'unanswered']])
     end
 
     it 'sends photos of the home it picked as a picture text, with no link' do
