@@ -10,6 +10,8 @@ module Assistant
       'legal_or_warranty' => 'asked about legal, warranty or a complaint',
       'trade_in_value' => 'wants a trade in valued',
       'appointment' => 'wants to set a time to visit',
+      'visit_time' => 'picked a time to visit; confirm it',
+      'ready_for_rep' => 'is ready to talk with the team',
       'unsure' => 'asked something the assistant could not answer',
       'rule_check' => 'the assistant could not write a safe answer',
       'email_reply' => 'replied by email',
@@ -28,7 +30,7 @@ module Assistant
         handed_off_to_user_id: user&.id, assigned_user_id: conversation.assigned_user_id || user&.id
       )
 
-      text = buyer_text == :default ? default_buyer_text(user) : buyer_text
+      text = buyer_text == :default ? default_buyer_text(user, conversation) : buyer_text
       Assistant::Messenger.deliver!(conversation, body: text) if text.present?
 
       notify(conversation, user, reason, summary)
@@ -52,11 +54,18 @@ module Assistant
       chosen = users.find_by(id: settings['handoff_user_id']) if settings['handoff_mode'] == 'user'
       chosen ||= users.find_by(id: conversation.conversable.try(:owner_id))
       chosen ||= users.find_by(id: conversation.assigned_user_id)
+      # A website visitor with no lead yet has no owner: the company's first
+      # admin takes it, so a handoff always reaches someone.
+      chosen ||= users.active.select(&:effective_admin?).reject(&:platform_admin?).min_by(&:id) if conversation.web_chat?
       chosen
     end
 
-    def default_buyer_text(user)
+    def default_buyer_text(user, conversation = nil)
       first = user&.try(:first_name).presence
+      if conversation&.web_chat?
+        who = first || 'our team'
+        return "I have asked #{who} to join this chat. If you need to go, leave your name and an email or mobile number and we will follow up."
+      end
       first ? "I have asked #{first} to text you directly." : 'I have asked our team to text you directly.'
     end
 
@@ -65,8 +74,9 @@ module Assistant
 
       lead = conversation.conversable
       who = lead.try(:display_name).presence || [lead.try(:first_name), lead.try(:last_name)].compact_blank.join(' ').presence ||
-            conversation.buyer_phone
+            conversation.buyer_phone.presence || 'A website visitor'
       message = "#{who} #{REASON_LABELS.fetch(reason.to_s, 'needs a person')}."
+      message += ' They are in the website chat now.' if conversation.visitor_on_page?
       message += " #{summary}" if summary.present?
       NotificationService.create(
         recipient: user, notification_type: :assistant_handoff, notifiable: lead,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_040000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2029,6 +2029,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_040000) do
     t.index ["parent_id"], name: "index_chart_of_accounts_on_parent_id"
   end
 
+  create_table "chat_messages", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.bigint "company_id", null: false
+    t.string "direction", null: false
+    t.string "sent_by"
+    t.bigint "user_id"
+    t.text "body", null: false
+    t.jsonb "listings", default: [], null: false
+    t.jsonb "actions", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_chat_messages_on_company_id"
+    t.index ["conversation_id", "id"], name: "index_chat_messages_on_conversation_id_and_id"
+    t.index ["conversation_id"], name: "index_chat_messages_on_conversation_id"
+  end
+
   create_table "commission_audit_entries", force: :cascade do |t|
     t.bigint "commission_id", null: false
     t.bigint "user_id", null: false
@@ -2776,11 +2792,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_040000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "last_person_reply_at"
+    t.string "visitor_token"
+    t.bigint "website_id"
+    t.datetime "visitor_seen_at"
+    t.string "chat_page_url"
     t.index ["assigned_user_id"], name: "index_conversations_on_assigned_user_id"
     t.index ["company_id", "status", "last_message_at"], name: "idx_on_company_id_status_last_message_at_4e838304a7"
     t.index ["company_id"], name: "index_conversations_on_company_id"
     t.index ["conversable_type", "conversable_id"], name: "index_conversations_on_conversable_type_and_conversable_id"
     t.index ["sender_number", "buyer_phone"], name: "index_conversations_open_by_numbers", unique: true, where: "((status)::text = ANY (ARRAY[('active'::character varying)::text, ('handed_off'::character varying)::text]))"
+    t.index ["visitor_token"], name: "index_conversations_on_visitor_token", unique: true, where: "(visitor_token IS NOT NULL)"
   end
 
   create_table "credit_memo_applications", force: :cascade do |t|
@@ -9411,6 +9432,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_040000) do
   add_foreign_key "chart_of_accounts", "bank_accounts"
   add_foreign_key "chart_of_accounts", "chart_of_accounts", column: "parent_id"
   add_foreign_key "chart_of_accounts", "companies"
+  add_foreign_key "chat_messages", "conversations"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade

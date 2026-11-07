@@ -121,6 +121,8 @@ class Lead < ApplicationRecord
 
   # Workflow engine emit hooks
   after_commit :emit_workflow_created, on: :create
+  # Quinn texts a new lead from a form, Facebook or the API itself (E96).
+  after_commit(on: :create) { AssistantStartJob.consider(self) }
   after_commit :emit_workflow_updated, on: :update
   after_commit :emit_workflow_deleted, on: :destroy
 

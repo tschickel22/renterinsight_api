@@ -40,8 +40,10 @@ module Assistant
 
     # The open conversation with this person on any channel, newest first:
     # the Inbox keeps one row per person, and the thread shows every channel.
+    # Texts and email only: a website chat lives in its own thread, and email
+    # threaded into it would never reach the visitor's widget.
     def open_conversation_for_record(record)
-      Conversation.open_now.where(conversable: record).order(updated_at: :desc).first
+      Conversation.open_now.where(conversable: record).where.not(channel: 'web_chat').order(updated_at: :desc).first
     end
 
     # An email in or out on a lead or contact (Communication callback).

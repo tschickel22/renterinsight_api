@@ -25,6 +25,11 @@ default: &default
     class: SmsRegistrationPollJob
     queue: low
     schedule: every 30 minutes
+  # Website chats Quinn handled that went quiet close themselves (E96).
+  web_chat_cleanup:
+    class: WebChatCleanupJob
+    queue: low
+    schedule: every hour
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob

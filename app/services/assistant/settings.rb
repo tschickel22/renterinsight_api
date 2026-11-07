@@ -9,6 +9,15 @@ module Assistant
     MODULE_KEY = 'marketing.lead_assistant'
     TONES = %w[friendly professional].freeze
     HANDOFF_MODES = %w[owner user].freeze
+    # What Quinn works toward, in chat and by text (Tom, 2026-11-07).
+    # book_always:      every conversation heads for a visit.
+    # book_after_hours: during business hours, the basics and then straight to
+    #                   a rep; after hours, heads for a visit.
+    # qualify:          learn what they need, then hand to a rep (default).
+    # answer_only:      answers questions, asks none, hands off when asked.
+    GOALS = %w[book_always book_after_hours qualify answer_only].freeze
+    CHAT_MODULE_KEY = 'marketing.ai_concierge'
+    MAX_CHAT_SITES = 10
 
     # The name the assistant goes by when a dealer has not chosen one.
     DEFAULT_NAME = 'Quinn'
@@ -28,7 +37,14 @@ module Assistant
       # [{ 'q' => ..., 'a' => ... }]. Quinn answers from these like any fact.
       'faqs' => [],
       # The site whose home pages Quinn links to (where links are allowed).
-      'link_website_id' => nil
+      'link_website_id' => nil,
+      # Quinn sends the first text to a new lead from a form, Facebook or the
+      # API itself, so it does not depend on a play (Tom, 2026-11-07).
+      'auto_start' => true,
+      'goal' => 'qualify',
+      # Web addresses (host names) of the dealer's own sites that may show the
+      # chat through the embed line. Sites we host need no entry.
+      'chat_sites' => []
     }.freeze
     MAX_FAQS = 60
 
@@ -70,6 +86,9 @@ module Assistant
       if clean.key?('link_website_id')
         clean['link_website_id'] = company.websites.find_by(id: clean['link_website_id'])&.id
       end
+      clean['goal'] = 'qualify' if clean.key?('goal') && !GOALS.include?(clean['goal'])
+      clean['auto_start'] = ActiveModel::Type::Boolean.new.cast(clean['auto_start']) == true if clean.key?('auto_start')
+      clean['chat_sites'] = self.class.clean_sites(clean['chat_sites']) if clean.key?('chat_sites')
       clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
       Setting.set('Company', company.id, KEY, to_h.merge(clean))
       @to_h = nil
@@ -84,6 +103,49 @@ module Assistant
 
     def enabled?
       to_h['enabled'] == true && add_on?
+    end
+
+    # The website chat add-on. The chat answers as Quinn with these same
+    # settings, whether or not the dealer also has Quinn by text.
+    def chat_add_on?
+      ModuleAccessService.new(company).module_enabled?(CHAT_MODULE_KEY)
+    rescue StandardError
+      false
+    end
+
+    def auto_start?
+      enabled? && to_h['auto_start'] != false
+    end
+
+    def goal
+      GOALS.include?(to_h['goal']) ? to_h['goal'] : 'qualify'
+    end
+
+    def chat_sites
+      Array(to_h['chat_sites'])
+    end
+
+    # Whether a page on this host may show the embedded chat. "www." is
+    # ignored, and a listed host covers its own subdomains.
+    def chat_site_allowed?(host)
+      host = self.class.normalize_host(host)
+      return false if host.blank?
+
+      chat_sites.any? { |site| host == site || host.end_with?(".#{site}") }
+    end
+
+    def self.normalize_host(value)
+      text = value.to_s.strip.downcase
+      return nil if text.blank?
+
+      text = "https://#{text}" unless text.match?(%r{\Ahttps?://})
+      URI.parse(text).host.to_s.sub(/\Awww\./, '').presence
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    def self.clean_sites(list)
+      Array(list).filter_map { |v| normalize_host(v) }.uniq.first(MAX_CHAT_SITES)
     end
 
     def answers_source?(source_id)

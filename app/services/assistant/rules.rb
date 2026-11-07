@@ -19,11 +19,11 @@ module Assistant
     # nil when the text may be sent; otherwise the reason it may not.
     # allowed_urls: the only web addresses this text may carry (a home's own
     # page, on a number registered for links).
-    def violation(text, allowed_urls: [])
+    def violation(text, allowed_urls: [], max_length: MAX_LENGTH)
       return 'empty' if text.to_s.strip.empty?
       return 'link' if without(text, allowed_urls).match?(URL)
       return 'finance_figure' if text.match?(MONEY) && text.match?(FINANCE_WORDS)
-      return 'too_long' if text.length > MAX_LENGTH
+      return 'too_long' if text.length > max_length
 
       nil
     end

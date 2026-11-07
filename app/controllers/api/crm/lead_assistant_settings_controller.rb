@@ -18,11 +18,19 @@ module Api
         settings = Assistant::Settings.for(@company)
         attrs = params.require(:settings).permit(
           :enabled, :assistant_name, :tone, :handoff_mode, :handoff_user_id, :extra_facts,
-          :quiet_start_hour, :quiet_end_hour, :source_ids, :link_website_id, source_ids: [], faqs: %i[q a]
+          :quiet_start_hour, :quiet_end_hour, :source_ids, :link_website_id, :auto_start, :goal,
+          source_ids: [], faqs: %i[q a], chat_sites: []
         ).to_h
+        # An emptied list arrives as no key at all.
+        attrs['chat_sites'] = [] if params[:settings].key?(:chat_sites) && params[:settings][:chat_sites].blank?
         attrs['enabled'] = ActiveModel::Type::Boolean.new.cast(attrs['enabled']) if attrs.key?('enabled')
         if attrs['enabled'] && !settings.add_on?
           return render(json: { error: 'The Lead Assistant add-on is not on this account' }, status: :forbidden)
+        end
+        # The goal, name and answers also drive the website chat, so a dealer
+        # with either add-on may change them.
+        unless settings.add_on? || settings.chat_add_on?
+          return render(json: { error: 'Quinn AI is not part of this subscription' }, status: :forbidden)
         end
 
         settings.update!(attrs)
@@ -30,6 +38,14 @@ module Api
       end
 
       private
+
+      def embed_code
+        token = @company.public_inventory_token
+        return nil if token.blank?
+
+        base = (ENV['RAILS_API_URL'].presence || request.base_url).to_s.chomp('/')
+        %(<script src="#{base}/chat/#{token}.js" async></script>)
+      end
 
       def payload
         settings = Assistant::Settings.for(@company)
@@ -40,6 +56,13 @@ module Api
           websites: @company.websites.where(status: :published, is_deleted: [false, nil]).order(:name)
                             .map { |w| { id: w.id, name: w.name, url: (w.public_url rescue nil) } },
           add_on: settings.add_on?,
+          # The website chat add-on (marketing.ai_concierge): Quinn in a chat on
+          # the dealer's sites, and the line to put it on their own.
+          chat: {
+            add_on: settings.chat_add_on?,
+            embed_code: settings.chat_add_on? ? embed_code : nil,
+            sites: settings.chat_sites
+          },
           texting: {
             own_numbers: own,
             pool_live: Assistant::Pool.live?,

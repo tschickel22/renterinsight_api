@@ -12,6 +12,8 @@ module Assistant
 
     # sent_by: 'assistant', 'play' (a play's own text), or 'user' with a user.
     def deliver!(conversation, body:, sent_by: 'assistant', user: nil, extra_metadata: {}, media_urls: [])
+      return deliver_chat!(conversation, body: body, sent_by: sent_by, user: user, extra_metadata: extra_metadata) if conversation.web_chat?
+
       lead = conversation.conversable
       raise ArgumentError, 'conversation has no buyer record' unless lead
 
@@ -36,6 +38,21 @@ module Assistant
         communicable: lead, to: conversation.buyer_phone, from: conversation.sender_number, body: body,
         metadata: metadata, sender_user_id: user&.id, user: user, conversation: conversation, media_urls: media
       )
+    end
+
+    # A website chat: the message is stored and the visitor's widget picks it
+    # up on its next check (every few seconds while open).
+    def deliver_chat!(conversation, body:, sent_by:, user:, extra_metadata: {})
+      body = Assistant::Rules.tidy(body) unless sent_by == 'user'
+      extra = (extra_metadata || {}).to_h.stringify_keys
+      who = { 'user' => 'user', 'system' => 'system' }.fetch(sent_by.to_s, 'assistant')
+      message = conversation.chat_messages.create!(
+        company_id: conversation.company_id, direction: 'outbound', body: body, sent_by: who, user_id: user&.id,
+        listings: Array(extra['listings']), actions: Array(extra['actions'])
+      )
+      conversation.note_message!(message)
+      conversation.update_columns(last_person_reply_at: message.created_at) if who == 'user'
+      { success: true, chat_message: message }
     end
 
     def dealer_name(conversation)

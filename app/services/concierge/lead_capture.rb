@@ -61,9 +61,16 @@ module Concierge
     # There is no consent text on intake forms today, so there is nothing to
     # inherit. This is the wording the chat uses until a dealer-level setting
     # exists to override it.
+    # The form's own texts-about-the-inquiry wording when it has one: the
+    # sentence the carriers reviewed for the dealer's campaign (E96).
     def consent_text
-      "By giving your number you agree that #{dealer_name} may call or text you about your " \
-        'enquiry. Message and data rates may apply. Reply STOP to opt out.'
+      form_text = form&.resolved_sms_consent_text if form&.sms_consent?
+      form_text.presence ||
+        "By giving your number you agree that #{dealer_name} may text you about your " \
+          'inquiry. Message and data rates may apply. Reply STOP to opt out.'
+    rescue StandardError
+      "By giving your number you agree that #{dealer_name} may text you about your inquiry. " \
+        'Message and data rates may apply. Reply STOP to opt out.'
     end
 
     def dealer_name
@@ -91,7 +98,13 @@ module Concierge
         ip_address: request_context[:ip],
         user_agent: request_context[:user_agent],
         referrer: request_context[:referrer],
-        submitted_at: Time.current
+        submitted_at: Time.current,
+        # The consent columns are what put inquiry text consent on the lead
+        # (IntakeSubmission#record_sms_consent!); before 2026-11-07 the chat
+        # stored it only in the answers, so Quinn could never text a chat lead.
+        sms_consent: phone.present? && consented,
+        sms_consent_text: (consent_text if phone.present? && consented),
+        sms_consent_at: (Time.current if phone.present? && consented)
       )
 
       return Result.new(status: 'form_required', form_path: form_path) unless submission.save
