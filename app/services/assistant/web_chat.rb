@@ -89,34 +89,26 @@ module Assistant
     def answer!(text)
       # A home search ("3 bed under 80k") is a database query, shown as cards:
       # no model, and no chance of a home that does not exist.
-      # Only a specific search with matches: anything vaguer ("can you help me
-      # find a home") or with nothing in stock is Quinn's to answer, since it
-      # knows the stock and works toward the dealer's goal.
+      # Quinn always answers (a message can carry a search, a name and a
+      # request at once). A specific search ("3 bed under 80k") also shows the
+      # matching homes as cards under its reply, straight from the stock the
+      # site serves.
       filters = Concierge::InventoryQuery.new(text).call
-      if filters.present?
-        matches = Concierge::InventorySearch.new(company: @company, filters: filters).call.map { |l| absolute(l) }
-        return inventory!(matches) if matches.any?
-      end
-
-      brain_answer!
+      matches = filters.present? ? Concierge::InventorySearch.new(company: @company, filters: filters).call.map { |l| absolute(l) } : []
+      brain_answer!(matches)
     end
 
-    def inventory!(matches)
-      body = "Here #{matches.size == 1 ? 'is one that fits' : "are #{matches.size} that fit"}. Want to come see #{matches.size == 1 ? 'it' : 'them'}?"
-      Assistant::Messenger.deliver!(conversation, body: body, sent_by: 'assistant', extra_metadata: { listings: matches })
-      Reply.new(messages: [])
-    end
-
-    def brain_answer!
+    def brain_answer!(matches = [])
       history = conversation.history(Assistant::Brain::HISTORY)
-      brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history)
+      showing = matches.map { |m| m[:name] }
+      brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, showing: showing)
       result = brain.call
       Assistant::Learn.apply!(conversation, result)
 
       reply = Assistant::Rules.tidy(result.reply)
       problem = Assistant::Rules.violation(reply, allowed_urls: brain.allowed_urls, max_length: MAX_REPLY)
       if problem && !result.handoff
-        result = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: problem).call
+        result = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: problem, showing: showing).call
         Assistant::Learn.apply!(conversation, result)
         reply = Assistant::Rules.tidy(result.reply)
         problem = Assistant::Rules.violation(reply, allowed_urls: brain.allowed_urls, max_length: MAX_REPLY)
@@ -125,7 +117,7 @@ module Assistant
 
       lead_from_chat!(result.contact)
       Assistant::Learn.record_question(conversation, result, reason, problem)
-      listings = home_card(result.photo_home_id)
+      listings = (home_card(result.photo_home_id) + matches).uniq { |l| l[:id] }.first(4)
 
       if problem
         Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)

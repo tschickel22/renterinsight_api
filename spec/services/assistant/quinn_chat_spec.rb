@@ -156,6 +156,17 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       expect(row).to include('channel' => 'web_chat', 'state' => 'Assistant')
     end
 
+    it 'answers a message that is a search and more, with the matching homes as cards under Quinn\'s reply' do
+      company.vehicles.create!(vin: "VIN#{SecureRandom.hex(6)}", year: 2026, make: 'Champion', model: 'Shoal Creek', bedrooms: 3,
+                               sale_price: 89_900, status: 'available')
+      brain_says(reply: 'Thanks Testy, here are our 3 bedroom homes. Someone will email you details.')
+      post "/concierge/#{token}", params: { message: '3 bedrooms. I am Testy, testy@example.com, send details?' }.to_json,
+                                  headers: { 'Content-Type' => 'application/json' }
+      message = JSON.parse(response.body)['messages'].last
+      expect(message['content']).to start_with('Thanks Testy')
+      expect(message['listings'].map { |l| l['name'] }).to include('2026 Champion Shoal Creek')
+    end
+
     it 'hands off into the chat, then the rep answers from the Inbox and the visitor gets it' do
       brain_says(reply: '', handoff: true, reason: 'asked_for_person')
       post "/concierge/#{token}", params: { message: 'Can I talk to a person?' }.to_json, headers: { 'Content-Type' => 'application/json' }
