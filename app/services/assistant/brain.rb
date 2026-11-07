@@ -115,6 +115,9 @@ module Assistant
         DEALER ANSWERS TO COMMON QUESTIONS
         #{faq_lines.presence || 'None yet.'}
 
+        FROM THE DEALER'S WEBSITES (use when it fits; the facts and dealer answers above win when they differ)
+        #{website_lines.presence || 'Nothing.'}
+
         HOMES (the only homes you may mention)
         #{stock_lines.presence || 'No homes listed.'}
 
@@ -323,6 +326,12 @@ module Assistant
     end
 
     public :allowed_urls, :links_allowed?, :home_urls
+
+    def website_lines
+      Assistant::Sources.prompt_lines(@company)
+    rescue StandardError
+      ''
+    end
 
     def faq_lines
       Array(@settings['faqs']).map { |f| "Q: #{f['q']}\n  A: #{f['a']}" }.join("\n")

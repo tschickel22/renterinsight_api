@@ -19,7 +19,7 @@ module Api
         attrs = params.require(:settings).permit(
           :enabled, :assistant_name, :tone, :handoff_mode, :handoff_user_id, :extra_facts,
           :quiet_start_hour, :quiet_end_hour, :source_ids, :link_website_id, :auto_start, :goal,
-          :texts_from, :cadence, :follow_up_channels,
+          :texts_from, :cadence, :follow_up_channels, :use_website_text,
           source_ids: [], faqs: %i[q a], chat_sites: []
         ).to_h
         # An emptied list arrives as no key at all.
@@ -43,7 +43,40 @@ module Api
         render json: payload
       end
 
+      # Reads the dealer's own website (FAQs, About) with the site scanner.
+      def read_site
+        return unless authorize_action!('company_settings', 'update')
+
+        settings = Assistant::Settings.for(@company)
+        unless settings.add_on? || settings.chat_add_on?
+          return render(json: { error: 'Quinn AI is not part of this subscription' }, status: :forbidden)
+        end
+
+        Assistant::Sources.read_site!(@company, params[:url].presence || settings.chat_sites.first, current_user)
+        render json: payload
+      rescue SiteProfiles::UrlGuard::BlockedUrlError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       private
+
+      # Everything Quinn AI already reads, as Quinn reads it, for the settings
+      # page: so a dealer adds only what is missing.
+      def knowledge
+        facts = Concierge::Knowledge.new(website: nil, company: @company).to_h
+        {
+          company: { name: facts[:dealer_name], phone: facts[:phone], email: facts[:email], address: facts[:address],
+                     hours: facts[:hours].present? },
+          homes: { count: facts[:inventory_count], brands: facts[:manufacturers] },
+          about: Assistant::Sources.about(@company),
+          website_faqs: Assistant::Sources.website_faqs(@company),
+          hosted_sites: Assistant::Sources.hosted_sites(@company).map(&:name),
+          reading: Assistant::Sources.reading_status(@company)
+        }
+      rescue StandardError => e
+        Rails.logger.warn("[LeadAssistantSettings] knowledge failed: #{e.class}: #{e.message}")
+        {}
+      end
 
       def texting_automations
         plays = @company.workflow_rules.where(status: 'active', entity_type: 'Lead').select do |rule|
@@ -81,6 +114,7 @@ module Api
           # "Who texts new leads" decides between.
           texting_automations: texting_automations,
           follow_up_plans: Assistant::FollowUp::PLANS,
+          knowledge: knowledge,
           # The website chat add-on (marketing.ai_concierge): Quinn in a chat on
           # the dealer's sites, and the line to put it on their own.
           chat: {
