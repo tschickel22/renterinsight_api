@@ -31,6 +31,17 @@ class Api::Admin::OnboardingController < ApplicationController
     render json: client_json.merge(added: added.size)
   end
 
+  # POST /api/admin/onboarding/:company_id/intro { user_ids: [], email: bool, sms: bool, note }
+  # Tells the client's people their setup plan is ready and where it is.
+  def intro
+    sent = Onboarding::Intro.send!(@client, actor: original_user, user_ids: params[:user_ids],
+                                   email: ActiveModel::Type::Boolean.new.cast(params.fetch(:email, true)),
+                                   sms: ActiveModel::Type::Boolean.new.cast(params.fetch(:sms, true)), note: params[:note])
+    render json: client_json.merge(sent: sent)
+  rescue Onboarding::Checklist::Invalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # POST /api/admin/onboarding/:company_id/items { section, title, detail, owed_by, assignee_id, due_on }
   def create_item
     answer { checklist.add!(item_params) }
@@ -153,7 +164,10 @@ class Api::Admin::OnboardingController < ApplicationController
       client: { id: @client.id, name: @client.name }, items: Onboarding::View.items(@client),
       progress: Onboarding::View.progress(@client), events: Onboarding::View.events(@client),
       people: people.uniq.map { |u| Onboarding::View.person(u) },
-      followers: User.where(id: @client.onboarding_followers.select(:user_id)).map { |u| Onboarding::View.person(u) }
+      followers: User.where(id: @client.onboarding_followers.select(:user_id)).map { |u| Onboarding::View.person(u) },
+      intro: Onboarding::Intro.status(@client),
+      intro_people: Onboarding::Intro.default_people(@client).map(&:id),
+      phones: User.where(company_id: @client.id).where.not(phone: [nil, '']).pluck(:id)
     }
   end
 

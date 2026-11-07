@@ -1,0 +1,17 @@
+Hi <%= @user.first_name.presence || 'there' %>,
+
+We built a setup plan for <%= @company.name %> in <%= @brand.name %>. It lists what we need from you and what our team is doing for you, so everyone can see where things stand.
+<% if @note %>
+
+<%= @note %>
+<% end %>
+
+Where to find it: in <%= @brand.name %>, click Getting started at the top of the screen, then Your project.
+
+On each item you can mark it done, write us a note or upload a file, and we hear about it right away. When something changes, you get one short email the next morning.
+
+Open your setup plan: <%= @url %>
+
+Questions? Reply to this email<% if @sender&.full_name.present? %> and it goes to <%= @sender.full_name %><% end %>.
+
+The <%= @brand.name %> team

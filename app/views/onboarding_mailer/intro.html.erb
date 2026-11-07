@@ -1,0 +1,8 @@
+<p>Hi <%= @user.first_name.presence || 'there' %>,</p>
+<p>We built a setup plan for <%= @company.name %> in <%= @brand.name %>. It lists what we need from you and what our team is doing for you, so everyone can see where things stand.</p>
+<% if @note %><p style="white-space:pre-line"><%= @note %></p><% end %>
+<p><strong>Where to find it:</strong> in <%= @brand.name %>, click <strong>Getting started</strong> at the top of the screen, then <strong>Your project</strong>.</p>
+<p>On each item you can mark it done, write us a note or upload a file, and we hear about it right away. When something changes, you get one short email the next morning.</p>
+<p><a href="<%= @url %>" style="display:inline-block;padding:10px 16px;background:#1d4ed8;color:#ffffff;border-radius:6px;text-decoration:none">Open your setup plan</a></p>
+<p>Questions? Reply to this email<% if @sender&.full_name.present? %> and it goes to <%= @sender.full_name %><% end %>.</p>
+<p>The <%= @brand.name %> team</p>

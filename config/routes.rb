@@ -3393,6 +3393,7 @@ Rails.application.routes.draw do
       get    'onboarding', to: 'onboarding#index'
       get    'onboarding/:company_id', to: 'onboarding#show'
       post   'onboarding/:company_id/start', to: 'onboarding#start'
+      post   'onboarding/:company_id/intro', to: 'onboarding#intro'
       post   'onboarding/:company_id/items', to: 'onboarding#create_item'
       patch  'onboarding/:company_id/items/:id', to: 'onboarding#update_item'
       delete 'onboarding/:company_id/items/:id', to: 'onboarding#destroy_item'
