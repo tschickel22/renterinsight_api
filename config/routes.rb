@@ -93,6 +93,8 @@ Rails.application.routes.draw do
   match 'concierge/:token/chat', to: 'public/concierge#options', via: :options
   match 'concierge/:token/config', to: 'public/concierge#options', via: :options
   get 'chat/:token.js', to: 'public/chat_embed#show', as: :chat_embed_script, format: false
+  # A rep's appointments as a calendar feed (E96 phase 2).
+  get 'calendar/:token.ics', to: 'public/calendar_feeds#show', as: :rep_calendar_feed, format: false
 
   # The demo link beacon. Short path for the same reason the page one is: it
   # ships inside a bundle and is called on every design change.
@@ -521,6 +523,14 @@ Rails.application.routes.draw do
         end
       end
       
+      # A rep's own hours, blocked time and calendar feeds; Quinn AI books
+      # visits only in open time (E96 phase 2).
+      resource :my_availability, only: %i[show update], controller: 'my_availability' do
+        post :reset_feed
+        post :blocks, action: :create_block
+        delete 'blocks/:block_id', action: :destroy_block
+      end
+
       # ==================== USER SETTINGS ====================
       scope path: 'user_settings', controller: 'user_settings' do
         get 'profile'

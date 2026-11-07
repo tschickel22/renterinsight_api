@@ -8,6 +8,11 @@ module SendsAppointmentInvites
   extend ActiveSupport::Concern
 
   included do
+    # Set when Quinn AI booked, moved or cancelled this in a conversation: Quinn
+    # sends the confirmation itself, so the booking text is skipped (sent under
+    # the rep's name it would also take the conversation from Quinn). E96.
+    attr_accessor :quinn_confirms
+
     # Separate names: Rails keeps only the last commit callback per method name.
     after_create_commit :send_invite_on_create
     after_update_commit :send_invite_on_change
@@ -39,7 +44,7 @@ module SendsAppointmentInvites
 
     bump_invite_sequence!(0)
     AppointmentInviteJob.perform_later(self.class.name, id, 'REQUEST')
-    AppointmentBookingTextJob.perform_later(self.class.name, id, 'booked') if status == 'pending'
+    AppointmentBookingTextJob.perform_later(self.class.name, id, 'booked') if status == 'pending' && !quinn_confirms
   end
 
   def send_invite_on_change
@@ -54,7 +59,9 @@ module SendsAppointmentInvites
     bump_invite_sequence!
     AppointmentInviteJob.perform_later(self.class.name, id, cancelling ? 'CANCEL' : 'REQUEST')
     # The customer hears by text only when the time or the outcome changed for them.
-    if cancelling
+    if quinn_confirms
+      nil
+    elsif cancelling
       AppointmentBookingTextJob.perform_later(self.class.name, id, 'cancelled')
     elsif saved_change_to_start_time?
       AppointmentBookingTextJob.perform_later(self.class.name, id, 'moved')

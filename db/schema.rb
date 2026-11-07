@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_070000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_080000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1262,6 +1262,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_070000) do
     t.index ["mfa_enabled"], name: "index_buyer_portal_accesses_on_mfa_enabled"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
+  end
+
+  create_table "calendar_busy_blocks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "starts_at", null: false
+    t.datetime "ends_at", null: false
+    t.string "source", default: "manual", null: false
+    t.string "note"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_calendar_busy_blocks_on_company_id"
+    t.index ["user_id", "starts_at"], name: "index_calendar_busy_blocks_on_user_id_and_starts_at"
   end
 
   create_table "campaign_ai_generations", force: :cascade do |t|
@@ -8401,6 +8414,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_070000) do
     t.bigint "primary_user_id"
     t.boolean "platform_admin", default: false
     t.jsonb "list_filter_preferences", default: {}, null: false
+    t.jsonb "working_hours"
+    t.string "calendar_feed_token"
+    t.text "busy_feed_url"
+    t.datetime "busy_feed_checked_at"
+    t.string "busy_feed_error"
+    t.index ["calendar_feed_token"], name: "index_users_on_calendar_feed_token", unique: true, where: "(calendar_feed_token IS NOT NULL)"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"

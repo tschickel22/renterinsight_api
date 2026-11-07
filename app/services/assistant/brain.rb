@@ -32,7 +32,8 @@ module Assistant
     CONTACT_FIELDS = %w[first_name last_name email phone street city state zip].freeze
 
     Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :question, :question_answered,
-                        :question_topic, :handoff, :handoff_reason, :summary, :usage, :subject, keyword_init: true)
+                        :question_topic, :handoff, :handoff_reason, :summary, :usage, :subject, :book_slot, :cancel_visit,
+                        keyword_init: true)
 
     # opener: write the first text to a new lead (Quinn starts it, E96).
     # showing: names of homes the website chat shows as cards under this reply.
@@ -42,8 +43,10 @@ module Assistant
     # call is for, for the usage log (text_reply, email_reply, opener,
     # follow_up, chat).
     def initialize(conversation:, settings:, history:, feedback: nil, opener: false, showing: [], follow_up: nil,
-                   reply_channel: nil, purpose: nil)
+                   reply_channel: nil, purpose: nil, booking: nil)
       @showing = Array(showing)
+      # Assistant::Booking: open times to offer, and the ids Quinn books by.
+      @booking = booking
       @follow_up = follow_up
       @reply_channel = reply_channel
       @purpose = purpose
@@ -76,6 +79,8 @@ module Assistant
         handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : (input['handoff'] ? 'other' : nil),
         summary: input['summary'].to_s.strip.truncate(500),
         subject: input['subject'].to_s.strip.presence,
+        book_slot: booking? ? input['book_slot'].to_s.strip.upcase.presence : nil,
+        cancel_visit: booking? && input['cancel_visit'] == true,
         usage: { model: response['model'], input_tokens: response.dig('usage', 'input_tokens'),
                  output_tokens: response.dig('usage', 'output_tokens') }
       )
@@ -140,6 +145,7 @@ module Assistant
 
         THEIR APPOINTMENTS
         #{appointment_lines.presence || 'None booked.'}
+        #{booking? ? "\nOPEN TIMES (the only times you may offer or book, with #{@booking.rep&.first_name.presence || 'the team'})\n#{@booking.prompt_lines}" : ''}
         #{@showing.any? ? "\nThe chat shows these homes as cards under your reply, matching their search: #{@showing.join('; ')}. You may refer to them as the homes below; do not list them again and do not call them cards." : ''}
         #{@feedback ? "\nYour last draft could not be sent (#{@feedback}). Write a new one that follows the rules." : ''}
       PROMPT
@@ -158,8 +164,10 @@ module Assistant
       case booking_mode
       when :book
         "Your goal is a visit to see homes in person. Answer their questions, learn what they need, and invite them to come see " \
-          "homes that fit. #{learn} #{contact} Once they give a day and time to visit and you have their name and a way to " \
-          'reach them, hand off with reason visit_time, saying the team will confirm that time. Never say a time is booked.'
+          "homes that fit. #{learn} #{contact} " +
+          (booking? ? 'When they are open to a visit, offer two open times and book the one they pick (see VISITS).' :
+            'Once they give a day and time to visit and you have their name and a way to reach them, hand off with reason ' \
+            'visit_time, saying the team will confirm that time. Never say a time is booked.')
       when :rep_now
         'The dealership is open right now and the team can help straight away. Learn their name and, in one or two questions, ' \
           "what they are looking for, then hand off with reason ready_for_rep, saying someone from the team will be right with them. #{contact}"
@@ -269,7 +277,20 @@ module Assistant
       end
     end
 
+    def booking?
+      @booking.present? && @booking.enabled?
+    end
+
     def visit_rule
+      if booking?
+        return 'VISITS: you book visits yourself. When they want to visit, offer two times from OPEN TIMES in plain words ' \
+               '(never the [id]). When they clearly accept one, set book_slot to its id; the confirmation with the day, time ' \
+               'and address is added to your reply for you, so keep your reply to a few warm words or leave it empty. If they ' \
+               'want a time that is not listed, offer the closest listed ones. To move a booked visit, offer times and set ' \
+               'book_slot for the new one. If they ask to cancel, set cancel_visit. Never say a visit is booked unless you set ' \
+               'book_slot. If there are no open times, hand off (reason appointment).'
+      end
+
       if booking_mode == :book
         'If they want to change or cancel a visit already booked, hand off. If they want a new visit, ask what day and time ' \
           'suits them first, then hand off with reason visit_time.'
@@ -324,7 +345,9 @@ module Assistant
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
             summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' },
-            subject: { type: 'string', description: 'Only for an email follow-up: the subject line, under 60 characters.' }
+            subject: { type: 'string', description: 'Only for an email follow-up: the subject line, under 60 characters.' },
+            book_slot: { type: 'string', description: 'The [id] from OPEN TIMES they clearly accepted, to book (or move their visit to). Omit otherwise.' },
+            cancel_visit: { type: 'boolean', description: 'True only when they clearly asked to cancel their booked visit.' }
           },
           required: %w[reply handoff summary]
         }

@@ -25,6 +25,8 @@ module Assistant
     def self.next_due(conversation)
       return nil unless conversation.assistant_answering?
       return nil unless conversation.conversable.is_a?(Lead)
+      # A booked visit is what the follow-ups were for.
+      return nil if Assistant::Appointments.upcoming_for(conversation.conversable, limit: 1).any?
 
       settings = Assistant::Settings.for(conversation.company)
       return nil unless conversation.web_chat? ? settings.chat_add_on? : settings.enabled?
@@ -146,7 +148,8 @@ module Assistant
     def draft(channel)
       history = conversation.history(Assistant::Brain::HISTORY)
       follow_up = { number: number, of: plan_size, channel: channel }
-      brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, follow_up: follow_up)
+      brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, follow_up: follow_up,
+                                   booking: Assistant::Booking.new(conversation))
       result = brain.call
       body = Assistant::Rules.tidy(result.reply)
       max = channel == :email ? EMAIL_MAX : Assistant::Rules::MAX_LENGTH
