@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SmsRegistration
+class SmsRegistration
   # The words we submit when registering an A2P 10DLC texting campaign:
   # description, message flow (opt-in), sample messages and the keyword replies.
   # One place, so the shared pool campaign and every dealer's own campaign at
