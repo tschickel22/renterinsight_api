@@ -93,6 +93,20 @@ class SmsRegistration < ApplicationRecord
     ]
   end
 
+  # Tells DealerTide's platform admins (in the app and by email) when a dealer
+  # submits, so someone sends it to the carriers, and when the carriers decide.
+  # Never raises: a failed notice must not undo the submit or the poll.
+  def notify_platform_admins!(message)
+    User.platform_admins.where(deleted_at: nil).select(&:active?).each do |user|
+      NotificationService.create(recipient: user, notification_type: :texting_registration, notifiable: self,
+                                 message: message, action_url: "/admin/texting-registrations?id=#{id}",
+                                 action_text: 'Open texting registrations', company_id: user.company_id,
+                                 location_id: nil, deliver_now: true)
+    end
+  rescue StandardError => e
+    Rails.logger.error("[SmsRegistration] notice failed for #{id}: #{e.class} #{e.message}")
+  end
+
   def log!(event, detail = nil)
     self.events = Array(events) + [{ 'at' => Time.current.iso8601, 'event' => event, 'detail' => detail }.compact]
     save!

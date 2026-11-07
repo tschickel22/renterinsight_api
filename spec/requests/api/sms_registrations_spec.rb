@@ -38,8 +38,14 @@ RSpec.describe 'Texting registration', type: :request do
     expect(body['problems']).to eq([])
     expect(body['registration']['business']).to include('state' => 'CO', 'ein' => '123456789')
 
+    staff = Company.create!(name: "DT #{SecureRandom.hex(3)}")
+    ops = User.create!(email: "ops-#{SecureRandom.hex(4)}@example.com", first_name: 'Op', last_name: 'Staff', password: 'Pass1234!',
+                       company_id: staff.id, role: 'platform_admin', status: 'active')
     post '/api/crm/sms_registration/submit', headers: headers
     expect(JSON.parse(response.body)['registration']).to include('status' => 'submitted', 'editable' => false)
+    notice = Notification.find_by(recipient: ops, notification_type: 'texting_registration')
+    expect(notice.message).to include('Summit Park Homes submitted')
+    expect(notice.action_url).to start_with('/admin/texting-registrations')
 
     patch '/api/crm/sms_registration', headers: headers, params: { registration: { business: { dba: 'Other' } } }.to_json
     expect(response).to have_http_status(:conflict)

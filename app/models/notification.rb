@@ -91,6 +91,8 @@ class Notification < ApplicationRecord
     truebuild_factory_run: { category: 'system', priority: 'normal', title: 'TrueView Factory Run' },
     new_homes_digest: { category: 'system', priority: 'normal', title: 'New Homes From the Feeds' },
     onboarding_update: { category: 'system', priority: 'normal', title: 'Onboarding Checklist' },
+    # A dealer's own texting registration needs DealerTide (E96 phase 4).
+    texting_registration: { category: 'system', priority: 'high', title: 'Texting Registration' },
     
     # Broadcast notifications
     broadcast_message: { category: 'broadcast', priority: 'normal', title: 'Company Announcement' },
@@ -170,6 +172,7 @@ class Notification < ApplicationRecord
     approval_required
     sms_reply_received
     assistant_handoff
+    texting_registration
     sms_new_lead
     missed_call
     email_reply_received
