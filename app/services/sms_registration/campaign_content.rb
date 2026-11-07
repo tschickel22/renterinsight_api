@@ -119,7 +119,7 @@ class SmsRegistration
     end
 
     def message_samples
-      who = "#{sender} via #{platform}:"
+      who = sample_prefix
       samples = [
         "#{who} Hi Tia, thanks for asking about the Hawthorne. Are you placing it on your own land or in a community? Reply STOP to opt out.",
         "#{who} We have Saturday at 10 AM or 2 PM open to see the Hawthorne at our Denver lot. Which works better for you?",
@@ -138,7 +138,7 @@ class SmsRegistration
     end
 
     def help_message
-      "#{pool? ? "#{platform} texting for home dealerships" : "#{dealer_name} via #{platform}"}. " \
+      "#{pool? ? "#{platform} texting for home dealerships" : sample_prefix.chomp(':')}. " \
         "Help: #{brand.support_email}. Msg & data rates may apply. Reply STOP to opt out."
     end
 
@@ -182,7 +182,7 @@ class SmsRegistration
         list << "consent lacks #{word}" unless inquiry_consent.downcase.include?(word.downcase)
       end
       list << 'pool samples or description read as marketing' if pool? && (message_samples + [description]).any? { |t| t.sub(/no marketing or promotional/i, '').match?(MARKETING_WORDS) }
-      list << 'a sample does not name the sender' unless message_samples.all? { |t| t.start_with?("#{sender} via #{platform}:") }
+      list << 'a sample does not name the sender' unless message_samples.all? { |t| t.start_with?(sample_prefix) }
       list << 'no sample shows STOP' unless message_samples.any? { |t| t.include?('STOP') }
       list << 'samples carry placeholders' if message_samples.any? { |t| t.include?('{{') || t.include?('[') }
       list << 'HELP reply does not name the sender' unless help_message.include?(pool? ? platform : dealer_name.to_s)
@@ -190,6 +190,12 @@ class SmsRegistration
     end
 
     private
+
+    # "Summit Park Homes via DealerTide:", or just the name when the dealer is
+    # the platform's own company (a "DealerTide via DealerTide" reads as a typo).
+    def sample_prefix
+      sender.to_s.casecmp?(platform.to_s) ? "#{sender}:" : "#{sender} via #{platform}:"
+    end
 
     def dba_note
       legal_name != dealer_name ? ", doing business as #{dealer_name}," : ''
