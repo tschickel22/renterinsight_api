@@ -2887,6 +2887,9 @@ Rails.application.routes.draw do
         end
       end
       resource :lead_assistant_settings, only: %i[show update]
+      resource :sms_registration, only: %i[show update] do
+        post :submit
+      end
       resources :assistant_questions, only: %i[index] do
         member do
           post :answer
@@ -3327,6 +3330,9 @@ Rails.application.routes.draw do
       # Which dealers have the AI connector and how much they use it (E53).
       get 'ai_connector_usage', to: 'ai_connector_usage#index'
       get 'assistant_questions', to: 'assistant_questions#index'
+      get 'sms_registrations', to: 'sms_registrations#index'
+      post 'sms_registrations/:id/send_to_carriers', to: 'sms_registrations#send_to_carriers'
+      post 'sms_registrations/:id/check', to: 'sms_registrations#check'
 
       resources :live_visitors, only: [:index] do
         collection do

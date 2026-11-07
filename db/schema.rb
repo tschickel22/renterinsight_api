@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_030000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7192,6 +7192,38 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_030000) do
     t.index ["site_content_profile_id", "session_token"], name: "idx_profile_views_session", unique: true
     t.index ["site_content_profile_id", "visitor_token"], name: "idx_on_site_content_profile_id_visitor_token_e8312fc8a9"
     t.index ["site_content_profile_id"], name: "index_site_profile_views_on_site_content_profile_id"
+  end
+
+  create_table "sms_registrations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "status", default: "draft", null: false
+    t.string "brand_type", default: "low_volume_standard", null: false
+    t.jsonb "business", default: {}, null: false
+    t.jsonb "contact", default: {}, null: false
+    t.jsonb "consent", default: {}, null: false
+    t.string "preferred_area_code"
+    t.string "customer_profile_sid"
+    t.string "end_user_sid"
+    t.string "address_sid"
+    t.string "trust_product_sid"
+    t.string "brand_registration_sid"
+    t.string "brand_status"
+    t.string "messaging_service_sid"
+    t.string "campaign_status"
+    t.string "campaign_id"
+    t.string "phone_number"
+    t.string "phone_number_sid"
+    t.text "rejection_reason"
+    t.jsonb "events", default: [], null: false
+    t.bigint "submitted_by_user_id"
+    t.datetime "submitted_at"
+    t.datetime "sent_to_carriers_at"
+    t.datetime "approved_at"
+    t.datetime "live_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_sms_registrations_on_company_id", unique: true
+    t.index ["status"], name: "index_sms_registrations_on_status"
   end
 
   create_table "sms_reply_tokens", force: :cascade do |t|

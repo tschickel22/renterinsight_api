@@ -20,6 +20,11 @@ default: &default
     class: OnboardingDailySummaryJob
     queue: low
     schedule: every day at 7am America/Denver
+  # Dealers' own texting registrations under carrier review (E96 phase 4).
+  sms_registration_poll:
+    class: SmsRegistrationPollJob
+    queue: low
+    schedule: every 30 minutes
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob
