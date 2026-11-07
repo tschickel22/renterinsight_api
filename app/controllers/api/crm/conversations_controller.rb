@@ -308,6 +308,9 @@ module Api
           started_at: c.started_at,
           next_appointment: next_appointment_json(c),
           visitor_on_page: c.visitor_on_page?,
+          # Quinn AI's next follow-up, while it is following up (E96).
+          next_follow_up_at: c.next_follow_up_at,
+          follow_up_count: c.follow_up_count,
           chat_page_url: c.chat_page_url
         }
       end

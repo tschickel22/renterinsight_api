@@ -32,12 +32,15 @@ module Assistant
     CONTACT_FIELDS = %w[first_name last_name email phone street city state zip].freeze
 
     Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :question, :question_answered,
-                        :question_topic, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
+                        :question_topic, :handoff, :handoff_reason, :summary, :usage, :subject, keyword_init: true)
 
     # opener: write the first text to a new lead (Quinn starts it, E96).
     # showing: names of homes the website chat shows as cards under this reply.
-    def initialize(conversation:, settings:, history:, feedback: nil, opener: false, showing: [])
+    # follow_up: { number:, of:, channel: :text|:email } to write a follow-up
+    # to a buyer who went quiet (Assistant::FollowUp).
+    def initialize(conversation:, settings:, history:, feedback: nil, opener: false, showing: [], follow_up: nil)
       @showing = Array(showing)
+      @follow_up = follow_up
       @conversation = conversation
       @opener = opener
       @web = conversation.web_chat?
@@ -64,6 +67,7 @@ module Assistant
         handoff: input['handoff'] == true,
         handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : (input['handoff'] ? 'other' : nil),
         summary: input['summary'].to_s.strip.truncate(500),
+        subject: input['subject'].to_s.strip.presence,
         usage: { model: response['model'], input_tokens: response.dig('usage', 'input_tokens'),
                  output_tokens: response.dig('usage', 'output_tokens') }
       )
@@ -80,8 +84,9 @@ module Assistant
 
         #{goal_text}
         #{opener_text}
+        #{follow_up_text}
         RULES. Breaking one of these costs the dealer a sale or worse.
-        1. #{@web ? 'Chat style: one to three short sentences. No lists, no emojis, no signatures.' : 'Text message style: one or two short sentences, under 300 characters. No lists, no emojis, no signatures.'}
+        1. #{style_rule}
         2. Answer ONLY from the facts and homes below. Never invent a home, price, feature, delivery date or policy.
            If you do not know, say you will check with the team, and hand off.
         3. Never state a monthly payment, interest rate, down payment, or whether someone will be approved.
@@ -154,6 +159,40 @@ module Assistant
       end
     end
 
+    def email_follow_up?
+      @follow_up && @follow_up[:channel] == :email
+    end
+
+    def style_rule
+      if email_follow_up?
+        'Email style: two to four short sentences in plain words. No greeting line and no signature (both are added for you). ' \
+          'No lists, no emojis. A home\'s link from HOMES may be included. Put a subject line under 60 characters in subject.'
+      elsif @web
+        'Chat style: one to three short sentences. No lists, no emojis, no signatures.'
+      else
+        'Text message style: one or two short sentences, under 300 characters. No lists, no emojis, no signatures.'
+      end
+    end
+
+    # A follow-up to a buyer who stopped answering. Each is written fresh;
+    # the stages follow what works for others (a quick nudge, homes that fit,
+    # a check-in, a polite last one).
+    def follow_up_text
+      return '' unless @follow_up
+
+      n = @follow_up[:number].to_i
+      of = [@follow_up[:of].to_i, n].max
+      stage = if n == 1 then 'a short, friendly nudge that makes it easy to reply'
+              elsif n == of then 'a polite last check-in: ask whether they would like you to keep them posted or close out their request'
+              elsif n.even? then 'one or two homes from HOMES that fit what they told you, by name with the price, and why they fit (use photo_home_id for one home by text)'
+              else 'a light check-in on their timeline or plans, or one useful fact from the dealer facts'
+              end
+      "This is FOLLOW-UP #{n} of #{of}, by #{@follow_up[:channel] == :email ? 'email' : 'text'}: they have not written back since your last " \
+        "message. Write #{stage}. Do not repeat what earlier messages said, do not guilt them, and end with one easy question. " \
+        'Only mention homes that fit what they said. Never mention sales, specials, discounts or new arrivals unless they asked. ' \
+        'Do not hand off.'
+    end
+
     # :book, :rep_now, :answer_only or :qualify.
     def booking_mode
       @booking_mode ||= case @settings.goal
@@ -219,7 +258,8 @@ module Assistant
             question_topic: { type: 'string', enum: AssistantQuestion::TOPICS },
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
-            summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' }
+            summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' },
+            subject: { type: 'string', description: 'Only for an email follow-up: the subject line, under 60 characters.' }
           },
           required: %w[reply handoff summary]
         }
@@ -273,10 +313,16 @@ module Assistant
       return @links_allowed if defined?(@links_allowed)
 
       # A web chat is on a web page already: home links are fine there.
-      @links_allowed = @web || Assistant::Media.links_allowed?(@conversation)
+      @links_allowed = @web || email_follow_up? || Assistant::Media.links_allowed?(@conversation)
     end
 
-    public :allowed_urls, :links_allowed?
+    # Every listed home's page, for an email (email carries links whatever
+    # the texting number's registration says).
+    def home_urls
+      stock.filter_map { |v| Assistant::Media.home_url(@company, v) }
+    end
+
+    public :allowed_urls, :links_allowed?, :home_urls
 
     def faq_lines
       Array(@settings['faqs']).map { |f| "Q: #{f['q']}\n  A: #{f['a']}" }.join("\n")

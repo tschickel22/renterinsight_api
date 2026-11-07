@@ -19,6 +19,7 @@ module Api
         attrs = params.require(:settings).permit(
           :enabled, :assistant_name, :tone, :handoff_mode, :handoff_user_id, :extra_facts,
           :quiet_start_hour, :quiet_end_hour, :source_ids, :link_website_id, :auto_start, :goal,
+          :texts_from, :cadence, :follow_up_channels,
           source_ids: [], faqs: %i[q a], chat_sites: []
         ).to_h
         # An emptied list arrives as no key at all.
@@ -33,11 +34,31 @@ module Api
           return render(json: { error: 'Quinn AI is not part of this subscription' }, status: :forbidden)
         end
 
+        before = settings.cadence
         settings.update!(attrs)
+        # A new follow-up plan applies to conversations already under way.
+        if settings.cadence != before
+          @company.conversations.where(status: 'active').find_each { |c| Assistant::FollowUp.schedule!(c) }
+        end
         render json: payload
       end
 
       private
+
+      def texting_automations
+        plays = @company.workflow_rules.where(status: 'active', entity_type: 'Lead').select do |rule|
+          Array(rule.steps.to_h['nodes']).any? do |node|
+            node['type'] == 'send_sms' && node.dig('config', 'to').to_s.match?(/\A\s*(\{\{\s*entity\.phone\s*\}\})?\s*\z/)
+          end
+        end
+        nurtures = NurtureSequence.where(company_id: @company.id, is_active: true)
+                                  .where(id: NurtureStep.where(step_type: 'sms').select(:nurture_sequence_id))
+        plays.map { |r| { kind: 'play', id: r.id, name: r.name } } +
+          nurtures.map { |n| { kind: 'nurture', id: n.id, name: n.name } }
+      rescue StandardError => e
+        Rails.logger.warn("[LeadAssistantSettings] automations lookup failed: #{e.message}")
+        []
+      end
 
       def embed_code
         token = @company.public_inventory_token
@@ -56,6 +77,10 @@ module Api
           websites: @company.websites.where(status: :published, is_deleted: [false, nil]).order(:name)
                             .map { |w| { id: w.id, name: w.name, url: (w.public_url rescue nil) } },
           add_on: settings.add_on?,
+          # Plays and nurtures that also text leads, so a dealer can see what
+          # "Who texts new leads" decides between.
+          texting_automations: texting_automations,
+          follow_up_plans: Assistant::FollowUp::PLANS,
           # The website chat add-on (marketing.ai_concierge): Quinn in a chat on
           # the dealer's sites, and the line to put it on their own.
           chat: {

@@ -30,6 +30,11 @@ default: &default
     class: WebChatCleanupJob
     queue: low
     schedule: every hour
+  # Quinn AI follows up with buyers who went quiet, until a visit is set (E96).
+  assistant_follow_up:
+    class: AssistantFollowUpJob
+    queue: low
+    schedule: every 15 minutes
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob

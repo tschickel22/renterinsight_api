@@ -17,6 +17,14 @@ module Assistant
     # answer_only:      answers questions, asks none, hands off when asked.
     GOALS = %w[book_always book_after_hours qualify answer_only].freeze
     CHAT_MODULE_KEY = 'marketing.ai_concierge'
+    # Who texts a new lead when the dealer's plays or nurtures also text them.
+    # quinn: Quinn AI does; play and nurture texts to that lead are skipped
+    #        while Quinn has (or is about to start) the conversation.
+    # plays: plays and nurtures text as built, and Quinn answers the reply.
+    TEXTS_FROM = %w[quinn plays].freeze
+    # How hard Quinn follows up when a buyer goes quiet (Assistant::FollowUp).
+    CADENCES = %w[off light standard persistent].freeze
+    FOLLOW_UP_CHANNELS = %w[mix text email].freeze
     MAX_CHAT_SITES = 10
 
     # The name the assistant goes by when a dealer has not chosen one.
@@ -44,7 +52,10 @@ module Assistant
       'goal' => 'qualify',
       # Web addresses (host names) of the dealer's own sites that may show the
       # chat through the embed line. Sites we host need no entry.
-      'chat_sites' => []
+      'chat_sites' => [],
+      'texts_from' => 'quinn',
+      'cadence' => 'standard',
+      'follow_up_channels' => 'mix'
     }.freeze
     MAX_FAQS = 60
 
@@ -87,6 +98,9 @@ module Assistant
         clean['link_website_id'] = company.websites.find_by(id: clean['link_website_id'])&.id
       end
       clean['goal'] = 'qualify' if clean.key?('goal') && !GOALS.include?(clean['goal'])
+      clean['texts_from'] = 'quinn' if clean.key?('texts_from') && !TEXTS_FROM.include?(clean['texts_from'])
+      clean['cadence'] = 'standard' if clean.key?('cadence') && !CADENCES.include?(clean['cadence'])
+      clean['follow_up_channels'] = 'mix' if clean.key?('follow_up_channels') && !FOLLOW_UP_CHANNELS.include?(clean['follow_up_channels'])
       clean['auto_start'] = ActiveModel::Type::Boolean.new.cast(clean['auto_start']) == true if clean.key?('auto_start')
       clean['chat_sites'] = self.class.clean_sites(clean['chat_sites']) if clean.key?('chat_sites')
       clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
@@ -123,6 +137,18 @@ module Assistant
 
     def chat_sites
       Array(to_h['chat_sites'])
+    end
+
+    def quinn_leads_texting?
+      to_h['texts_from'] != 'plays'
+    end
+
+    def cadence
+      CADENCES.include?(to_h['cadence']) ? to_h['cadence'] : 'standard'
+    end
+
+    def follow_up_channels
+      FOLLOW_UP_CHANNELS.include?(to_h['follow_up_channels']) ? to_h['follow_up_channels'] : 'mix'
     end
 
     # Whether a page on this host may show the embedded chat. "www." is

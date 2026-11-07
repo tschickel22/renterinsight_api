@@ -27,6 +27,38 @@ module Assistant
       existing.present? || (eligible? && sender.present?)
     end
 
+    # What a play's or nurture's text to this lead should do (E96):
+    #   :normal   send it as built (Quinn is not involved)
+    #   :skip     do not send: Quinn AI has, or is about to start, this
+    #             conversation and the dealer chose "Quinn AI leads"
+    #   :quinn    send it into Quinn's conversation, so Quinn answers the reply
+    # to: the number the step texts. A text to anyone but the lead (a staff
+    # alert to the owner) is never routed into the buyer's conversation.
+    def automation_route(to)
+      return :normal unless lead.is_a?(Lead) && lead.phone.present?
+      return :normal unless Conversation.normalize_phone(to) == Conversation.normalize_phone(lead.phone)
+
+      settings = Assistant::Settings.for(lead.company)
+      return :normal unless settings.enabled?
+
+      if existing
+        settings.quinn_leads_texting? ? :skip : :quinn
+      elsif eligible? && sender
+        settings.quinn_leads_texting? && will_start? ? :skip : :quinn
+      else
+        :normal
+      end
+    rescue StandardError => e
+      Rails.logger.error("[Assistant::Starter] route failed for lead #{lead.try(:id)}: #{e.class}: #{e.message}")
+      :normal
+    end
+
+    # Quinn's own first text is coming (AssistantStartJob would send it).
+    def will_start?
+      Assistant::Settings.for(lead.company).auto_start? &&
+        AssistantStartJob::ORIGINS.include?(lead.origin.to_s) && lead.created_at > AssistantStartJob::FRESH_FOR.ago
+    end
+
     def eligible?
       return false unless lead.is_a?(Lead) && lead.phone.present? && lead.may_text_about_inquiry
       return false if lead.source&.name.to_s.match?(PARTNER_AI_SOURCE)
