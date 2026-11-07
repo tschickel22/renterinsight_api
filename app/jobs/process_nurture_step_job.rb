@@ -223,6 +223,21 @@ class ProcessNurtureStepJob < ApplicationJob
     # - Twilio configuration
     # - Actual sending via Twilio API
     # - Communication record creation with proper metadata
+    # Quinn AI (E96): skipped while Quinn has this lead's conversation, or sent
+    # into it so Quinn answers the reply, by the dealer's choice.
+    starter = Assistant::Starter.for(entity)
+    route = starter.automation_route(phone)
+    if route == :skip
+      Rails.logger.info "[Nurture] SMS step #{step.id} skipped for #{entity.class.name} #{entity.id}: Quinn AI has this conversation"
+      return
+    end
+    if route == :quinn
+      result = starter.send_first_text!(body: body, metadata: { nurture_step_id: step.id, nurture_sequence_id: step.nurture_sequence_id,
+                                                                 nurture_enrollment_id: enrollment.id, step_type: 'sms' })
+      Rails.logger.info "[Nurture] SMS step #{step.id} sent into Quinn AI's conversation (#{result.inspect.truncate(120)})"
+      return
+    end
+
     result = CommunicationService.send_sms(
       communicable: entity,
       to: phone,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_050000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_07_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2796,10 +2796,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_050000) do
     t.bigint "website_id"
     t.datetime "visitor_seen_at"
     t.string "chat_page_url"
+    t.integer "follow_up_count", default: 0, null: false
+    t.datetime "follow_up_anchor_at"
+    t.datetime "next_follow_up_at"
     t.index ["assigned_user_id"], name: "index_conversations_on_assigned_user_id"
     t.index ["company_id", "status", "last_message_at"], name: "idx_on_company_id_status_last_message_at_4e838304a7"
     t.index ["company_id"], name: "index_conversations_on_company_id"
     t.index ["conversable_type", "conversable_id"], name: "index_conversations_on_conversable_type_and_conversable_id"
+    t.index ["next_follow_up_at"], name: "index_conversations_on_next_follow_up_at", where: "(next_follow_up_at IS NOT NULL)"
     t.index ["sender_number", "buyer_phone"], name: "index_conversations_open_by_numbers", unique: true, where: "((status)::text = ANY (ARRAY[('active'::character varying)::text, ('handed_off'::character varying)::text]))"
     t.index ["visitor_token"], name: "index_conversations_on_visitor_token", unique: true, where: "(visitor_token IS NOT NULL)"
   end

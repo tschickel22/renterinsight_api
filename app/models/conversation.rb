@@ -89,10 +89,14 @@ class Conversation < ApplicationRecord
     if communication.direction == 'inbound'
       attrs[:last_inbound_at] = attrs[:last_message_at]
       attrs[:unanswered_count] = 0
+      # The buyer wrote: Quinn's follow-up clock starts over (E96).
+      attrs[:follow_up_count] = 0
+      attrs[:follow_up_anchor_at] = attrs[:last_message_at]
     else
       attrs[:last_outbound_at] = attrs[:last_message_at]
     end
     update_columns(attrs.merge(updated_at: Time.current))
+    Assistant::FollowUp.schedule!(self)
   end
 
   private

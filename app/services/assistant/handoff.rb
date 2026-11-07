@@ -29,6 +29,8 @@ module Assistant
         status: 'handed_off', handoff_reason: reason, handed_off_at: Time.current,
         handed_off_to_user_id: user&.id, assigned_user_id: conversation.assigned_user_id || user&.id
       )
+      # A person has it: Quinn's follow-ups stop until it is handed back.
+      Assistant::FollowUp.schedule!(conversation)
 
       text = buyer_text == :default ? default_buyer_text(user, conversation) : buyer_text
       Assistant::Messenger.deliver!(conversation, body: text) if text.present?
@@ -41,11 +43,14 @@ module Assistant
     def taken_over!(conversation, user)
       conversation.update!(status: 'handed_off', handoff_reason: 'rep_replied', handed_off_at: Time.current,
                            handed_off_to_user_id: user.id, assigned_user_id: conversation.assigned_user_id || user.id)
+      Assistant::FollowUp.schedule!(conversation)
     end
 
     def hand_back!(conversation)
       conversation.update!(status: 'active', handoff_reason: nil, handed_off_at: nil, handed_off_to_user_id: nil,
                            failed_answer_count: 0, assistant_enabled: true)
+      # Handing back restarts Quinn's long-term follow-ups from today.
+      Assistant::FollowUp.restart!(conversation)
     end
 
     def handoff_user(conversation)
