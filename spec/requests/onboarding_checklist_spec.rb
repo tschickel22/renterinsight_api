@@ -111,4 +111,29 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     ActionMailer::Base.deliveries.clear
     expect(Onboarding::DailySummary.call(now: 3.days.from_now)).to eq(0)
   end
+
+  it 'sends the intro by email and text to the people picked, and remembers it was sent' do
+    Setting.set('Platform', 0, 'communications', { 'email' => { 'fromEmail' => 'hello@example.com', 'fromName' => 'DealerTide' } })
+    client_admin.update!(phone: '3035550100')
+    texts = []
+    allow(TwilioSmsService).to receive(:send_via_master) { |to:, body:, **| texts << [to, body]; { success: true } }
+    post "/api/admin/onboarding/#{client.id}/start", headers: headers_for(tom)
+    expect(body['intro']).to be_nil
+    expect(body['intro_people']).to include(client_admin.id)
+
+    expect do
+      post "/api/admin/onboarding/#{client.id}/intro", headers: headers_for(tom),
+                                                       params: { user_ids: [client_admin.id, client_rep.id], note: 'Call me any time' }.to_json
+    end.to change { ActionMailer::Base.deliveries.size }.by(2)
+    expect(response).to have_http_status(:ok)
+    expect(body['sent']).to include('emails' => 2, 'texts' => 1, 'skipped_texts' => [client_rep.full_name])
+    expect(texts.first.last).to include('Getting started', 'Your project', '?getting_started=1')
+    mail = ActionMailer::Base.deliveries.last
+    expect(mail.reply_to).to eq([tom.email])
+    expect(mail.text_part.body.to_s).to include('Call me any time', 'Getting started')
+    expect(body['intro']).to include('by' => tom.full_name, 'emails' => 2, 'texts' => 1)
+
+    post "/api/admin/onboarding/#{client.id}/intro", headers: headers_for(tom), params: { user_ids: [outsider.id] }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
 end
