@@ -64,6 +64,11 @@ module Assistant
       first = user&.try(:first_name).presence
       if conversation&.web_chat?
         who = first || 'our team'
+        lead = conversation.conversable
+        # Only ask for a way to reach them when the chat does not have one yet.
+        if lead.try(:email).present? || lead.try(:phone).present?
+          return "I have asked #{who} to join this chat. If you need to go, #{first ? first : 'we'} will follow up with you."
+        end
         return "I have asked #{who} to join this chat. If you need to go, leave your name and an email or mobile number and we will follow up."
       end
       first ? "I have asked #{first} to text you directly." : 'I have asked our team to text you directly.'

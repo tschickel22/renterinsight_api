@@ -123,7 +123,7 @@ module Assistant
 
         THEIR APPOINTMENTS
         #{appointment_lines.presence || 'None booked.'}
-        #{@showing.any? ? "\nThe chat shows these homes as cards under your reply, matching their search: #{@showing.join('; ')}. You may refer to them; do not list them again." : ''}
+        #{@showing.any? ? "\nThe chat shows these homes as cards under your reply, matching their search: #{@showing.join('; ')}. You may refer to them as the homes below; do not list them again and do not say "cards"." : ''}
         #{@feedback ? "\nYour last draft could not be sent (#{@feedback}). Write a new one that follows the rules." : ''}
       PROMPT
     end
