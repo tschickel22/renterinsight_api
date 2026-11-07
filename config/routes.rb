@@ -2896,7 +2896,10 @@ Rails.application.routes.draw do
           post :chat_reply
         end
       end
-      resource :lead_assistant_settings, only: %i[show update]
+      resource :lead_assistant_settings, only: %i[show update] do
+        # Read the dealer's own website for FAQs and About text (E96).
+        post :read_site
+      end
       resource :sms_registration, only: %i[show update] do
         post :submit
       end

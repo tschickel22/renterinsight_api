@@ -55,7 +55,12 @@ module Assistant
       'chat_sites' => [],
       'texts_from' => 'quinn',
       'cadence' => 'standard',
-      'follow_up_channels' => 'mix'
+      'follow_up_channels' => 'mix',
+      # Quinn also reads the FAQs and About text on the dealer's websites
+      # (Assistant::Sources). Off when a site still has template copy.
+      'use_website_text' => true,
+      # The reading of the dealer's own site Quinn uses (SiteContentProfile).
+      'site_reading_id' => nil
     }.freeze
     MAX_FAQS = 60
 
@@ -102,6 +107,7 @@ module Assistant
       clean['cadence'] = 'standard' if clean.key?('cadence') && !CADENCES.include?(clean['cadence'])
       clean['follow_up_channels'] = 'mix' if clean.key?('follow_up_channels') && !FOLLOW_UP_CHANNELS.include?(clean['follow_up_channels'])
       clean['auto_start'] = ActiveModel::Type::Boolean.new.cast(clean['auto_start']) == true if clean.key?('auto_start')
+      clean['use_website_text'] = ActiveModel::Type::Boolean.new.cast(clean['use_website_text']) == true if clean.key?('use_website_text')
       clean['chat_sites'] = self.class.clean_sites(clean['chat_sites']) if clean.key?('chat_sites')
       clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
       Setting.set('Company', company.id, KEY, to_h.merge(clean))
