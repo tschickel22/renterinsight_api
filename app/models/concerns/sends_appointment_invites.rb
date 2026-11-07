@@ -16,6 +16,7 @@ module SendsAppointmentInvites
     # Separate names: Rails keeps only the last commit callback per method name.
     after_create_commit :send_invite_on_create
     after_update_commit :send_invite_on_change
+    after_update_commit :follow_up_no_show
     before_destroy :cancel_invite_before_destroy
   end
 
@@ -45,6 +46,13 @@ module SendsAppointmentInvites
     bump_invite_sequence!(0)
     AppointmentInviteJob.perform_later(self.class.name, id, 'REQUEST')
     AppointmentBookingTextJob.perform_later(self.class.name, id, 'booked') if status == 'pending' && !quinn_confirms
+  end
+
+  # Marked a no-show: Quinn AI offers new times an hour later (E96 phase 2).
+  def follow_up_no_show
+    return unless activity_type == 'meeting' && saved_change_to_status? && status == 'no_show'
+
+    AssistantNoShowJob.set(wait: AssistantNoShowJob::WAIT).perform_later(self.class.name, id)
   end
 
   def send_invite_on_change

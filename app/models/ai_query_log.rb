@@ -13,7 +13,7 @@ class AiQueryLog < ApplicationRecord
                 ai_audience_refine bill_scan ai_template_generate ai_sequence_generate deal_desk_ai
                 ai_landing_page_generate site_content_profile guide_release_draft help_assistant
                 concierge concierge_demo
-                quinn_text_reply quinn_email_reply quinn_opener quinn_follow_up quinn_chat].freeze
+                quinn_text_reply quinn_email_reply quinn_opener quinn_follow_up quinn_chat quinn_no_show].freeze
   # concierge: the website chat before Quinn (its rows were refused until
   # 2026-11-07, so it was never metered). quinn_*: Quinn AI, E96, one row per
   # model call (Assistant::Brain#log_usage).

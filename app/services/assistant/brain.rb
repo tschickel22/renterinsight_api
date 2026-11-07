@@ -43,10 +43,12 @@ module Assistant
     # call is for, for the usage log (text_reply, email_reply, opener,
     # follow_up, chat).
     def initialize(conversation:, settings:, history:, feedback: nil, opener: false, showing: [], follow_up: nil,
-                   reply_channel: nil, purpose: nil, booking: nil)
+                   reply_channel: nil, purpose: nil, booking: nil, missed_visit: nil)
       @showing = Array(showing)
       # Assistant::Booking: open times to offer, and the ids Quinn books by.
       @booking = booking
+      # The time of a visit they missed, to offer a new one (no-show).
+      @missed_visit = missed_visit
       @follow_up = follow_up
       @reply_channel = reply_channel
       @purpose = purpose
@@ -98,6 +100,7 @@ module Assistant
         #{goal_text}
         #{opener_text}
         #{follow_up_text}
+        #{missed_visit_text}
         RULES. Breaking one of these costs the dealer a sale or worse.
         1. #{style_rule}
         2. Answer ONLY from the facts and homes below. Never invent a home, price, feature, delivery date or policy.
@@ -227,6 +230,13 @@ module Assistant
     # A follow-up to a buyer who stopped answering. Each is written fresh;
     # the stages follow what works for others (a quick nudge, homes that fit,
     # a check-in, a polite last one).
+    def missed_visit_text
+      return '' unless @missed_visit
+
+      "They MISSED their visit on #{@missed_visit}; they have not written. Write one short, kind text: no problem at all, " \
+        'things come up, and offer two new times from OPEN TIMES. No guilt, no mention of being late. Do not hand off.'
+    end
+
     def follow_up_text
       return '' unless @follow_up
 

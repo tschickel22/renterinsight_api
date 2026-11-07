@@ -17,7 +17,8 @@ class LeadActivity < ApplicationRecord
   serialize :reminder_method, coder: JSON
   
   ACTIVITY_TYPES = %w[task meeting call reminder note].freeze
-  STATUSES = %w[pending in_progress completed cancelled].freeze
+  # no_show: the customer missed the appointment (E96 phase 2).
+  STATUSES = %w[pending in_progress completed cancelled no_show].freeze
   PRIORITIES = %w[low medium high urgent].freeze
   CALL_DIRECTIONS = %w[inbound outbound].freeze
   CALL_OUTCOMES = %w[answered voicemail no_answer busy].freeze

@@ -108,7 +108,7 @@ module Assistant
         model = name.safe_constantize
         next unless model && model.column_names.include?('start_time')
 
-        scope = model.where(activity_type: 'meeting').where.not(status: %w[cancelled completed])
+        scope = model.where(activity_type: 'meeting').where.not(status: %w[cancelled completed no_show])
                      .where('start_time < ? AND start_time > ?', to, from - 1.day)
         scope = scope.where('assigned_to_id = :id OR (assigned_to_id IS NULL AND user_id = :id)', id: @user.id)
         scope = scope.where.not(id: ignore.id) if ignore.is_a?(model)
