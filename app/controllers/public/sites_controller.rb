@@ -698,8 +698,12 @@ module Public
       return false if @page || @vehicle || @blog_post
 
       path = normalized_path
-      path != '/' && path != Websites::HomeUrl::PREFIX
+      # /sms-terms is built into every site we host (E96 phase 4): carriers
+      # check a dealer's site for texting terms before approving them.
+      path != '/' && path != Websites::HomeUrl::PREFIX && path != SMS_TERMS_PATH
     end
+
+    SMS_TERMS_PATH = '/sms-terms'
 
     # Still the site, so a visitor who mistyped gets its header and nav rather
     # than a bare error, but a 404 and noindex to everything else.

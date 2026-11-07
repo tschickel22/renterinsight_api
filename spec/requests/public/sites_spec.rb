@@ -329,6 +329,16 @@ RSpec.describe 'Public::Sites', type: :request do
     end
   end
 
+  describe 'texting terms' do
+    it 'serves /sms-terms on every site, which carriers check before approving texting' do
+      get_site('/sms-terms')
+      expect(response).to have_http_status(:ok)
+
+      get_site('/not-a-page')
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
   describe 'when the site should not be served' do
     it 'does not render a site for an unknown host' do
       get_site('/about', host: 'nobody.test')
