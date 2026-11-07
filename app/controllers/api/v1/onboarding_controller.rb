@@ -41,7 +41,9 @@ module Api
         file = @item.files.find_by(id: params[:file_id])
         return render(json: { error: 'Not found' }, status: :not_found) unless file
 
-        redirect_to file.blob.url(expires_in: 5.minutes, disposition: 'attachment'), allow_other_host: true
+        # A short-lived link, asked for with the person's sign-in; a plain link
+        # in the browser would not carry it.
+        render json: { url: file.blob.url(expires_in: 5.minutes, disposition: 'attachment'), name: file.filename.to_s }
       end
 
       private
