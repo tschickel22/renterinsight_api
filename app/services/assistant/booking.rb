@@ -48,7 +48,8 @@ module Assistant
     end
 
     def slots
-      @slots ||= enabled? ? availability.slots : []
+      # Two a day for the week, so a day the buyer names has a real choice.
+      @slots ||= enabled? ? availability.slots(days: 7, per_day: 2, limit: 14) : []
     end
 
     def current_visit
