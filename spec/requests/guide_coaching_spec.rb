@@ -55,7 +55,23 @@ RSpec.describe 'Coaching, adoption and content gaps', type: :request do
       expect(person['path']).to include('done' => 1)
     end
 
-    it 'is for admins only' do
+    it 'says who never signed in, their next step and their required training, nudges first' do
+      admin = make_user(role: 'admin')
+      admin.update_columns(last_active_at: Time.current)
+      rep = make_user
+      video = TrainingVideo.create!(title: 'Leads', video_url: 'https://example.com/v.mp4', is_published: true, duration_seconds: 100)
+      TrainingAssignment.create!(company_id: company.id, user: rep, training_video: video, due_on: Date.yesterday)
+
+      get '/api/v1/guide/team', headers: auth(admin)
+      people = JSON.parse(response.body)['people']
+      expect(people.first['id']).to eq(rep.id)
+      expect(people.first['needs_nudge']).to include('never_signed_in', 'training_overdue')
+      expect(people.first['training']).to eq('required' => 1, 'watched' => 0, 'overdue' => 1)
+      expect(people.first['path']['next']).to be_present
+      expect(people.last['needs_nudge']).to eq([])
+    end
+
+        it 'is for admins only' do
       get '/api/v1/guide/team', headers: auth(make_user)
       expect(response).to have_http_status(:forbidden)
     end
