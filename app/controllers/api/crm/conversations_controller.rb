@@ -229,17 +229,7 @@ module Api
         scope.where('conversations.snoozed_until IS NULL OR conversations.snoozed_until <= ?', Time.current)
       end
 
-      NEEDS_YOU_SQL = <<~SQL.squish
-        conversations.status <> 'closed'
-        AND (
-          conversations.draft_reply IS NOT NULL
-          OR (
-            NOT (conversations.status = 'active' AND conversations.assistant_enabled)
-            AND conversations.last_inbound_at IS NOT NULL
-            AND (conversations.last_person_reply_at IS NULL OR conversations.last_inbound_at > conversations.last_person_reply_at)
-          )
-        )
-      SQL
+      NEEDS_YOU_SQL = Conversation::NEEDS_YOU_SQL
 
       def apply_view(scope, view)
         case view

@@ -117,4 +117,10 @@ RSpec.describe 'Quinn AI email replies', type: :request do
     row = JSON.parse(response.body)['items'].detect { |r| r['company_id'] == company.id }
     expect(row).to include('ai_calls' => 1, 'input_tokens' => 3000, 'texts_sent' => 1, 'ai_cost_cents' => 1)
   end
+
+  it 'lists the lead under Waiting on you in the Inbox in the Workqueue while a draft waits' do
+    conversation.update_columns(assigned_user_id: rep.id, draft_reply: { 'channel' => 'email', 'subject' => 'Re: Hi', 'body' => 'Yes' })
+    ids = WorkqueueService.new(company: company, user: rep, queue_id: 'leads_inbox_waiting').items[:items].map { |r| r[:entity_id] }
+    expect(ids).to include(lead.id)
+  end
 end

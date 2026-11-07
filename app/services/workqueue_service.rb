@@ -31,6 +31,7 @@ class WorkqueueService
     'activity_reminders_upcoming' => :activity_reminders_upcoming,
     'leads_inbound_new'           => :leads_inbound_new,
     'leads_replied'               => :leads_replied,
+    'leads_inbox_waiting'         => :leads_inbox_waiting,
     'leads_designed_home'         => :leads_designed_home,
     'leads_design_price_up'       => :leads_design_price_up,
     'leads_design_opened'         => :leads_design_opened,
@@ -56,7 +57,7 @@ class WorkqueueService
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
-      queue_ids: %w[leads_inbound_new leads_designed_home leads_design_opened leads_design_shared leads_design_price_up leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
+      queue_ids: %w[leads_inbox_waiting leads_inbound_new leads_designed_home leads_design_opened leads_design_shared leads_design_price_up leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
     { id: 'my_deals', label: 'My Deals',
       queue_ids: %w[deals_mine deals_closing_month deals_closing_week deals_stale_30d] },
     { id: 'my_service', label: 'My Service Work',
@@ -447,6 +448,7 @@ class WorkqueueService
     when 'activity_reminders_upcoming' then "Reminders — Next #{prefs[:reminders_window_days]}d"
     when 'leads_inbound_new'           then 'New Inbound: Not Yet Contacted'
     when 'leads_replied'               then 'Replied — Needs Response'
+    when 'leads_inbox_waiting'         then 'Waiting on You in the Inbox'
     when 'leads_designed_home'         then 'Designed a Home'
     when 'leads_design_price_up'       then 'Saved Design Price Went Up'
     when 'leads_design_opened'         then 'Saved Design Opened'
@@ -757,6 +759,18 @@ class WorkqueueService
   # window AND the user hasn't responded since. Implemented with a correlated
   # NOT EXISTS so the filter happens in one round-trip and stays an AR scope
   # (compatible with apply_search / apply_sort / pagination above).
+  # Leads whose Inbox conversation is with this person and waits on them:
+  # the buyer wrote and nobody answered, or Quinn AI's reply waits for
+  # approval (E96). Snoozed conversations stay out until they wake.
+  def leads_inbox_waiting
+    waiting = Conversation.where(company_id: @company.id, conversable_type: 'Lead')
+                          .where('conversations.assigned_user_id = :id OR conversations.handed_off_to_user_id = :id', id: @user.id)
+                          .where('conversations.snoozed_until IS NULL OR conversations.snoozed_until <= ?', Time.current)
+                          .where(Conversation::NEEDS_YOU_SQL)
+    leads = @company.leads.where(id: waiting.select(:conversable_id))
+    leads.where.not(status: excluded_lead_status_keys).or(leads.where(status: nil))
+  end
+
   def leads_replied
     cutoff = prefs[:replied_window_days].to_i.days.ago
     @company.leads
