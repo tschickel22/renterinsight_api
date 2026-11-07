@@ -42,10 +42,12 @@ module Assistant
       @sender ||= own_number || pool_number
     end
 
-    def send_first_text!(body:, metadata: {})
+    # sent_by: 'play' for a play's own words, 'assistant' when Quinn writes the
+    # first text itself (AssistantStartJob).
+    def send_first_text!(body:, metadata: {}, sent_by: 'play')
       conversation = existing || open!
       body = identify(body, conversation)
-      Assistant::Messenger.deliver!(conversation, body: body, sent_by: 'play', extra_metadata: metadata)
+      Assistant::Messenger.deliver!(conversation, body: body, sent_by: sent_by, extra_metadata: metadata)
     end
 
     def open!

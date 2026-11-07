@@ -24,18 +24,21 @@ module Assistant
 
     HANDOFF_REASONS = %w[
       asked_for_person upset finance_or_credit legal_or_warranty trade_in_value
-      appointment unsure other
+      appointment visit_time ready_for_rep unsure other
     ].freeze
 
     # Who the buyer is, as they tell it. Copied onto the lead's own fields
     # (AssistantReplyJob), the same fields the lead form fills.
-    CONTACT_FIELDS = %w[first_name last_name email street city state zip].freeze
+    CONTACT_FIELDS = %w[first_name last_name email phone street city state zip].freeze
 
     Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :question, :question_answered,
                         :question_topic, :handoff, :handoff_reason, :summary, :usage, keyword_init: true)
 
-    def initialize(conversation:, settings:, history:, feedback: nil)
+    # opener: write the first text to a new lead (Quinn starts it, E96).
+    def initialize(conversation:, settings:, history:, feedback: nil, opener: false)
       @conversation = conversation
+      @opener = opener
+      @web = conversation.web_chat?
       @company = conversation.company
       @lead = conversation.conversable
       @settings = settings
@@ -68,28 +71,24 @@ module Assistant
       facts = knowledge.to_h
       name = @settings.assistant_name
       <<~PROMPT
-        You text with people who asked #{facts[:dealer_name]}, a manufactured home dealer, about a home.
+        #{@web ? "You chat with visitors on the website of #{facts[:dealer_name]}, a manufactured home dealer." : "You text with people who asked #{facts[:dealer_name]}, a manufactured home dealer, about a home."}
         Your name is #{name}. You work with the team at #{facts[:dealer_name]}. If asked, you are the dealership's
         assistant and a person on the team can take over at any time.
         Tone: #{@settings['tone'] == 'professional' ? 'polite and professional' : 'warm, friendly and relaxed'}.
 
-        Your job: answer their questions, learn what they need, and get them to visit or talk with the team.
-        Learn, one question at a time and only when it fits: whether they own land or need land or a community,
-        the size of home and bedrooms, their timeline, their budget, how they would pay (cash, financing, or not sure),
-        and a good time to visit. If they want to visit or want details sent and you do not have their full name or
-        email address, ask for it.
-
+        #{goal_text}
+        #{opener_text}
         RULES. Breaking one of these costs the dealer a sale or worse.
-        1. Text message style: one or two short sentences, under 300 characters. No lists, no emojis, no signatures.
+        1. #{@web ? 'Chat style: one to three short sentences. No lists, no emojis, no signatures.' : 'Text message style: one or two short sentences, under 300 characters. No lists, no emojis, no signatures.'}
         2. Answer ONLY from the facts and homes below. Never invent a home, price, feature, delivery date or policy.
            If you do not know, say you will check with the team, and hand off.
         3. Never state a monthly payment, interest rate, down payment, or whether someone will be approved.
            For payment or credit questions say the finance manager will go over it with them, and hand off.
         4. #{links_rule}
         5. Do not use dashes as punctuation.
-        6. If they ask to talk with a person, are upset, ask about legal, warranty or a complaint, want a trade in
-           valued, or want to book a new visit or change or cancel one, hand off with a short friendly reply saying
-           someone will text them.
+        6. If they ask to talk with a person, are upset, ask about legal, warranty or a complaint, or want a trade in
+           valued, hand off with a short friendly reply saying someone from the team will #{@web ? 'get back to them' : 'text them'}.
+           #{visit_rule}
         8. If they ask about a visit already booked (when, where, with whom), answer from THEIR APPOINTMENTS below.
            If they ask for the invite or the details again, set resend_invite and tell them the calendar invite is on
            its way to their email (only when an email is on file; otherwise just text them the details).
@@ -115,6 +114,7 @@ module Assistant
         THIS BUYER
         Name on file: #{[@lead.try(:first_name), @lead.try(:last_name)].compact_blank.join(' ').presence || 'unknown'}
         Email on file: #{@lead.try(:email).presence || 'none'}
+        #{@web ? "Mobile on file: #{@lead.try(:phone).present? ? 'yes' : 'none'}" : ''}
         Came from: #{source_name || 'unknown'}
         What they first asked: #{first_request || 'nothing recorded'}
         Known so far: #{@conversation.qualification.presence&.to_json || 'nothing yet'}
@@ -126,6 +126,58 @@ module Assistant
     end
 
     private
+
+    # What Quinn works toward, from the dealer's goal setting.
+    def goal_text
+      learn = 'Learn, one question at a time and only when it fits: whether they own land or need land or a community, ' \
+              'the size of home and bedrooms, their timeline, their budget, how they would pay (cash, financing, or not sure), ' \
+              'and a good time to visit.'
+      contact = @web ? 'If they want to visit, be contacted or have details sent, ask for their name and an email address or mobile number ' \
+                       '(the chat itself asks whether texting is OK, so do not ask that).' :
+                       'If they want to visit or want details sent and you do not have their full name or email address, ask for it.'
+      case booking_mode
+      when :book
+        "Your goal is a visit to see homes in person. Answer their questions, learn what they need, and invite them to come see " \
+          "homes that fit. #{learn} #{contact} Once they give a day and time to visit and you have their name and a way to " \
+          'reach them, hand off with reason visit_time, saying the team will confirm that time. Never say a time is booked.'
+      when :rep_now
+        'The dealership is open right now and the team can help straight away. Learn their name and, in one or two questions, ' \
+          "what they are looking for, then hand off with reason ready_for_rep, saying someone from the team will be right with them. #{contact}"
+      when :answer_only
+        'Your job is to answer their questions. Do not ask them qualifying questions. When they ask for a person, ' \
+          "want to visit, or ask something you cannot answer, hand off. #{contact}"
+      else
+        "Your job: answer their questions, learn what they need, and get them to visit or talk with the team. #{learn} #{contact}"
+      end
+    end
+
+    # :book, :rep_now, :answer_only or :qualify.
+    def booking_mode
+      @booking_mode ||= case @settings.goal
+                        when 'book_always' then :book
+                        when 'book_after_hours'
+                          Assistant::Hours.open_now?(@company, @conversation.location || @lead.try(:location)) ? :rep_now : :book
+                        when 'answer_only' then :answer_only
+                        else :qualify
+                        end
+    end
+
+    def visit_rule
+      if booking_mode == :book
+        'If they want to change or cancel a visit already booked, hand off. If they want a new visit, ask what day and time ' \
+          'suits them first, then hand off with reason visit_time.'
+      else
+        'If they want to book a visit, or change or cancel one, hand off (reason appointment).'
+      end
+    end
+
+    def opener_text
+      return '' unless @opener
+
+      "This is your FIRST text to them; they have not texted you yet. Say hi by first name if you have it, say you are #{@settings.assistant_name} " \
+        "with #{knowledge.dealer_name}, mention what they asked about if it is recorded below, and ask one easy question that fits your goal. " \
+        'Do not hand off. Do not add opt out wording; it is added for you.'
+    end
 
     def request_body
       {
@@ -217,7 +269,8 @@ module Assistant
     def links_allowed?
       return @links_allowed if defined?(@links_allowed)
 
-      @links_allowed = Assistant::Media.links_allowed?(@conversation)
+      # A web chat is on a web page already: home links are fine there.
+      @links_allowed = @web || Assistant::Media.links_allowed?(@conversation)
     end
 
     public :allowed_urls, :links_allowed?

@@ -52,7 +52,7 @@ RSpec.describe 'Inbox conversations', type: :request do
     expect(states).to eq(handed_off.id => 'Needs you', assistant_has_it.id => 'Assistant', answered.id => 'Waiting on buyer')
     expect(body['meta']['counts']).to include('needs_you' => 1, 'unassigned' => 1)
     expect(body['items'].first['handoff_label']).to eq('asked about payments or credit')
-    expect(body['meta']['assistant']).to eq('available' => false, 'enabled' => false, 'name' => 'Quinn')
+    expect(body['meta']['assistant']).to eq('available' => false, 'enabled' => false, 'name' => 'Quinn', 'chat' => false)
   end
 
   it 'has the views from the mockup' do

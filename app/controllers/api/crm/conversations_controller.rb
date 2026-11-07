@@ -117,9 +117,42 @@ module Api
         render json: row_json(@conversation.reload, nil)
       end
 
+      # A website chat's messages, oldest first (after: only newer ones, for
+      # the Inbox's own few-second check while the thread is open).
+      def chat_messages
+        return unless authorize_action!('leads', 'read')
+        return render(json: { error: 'Not a website chat' }, status: :unprocessable_entity) unless @conversation.web_chat?
+
+        scope = @conversation.chat_messages.order(:id)
+        scope = scope.where('id > ?', params[:after].to_i) if params[:after].present?
+        users = User.where(id: scope.map(&:user_id).compact.uniq).index_by(&:id)
+        render json: {
+          messages: scope.last(200).map { |m| m.as_chat_json.merge(user_name: users[m.user_id]&.first_name) },
+          visitor_on_page: @conversation.visitor_on_page?, visitor_seen_at: @conversation.visitor_seen_at,
+          page_url: @conversation.chat_page_url, conversation: row_json(@conversation, nil)
+        }
+      end
+
+      # A rep answers in the website chat. Quinn stops answering from here on.
+      def chat_reply
+        return unless authorize_action!('leads', 'update')
+        return render(json: { error: 'Not a website chat' }, status: :unprocessable_entity) unless @conversation.web_chat?
+
+        body = params[:body].to_s.strip.truncate(2000)
+        return render(json: { error: 'Type a message' }, status: :unprocessable_entity) if body.blank?
+
+        Assistant::Handoff.taken_over!(@conversation, current_user) if @conversation.status == 'active'
+        @conversation.update!(status: 'handed_off', ended_at: nil) if @conversation.status == 'closed'
+        result = Assistant::Messenger.deliver!(@conversation, body: body, sent_by: 'user', user: current_user)
+        render json: { message: result[:chat_message].as_chat_json.merge(user_name: current_user.first_name),
+                       visitor_on_page: @conversation.visitor_on_page? }
+      end
+
       def hand_back
         return unless authorize_action!('leads', 'update')
-        unless @conversation.channel == 'sms' && Assistant::Settings.for(@company).enabled?
+        settings = Assistant::Settings.for(@company)
+        allowed = @conversation.web_chat? ? settings.chat_add_on? : (@conversation.channel == 'sms' && settings.enabled?)
+        unless allowed
           return render(json: { error: 'The Lead Assistant is not on for this account' }, status: :unprocessable_entity)
         end
         return render(json: { error: 'This conversation is closed' }, status: :unprocessable_entity) if @conversation.status == 'closed'
@@ -152,7 +185,8 @@ module Api
 
       def assistant_meta
         settings = Assistant::Settings.for(@company)
-        { available: settings.add_on?, enabled: settings.enabled?, name: settings.assistant_name }
+        { available: settings.add_on?, enabled: settings.enabled?, name: settings.assistant_name,
+          chat: settings.chat_add_on? }
       end
 
       def set_conversation
@@ -165,7 +199,9 @@ module Api
       # all; everyone else sees their locations (and conversations with no
       # location). Then the location picker.
       def visible_scope
-        scope = @company.conversations
+        # A website chat counts once the visitor has said something: a greeting
+        # nobody answered (after a form, or an opened chat) is not a conversation.
+        scope = @company.conversations.where("conversations.channel <> 'web_chat' OR conversations.last_inbound_at IS NOT NULL")
         if current_user.uses_rbac? && !current_user.effective_admin? && !permission_service.can?('leads', 'read', 'all')
           location_ids = permission_service.accessible_location_ids
           scope = scope.where('conversations.location_id IN (?) OR conversations.location_id IS NULL', location_ids) if location_ids.any?
@@ -270,7 +306,9 @@ module Api
           last_message_preview: c.last_message_preview,
           snoozed_until: c.snoozed_until,
           started_at: c.started_at,
-          next_appointment: next_appointment_json(c)
+          next_appointment: next_appointment_json(c),
+          visitor_on_page: c.visitor_on_page?,
+          chat_page_url: c.chat_page_url
         }
       end
     end

@@ -25,7 +25,11 @@ module Public
       # our sales asset, not a customer's site, and the concierge answering from
       # the prospect's own stock is the point of showing it.
       return head :forbidden unless concierge_enabled? || demo?
+      return head :forbidden unless embed_allowed?
       return too_many if rate_limited?
+      # A live site's chat is Quinn's, kept in the Inbox (E96, 2026-11-07). A
+      # demo keeps the answer-only concierge: it writes nothing anywhere.
+      return quinn_create unless demo?
 
       result = Concierge::Responder.new(
         website: website,
@@ -57,6 +61,42 @@ module Public
       }
     end
 
+    # GET concierge/:token/chat?chat_key=&after=
+    #
+    # New messages for the visitor's widget, asked every few seconds while it
+    # is open: Quinn's and, once a person has the chat, the rep's from the
+    # Inbox. Asking is also how the Inbox knows the visitor is still there.
+    def chat
+      return head :not_found if company.nil?
+      return head :forbidden unless concierge_enabled? && embed_allowed?
+
+      conversation = Assistant::WebChat.find(company, params[:chat_key])
+      return render(json: { messages: [], closed: true }) unless conversation
+
+      Assistant::WebChat.new(conversation).seen!
+      after = params[:after].to_i
+      messages = conversation.chat_messages.where('id > ?', after).order(:id).limit(50).map(&:as_chat_json)
+      render json: { messages: messages, person: conversation.handed_off?, closed: conversation.status == 'closed' }
+    end
+
+    # GET concierge/:token/config?site=
+    #
+    # What the embedded chat needs before the first message: the name, colour
+    # and greeting. Only for a page on a site the dealer listed.
+    def chat_config
+      return head :not_found if company.nil?
+      return head :forbidden unless concierge_enabled? && embed_allowed?
+
+      settings = Assistant::Settings.for(company)
+      render json: {
+        dealer_name: company.name, assistant_name: settings.assistant_name,
+        color: params[:color].to_s.match?(/\A#[0-9a-f]{6}\z/i) ? params[:color] : chat_color,
+        greeting: "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about homes, prices or a visit.",
+        quick_actions: quick_actions.reject { |a| a[:type] == 'form' },
+        lead_capture: lead_capture_config, platform_brand: platform_brand
+      }
+    end
+
     # POST concierge/:token/lead
     #
     # Creates the lead once the assistant has a name and a way to reach them.
@@ -72,6 +112,13 @@ module Public
       # stranger's details in front of a dealer who never asked for them.
       return render json: { status: 'demo' } if demo?
 
+      # A chat already tied to a lead: the visitor's number and their yes to
+      # texts go on that lead rather than making a second one.
+      chat_conversation = Assistant::WebChat.find(company, params[:chat_key])
+      if chat_conversation&.conversable.is_a?(Lead)
+        return render json: { status: 'created', message: add_to_chat_lead(chat_conversation.conversable) }
+      end
+
       result = capture.call(
         visitor: visitor_details,
         intent: params[:intent].to_s.presence || 'contact',
@@ -80,6 +127,10 @@ module Public
         request_context: { ip: request.remote_ip, user_agent: request.user_agent,
                            referrer: request.referrer }
       )
+
+      if result.status == 'created' && chat_conversation
+        Assistant::WebChat.link!(chat_conversation, company.leads.find_by(id: result.lead_id))
+      end
 
       render json: { status: result.status, message: result.message,
                      form_path: result.form_path }.compact
@@ -90,6 +141,70 @@ module Public
     end
 
     private
+
+    def quinn_create
+      message = params[:message].to_s.strip.slice(0, MAX_MESSAGE)
+      conversation = Assistant::WebChat.find(company, params[:chat_key])
+      return render(json: { messages: [], text: nil, actions: [], listings: [] }) if message.blank? && conversation.nil?
+
+      chat_site = embed? ? nil : website
+      conversation ||= Assistant::WebChat.start!(company: company, website: chat_site, page_url: page_url)
+      reply = Assistant::WebChat.new(conversation, website: chat_site,
+                                                   request_context: { ip: request.remote_ip, user_agent: request.user_agent,
+                                                                      referrer: request.referrer }).visitor_says!(message)
+      log_usage(Struct.new(:usage).new(reply.usage&.then { |u| { input_tokens: u[:input_tokens], output_tokens: u[:output_tokens] } }))
+
+      last = reply.messages.last
+      render json: {
+        chat_key: conversation.visitor_token, messages: reply.messages, person: conversation.reload.handed_off?,
+        ask_consent: reply.ask_consent == true, visitor: reply.visitor || {},
+        # The single-answer shape older widgets read.
+        text: last&.dig(:content), actions: [], listings: last ? last[:listings] : [], source: 'quinn',
+        quick_actions: embed? ? quick_actions.reject { |a| a[:type] == 'form' } : quick_actions,
+        lead_capture: lead_capture_config, platform_brand: platform_brand
+      }
+    end
+
+    # The embedded chat on a dealer's own site sends the page's address as
+    # `site`. It answers only on the sites the dealer listed, so the embed line
+    # copied onto someone else's site gets nothing (E96).
+    def embed?
+      params[:site].present? || params[:embed].present?
+    end
+
+    def embed_allowed?
+      return true unless embed?
+
+      Assistant::Settings.for(company).chat_site_allowed?(params[:site])
+    end
+
+    def page_url
+      (params[:page_url].presence || request.referrer).to_s.truncate(500)
+    end
+
+    def chat_color
+      site = website
+      site&.theme.to_h['primary_color'].presence || '#2563eb'
+    rescue StandardError
+      '#2563eb'
+    end
+
+    def add_to_chat_lead(lead)
+      phone = visitor_details['phone'].to_s.strip
+      consented = ActiveModel::Type::Boolean.new.cast(params[:consented]) == true
+      changes = {}
+      changes[:phone] = phone if phone.present? && consented && lead.phone.blank?
+      if consented && phone.present? && (lead.phone.blank? || Conversation.normalize_phone(lead.phone) == Conversation.normalize_phone(phone))
+        changes[:sms_inquiry_consent] = true
+        changes[:sms_inquiry_consent_at] = Time.current
+      end
+      changes[:email] = visitor_details['email'] if visitor_details['email'].present? && lead.email.blank?
+      lead.update!(changes) if changes.any?
+      "Thanks. Someone from #{company.name} will be in touch shortly."
+    rescue StandardError => e
+      Rails.logger.warn("[Concierge] could not add to chat lead #{lead&.id}: #{e.message}")
+      "Thanks. Someone from #{company.name} will be in touch shortly."
+    end
 
     # Only what the scheduler can use. Deliberately not persisted here: this
     # endpoint answers questions, and creating a lead is a separate, consented
@@ -231,7 +346,7 @@ module Public
 
     def set_cors_headers
       headers['Access-Control-Allow-Origin'] = '*'
-      headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+      headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
       headers['Access-Control-Allow-Headers'] = 'Content-Type'
     end
 

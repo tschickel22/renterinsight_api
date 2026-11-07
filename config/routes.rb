@@ -86,6 +86,13 @@ Rails.application.routes.draw do
   post 'concierge/:token/lead', to: 'public/concierge#lead'
   match 'concierge/:token', to: 'public/concierge#options', via: :options
   match 'concierge/:token/lead', to: 'public/concierge#options', via: :options
+  # Quinn's website chat (E96): new messages for the widget, and the embedded
+  # chat's settings. The loader line a dealer pastes into their own site.
+  get 'concierge/:token/chat', to: 'public/concierge#chat'
+  get 'concierge/:token/config', to: 'public/concierge#chat_config'
+  match 'concierge/:token/chat', to: 'public/concierge#options', via: :options
+  match 'concierge/:token/config', to: 'public/concierge#options', via: :options
+  get 'chat/:token.js', to: 'public/chat_embed#show', as: :chat_embed_script, format: false
 
   # The demo link beacon. Short path for the same reason the page one is: it
   # ships inside a bundle and is called on every design change.
@@ -2884,6 +2891,9 @@ Rails.application.routes.draw do
           post :reopen
           post :take_over
           post :hand_back
+          # A website chat (E96): its messages, and a rep's reply in it.
+          get :chat_messages
+          post :chat_reply
         end
       end
       resource :lead_assistant_settings, only: %i[show update]
