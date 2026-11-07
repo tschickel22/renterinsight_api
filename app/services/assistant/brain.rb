@@ -31,8 +31,8 @@ module Assistant
     # (AssistantReplyJob), the same fields the lead form fills.
     CONTACT_FIELDS = %w[first_name last_name email street city state zip].freeze
 
-    Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :handoff, :handoff_reason, :summary, :usage,
-                        keyword_init: true)
+    Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :handoff, :handoff_reason,
+                        :summary, :usage, keyword_init: true)
 
     def initialize(conversation:, settings:, history:, feedback: nil)
       @conversation = conversation
@@ -52,6 +52,7 @@ module Assistant
         qualification: input['qualification'].to_h.slice(*QUALIFICATION_FIELDS).compact_blank,
         contact: input['contact'].to_h.slice(*CONTACT_FIELDS).transform_values { |v| v.to_s.strip }.compact_blank,
         resend_invite: input['resend_invite'] == true,
+        photo_home_id: stock_ids.include?(input['photo_home_id'].to_i) ? input['photo_home_id'].to_i : nil,
         handoff: input['handoff'] == true,
         handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : (input['handoff'] ? 'other' : nil),
         summary: input['summary'].to_s.strip.truncate(500),
@@ -81,7 +82,7 @@ module Assistant
            If you do not know, say you will check with the team, and hand off.
         3. Never state a monthly payment, interest rate, down payment, or whether someone will be approved.
            For payment or credit questions say the finance manager will go over it with them, and hand off.
-        4. Never send a link or a web address of any kind.
+        4. #{links_rule}
         5. Do not use dashes as punctuation.
         6. If they ask to talk with a person, are upset, ask about legal, warranty or a complaint, want a trade in
            valued, or want to book a new visit or change or cancel one, hand off with a short friendly reply saying
@@ -151,6 +152,7 @@ module Assistant
               properties: CONTACT_FIELDS.index_with { { type: 'string' } }
             },
             resend_invite: { type: 'boolean', description: 'True to email the calendar invite for their next appointment again.' },
+            photo_home_id: { type: 'integer', description: 'The [number] of one home from HOMES to send its photos with your reply, when they ask for pictures or to see it.' },
             handoff: { type: 'boolean', description: 'True when a person should take over now.' },
             handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
             summary: { type: 'string', description: 'One or two sentences for the sales rep: who this is and what they want. Use their name or "they", never he or she.' }
@@ -196,14 +198,51 @@ module Assistant
       @knowledge ||= Concierge::Knowledge.new(website: nil, company: @company)
     end
 
+    # Web addresses Quinn may text in this conversation (the listed homes'
+    # pages, only where the number allows links). AssistantReplyJob lets these
+    # through Assistant::Rules and nothing else.
+    def allowed_urls
+      links_allowed? ? stock.filter_map { |v| Assistant::Media.home_url(@company, v) } : []
+    end
+
+    def links_allowed?
+      return @links_allowed if defined?(@links_allowed)
+
+      @links_allowed = Assistant::Media.links_allowed?(@conversation)
+    end
+
+    public :allowed_urls, :links_allowed?
+
+    def links_rule
+      if links_allowed?
+        'Never send a web address except a home\'s own link exactly as written in HOMES, and only when they ask for ' \
+          'a link, more details or pictures. You can also send its photos with photo_home_id.'
+      else
+        'Never send a link or a web address of any kind. When they ask for pictures, a link or to see a home, send ' \
+          'its photos with photo_home_id and say the photos are on their way.'
+      end
+    end
+
+    def stock
+      @stock ||= @company.vehicles.where(is_deleted: [false, nil], status: Concierge::InventorySearch::SERVABLE)
+                         .order(updated_at: :desc).limit(STOCK_LIMIT).to_a
+    end
+
+    def stock_ids
+      stock.map(&:id)
+    end
+
     def stock_lines
-      @company.vehicles.where(is_deleted: [false, nil], status: Concierge::InventorySearch::SERVABLE)
-              .order(updated_at: :desc).limit(STOCK_LIMIT).map do |v|
-        bits = [[v.year, v.make, v.model].compact_blank.join(' ')]
+      stock.map do |v|
+        bits = ["[#{v.id}] #{[v.year, v.make, v.model].compact_blank.join(' ')}"]
         bits << "#{v.bedrooms} bed" if v.bedrooms.present?
         bits << "#{v.bathrooms.to_s.sub(/\.0\z/, '')} bath" if v.bathrooms.present?
         bits << "#{v.square_feet} sq ft" if v.square_feet.present?
         bits << "$#{v.sale_price.to_i}" if v.sale_price.to_i.positive?
+        bits << (Assistant::Media.photos(v).any? ? 'has photos' : 'no photos')
+        if links_allowed? && (url = Assistant::Media.home_url(@company, v))
+          bits << "link #{url}"
+        end
         "- #{bits.join(', ')}"
       end.join("\n")
     rescue StandardError

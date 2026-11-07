@@ -29,9 +29,10 @@ RSpec.describe 'Lead Assistant', type: :request do
     TwilioAccount.create!(company: company, phone_number: own_number, phone_number_sid: "PN#{SecureRandom.hex(8)}", status: 'active')
   end
 
-  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {}, resend_invite: false)
+  def brain_says(reply:, handoff: false, reason: nil, qualification: {}, contact: {}, resend_invite: false, photo_home_id: nil)
     allow_any_instance_of(Assistant::Brain).to receive(:call).and_return(
-      Assistant::Brain::Result.new(reply: reply, qualification: qualification, contact: contact, resend_invite: resend_invite, handoff: handoff,
+      Assistant::Brain::Result.new(reply: reply, qualification: qualification, contact: contact, resend_invite: resend_invite,
+                                   photo_home_id: photo_home_id, handoff: handoff,
                                    handoff_reason: reason, summary: 'Wants a 3 bed on her land.', usage: {})
     )
   end
@@ -158,6 +159,38 @@ RSpec.describe 'Lead Assistant', type: :request do
       perform_enqueued_jobs(except: [AppointmentInviteJob])
       expect(resent).to eq([['LeadActivity', appt.id, 'REQUEST']])
       expect(conversation.reload.status).to eq('active')
+    end
+
+    it 'sends photos of the home it picked as a picture text, with no link' do
+      home = company.vehicles.create!(vin: "VIN#{SecureRandom.hex(5)}", year: 2024, make: 'Fleetwood', model: 'Vista', status: 'available', sale_price: 58_023,
+                                      images: [{ 'url' => 'https://cdn.example.com/a.jpg' }, { 'url' => 'https://cdn.example.com/b.jpg' }])
+      brain_says(reply: 'Here are photos of the 2024 Fleetwood Vista.', photo_home_id: home.id)
+      buyer_texts('Can you send me pictures of that one?')
+      perform_enqueued_jobs
+      expect(sent.last).to include(body: 'Here are photos of the 2024 Fleetwood Vista.',
+                                   media_urls: ['https://cdn.example.com/a.jpg', 'https://cdn.example.com/b.jpg'])
+      expect(Communication.where(conversation_id: conversation.id).order(:id).last.metadata['media_urls'].size).to eq(2)
+    end
+
+    it "texts a home's own link only on a number registered for links" do
+      home = company.vehicles.create!(vin: "VIN#{SecureRandom.hex(5)}", year: 2024, make: 'Fleetwood', model: 'Vista', status: 'available')
+      allow(Assistant::Media).to receive(:home_url).and_return('https://summit.example.com/homes/2024-fleetwood-vista-1')
+      brain_says(reply: 'Here it is: https://summit.example.com/homes/2024-fleetwood-vista-1')
+      buyer_texts('Send me the link')
+      perform_enqueued_jobs
+      expect(sent.map { |m| m[:body] }).not_to include(a_string_including('https://')) # the dealer number is not registered for links
+      expect(conversation.reload.status).to eq('handed_off')
+
+      Assistant::Handoff.hand_back!(conversation)
+      TwilioAccount.find_by(phone_number: own_number).update!(metadata: { 'links_allowed' => true })
+      buyer_texts('Send me the link please')
+      perform_enqueued_jobs
+      expect(sent.last[:body]).to eq('Here it is: https://summit.example.com/homes/2024-fleetwood-vista-1')
+
+      brain_says(reply: 'See https://other-site.example.com/deal')
+      buyer_texts('anything else?')
+      perform_enqueued_jobs
+      expect(sent.map { |m| m[:body] }).not_to include(a_string_including('other-site'))
     end
 
     it 'routes a reply to a pool number by the conversation, since the number names no dealer' do

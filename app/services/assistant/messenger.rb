@@ -11,7 +11,7 @@ module Assistant
     module_function
 
     # sent_by: 'assistant', 'play' (a play's own text), or 'user' with a user.
-    def deliver!(conversation, body:, sent_by: 'assistant', user: nil, extra_metadata: {})
+    def deliver!(conversation, body:, sent_by: 'assistant', user: nil, extra_metadata: {}, media_urls: [])
       lead = conversation.conversable
       raise ArgumentError, 'conversation has no buyer record' unless lead
 
@@ -30,9 +30,11 @@ module Assistant
       metadata = (extra_metadata || {}).to_h.symbolize_keys.merge(
         sent_by: sent_by, conversation_id: conversation.id, source: SOURCES.fetch(sent_by, 'manual')
       )
+      media = Array(media_urls).first(Assistant::Media::MAX_PHOTOS)
+      metadata[:media_urls] = media if media.any?
       CommunicationService.send_sms(
         communicable: lead, to: conversation.buyer_phone, from: conversation.sender_number, body: body,
-        metadata: metadata, sender_user_id: user&.id, user: user, conversation: conversation
+        metadata: metadata, sender_user_id: user&.id, user: user, conversation: conversation, media_urls: media
       )
     end
 

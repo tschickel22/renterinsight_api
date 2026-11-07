@@ -33,7 +33,8 @@ module Providers
           body: body,
           account_sid: account_sid,
           auth_token: auth_token,
-          messaging_service_sid: pool_service || config[:messaging_service_sid] || config[:twilio_messaging_service_sid]
+          messaging_service_sid: pool_service || config[:messaging_service_sid] || config[:twilio_messaging_service_sid],
+          media_urls: options[:media_urls]
         )
         
         if result[:success]
@@ -57,7 +58,7 @@ module Providers
       
       private
       
-      def send_via_http(to:, from:, body:, account_sid:, auth_token:, messaging_service_sid: nil)
+      def send_via_http(to:, from:, body:, account_sid:, auth_token:, messaging_service_sid: nil, media_urls: nil)
         require 'net/http'
         require 'uri'
         require 'json'
@@ -81,7 +82,11 @@ module Providers
         callback = TwilioSmsService.own_account_status_callback(account_sid)
         form_data['StatusCallback'] = callback if callback
 
-        request.set_form_data(form_data)
+        # Photos make it a picture text (MMS). Twilio takes MediaUrl once per
+        # image, so the form is sent as pairs rather than a hash.
+        pairs = form_data.to_a
+        Array(media_urls).first(10).each { |url| pairs << ['MediaUrl', url] }
+        request.set_form_data(pairs)
         
         response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
           http.request(request)

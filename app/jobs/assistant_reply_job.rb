@@ -25,13 +25,13 @@ class AssistantReplyJob < ApplicationJob
 
     reason = result.handoff ? result.handoff_reason : nil
     reply = Assistant::Rules.tidy(result.reply)
-    problem = Assistant::Rules.violation(reply)
+    problem = Assistant::Rules.violation(reply, allowed_urls: @allowed_urls)
 
     if problem && !result.handoff
       retry_result = draft(conversation, settings, feedback: problem)
       copy_contact_onto_lead(conversation, retry_result.contact)
       reply = Assistant::Rules.tidy(retry_result.reply)
-      problem = Assistant::Rules.violation(reply)
+      problem = Assistant::Rules.violation(reply, allowed_urls: @allowed_urls)
       result = retry_result
       reason = retry_result.handoff ? retry_result.handoff_reason : nil
     end
@@ -42,11 +42,11 @@ class AssistantReplyJob < ApplicationJob
       Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)
     elsif reason
       # The reply already tells the buyer someone will text them.
-      Assistant::Messenger.deliver!(conversation, body: reply) if reply.present?
+      Assistant::Messenger.deliver!(conversation, body: reply, media_urls: photos_for(conversation, result)) if reply.present?
       Assistant::Handoff.perform!(conversation, reason: reason, summary: result.summary,
                                                 buyer_text: reply.present? ? nil : :default)
     else
-      Assistant::Messenger.deliver!(conversation, body: reply)
+      Assistant::Messenger.deliver!(conversation, body: reply, media_urls: photos_for(conversation, result))
     end
   rescue StandardError => e
     Rails.logger.error("[AssistantReplyJob] conversation #{conversation_id}: #{e.class}: #{e.message}")
@@ -63,10 +63,20 @@ class AssistantReplyJob < ApplicationJob
 
   def draft(conversation, settings, feedback: nil)
     history = Communication.where(conversation_id: conversation.id, channel: 'sms').order(:created_at).last(Assistant::Brain::HISTORY)
-    result = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: feedback).call
+    brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: feedback)
+    result = brain.call
+    @allowed_urls = brain.allowed_urls
     Rails.logger.info("[AssistantReplyJob] conversation #{conversation.id} model=#{result.usage[:model]} " \
                       "in=#{result.usage[:input_tokens]} out=#{result.usage[:output_tokens]} handoff=#{result.handoff}")
     result
+  end
+
+  # Up to three photos of the home Quinn chose, sent with its reply.
+  def photos_for(conversation, result)
+    return [] unless result.photo_home_id
+
+    vehicle = conversation.company.vehicles.find_by(id: result.photo_home_id)
+    vehicle ? Assistant::Media.photos(vehicle) : []
   end
 
   # What the buyer told the assistant, on the lead where the lead has a place
