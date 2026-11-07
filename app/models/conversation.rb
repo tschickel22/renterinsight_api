@@ -113,6 +113,7 @@ class Conversation < ApplicationRecord
     end
     update_columns(attrs.merge(updated_at: Time.current))
     Assistant::FollowUp.schedule!(self)
+    InboxChannel.changed(self)
   end
 
   private
