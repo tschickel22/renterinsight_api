@@ -70,7 +70,8 @@ class Conversation < ApplicationRecord
     if web_chat?
       chat_messages.order(:id).last(limit)
     else
-      Communication.where(conversation_id: id, channel: 'sms').order(:created_at).last(limit)
+      # Texts and emails: a buyer may answer Quinn's email follow-up by email.
+      Communication.where(conversation_id: id, channel: %w[sms email]).order(:created_at).last(limit)
     end
   end
 

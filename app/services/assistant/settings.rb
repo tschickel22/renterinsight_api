@@ -60,8 +60,20 @@ module Assistant
       # (Assistant::Sources). Off when a site still has template copy.
       'use_website_text' => true,
       # The reading of the dealer's own site Quinn uses (SiteContentProfile).
-      'site_reading_id' => nil
+      'site_reading_id' => nil,
+      # When a buyer answers by email: answer (Quinn replies by email), draft
+      # (Quinn writes it, a rep approves), rep (a person always takes it).
+      'email_replies' => 'answer',
+      # Hand to a rep when the buyer says they are ready to buy.
+      'handoff_on_ready' => true,
+      # Hand to a rep when Quinn cannot answer; off, it says it will check
+      # and the question waits in the dealer's list.
+      'handoff_on_unknown' => true,
+      # Hand to a rep after this many buyer messages (0: never).
+      'handoff_after' => 0
     }.freeze
+    EMAIL_REPLIES = %w[answer draft rep].freeze
+    HANDOFF_AFTER = [0, 5, 8, 12].freeze
     MAX_FAQS = 60
 
     attr_reader :company
@@ -108,6 +120,11 @@ module Assistant
       clean['follow_up_channels'] = 'mix' if clean.key?('follow_up_channels') && !FOLLOW_UP_CHANNELS.include?(clean['follow_up_channels'])
       clean['auto_start'] = ActiveModel::Type::Boolean.new.cast(clean['auto_start']) == true if clean.key?('auto_start')
       clean['use_website_text'] = ActiveModel::Type::Boolean.new.cast(clean['use_website_text']) == true if clean.key?('use_website_text')
+      %w[handoff_on_ready handoff_on_unknown].each do |k|
+        clean[k] = ActiveModel::Type::Boolean.new.cast(clean[k]) == true if clean.key?(k)
+      end
+      clean['email_replies'] = 'answer' if clean.key?('email_replies') && !EMAIL_REPLIES.include?(clean['email_replies'])
+      clean['handoff_after'] = HANDOFF_AFTER.include?(clean['handoff_after'].to_i) ? clean['handoff_after'].to_i : 0 if clean.key?('handoff_after')
       clean['chat_sites'] = self.class.clean_sites(clean['chat_sites']) if clean.key?('chat_sites')
       clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
       Setting.set('Company', company.id, KEY, to_h.merge(clean))
@@ -143,6 +160,14 @@ module Assistant
 
     def chat_sites
       Array(to_h['chat_sites'])
+    end
+
+    def email_replies
+      EMAIL_REPLIES.include?(to_h['email_replies']) ? to_h['email_replies'] : 'answer'
+    end
+
+    def handoff_after
+      to_h['handoff_after'].to_i
     end
 
     def quinn_leads_texting?

@@ -20,6 +20,7 @@ module Api
           :enabled, :assistant_name, :tone, :handoff_mode, :handoff_user_id, :extra_facts,
           :quiet_start_hour, :quiet_end_hour, :source_ids, :link_website_id, :auto_start, :goal,
           :texts_from, :cadence, :follow_up_channels, :use_website_text,
+          :email_replies, :handoff_on_ready, :handoff_on_unknown, :handoff_after,
           source_ids: [], faqs: %i[q a], chat_sites: []
         ).to_h
         # An emptied list arrives as no key at all.

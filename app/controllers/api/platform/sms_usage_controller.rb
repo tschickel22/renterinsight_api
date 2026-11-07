@@ -20,7 +20,8 @@ class Api::Platform::SmsUsageController < ApplicationController
        COALESCE(SUM(CASE WHEN sms_usage_logs.direction = \'outbound\' THEN sms_usage_logs.message_count ELSE 0 END), 0) AS outbound_count,
        COALESCE(SUM(CASE WHEN sms_usage_logs.direction = \'inbound\'  THEN sms_usage_logs.message_count ELSE 0 END), 0) AS inbound_count,
        COALESCE(SUM(CASE WHEN sms_usage_logs.source = \'manual\'    THEN sms_usage_logs.message_count ELSE 0 END), 0) AS manual_count,
-       COALESCE(SUM(CASE WHEN sms_usage_logs.source = \'sequence\'  THEN sms_usage_logs.message_count ELSE 0 END), 0) AS sequence_count'
+       COALESCE(SUM(CASE WHEN sms_usage_logs.source = \'sequence\'  THEN sms_usage_logs.message_count ELSE 0 END), 0) AS sequence_count,
+       COALESCE(SUM(CASE WHEN sms_usage_logs.source = \'assistant\' THEN sms_usage_logs.message_count ELSE 0 END), 0) AS assistant_count'
     ).group('companies.id, companies.name, companies.sms_monthly_limit')
      .order('total_messages DESC')
 
@@ -42,6 +43,7 @@ class Api::Platform::SmsUsageController < ApplicationController
           inbound:           c.inbound_count.to_i,
           manual:            c.manual_count.to_i,
           sequence:          c.sequence_count.to_i,
+          assistant:         c.assistant_count.to_i,
           status:            pct >= 100 ? 'over_cap' : pct >= 80 ? 'approaching_cap' : 'ok'
         }
       end

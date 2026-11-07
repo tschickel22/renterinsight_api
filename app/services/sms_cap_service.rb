@@ -22,8 +22,9 @@ class SmsCapService
     end
 
     if current >= limit
-      if source == 'sequence'
-        raise CapExceededError, "SMS cap reached (#{current}/#{limit}). Automated sequence SMS blocked."
+      # Automated texts stop at the cap: sequences and Quinn AI (E96).
+      if %w[sequence assistant].include?(source)
+        raise CapExceededError, "SMS cap reached (#{current}/#{limit}). Automated #{source} SMS blocked."
       else
         # Manual sends: warn but allow
         Rails.logger.warn "[SmsCapService] Company #{company.id} over cap — manual send allowed"

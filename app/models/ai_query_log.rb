@@ -11,7 +11,12 @@ class AiQueryLog < ApplicationRecord
   # and, because callers rescue logging failures, fails silently.
   FEATURES = %w[report_ai vision_scan ai_campaign_generate ai_campaign_refine ai_audience_generate
                 ai_audience_refine bill_scan ai_template_generate ai_sequence_generate deal_desk_ai
-                ai_landing_page_generate site_content_profile guide_release_draft help_assistant].freeze
+                ai_landing_page_generate site_content_profile guide_release_draft help_assistant
+                concierge concierge_demo
+                quinn_text_reply quinn_email_reply quinn_opener quinn_follow_up quinn_chat].freeze
+  # concierge: the website chat before Quinn (its rows were refused until
+  # 2026-11-07, so it was never metered). quinn_*: Quinn AI, E96, one row per
+  # model call (Assistant::Brain#log_usage).
   STATUSES = %w[success error rate_limited no_results classified no_match disambiguation].freeze
 
   # AI features that draw from the company's single monthly AI query budget. Deal Desk AI

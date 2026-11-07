@@ -152,7 +152,7 @@ module Public
       reply = Assistant::WebChat.new(conversation, website: chat_site,
                                                    request_context: { ip: request.remote_ip, user_agent: request.user_agent,
                                                                       referrer: request.referrer }).visitor_says!(message)
-      log_usage(Struct.new(:usage).new(reply.usage&.then { |u| { input_tokens: u[:input_tokens], output_tokens: u[:output_tokens] } }))
+      # Quinn's model calls log their own usage (Assistant::Brain).
 
       last = reply.messages.last
       render json: {

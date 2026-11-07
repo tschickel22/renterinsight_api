@@ -18,35 +18,45 @@ class AssistantReplyJob < ApplicationJob
     return unless settings.enabled?
     return if conversation.unanswered_count >= Assistant::Rules::MAX_UNANSWERED
 
+    inbound = Communication.where(conversation_id: conversation.id, direction: 'inbound').order(:id).last
+    @channel = inbound&.channel == 'email' ? :email : :text
+    @inbound = inbound
+
+    # A long back and forth goes to a person, when the dealer asked for that.
+    limit = settings.handoff_after
+    if limit.positive? && Communication.where(conversation_id: conversation.id, direction: 'inbound').count >= limit
+      return hand_off(conversation, 'long_conversation', 'They have written a lot; a person should take it from here.', reply: nil)
+    end
+
     result = draft(conversation, settings)
     Assistant::Learn.apply!(conversation, result)
 
     reason = result.handoff ? result.handoff_reason : nil
     reply = Assistant::Rules.tidy(result.reply)
-    problem = Assistant::Rules.violation(reply, allowed_urls: @allowed_urls)
+    problem = check(reply)
 
     if problem && !result.handoff
       retry_result = draft(conversation, settings, feedback: problem)
       Assistant::Learn.copy_contact(conversation.conversable, retry_result.contact)
       reply = Assistant::Rules.tidy(retry_result.reply)
-      problem = Assistant::Rules.violation(reply, allowed_urls: @allowed_urls)
+      problem = check(reply)
       result = retry_result
       reason = retry_result.handoff ? retry_result.handoff_reason : nil
     end
 
     Assistant::Appointments.resend_invite(conversation.conversable) if result.resend_invite && !problem
-    inbound = Communication.where(conversation_id: conversation.id, direction: 'inbound').order(:id).last
     Assistant::Learn.record_question(conversation, result, reason, problem, communication_id: inbound&.id)
 
     if problem
-      Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)
+      hand_off(conversation, reason || 'rule_check', result.summary, reply: nil)
+    elsif @channel == :email && settings.email_replies == 'draft'
+      # The dealer approves Quinn's email replies before they go.
+      Assistant::Drafts.save!(conversation, subject: reply_subject(result), body: reply, handoff_reason: reason,
+                                            summary: result.summary)
     elsif reason
-      # The reply already tells the buyer someone will text them.
-      Assistant::Messenger.deliver!(conversation, body: reply, media_urls: photos_for(conversation, result)) if reply.present?
-      Assistant::Handoff.perform!(conversation, reason: reason, summary: result.summary,
-                                                buyer_text: reply.present? ? nil : :default)
+      hand_off(conversation, reason, result.summary, reply: reply.presence, result: result)
     else
-      Assistant::Messenger.deliver!(conversation, body: reply, media_urls: photos_for(conversation, result))
+      send_reply(conversation, reply, result)
     end
   rescue StandardError => e
     Rails.logger.error("[AssistantReplyJob] conversation #{conversation_id}: #{e.class}: #{e.message} #{e.backtrace.first(4).join(" | ")}")
@@ -63,12 +73,49 @@ class AssistantReplyJob < ApplicationJob
 
   def draft(conversation, settings, feedback: nil)
     history = conversation.history(Assistant::Brain::HISTORY)
-    brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: feedback)
+    brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, feedback: feedback,
+                                 reply_channel: @channel, purpose: @channel == :email ? 'email_reply' : 'text_reply')
     result = brain.call
-    @allowed_urls = brain.allowed_urls
+    @allowed_urls = @channel == :email ? brain.home_urls : brain.allowed_urls
     Rails.logger.info("[AssistantReplyJob] conversation #{conversation.id} model=#{result.usage[:model]} " \
                       "in=#{result.usage[:input_tokens]} out=#{result.usage[:output_tokens]} handoff=#{result.handoff}")
     result
+  end
+
+  def check(reply)
+    max = @channel == :email ? Assistant::FollowUp::EMAIL_MAX : Assistant::Rules::MAX_LENGTH
+    Assistant::Rules.violation(reply, allowed_urls: @allowed_urls, max_length: max)
+  end
+
+  def reply_subject(result)
+    subject = @inbound&.subject.to_s.strip
+    subject = result&.subject.to_s if subject.blank?
+    subject = subject.presence || 'Your home search'
+    subject.match?(/\Are:/i) ? subject : "Re: #{subject}"
+  end
+
+  def send_reply(conversation, reply, result)
+    if @channel == :email
+      Assistant::Messenger.email!(conversation, subject: reply_subject(result), body: reply)
+    else
+      Assistant::Messenger.deliver!(conversation, body: reply, media_urls: photos_for(conversation, result))
+    end
+  end
+
+  # Quinn's own reply (when it has one) says a person will follow up; by email
+  # the default line goes by email, never as a text.
+  def hand_off(conversation, reason, summary, reply:, result: nil)
+    if reply.present?
+      send_reply(conversation, reply, result)
+      Assistant::Handoff.perform!(conversation, reason: reason, summary: summary, buyer_text: nil)
+    elsif @channel == :email
+      user = Assistant::Handoff.handoff_user(conversation)
+      line = "I have asked #{user&.first_name.presence || 'our team'} to get back to you directly."
+      Assistant::Messenger.email!(conversation, subject: reply_subject(result), body: line)
+      Assistant::Handoff.perform!(conversation, reason: reason, summary: summary, buyer_text: nil)
+    else
+      Assistant::Handoff.perform!(conversation, reason: reason, summary: summary)
+    end
   end
 
   # Up to three photos of the home Quinn chose, sent with its reply.

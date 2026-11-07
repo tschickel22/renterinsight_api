@@ -195,23 +195,10 @@ module Assistant
       return false unless body
 
       subject = result.subject.to_s.squish.truncate(80).presence || "Your home search with #{@company.name}"
-      CommunicationService.send_email(
-        communicable: @lead, to: @lead.email, subject: subject, body: email_html(body), category: 'nurture',
-        user: @lead.try(:owner), conversation: conversation,
-        metadata: { sent_by: 'assistant', conversation_id: conversation.id, quinn_follow_up: number }.deep_stringify_keys
-      )
+      Assistant::Messenger.email!(conversation, subject: subject, body: body, extra_metadata: { 'quinn_follow_up' => number }, category: 'nurture')
       true
     rescue CommunicationService::OptOutError
       false
-    end
-
-    def email_html(body)
-      first = @lead.first_name.to_s.strip
-      first = '' if first.match?(Assistant::Learn::PLACEHOLDER_NAME)
-      paragraphs = body.split(/\n{2,}/).map { |p| "<p>#{ERB::Util.html_escape(p).gsub("\n", '<br>')}</p>" }.join
-      paragraphs = paragraphs.gsub(%r{https?://[^\s<]+}) { |url| %(<a href="#{url}">#{url}</a>) }
-      "<p>Hi#{" #{ERB::Util.html_escape(first)}" if first.present?},</p>#{paragraphs}" \
-        "<p>#{ERB::Util.html_escape(settings.assistant_name)}<br>#{ERB::Util.html_escape(@company.name)}</p>"
     end
   end
 end
