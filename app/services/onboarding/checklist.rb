@@ -143,9 +143,19 @@ module Onboarding
     # admins, plus anyone at the client following the list.
     def self.client_people(company, item = nil)
       assignee = item&.assignee if item&.assignee&.company_id == company.id
-      base = assignee ? [assignee] : User.where(company_id: company.id).select { |u| u.active? && u.effective_admin? && !u.platform_admin? }
+      base = assignee ? [assignee] : User.where(company_id: company.id).includes(:roles).select { |u| u.active? && !u.platform_admin? && admin_like?(u) }
       followers = User.where(id: company.onboarding_followers.select(:user_id), company_id: company.id).to_a
       (base + followers).uniq.select(&:active?)
+    end
+
+    # A client's admins. Dealers copy and rename the admin role ("Company
+    # Administrator (Copy)"), which effective_admin? does not know, so a role
+    # named like an administrator counts too.
+    def self.admin_like?(user)
+      return true if user.effective_admin?
+
+      names = [user.role.to_s] + (user.respond_to?(:roles) ? user.roles.map { |r| r.try(:name).to_s } : [])
+      names.any? { |n| n.match?(/admin/i) }
     end
 
     private
