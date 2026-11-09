@@ -75,9 +75,14 @@ module Assistant
       'books_visits' => true,
       'visit_minutes' => 60,
       # How far ahead the earliest time it offers is.
-      'booking_notice_hours' => 2
+      'booking_notice_hours' => 2,
+      # Someone texts the dealer's number without answering anything we sent:
+      # new (Quinn answers people not yet in the CRM), leads (also leads with
+      # no conversation open), off (a person answers every one).
+      'cold_texts' => 'new'
     }.freeze
     EMAIL_REPLIES = %w[answer draft rep].freeze
+    COLD_TEXTS = %w[new leads off].freeze
     HANDOFF_AFTER = [0, 5, 8, 12].freeze
     MAX_FAQS = 60
 
@@ -131,6 +136,7 @@ module Assistant
         clean[k] = ActiveModel::Type::Boolean.new.cast(clean[k]) == true if clean.key?(k)
       end
       clean['email_replies'] = 'answer' if clean.key?('email_replies') && !EMAIL_REPLIES.include?(clean['email_replies'])
+      clean['cold_texts'] = 'new' if clean.key?('cold_texts') && !COLD_TEXTS.include?(clean['cold_texts'])
       clean['handoff_after'] = HANDOFF_AFTER.include?(clean['handoff_after'].to_i) ? clean['handoff_after'].to_i : 0 if clean.key?('handoff_after')
       clean['chat_sites'] = self.class.clean_sites(clean['chat_sites']) if clean.key?('chat_sites')
       clean['assistant_name'] = clean['assistant_name'].to_s.strip.truncate(40).presence || DEFAULT_NAME if clean.key?('assistant_name')
@@ -187,6 +193,10 @@ module Assistant
 
     def handoff_after
       to_h['handoff_after'].to_i
+    end
+
+    def cold_texts
+      COLD_TEXTS.include?(to_h['cold_texts']) ? to_h['cold_texts'] : 'new'
     end
 
     def quinn_leads_texting?

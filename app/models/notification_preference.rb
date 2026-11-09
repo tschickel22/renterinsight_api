@@ -78,6 +78,7 @@ class NotificationPreference < ApplicationRecord
     assistant_draft: { in_app: true, email: true, sms: false, push: true },
     # Email off: the rep already gets the calendar invite by email.
     assistant_booking: { in_app: true, email: false, sms: false, push: true },
+    visit_check_in: { in_app: true, email: false, sms: false, push: true },
     # Platform admins: a dealer submitted, or the carriers decided (E96 phase 4).
     texting_registration: { in_app: true, email: true, sms: false, push: true },
     sms_new_lead: { in_app: true, email: true, sms: false, push: true },

@@ -106,6 +106,8 @@ class Notification < ApplicationRecord
     assistant_draft: { category: 'communications', priority: 'high', title: 'Quinn AI Reply to Approve' },
     # Quinn AI booked, moved or cancelled a visit with this rep (E96 phase 2).
     assistant_booking: { category: 'crm', priority: 'high', title: 'Quinn AI Booked a Visit' },
+    # Thirty minutes after a visit started with nothing marked (E96 phase 2).
+    visit_check_in: { category: 'crm', priority: 'normal', title: 'Did They Make the Visit?' },
     # A text from someone not in the CRM became a lead (ColdTextHandler).
     sms_new_lead: { category: 'crm', priority: 'high', title: 'New Lead by Text' },
     # A call from someone in the CRM went unanswered (PhoneCalls::Recorder, 3CX).
@@ -178,6 +180,7 @@ class Notification < ApplicationRecord
     assistant_handoff
     assistant_draft
     assistant_booking
+    visit_check_in
     texting_registration
     sms_new_lead
     missed_call

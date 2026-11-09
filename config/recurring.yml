@@ -40,6 +40,11 @@ default: &default
     class: BusyFeedSyncJob
     queue: low
     schedule: every 15 minutes
+  # Asks the rep whether a visit happened, 30 minutes after it started (E96).
+  visit_check_in:
+    class: VisitCheckInJob
+    queue: low
+    schedule: every 15 minutes
   # A home's sale ends on its end date (backlog E72).
   expire_sale_prices:
     class: ExpireSalePricesJob

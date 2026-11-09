@@ -148,8 +148,10 @@ module Assistant
     def draft(channel)
       history = conversation.history(Assistant::Brain::HISTORY)
       follow_up = { number: number, of: plan_size, channel: channel }
+      missed = Assistant::Appointments.last_missed(@lead)
+      missed = missed && ::Appointments::TimeText.for(missed, @company)
       brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: history, follow_up: follow_up,
-                                   booking: Assistant::Booking.new(conversation))
+                                   booking: Assistant::Booking.new(conversation), missed_visit: missed)
       result = brain.call
       body = Assistant::Rules.tidy(result.reply)
       max = channel == :email ? EMAIL_MAX : Assistant::Rules::MAX_LENGTH
@@ -159,7 +161,8 @@ module Assistant
       problem = Assistant::Rules.violation(body, allowed_urls: urls, max_length: max)
       if problem
         result = Assistant::Brain.new(conversation: conversation, settings: settings, history: history,
-                                      follow_up: follow_up, feedback: problem).call
+                                      follow_up: follow_up, feedback: problem, booking: Assistant::Booking.new(conversation),
+                                      missed_visit: missed).call
         body = Assistant::Rules.tidy(result.reply)
         problem = Assistant::Rules.violation(body, allowed_urls: urls, max_length: max)
       end

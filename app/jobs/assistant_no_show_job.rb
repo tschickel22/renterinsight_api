@@ -36,6 +36,9 @@ class AssistantNoShowJob < ApplicationJob
              (times.size == 2 ? "Would #{times[0]} or #{times[1]} work instead?" : 'Would you like to pick a new time?')
     end
     Assistant::Messenger.deliver!(conversation, body: body, sent_by: 'assistant', extra_metadata: { quinn_no_show: activity.id })
+    # Then Quinn's follow-ups take over from today, aimed at a new visit, for
+    # as long as the dealer's follow-up plan runs (the nurture after a no-show).
+    Assistant::FollowUp.restart!(conversation.reload)
     log(activity, 'texted')
   rescue StandardError => e
     Rails.logger.error("[AssistantNoShowJob] #{activity_class} #{activity_id}: #{e.class}: #{e.message}")

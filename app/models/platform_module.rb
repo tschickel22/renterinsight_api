@@ -70,11 +70,11 @@ class PlatformModule
     'marketing.text_us' => { name: 'Text Us Widget', category: 'Marketing', icon: 'MessageSquare', description: 'Web-to-text widget for any dealer site — visitors send a text, replies route to a rep or round-robin queue through the existing SMS pipeline' },
     # Paid add-on (backlog E96), same shape as marketing.text_us: absent from
     # every PLAN_TEMPLATE, attached per tenant with a TenantModuleOverride.
-    'marketing.lead_assistant' => { name: 'Lead Assistant', category: 'Marketing', icon: 'Bot', description: 'AI that texts new leads back within a minute, answers from your own homes and facts, learns what they want and hands the conversation to your team' },
+    'marketing.lead_assistant' => { name: 'Quinn AI: Texting and Email', category: 'Marketing', icon: 'Bot', description: 'Quinn AI texts new leads within minutes, answers texts and emails from your own homes and facts, books visits, follows up until a visit is set and hands the conversation to your team' },
     # Paid add-on, same shape as text_us and automation: absent from every
     # PLAN_TEMPLATE on purpose, so no tier grants it free and it can be sold to a
     # dealer who is on neither our website builder nor Text Us.
-    'marketing.ai_concierge' => { name: 'AI Concierge', category: 'Marketing', icon: 'MessageCircle', description: 'A chat assistant on the dealer site that answers from their own inventory and content, qualifies the visitor, and books the appointment' },
+    'marketing.ai_concierge' => { name: 'Quinn AI: Website Chat', category: 'Marketing', icon: 'MessageCircle', description: 'Quinn AI chats with visitors on your website (or your own site with one line of code), answers from your homes and content, and books the visit' },
     # Not sold separately: implied by campaigns, landing pages and the website
     # builder (see IMPLIED_MODULES). Gates VERIFYING a domain, not sending. A
     # tenant who loses the granting module keeps any domain they already

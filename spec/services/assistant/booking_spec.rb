@@ -178,6 +178,58 @@ RSpec.describe 'Quinn AI books visits', type: :request do
       AssistantNoShowJob.perform_now('LeadActivity', visit.id)
       expect(sent.last[:body]).to include('No problem at all')
       expect(conversation.reload).to have_attributes(status: 'active', assistant_enabled: true)
+      # Then Quinn's follow-ups run from today, aimed at a new visit.
+      expect(conversation.follow_up_count).to eq(0)
+      expect(conversation.next_follow_up_at).to be_within(1.minute).of(1.day.from_now)
+      expect(Assistant::Appointments.last_missed(lead)).to eq(visit)
+    end
+  end
+
+  it 'tells follow-ups about the missed visit until a new one is booked' do
+    travel_to(monday_8am) do
+      visit = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',
+                                   start_time: 1.day.ago, end_time: 1.day.ago + 1.hour, status: 'no_show',
+                                   send_calendar_invite: false, remind_customer: false)
+      seen = []
+      allow(Assistant::Brain).to receive(:new).and_wrap_original { |m, **kw| seen << kw[:missed_visit]; m.call(**kw) }
+      allow_any_instance_of(Assistant::Brain).to receive(:call).and_return(
+        Assistant::Brain::Result.new(reply: 'Still happy to find you a time. Would Tuesday at 10 AM work?', qualification: {}, contact: {},
+                                     usage: {}, handoff: false)
+      )
+      conversation.update_columns(follow_up_anchor_at: 2.days.ago, follow_up_count: 0, next_follow_up_at: 1.minute.ago)
+      Assistant::FollowUp.new(conversation).run!
+      expect(seen.compact.first).to include(Appointments::TimeText.for(visit, company).split(' at ').first)
+
+      LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',
+                           start_time: 3.days.from_now, end_time: 3.days.from_now + 1.hour, status: 'pending',
+                           send_calendar_invite: false, remind_customer: false)
+      expect(Assistant::Appointments.last_missed(lead)).to be_nil
+    end
+  end
+
+  it 'asks the rep 30 minutes after a visit started whether the buyer came, once' do
+    travel_to(monday_8am) do
+      visit = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',
+                                   start_time: 40.minutes.ago, end_time: 20.minutes.from_now, status: 'pending',
+                                   send_calendar_invite: false, remind_customer: false)
+      LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Later',
+                           start_time: 10.minutes.ago, end_time: 50.minutes.from_now, status: 'pending',
+                           send_calendar_invite: false, remind_customer: false)
+      VisitCheckInJob.perform_now
+      VisitCheckInJob.perform_now
+      notices = Notification.where(notification_type: 'visit_check_in', recipient: rep)
+      expect(notices.count).to eq(1)
+      expect(notices.first.message).to include('Did Tia May make the').and include('Quinn AI will text them new times')
+      expect(notices.first.action_url).to eq("/crm/leads/#{lead.id}?tab=activities")
+      expect(visit.reload.metadata['check_in_asked_at']).to be_present
+
+      Assistant::Settings.for(company).update!('enabled' => false)
+      other = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit 2',
+                                   start_time: 50.minutes.ago, end_time: 10.minutes.ago, status: 'pending',
+                                   send_calendar_invite: false, remind_customer: false)
+      VisitCheckInJob.perform_now
+      expect(notices.count).to eq(1) # no Quinn and not booked by Quinn: not asked
+      expect(other.reload.metadata.to_h['check_in_asked_at']).to be_nil
     end
   end
 end
