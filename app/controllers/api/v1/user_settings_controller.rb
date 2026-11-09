@@ -27,6 +27,9 @@ module Api
           last_name: extract_last_name,
           title: @user.respond_to?(:title) ? @user.title : nil,
           phone: extract_phone,
+          office_phone: @user.try(:office_phone),
+          office_phone_ext: @user.try(:office_phone_ext),
+          customer_phone: @user.try(:customer_phone) || 'mobile',
           address: extract_address,
           city: extract_city,
           state: extract_state,
@@ -44,7 +47,7 @@ module Api
       # PATCH /api/v1/user_settings/profile
       def update_profile
         profile_params = params.permit(
-          :first_name, :last_name, :title, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
+          :first_name, :last_name, :title, :phone, :office_phone, :office_phone_ext, :customer_phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
           :email_signature, :sms_signature,
           workqueue_preferences: {}, calendar_preferences: {}
         )
@@ -77,6 +80,13 @@ module Api
             updates[:last_name] = profile_params[:last_name] if profile_params[:last_name].present?
             updates[:title] = profile_params[:title] if profile_params.key?(:title)
             updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
+            if @user.respond_to?(:office_phone)
+              updates[:office_phone] = profile_params[:office_phone].to_s.strip.presence if profile_params.key?(:office_phone)
+              updates[:office_phone_ext] = profile_params[:office_phone_ext].to_s.gsub(/\D/, '').first(8).presence if profile_params.key?(:office_phone_ext)
+              if profile_params.key?(:customer_phone)
+                updates[:customer_phone] = User::CUSTOMER_PHONES.include?(profile_params[:customer_phone]) ? profile_params[:customer_phone] : 'mobile'
+              end
+            end
             updates[:email] = profile_params[:email] if profile_params[:email].present?
             updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?
             updates[:booking_url] = profile_params[:booking_url] if profile_params.key?(:booking_url)

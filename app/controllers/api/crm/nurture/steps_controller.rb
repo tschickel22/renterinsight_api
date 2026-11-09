@@ -366,7 +366,7 @@ module Api
           if owner
             data['rep_name']  = [owner.try(:first_name), owner.try(:last_name)].compact.join(' ')
             data['rep_email'] = owner.try(:email).to_s
-            data['rep_phone'] = owner.try(:phone).to_s
+            data['rep_phone'] = owner.try(:customer_facing_phone).to_s
           end
 
           vehicle = entity.try(:preferred_vehicle)

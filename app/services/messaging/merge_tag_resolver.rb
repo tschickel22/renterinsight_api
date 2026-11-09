@@ -22,7 +22,7 @@ module Messaging
         'phone'      => extract_phone(recipient),
         'rep_name'         => rep_full_name(rep),
         'rep_email'        => rep&.try(:email),
-        'rep_phone'        => rep&.try(:phone),
+        'rep_phone'        => rep&.try(:customer_facing_phone),
         'rep_booking_link' => rep&.try(:booking_url).presence || '',
         'company' => {
           'name'    => company&.name,
@@ -191,7 +191,7 @@ module Messaging
       context['lead.source']      = source&.try(:name).to_s.presence || recipient.try(:source_text).to_s
       context['lead.owner_name']  = rep_full_name(owner).to_s
       context['lead.owner_email'] = owner&.try(:email).to_s
-      context['lead.owner_phone'] = owner&.try(:phone).to_s
+      context['lead.owner_phone'] = owner&.try(:customer_facing_phone).to_s
       context['lead.created_at']  = recipient.created_at&.strftime('%Y-%m-%d').to_s
       context['lead.notes']       = recipient.try(:notes).to_s
     end

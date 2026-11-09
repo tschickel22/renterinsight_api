@@ -40,8 +40,16 @@ module ContactCard
     lines << "FN:#{escape(full)}"
     lines << "ORG:#{escape(company.name)}" if company&.name.present?
     lines << "TITLE:#{escape(user.title)}" if user.try(:title).present?
-    lines << "TEL;TYPE=CELL,VOICE:#{escape(user.phone)}" if user.phone.present?
-    lines << "TEL;TYPE=WORK,VOICE:#{escape(company.phone)}" if company&.phone.present? && company.phone != user.phone
+    # The personal cell goes on the card only when it is the number this
+    # person gives customers. The office line carries its extension after a
+    # pause (",") so a tap dials straight through.
+    office = user.try(:office_phone).presence
+    office &&= [office, user.try(:office_phone_ext).presence].compact.join(',')
+    use_office = user.try(:customer_phone) == 'office' && office
+    lines << "TEL;TYPE=CELL,VOICE:#{escape(user.phone)}" if user.phone.present? && !use_office
+    lines << "TEL;TYPE=WORK,VOICE:#{escape(office)}" if office
+    shown = [user.phone, user.try(:office_phone)].compact
+    lines << "TEL;TYPE=WORK,VOICE:#{escape(company.phone)}" if company&.phone.present? && !shown.include?(company.phone)
     lines << "EMAIL;TYPE=INTERNET,WORK:#{escape(user.email)}" if user.email.present?
     lines << 'END:VCARD'
     "#{lines.join("\r\n")}\r\n"
