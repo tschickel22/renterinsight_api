@@ -5,6 +5,10 @@ module Api
     class VehiclesController < ApplicationController
       include RbacAuthorization
 
+      # Location-less catalog rows (Champion feed, available-to-order plans)
+      # that every user in the company sees regardless of assigned locations.
+      CATALOG_PASSTHROUGH_SQL = "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))".freeze
+
       # Fields the inline editor (Cost Details, etc.) must be able to CLEAR. For these, an
       # explicit null in the request persists as NULL instead of being skipped. Everything
       # else keeps the "skip nil" behavior so partial updates (CSV import, single-field
@@ -48,7 +52,7 @@ module Api
         # reference it — without that, a location-tier user's
         # `where(location_id: assigned_ids)` AND-out the location_id IS NULL
         # rows before the location selector ever gets a chance to OR them back.
-        catalog_passthrough = "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))"
+        catalog_passthrough = CATALOG_PASSTHROUGH_SQL
 
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
         # RBAC: Location-tier users only see their assigned locations + catalog passthroughs.
@@ -1463,7 +1467,13 @@ module Api
         @vehicle = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
           location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
           if location_ids.any?
-            @company.vehicles.active.where(location_id: location_ids).find(params[:id])
+            # Same visibility as #index: assigned locations + peers, plus the
+            # location-less catalog rows every user in the company can see.
+            # Without the passthrough a catalog home shows in the list and
+            # 404s when opened.
+            @company.vehicles.active
+              .where("location_id IN (?) OR #{CATALOG_PASSTHROUGH_SQL}", location_ids)
+              .find(params[:id])
           else
             @company.vehicles.active.find(params[:id])
           end

@@ -8414,9 +8414,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.bigint "primary_user_id"
     t.boolean "platform_admin", default: false
     t.jsonb "list_filter_preferences", default: {}, null: false
-    t.string "office_phone"
-    t.string "office_phone_ext"
-    t.string "customer_phone", default: "mobile", null: false
     t.jsonb "working_hours"
     t.string "calendar_feed_token"
     t.text "busy_feed_url"
@@ -8439,6 +8436,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.index ["phone"], name: "index_users_on_phone"
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
     t.index ["primary_user_id"], name: "index_users_on_primary_user_id"
+    t.string "office_phone"
+    t.string "office_phone_ext"
+    t.string "customer_phone", default: "mobile", null: false
   end
 
   create_table "vehicle_documents", force: :cascade do |t|
