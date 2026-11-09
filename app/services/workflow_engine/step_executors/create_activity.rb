@@ -44,6 +44,12 @@ module WorkflowEngine
         if attrs[:activity_type] == 'call' && attrs[:call_direction].blank? && klass.column_names.include?('call_direction')
           attrs[:call_direction] = 'outbound'
         end
+        # The call screen dials from the activity's own phone number. A play
+        # wrote the number only into the description, so the rep opened a
+        # call task with an empty Phone Number box.
+        if attrs[:activity_type] == 'call' && klass.column_names.include?('phone_number')
+          attrs[:phone_number] = resolve_variables(config['phone_number'].to_s).presence || entity_phone
+        end
 
         attrs[:company_id] = @run.company_id if klass.column_names.include?('company_id')
         assoc_key = "#{@run.entity_type.downcase}_id"
@@ -86,6 +92,20 @@ module WorkflowEngine
           (@run.entity.respond_to?(:owner_id) ? @run.entity.owner_id : nil) ||
           @run.workflow_rule&.created_by_user_id ||
           default_user_id
+      end
+
+      # The person's number: the record's own phone, or for a deal its
+      # contact's (then its account's).
+      def entity_phone
+        e = @run.entity
+        return nil if e.nil?
+        return e.phone.presence if e.respond_to?(:phone)
+
+        %i[contact account].each do |assoc|
+          phone = e.public_send(assoc)&.phone.presence if e.respond_to?(assoc)
+          return phone if phone
+        end
+        nil
       end
 
       def default_user_id
