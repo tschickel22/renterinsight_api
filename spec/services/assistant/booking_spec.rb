@@ -185,6 +185,16 @@ RSpec.describe 'Quinn AI books visits', type: :request do
     end
   end
 
+  it 'waits out the dealer\'s quiet hours before the missed-visit text' do
+    travel_to(monday_8am.change(hour: 22)) do
+      visit = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',
+                                   start_time: 3.hours.ago, end_time: 2.hours.ago, status: 'no_show',
+                                   send_calendar_invite: false, remind_customer: false)
+      expect { AssistantNoShowJob.perform_now('LeadActivity', visit.id) }.to have_enqueued_job(AssistantNoShowJob)
+      expect(sent).to be_empty
+    end
+  end
+
   it 'tells follow-ups about the missed visit until a new one is booked' do
     travel_to(monday_8am) do
       visit = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',

@@ -20,10 +20,16 @@ class AssistantNoShowJob < ApplicationJob
     starter = Assistant::Starter.for(record)
     return log(activity, 'Quinn cannot text this lead') unless starter.takes_over?
 
+    settings = Assistant::Settings.for(record.company)
+    # Not in the dealer's quiet hours: try again in an hour.
+    if Assistant::Rules.quiet_now?(settings, record.try(:location))
+      self.class.set(wait: 1.hour).perform_later(activity_class, activity_id)
+      return log(activity, 'quiet hours, later')
+    end
+
     conversation = starter.existing || starter.open!
     # The rep marked it, so they want Quinn to win the visit back.
     Assistant::Handoff.hand_back!(conversation) unless conversation.assistant_answering?
-    settings = Assistant::Settings.for(record.company)
     booking = Assistant::Booking.new(conversation)
     missed = ::Appointments::TimeText.for(activity, record.company)
     brain = Assistant::Brain.new(conversation: conversation, settings: settings, history: conversation.history(Assistant::Brain::HISTORY),
