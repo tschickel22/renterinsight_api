@@ -195,7 +195,7 @@ module Api
         # used to fail here silently while the rows were marked sent (E87).
         undeliverable = []
         contractor_ids.each do |cid|
-          problem = ProjectNotificationService.undeliverable_reason(::Contractor.find_by(id: cid), @company)
+          problem = ProjectNotificationService.undeliverable_reason(::Vendor.find_by(id: cid), @company)
           undeliverable << problem if problem
           contractor_sent += ProjectNotificationService.dispatch_pending_assignments_for_contractor(cid)
         end
@@ -477,7 +477,7 @@ module Api
         task = phase.project_phase_tasks.find_by(id: params[:task_id])
         return render(json: { error: 'Task not found' }, status: :not_found) unless task
 
-        contractor = @company.contractors.not_deleted.find(params[:contractor_id])
+        contractor = @company.vendors.not_deleted.find(params[:contractor_id])
 
         # Check if already assigned
         existing = task.contractor_assignments.find_by(contractor_id: contractor.id)
@@ -854,8 +854,8 @@ module Api
         changes = {}
         if params.key?(:assigned_vendor_id)
           if params[:assigned_vendor_id].present?
-            vendor = @company.contractors.active.find_by(id: params[:assigned_vendor_id])
-            return render(json: { error: 'Contractor not found or not active' }, status: :unprocessable_entity) unless vendor
+            vendor = @company.vendors.active.find_by(id: params[:assigned_vendor_id])
+            return render(json: { error: 'Vendor not found or not active' }, status: :unprocessable_entity) unless vendor
             changes[:vendor] = vendor
           else
             changes[:vendor] = nil

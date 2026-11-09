@@ -36,7 +36,7 @@ module Api
             return render json: { error: 'Invalid token' }, status: :unauthorized
           end
 
-          @current_contractor = ::Contractor.find_by(id: @primary_contractor_id, is_deleted: [false, nil])
+          @current_contractor = ::Vendor.find_by(id: @primary_contractor_id, is_deleted: [false, nil])
 
           unless @current_contractor
             return render json: { error: 'Invalid token' }, status: :unauthorized
@@ -46,7 +46,7 @@ module Api
             return render json: { error: 'Account is inactive' }, status: :forbidden
           end
 
-          @all_contractors = ::Contractor.where(id: @contractor_ids, is_deleted: [false, nil], status: 'active')
+          @all_contractors = ::Vendor.where(id: @contractor_ids, is_deleted: [false, nil], status: 'active')
 
         rescue JWT::ExpiredSignature
           render json: { error: 'Token has expired' }, status: :unauthorized
@@ -108,7 +108,7 @@ module Api
       end
 
       def self.generate_contractor_token(contractor)
-        all_records = ::Contractor.where(
+        all_records = ::Vendor.where(
           email: contractor.email.downcase.strip,
           is_deleted: [false, nil],
           status: 'active'

@@ -73,7 +73,7 @@ class ProjectAssignmentService
   def inherit_for_new_task!(task)
     phase = task.project_phase
     task.update!(assigned_to_id: phase.assigned_to_id) if task.assigned_to_id.nil? && phase.assigned_to_id
-    vendor = phase.assigned_vendor_id && @company.contractors.active.find_by(id: phase.assigned_vendor_id)
+    vendor = phase.assigned_vendor_id && @company.vendors.active.find_by(id: phase.assigned_vendor_id)
     assign_contractor!(task, vendor) if vendor && task.contractor_assignments.none?
   end
 

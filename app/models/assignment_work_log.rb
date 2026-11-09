@@ -9,7 +9,7 @@ class AssignmentWorkLog < ApplicationRecord
   alias_attribute :contractor_id, :vendor_id
 
   belongs_to :contractor_assignment
-  belongs_to :contractor, foreign_key: :vendor_id, optional: true
+  belongs_to :contractor, class_name: 'Vendor', foreign_key: :vendor_id, optional: true
   belongs_to :user, optional: true
 
   validates :log_type, inclusion: { in: %w[note photo document status_change completion] }

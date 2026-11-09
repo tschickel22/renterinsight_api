@@ -133,8 +133,8 @@ class ProjectBidService
     raise Error, 'That bid is not on this request' unless bid.project_bid_request_id == request.id
     raise Error, 'Only a bid with an amount can be awarded' unless bid.status == 'submitted' && bid.amount.to_d.positive?
 
-    vendor = @company.contractors.active.find_by(id: bid.vendor_id)
-    raise Error, "#{bid.vendor.name} is no longer an active contractor" unless vendor
+    vendor = @company.vendors.active.find_by(id: bid.vendor_id)
+    raise Error, "#{bid.vendor.name} is no longer an active vendor" unless vendor
 
     project = request.project
     phase = request.project_phase
@@ -180,7 +180,7 @@ class ProjectBidService
 
     project = request.project
     phase = request.project_phase
-    previous = request.previous_vendor_id && @company.contractors.active.find_by(id: request.previous_vendor_id)
+    previous = request.previous_vendor_id && @company.vendors.active.find_by(id: request.previous_vendor_id)
     current_owner = phase ? phase.assigned_vendor_id : project.assigned_vendor_id
     service = ProjectAssignmentService.new(project, actor: @actor)
     if current_owner == bid&.vendor_id
@@ -242,7 +242,7 @@ class ProjectBidService
     ids = Array(ids).map(&:to_i).uniq.reject(&:zero?)
     return [] if ids.empty?
 
-    @company.contractors.active.where(id: ids).to_a
+    @company.vendors.active.where(id: ids).to_a
   end
 
   def invite!(request, vendor)

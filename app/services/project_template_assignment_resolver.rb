@@ -72,10 +72,10 @@ class ProjectTemplateAssignmentResolver
     task.with_indifferent_access[field] if task.respond_to?(:with_indifferent_access)
   end
 
-  # A template may only name this company's own contractors, so look up through
-  # the company: another tenant's vendor id resolves to nothing.
+  # A template may only name this company's own vendors (any type), so look up
+  # through the company: another tenant's vendor id resolves to nothing.
   def usable_vendor(id)
-    @vendors.fetch(id) { @vendors[id] = @company.contractors.active.find_by(id: id) }
+    @vendors.fetch(id) { @vendors[id] = @company.vendors.active.find_by(id: id) }
   end
 
   def usable_user(id)
@@ -108,7 +108,6 @@ class ProjectTemplateAssignmentResolver
   def reason_for(record)
     return 'not_found' if record.nil?
     return 'deleted' if record.respond_to?(:is_deleted) && record.is_deleted
-    return 'not_a_contractor' if record.is_a?(Vendor) && record.vendor_type != 'contractor'
 
     'inactive'
   end
