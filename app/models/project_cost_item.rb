@@ -19,9 +19,9 @@ class ProjectCostItem < ApplicationRecord
   belongs_to :approved_by, class_name: 'User', foreign_key: 'approved_by_id', optional: true
   belongs_to :part, optional: true
   belongs_to :inventory_transaction, optional: true
-  belongs_to :contractor, foreign_key: :vendor_id, optional: true
-  # Any vendor type (contractor, supplier, ...) — the cost picker lists them all,
-  # while :contractor only resolves vendor_type='contractor'.
+  # Same row as :vendor; kept for callers that still say contractor. Any vendor
+  # type can do project work, so it resolves through Vendor.
+  belongs_to :contractor, class_name: 'Vendor', foreign_key: :vendor_id, optional: true
   belongs_to :vendor, optional: true
   # The bill this cost is paid through (E68), e.g. a contractor's portal invoice.
   belongs_to :bill, optional: true

@@ -30,7 +30,9 @@ class ContractorAssignment < ApplicationRecord
   # Existing callers reference contractor_id; alias keeps them working.
   alias_attribute :contractor_id, :vendor_id
 
-  belongs_to :contractor, foreign_key: :vendor_id
+  # Any vendor type can be given work (a supplier or service provider too),
+  # so resolve through Vendor; Contractor would read a supplier as nil.
+  belongs_to :contractor, class_name: 'Vendor', foreign_key: :vendor_id
   belongs_to :assignable, polymorphic: true
   belongs_to :company
   belongs_to :assigned_by, class_name: 'User', optional: true

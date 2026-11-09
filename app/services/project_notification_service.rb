@@ -211,7 +211,7 @@ class ProjectNotificationService
   # processed, even if the email fails — we don't want infinite retries.
   # @return [Integer] number of assignments processed
   def self.dispatch_pending_assignments_for_contractor(contractor_id)
-    contractor = ::Contractor.find_by(id: contractor_id, is_deleted: [false, nil])
+    contractor = ::Vendor.find_by(id: contractor_id, is_deleted: [false, nil])
     unless contractor
       Rails.logger.info("[ProjectNotificationService] dispatch: contractor #{contractor_id} not found")
       return 0

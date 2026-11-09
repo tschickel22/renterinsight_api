@@ -92,7 +92,7 @@ module Api
       def assign_contractor
         return unless authorize_action!('contractors', 'create')
 
-        contractor = @company.contractors.not_deleted.find(params[:contractor_id])
+        contractor = @company.vendors.not_deleted.find(params[:contractor_id])
         assignment = @task.contractor_assignments.build(
           contractor: contractor,
           company: @company,

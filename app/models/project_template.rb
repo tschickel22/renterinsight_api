@@ -206,7 +206,7 @@ class ProjectTemplate < ApplicationRecord
     owners << [project.assigned_vendor_id, nil] if project.assigned_vendor_id
     phases.each { |ph| owners << [ph.assigned_vendor_id, ph] if ph.assigned_vendor_id }
     owners.reject { |vid, _| with_tasks.include?(vid) }.uniq(&:first).each do |vendor_id, phase|
-      vendor = project.company.contractors.active.find_by(id: vendor_id)
+      vendor = project.company.vendors.active.find_by(id: vendor_id)
       ProjectNotificationService.notify_contractor_owner_assigned(vendor, project, phase: phase) if vendor
     end
   rescue => e

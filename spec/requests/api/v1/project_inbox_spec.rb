@@ -234,7 +234,7 @@ RSpec.describe 'Project inbox and bids', type: :request do
 
     expect(Notification.find_by(recipient: rep, notification_type: 'project_assigned').message).to include(built.name)
     # A phase with no tasks: the contractor gets the owner notice, not a task batch.
-    expect(ProjectNotificationService).to have_received(:notify_contractor_owner_assigned).with(smith, built, phase: nil)
+    expect(ProjectNotificationService).to have_received(:notify_contractor_owner_assigned).with(an_object_having_attributes(id: smith.id), built, phase: nil)
   end
 
   it 'completes the open tasks with the phase when asked' do

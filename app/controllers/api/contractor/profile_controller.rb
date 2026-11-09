@@ -50,7 +50,7 @@ module Api
 
         if current_contractor.update(password: params[:password], password_login_enabled: true)
           # Sync password to all records with same email so login works across all dealers
-          other_records = ::Contractor.where(email: current_contractor.email.downcase.strip, is_deleted: [false, nil])
+          other_records = ::Vendor.where(email: current_contractor.email.downcase.strip, is_deleted: [false, nil])
             .where.not(id: current_contractor.id)
 
           if other_records.any?

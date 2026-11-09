@@ -94,7 +94,7 @@ class Api::V1::DeviceSessionsController < ApplicationController
     # owner_usable? has already established this vendor is an active
     # contractor; reload through Contractor so the token generator sees the
     # class its own login screen would have handed it.
-    contractor = ::Contractor.find_by(id: vendor.id)
+    contractor = ::Vendor.find_by(id: vendor.id)
     return nil if contractor.blank?
 
     contractor.update_columns(last_portal_login_at: Time.current, updated_at: Time.current)

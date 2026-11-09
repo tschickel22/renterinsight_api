@@ -161,7 +161,7 @@ module Api
 
         vendor_ids = vendor_ids.map(&:to_i).uniq
         user_ids = user_ids.map(&:to_i).uniq
-        bad_vendors = vendor_ids - @company.contractors.not_deleted.where(id: vendor_ids).pluck(:id)
+        bad_vendors = vendor_ids - @company.vendors.not_deleted.where(id: vendor_ids).pluck(:id)
         bad_users = user_ids - @company.users.where(id: user_ids).pluck(:id)
         return true if bad_vendors.empty? && bad_users.empty?
 

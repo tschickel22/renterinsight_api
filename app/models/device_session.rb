@@ -139,10 +139,10 @@ class DeviceSession < ApplicationRecord
     update_columns(revoked_at: Time.current, revoked_reason: reason, updated_at: Time.current)
   end
 
-  # Only contractors sign into a portal; a supplier row shares the table but has
-  # no login, so it must never be able to unlock anything.
+  # Any vendor doing project work signs into the portal, whatever its type;
+  # an inactive or deleted one must never be able to unlock anything.
   def contractor_usable?(vendor)
-    vendor.vendor_type == 'contractor' && vendor.status == 'active' && !vendor.is_deleted
+    vendor.status == 'active' && !vendor.is_deleted
   end
 
   def as_json_for_client(options = {})
