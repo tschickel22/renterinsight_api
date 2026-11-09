@@ -373,8 +373,9 @@ module Webhooks
                                        body: body, message_sid: message_sid).call
             Rails.logger.info "[TwilioWebhook] Cold text from #{from_number} -> #{cold.record.class.name} ##{cold.record.id}" \
                               "#{cold.created_lead ? ' (new lead)' : ''}"
-            Assistant::Threading.track_inbound!(company: company, record: cold.record, communication: cold.communication,
-                                                our_number: to_number, buyer_number: from_number)
+            cold_conversation = Assistant::Threading.track_inbound!(company: company, record: cold.record, communication: cold.communication,
+                                                                    our_number: to_number, buyer_number: from_number)
+            Assistant::ColdText.consider(cold_conversation, cold)
           rescue StandardError => e
             Rails.logger.error "[TwilioWebhook] Cold text handling failed for #{from_number}: #{e.class}: #{e.message}"
           end

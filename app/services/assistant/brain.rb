@@ -139,7 +139,7 @@ module Assistant
         #{stock_lines.presence || 'No homes listed.'}
 
         THIS BUYER
-        Name on file: #{[@lead.try(:first_name), @lead.try(:last_name)].compact_blank.join(' ').presence || 'unknown'}
+        Name on file: #{name_on_file}
         Email on file: #{@lead.try(:email).presence || 'none'}
         #{@web ? "Mobile on file: #{@lead.try(:phone).present? ? 'yes' : 'none'}" : ''}
         Came from: #{source_name || 'unknown'}
@@ -155,6 +155,12 @@ module Assistant
     end
 
     private
+
+    # "Text from (352) ..." is what we called them before anyone knew.
+    def name_on_file
+      name = [@lead.try(:first_name), @lead.try(:last_name)].compact_blank.join(' ')
+      name.blank? || name.match?(Assistant::Learn::PLACEHOLDER_NAME) ? 'unknown (ask for it when it fits)' : name
+    end
 
     # What Quinn works toward, from the dealer's goal setting.
     def goal_text
@@ -232,6 +238,7 @@ module Assistant
     # a check-in, a polite last one).
     def missed_visit_text
       return '' unless @missed_visit
+      return '' if @follow_up # the follow-up wording carries it
 
       "They MISSED their visit on #{@missed_visit}; they have not written. Write one short, kind text: no problem at all, " \
         'things come up, and offer two new times from OPEN TIMES. No guilt, no mention of being late. Do not hand off.'
@@ -250,7 +257,16 @@ module Assistant
       "This is FOLLOW-UP #{n} of #{of}, by #{@follow_up[:channel] == :email ? 'email' : 'text'}: they have not written back since your last " \
         "message. Write #{stage}. Do not repeat what earlier messages said, do not guilt them, and end with one easy question. " \
         'Only mention homes that fit what they said. Never mention sales, specials, discounts or new arrivals unless they asked. ' \
-        'Do not hand off.'
+        "Do not hand off.#{missed_follow_up_text}"
+    end
+
+    # After a missed visit, the follow-ups aim to win the visit back.
+    def missed_follow_up_text
+      return '' unless @missed_visit
+
+      " They missed a visit on #{@missed_visit} and have not rebooked. Keep it kind and low pressure; " \
+        "#{booking? ? 'where it fits, offer two new times from OPEN TIMES.' : 'ask whether they would like to pick a new time.'} " \
+        'Never mention being late or the missed visit more than once.'
     end
 
     # :book, :rep_now, :answer_only or :qualify.
