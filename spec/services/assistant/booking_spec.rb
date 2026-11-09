@@ -108,6 +108,11 @@ RSpec.describe 'Quinn AI books visits', type: :request do
       expect(gone.kind).to eq('cancelled')
       expect(first.reload.status).to eq('cancelled')
       expect(gone.text).to include('is cancelled')
+
+      notices = Notification.where(notification_type: 'assistant_booking', recipient: rep).order(:id)
+      expect(notices.map(&:title)).to eq(['Quinn AI Booked a Visit', 'Quinn AI Moved a Visit', 'Quinn AI Cancelled a Visit'])
+      expect(notices.first.message).to include('Tia May')
+      expect(notices.first.action_url).to eq("/inbox?c=#{conversation.id}")
     end
   end
 

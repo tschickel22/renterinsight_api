@@ -134,7 +134,31 @@ module Assistant
     def outcome(visit, kind)
       customer = ::Appointments::Customer.for(visit)
       text = ::Appointments::BookingText.body(visit, customer, visit.assigned_to || visit.user, kind)
+      notify_rep(visit, kind)
       Outcome.new(ok: true, kind: kind, activity: visit, text: text)
+    end
+
+    # The rep hears in the app (bell, pop-up, phone) as well as by the calendar
+    # invite email, so a visit booked an hour ahead is not missed.
+    def notify_rep(visit, kind)
+      user = visit.assigned_to || visit.user
+      return unless user
+
+      who = [@record.try(:first_name), @record.try(:last_name)].compact_blank.join(' ').presence || 'A buyer'
+      at = ::Appointments::TimeText.for(visit, @company)
+      name = "#{settings.assistant_name} AI"
+      title, message = case kind
+                       when 'moved' then ["#{name} Moved a Visit", "#{name} moved #{who}'s visit with you to #{at}."]
+                       when 'cancelled' then ["#{name} Cancelled a Visit", "#{who} cancelled the visit with you on #{at}."]
+                       else ["#{name} Booked a Visit", "#{name} booked a visit with #{who} for you on #{at}."]
+                       end
+      NotificationService.create(
+        recipient: user, notification_type: :assistant_booking, notifiable: @record, company_id: @company.id,
+        title: title, message: message, action_url: "/inbox?c=#{conversation.id}", action_text: 'Open the conversation',
+        location_id: @record.try(:location_id), deliver_now: true
+      )
+    rescue StandardError => e
+      Rails.logger.error("[Assistant::Booking] notify failed for conversation #{conversation.id}: #{e.class}: #{e.message}")
     end
 
     # The time went while they were deciding: offer the next ones.
