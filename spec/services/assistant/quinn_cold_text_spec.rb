@@ -67,6 +67,13 @@ RSpec.describe 'Quinn AI answers texts from new people' do
     expect(conversation.reload.assistant_enabled).to be(false)
   end
 
+  it 'names someone still called after their number by that number in notices' do
+    cold, = text_in('+13035550144', 'hello')
+    expect(Assistant::Learn.display_name(cold.record)).to eq('the buyer at (303) 555-0144')
+    cold.record.update!(first_name: 'Rae', last_name: 'Lin')
+    expect(Assistant::Learn.display_name(cold.record)).to eq('Rae Lin')
+  end
+
   it 'does nothing without Quinn by text' do
     Assistant::Settings.for(company).update!('enabled' => false)
     _, _, taken = text_in('+13035550155', 'Price on the Hawthorne?')

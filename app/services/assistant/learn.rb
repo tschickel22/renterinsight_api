@@ -15,6 +15,16 @@ module Assistant
     # Names the system gave a lead before anyone knew it ("Text from (303) ...").
     PLACEHOLDER_NAME = /\Atext from\b|\Aunknown\z|\Anew lead\z/i
 
+    # A person's name for notices to the team, or "the buyer at (303) ..."
+    # while they are still named after their number.
+    def self.display_name(record, fallback: 'A buyer')
+      name = [record.try(:first_name), record.try(:last_name)].compact_blank.join(' ')
+      return name if name.present? && !name.match?(PLACEHOLDER_NAME)
+
+      phone = record.try(:phone).to_s.gsub(/\D/, '').last(10)
+      phone.length == 10 ? "the buyer at (#{phone[0, 3]}) #{phone[3, 3]}-#{phone[6, 4]}" : fallback
+    end
+
     module_function
 
     def apply!(conversation, result)

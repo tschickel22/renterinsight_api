@@ -40,7 +40,7 @@ module Assistant
       return unless user
 
       lead = conversation.conversable
-      who = [lead.try(:first_name), lead.try(:last_name)].compact_blank.join(' ').presence || 'A buyer'
+      who = Assistant::Learn.display_name(lead).sub(/\Athe /, 'The ')
       NotificationService.create(
         recipient: user, notification_type: :assistant_draft, notifiable: lead, company_id: conversation.company_id,
         message: "#{who} replied by email. #{Assistant::Settings.for(conversation.company).assistant_name} AI wrote an answer for you to check and send.",

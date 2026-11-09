@@ -38,7 +38,7 @@ class VisitCheckInJob < ApplicationJob
     user = visit.assigned_to || visit.user
     return unless user&.active?
 
-    who = [record.try(:first_name), record.try(:last_name)].compact_blank.join(' ').presence || 'the buyer'
+    who = Assistant::Learn.display_name(record, fallback: 'the buyer')
     at = Appointments::TimeText.for(visit, company).split(' at ').last
     quinn = record.is_a?(Lead) && settings.enabled? ? " If not, mark it No show and #{settings.assistant_name} AI will text them new times." : ' If not, mark it No show.'
     path = record.is_a?(Lead) ? "/crm/leads/#{record.id}?tab=activities" : "/contacts/#{record.id}?tab=activities"
