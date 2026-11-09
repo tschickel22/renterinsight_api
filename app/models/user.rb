@@ -91,6 +91,26 @@ class User < ApplicationRecord
   def full_name
     name
   end
+
+  CUSTOMER_PHONES = %w[mobile office].freeze
+
+  # The number customers see: email signatures, merge fields like rep_phone,
+  # the "save my info" contact card and shared deal pages. `phone` is the
+  # person's mobile and stays for sign-in codes and alerts to them; with
+  # customer_phone 'office' customers get the office line and extension.
+  def customer_facing_phone
+    office = office_phone_with_ext
+    return office if customer_phone == 'office' && office.present?
+
+    phone.presence || office
+  end
+
+  # "813-555-0100 ext. 12"
+  def office_phone_with_ext
+    return nil if office_phone.blank?
+
+    office_phone_ext.present? ? "#{office_phone} ext. #{office_phone_ext}" : office_phone
+  end
   
   # Status helpers
   def inactive?

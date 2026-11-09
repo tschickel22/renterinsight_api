@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_07_020000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8342,6 +8342,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_07_020000) do
     t.index ["phone"], name: "index_users_on_phone"
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
     t.index ["primary_user_id"], name: "index_users_on_primary_user_id"
+    t.string "office_phone"
+    t.string "office_phone_ext"
+    t.string "customer_phone", default: "mobile", null: false
   end
 
   create_table "vehicle_documents", force: :cascade do |t|

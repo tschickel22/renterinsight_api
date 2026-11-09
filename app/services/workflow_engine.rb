@@ -159,7 +159,7 @@ module WorkflowEngine
 
       if entity.respond_to?(:owner) && (owner = entity.try(:owner))
         hash['owner_email'] ||= owner.try(:email)
-        hash['owner_phone'] ||= owner.try(:phone)
+        hash['owner_phone'] ||= owner.try(:customer_facing_phone)
         hash['owner_name']  ||= full_name_for(owner) || owner.try(:email)
         # The record owner's own booking link, so one rule sends each prospect
         # their rep's calendar rather than whoever wrote the rule.

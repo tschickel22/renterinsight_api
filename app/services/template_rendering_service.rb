@@ -134,7 +134,7 @@ class TemplateRenderingService
         # 🔧 FIX: Rep fields from User account settings
         'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
         'rep_email' => rep_user&.email || '',
-        'rep_phone' => rep_user&.phone || '',
+        'rep_phone' => rep_user&.try(:customer_facing_phone) || '',
         
         # 🔧 FIX: Website URL from Company Settings > Domain
         'website_url' => company&.domain || ''
@@ -164,7 +164,7 @@ class TemplateRenderingService
         # 🔧 FIX: Rep fields from User account settings
         'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
         'rep_email' => rep_user&.email || '',
-        'rep_phone' => rep_user&.phone || '',
+        'rep_phone' => rep_user&.try(:customer_facing_phone) || '',
         
         # 🔧 FIX: Website URL from Company Settings > Domain
         'website_url' => company&.domain || ''
@@ -196,7 +196,7 @@ class TemplateRenderingService
         # 🔧 FIX: Rep fields from User account settings
         'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
         'rep_email' => rep_user&.email || '',
-        'rep_phone' => rep_user&.phone || '',
+        'rep_phone' => rep_user&.try(:customer_facing_phone) || '',
         
         # 🔧 FIX: Website URL from Company Settings > Domain
         'website_url' => company&.domain || ''
@@ -222,7 +222,7 @@ class TemplateRenderingService
         'location_name' => location&.name || '',
         'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
         'rep_email' => rep_user&.email || '',
-        'rep_phone' => rep_user&.phone || '',
+        'rep_phone' => rep_user&.try(:customer_facing_phone) || '',
         'website_url' => company&.domain || ''
       }
     end

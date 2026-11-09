@@ -92,7 +92,7 @@ module DealDesk
       rep = deal.respond_to?(:primary_salesperson) ? (deal.primary_salesperson || deal.owner) : deal.owner
       rep ||= scenarios.first&.created_by
       return nil unless rep
-      { 'name' => rep.respond_to?(:name) ? rep.name : rep.email, 'email' => rep.email, 'phone' => (rep.respond_to?(:phone) ? rep.phone : nil) }
+      { 'name' => rep.respond_to?(:name) ? rep.name : rep.email, 'email' => rep.email, 'phone' => rep.try(:customer_facing_phone) }
     end
 
     # Customer-safe scenario JSON — mirrors `scenario_json` in

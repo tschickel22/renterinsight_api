@@ -133,7 +133,7 @@ module Api
             rep: current_user ? {
               name: current_user.respond_to?(:full_name) ? current_user.full_name : current_user.email,
               email: current_user.email,
-              phone: current_user.respond_to?(:phone) ? current_user.phone : nil
+              phone: current_user.try(:customer_facing_phone)
             } : nil
           }
         }
