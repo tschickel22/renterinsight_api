@@ -144,12 +144,12 @@ module Assistant
       user = visit.assigned_to || visit.user
       return unless user
 
-      who = [@record.try(:first_name), @record.try(:last_name)].compact_blank.join(' ').presence || 'A buyer'
+      who = Assistant::Learn.display_name(@record)
       at = ::Appointments::TimeText.for(visit, @company)
       name = "#{settings.assistant_name} AI"
       title, message = case kind
                        when 'moved' then ["#{name} Moved a Visit", "#{name} moved #{who}'s visit with you to #{at}."]
-                       when 'cancelled' then ["#{name} Cancelled a Visit", "#{who} cancelled the visit with you on #{at}."]
+                       when 'cancelled' then ["#{name} Cancelled a Visit", "#{who.sub(/\Athe /, 'The ')} cancelled the visit with you on #{at}."]
                        else ["#{name} Booked a Visit", "#{name} booked a visit with #{who} for you on #{at}."]
                        end
       NotificationService.create(
