@@ -26,7 +26,7 @@ class CommunicationEvent < ApplicationRecord
   
   # Validations
   validates :event_type, presence: true, inclusion: { 
-    in: %w[sent delivered opened clicked bounced failed unsubscribed spam_report]
+    in: %w[sent delivered opened scanner_open clicked bounced failed unsubscribed spam_report]
   }
   validates :occurred_at, presence: true
   
@@ -64,10 +64,12 @@ class CommunicationEvent < ApplicationRecord
     track(communication: communication, event_type: 'delivered', details: details)
   end
   
-  def self.track_open(communication, ip_address: nil, user_agent: nil)
+  # A mail scanner's look is kept as 'scanner_open' so it never counts as an
+  # open (ScannerOpen).
+  def self.track_open(communication, ip_address: nil, user_agent: nil, scanner: false)
     track(
       communication: communication,
-      event_type: 'opened',
+      event_type: scanner ? 'scanner_open' : 'opened',
       ip_address: ip_address,
       user_agent: user_agent
     )
