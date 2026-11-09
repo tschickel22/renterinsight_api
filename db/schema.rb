@@ -714,6 +714,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.index ["vendor_id"], name: "index_assignment_work_logs_on_vendor_id"
   end
 
+  create_table "assistant_questions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "conversation_id"
+    t.bigint "communication_id"
+    t.text "question", null: false
+    t.string "status", default: "answered", null: false
+    t.string "topic"
+    t.text "reply"
+    t.text "dealer_answer"
+    t.bigint "answered_by_user_id"
+    t.datetime "answered_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "created_at"], name: "idx_on_company_id_status_created_at_3a99b6356d"
+    t.index ["conversation_id"], name: "index_assistant_questions_on_conversation_id"
+  end
+
   create_table "attachment_audiences", force: :cascade do |t|
     t.bigint "active_storage_attachment_id", null: false
     t.boolean "visible_to_customer", default: false, null: false
@@ -1245,6 +1262,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.index ["mfa_enabled"], name: "index_buyer_portal_accesses_on_mfa_enabled"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
+  end
+
+  create_table "calendar_busy_blocks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "starts_at", null: false
+    t.datetime "ends_at", null: false
+    t.string "source", default: "manual", null: false
+    t.string "note"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_calendar_busy_blocks_on_company_id"
+    t.index ["user_id", "starts_at"], name: "index_calendar_busy_blocks_on_user_id_and_starts_at"
   end
 
   create_table "campaign_ai_generations", force: :cascade do |t|
@@ -2012,6 +2042,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.index ["parent_id"], name: "index_chart_of_accounts_on_parent_id"
   end
 
+  create_table "chat_messages", force: :cascade do |t|
+    t.bigint "conversation_id", null: false
+    t.bigint "company_id", null: false
+    t.string "direction", null: false
+    t.string "sent_by"
+    t.bigint "user_id"
+    t.text "body", null: false
+    t.jsonb "listings", default: [], null: false
+    t.jsonb "actions", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_chat_messages_on_company_id"
+    t.index ["conversation_id", "id"], name: "index_chat_messages_on_conversation_id_and_id"
+    t.index ["conversation_id"], name: "index_chat_messages_on_conversation_id"
+  end
+
   create_table "commission_audit_entries", force: :cascade do |t|
     t.bigint "commission_id", null: false
     t.bigint "user_id", null: false
@@ -2759,11 +2805,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "last_person_reply_at"
+    t.string "visitor_token"
+    t.bigint "website_id"
+    t.datetime "visitor_seen_at"
+    t.string "chat_page_url"
+    t.integer "follow_up_count", default: 0, null: false
+    t.datetime "follow_up_anchor_at"
+    t.datetime "next_follow_up_at"
+    t.jsonb "draft_reply"
     t.index ["assigned_user_id"], name: "index_conversations_on_assigned_user_id"
     t.index ["company_id", "status", "last_message_at"], name: "idx_on_company_id_status_last_message_at_4e838304a7"
     t.index ["company_id"], name: "index_conversations_on_company_id"
     t.index ["conversable_type", "conversable_id"], name: "index_conversations_on_conversable_type_and_conversable_id"
+    t.index ["next_follow_up_at"], name: "index_conversations_on_next_follow_up_at", where: "(next_follow_up_at IS NOT NULL)"
     t.index ["sender_number", "buyer_phone"], name: "index_conversations_open_by_numbers", unique: true, where: "((status)::text = ANY (ARRAY[('active'::character varying)::text, ('handed_off'::character varying)::text]))"
+    t.index ["visitor_token"], name: "index_conversations_on_visitor_token", unique: true, where: "(visitor_token IS NOT NULL)"
   end
 
   create_table "credit_memo_applications", force: :cascade do |t|
@@ -7177,6 +7233,38 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.index ["site_content_profile_id"], name: "index_site_profile_views_on_site_content_profile_id"
   end
 
+  create_table "sms_registrations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "status", default: "draft", null: false
+    t.string "brand_type", default: "low_volume_standard", null: false
+    t.jsonb "business", default: {}, null: false
+    t.jsonb "contact", default: {}, null: false
+    t.jsonb "consent", default: {}, null: false
+    t.string "preferred_area_code"
+    t.string "customer_profile_sid"
+    t.string "end_user_sid"
+    t.string "address_sid"
+    t.string "trust_product_sid"
+    t.string "brand_registration_sid"
+    t.string "brand_status"
+    t.string "messaging_service_sid"
+    t.string "campaign_status"
+    t.string "campaign_id"
+    t.string "phone_number"
+    t.string "phone_number_sid"
+    t.text "rejection_reason"
+    t.jsonb "events", default: [], null: false
+    t.bigint "submitted_by_user_id"
+    t.datetime "submitted_at"
+    t.datetime "sent_to_carriers_at"
+    t.datetime "approved_at"
+    t.datetime "live_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_sms_registrations_on_company_id", unique: true
+    t.index ["status"], name: "index_sms_registrations_on_status"
+  end
+
   create_table "sms_reply_tokens", force: :cascade do |t|
     t.string "token", null: false
     t.bigint "company_id", null: false
@@ -8326,6 +8414,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.bigint "primary_user_id"
     t.boolean "platform_admin", default: false
     t.jsonb "list_filter_preferences", default: {}, null: false
+    t.string "office_phone"
+    t.string "office_phone_ext"
+    t.string "customer_phone", default: "mobile", null: false
+    t.jsonb "working_hours"
+    t.string "calendar_feed_token"
+    t.text "busy_feed_url"
+    t.datetime "busy_feed_checked_at"
+    t.string "busy_feed_error"
+    t.index ["calendar_feed_token"], name: "index_users_on_calendar_feed_token", unique: true, where: "(calendar_feed_token IS NOT NULL)"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
@@ -8342,9 +8439,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.index ["phone"], name: "index_users_on_phone"
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
     t.index ["primary_user_id"], name: "index_users_on_primary_user_id"
-    t.string "office_phone"
-    t.string "office_phone_ext"
-    t.string "customer_phone", default: "mobile", null: false
   end
 
   create_table "vehicle_documents", force: :cascade do |t|
@@ -9365,6 +9459,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
   add_foreign_key "chart_of_accounts", "bank_accounts"
   add_foreign_key "chart_of_accounts", "chart_of_accounts", column: "parent_id"
   add_foreign_key "chart_of_accounts", "companies"
+  add_foreign_key "chat_messages", "conversations"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
