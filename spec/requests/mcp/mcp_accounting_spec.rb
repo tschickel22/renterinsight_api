@@ -377,6 +377,8 @@ RSpec.describe 'MCP accounting tools', :mcp, type: :request do
     end
 
     it 'says when invoices and payments are not set to post, so a zero P&L is explained' do
+      # Both now default to on for every company, so switch them off to see the notes.
+      AccountingSettings.for_company(company).update!(auto_post_invoices: false, auto_post_payments: false)
       notes = call_tool(token, 'accounting_summary').first.dig('profit_and_loss', 'notes')
       expect(notes.join).to include('auto post invoices is off', 'auto post payments is off')
 
