@@ -37,6 +37,13 @@ class ProjectTemplate < ApplicationRecord
       new_phase = phase.dup
       new_phase.project_template = new_template
       new_phase.save!
+      # The plain task rows carry the days and customer setting for older
+      # templates, and are the only tasks a template without task JSON has.
+      phase.project_template_phase_tasks.each do |task|
+        copy = task.dup
+        copy.project_template_phase = new_phase
+        copy.save!
+      end
     end
 
     new_template.reload
@@ -129,10 +136,13 @@ class ProjectTemplate < ApplicationRecord
       # Creates BOTH ProjectPhaseTask (for progress tracker display) AND ProjectTask (for rich detail)
       # Handles both seed format (title/checklist) and editor format (name/checklist_items)
       simple_task_position = phase.project_phase_tasks.count  # Start after any existing simple tasks
+      legacy_tasks = has_default_tasks ? template_phase.project_template_phase_tasks.to_a : []
       (template_phase.default_tasks || []).each_with_index do |task_data, task_idx|
         task_data = task_data.with_indifferent_access
         task_title = task_data[:title] || task_data[:name]
         next if task_title.blank?
+
+        settings = rich_task_settings(task_data, legacy_task_for(legacy_tasks, task_data, task_idx, task_title))
 
         task_user_id = assignments.user_id(:task, template_phase, task_data)
         task_vendor_id = assignments.vendor_id(:task, template_phase, task_data)
@@ -142,10 +152,10 @@ class ProjectTemplate < ApplicationRecord
           company: company,
           name: task_title,
           position: simple_task_position + task_idx,
-          is_required: true,
-          visible_to_client: task_data[:visible_to_client] || false,
-          client_actionable: task_data[:client_actionable] || false,
-          estimated_days: task_data[:estimated_days],
+          is_required: settings[:is_required],
+          visible_to_client: settings[:visible_to_client],
+          client_actionable: settings[:client_actionable],
+          estimated_days: settings[:estimated_days],
           status: 'pending',
           assigned_to_id: task_user_id
         )
@@ -187,6 +197,41 @@ class ProjectTemplate < ApplicationRecord
     announce_default_owners(project, created_by)
     project
   end
+
+  # Task JSON saved by the editor before 2026-11-10 carried no days, eye or
+  # required setting. The editor also wrote a plain task row beside the JSON
+  # with those values, so a missing key is read from that row. Seeded
+  # templates have no such row: their tasks stay required and hidden from the
+  # customer, with no days, as before.
+  def legacy_task_for(legacy_tasks, task_data, task_idx, task_title)
+    return nil if legacy_tasks.empty?
+
+    position = task_data[:position] || task_idx
+    legacy_tasks.find { |t| t.name == task_title && t.position == position.to_i } ||
+      legacy_tasks.find { |t| t.name == task_title }
+  end
+
+  def rich_task_settings(task_data, legacy)
+    flag = lambda do |key, fallback|
+      value = task_data[key]
+      if !value.nil?
+        ActiveModel::Type::Boolean.new.cast(value)
+      elsif legacy
+        legacy.public_send(key) ? true : false
+      else
+        fallback
+      end
+    end
+    days = task_data.key?(:estimated_days) ? task_data[:estimated_days] : legacy&.estimated_days
+
+    {
+      is_required: flag.call(:is_required, true),
+      visible_to_client: flag.call(:visible_to_client, false),
+      client_actionable: flag.call(:client_actionable, false),
+      estimated_days: days.presence&.to_i
+    }
+  end
+  private :legacy_task_for, :rich_task_settings
 
   # Owners copied from the template hear about it the same way as owners
   # assigned by hand (E87). A contractor with tasks gets the batched task
