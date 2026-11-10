@@ -86,6 +86,16 @@ RSpec.describe ImapSentEmailService do
         )).to be false
       end
 
+      it 'still logs it on the lead when the app sent it from a quote or brochure' do
+        quote_owner = create(:lead, company: company, email: 'other@example.com')
+        create(:communication, :sent, communicable: quote_owner, company_id: company.id, to_address: 'Buyer@example.com',
+                                      subject: 'Your quote', sent_at: sent_at)
+        Communication.where(subject: 'Your quote').update_all(communicable_type: 'Quote')
+        expect(described_class.already_logged?(
+          message_id: nil, communicable: lead, to_address: lead.email, sent_at: sent_at, subject: 'Your quote'
+        )).to be false
+      end
+
       it 'does not count an earlier synced copy as the platform send' do
         sent_from(contact, subject: 'Demo Follow Up', metadata: { 'source' => 'graph_sync' })
         expect(described_class.already_logged?(
