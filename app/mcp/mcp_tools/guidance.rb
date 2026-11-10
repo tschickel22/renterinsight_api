@@ -25,7 +25,7 @@ module McpTools
           "Dealer cost, gross, margin or commission: \"Dealer cost and gross are not shown through this connector; " \
             "your #{app} admin can allow it under Settings, Integrations, AI Apps. Commission is never shown.\" " \
             'Deals, inventory and projects leave cost out; accounting_summary, budget_variance and budget_history ' \
-            'leave out cost of goods sold and net income (costs_hidden says so); bills for homes and jobs show ' \
+            'leave out cost of goods sold and gross profit but show net income (costs_hidden says so); bills for homes and jobs show ' \
             'amounts_hidden. Journal entries and bank feed lines are the books as recorded and keep their amounts ' \
             'for people who can read them: use them for bookkeeping, never to work out what a home or a deal cost.'
         end

@@ -9,7 +9,7 @@ module McpTools
     description 'Compare a budget with the posted books for a month, a quarter, the year to date or the full ' \
                 'year: every revenue and expense account with budget, actual and the difference, plus the biggest ' \
                 'misses and wins in dollars. Leave id out to use the active budget for the current fiscal year. Unless ' \
-                'the dealer lets AI apps see dealer cost, cost of goods sold accounts and net income are left out ' \
+                'the dealer lets AI apps see dealer cost, cost of goods sold accounts are left out (net income stays) ' \
                 '(costs_hidden says so).'
     input_schema(
       properties: {
@@ -41,7 +41,7 @@ module McpTools
       payload = {
         budget: BudgetArea.summary(ctx, budget),
         period: report[:period].slice(:kind, :start_date, :end_date).merge(quarter: quarter).compact,
-        net_income: (money_hash(report[:net_income]) if ctx.book_costs_visible?),
+        net_income: money_hash(report[:net_income]),
         costs_hidden: (COSTS_HIDDEN unless ctx.book_costs_visible?),
         subtotals: groups.to_h { |g| [g[:account_type], money_hash(g[:subtotal])] },
         biggest_misses: rows.select { |r| r[:impact].negative? }.sort_by { |r| r[:impact] }.first(5),
@@ -52,7 +52,7 @@ module McpTools
       Base::Result.new(payload: payload.compact, count: 1)
     end
 
-    COSTS_HIDDEN = 'Cost of goods sold accounts and net income are left out, and the expense subtotal leaves them ' \
+    COSTS_HIDDEN = 'Cost of goods sold accounts are left out (net income is shown), and the expense subtotal leaves them ' \
                    'out, because actual cost of goods sold shows dealer cost. An admin can allow it under Settings, ' \
                    'Integrations, AI Apps, "Let AI apps see dealer cost and gross".'
 

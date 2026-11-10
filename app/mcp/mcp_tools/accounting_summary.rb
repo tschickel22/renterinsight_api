@@ -16,7 +16,7 @@ module McpTools
                 'present, empty when nothing was skipped). profit_and_loss.notes says when invoices are not set ' \
                 'to post to the books. Note: profit only reflects what has been booked, so a large ' \
                 'uncategorized bank feed means the P&L is incomplete. Unless the dealer lets AI apps see dealer cost, ' \
-                'cost of goods sold, gross profit and net income are left out (costs_hidden says so) and bill ' \
+                'cost of goods sold and gross profit are left out (costs_hidden says so; net income stays) and bill ' \
                 'amounts leave out bills for homes and jobs.'
     input_schema(
       properties: {
@@ -133,12 +133,13 @@ module McpTools
       }
       return out if ctx.book_costs_visible?
 
-      # Net income goes too: with revenue and expenses beside it, it gives
-      # cost of goods sold away by subtraction.
-      out.except(:cost_of_goods_sold, :gross_profit, :net_income).merge(costs_hidden: COSTS_HIDDEN)
+      # Net income stays (Tom, 2026-11-10: people should see what the business
+      # made), even though revenue, expenses and net income together let total
+      # cost of goods sold be worked out. The line items for cost stay out.
+      out.except(:cost_of_goods_sold, :gross_profit).merge(costs_hidden: COSTS_HIDDEN)
     end
 
-    COSTS_HIDDEN = 'Cost of goods sold, gross profit and net income are left out because they show dealer cost. ' \
+    COSTS_HIDDEN = 'Cost of goods sold and gross profit are left out because they show dealer cost; net income is shown. ' \
                    'expenses are operating expenses only. An admin can allow them under Settings, Integrations, AI ' \
                    'Apps, "Let AI apps see dealer cost and gross"; the full P&L is in the app.'
 

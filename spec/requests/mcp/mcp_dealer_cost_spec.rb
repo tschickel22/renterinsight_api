@@ -58,14 +58,15 @@ RSpec.describe 'MCP dealer cost switch and read limit', :mcp, type: :request do
       post!(ads, cash, 2_000)
     end
 
-    it 'leaves out cost of goods sold, gross profit and net income while the switch is off' do
+    it 'leaves out cost of goods sold and gross profit but keeps net income while the switch is off' do
       summary, error, text = call_tool(token, 'accounting_summary')
       expect(error).to be_falsey, text
       period = summary.dig('profit_and_loss', 'period')
       expect(period).to include('revenue' => 100_000.0, 'expenses' => 2_000.0)
-      expect(period.keys).not_to include('cost_of_goods_sold', 'gross_profit', 'net_income')
+      expect(period.keys).not_to include('cost_of_goods_sold', 'gross_profit')
+      expect(period['net_income']).to eq(20_000.0)
       expect(period['costs_hidden']).to include('Let AI apps see dealer cost and gross')
-      expect(summary.dig('profit_and_loss', 'fiscal_year_to_date').keys).not_to include('cost_of_goods_sold', 'net_income')
+      expect(summary.dig('profit_and_loss', 'fiscal_year_to_date').keys).not_to include('cost_of_goods_sold')
       expect(text).not_to include('78000')
     end
 
@@ -134,20 +135,20 @@ RSpec.describe 'MCP dealer cost switch and read limit', :mcp, type: :request do
       post!(cogs, cash, 3_900, Date.new(year - 1, 3, 10))
     end
 
-    it 'budget_variance leaves out cost of goods sold rows and net income, and works the subtotal without them' do
+    it 'budget_variance leaves out cost of goods sold rows, keeps net income, and works the subtotal without them' do
       result, error, text = call_tool(token, 'budget_variance', period: 'ytd')
       expect(error).to be_falsey, text
       expect(result['rows'].map { |r| r['account_name'] }).not_to include('Cost of Homes Sold')
-      expect(result).not_to have_key('net_income')
+      expect(result['net_income']).to be_present
       expect(result['costs_hidden']).to include('cost of goods sold')
       expect(result.dig('subtotals', 'expense', 'actual')).to eq(300.0)
       expect(text).not_to include('6500')
     end
 
-    it 'budget_history leaves out cost of goods sold and net income' do
+    it 'budget_history leaves out cost of goods sold and keeps net income' do
       result, = call_tool(token, 'budget_history')
       expect(result['groups'].map { |g| g['group'] }).to eq(%w[revenue])
-      expect(result).not_to have_key('net_income')
+      expect(result).to have_key('net_income')
       expect(result['costs_hidden']).to be_present
     end
 
