@@ -66,11 +66,11 @@ RSpec.describe 'Client onboarding checklist', type: :request do
                                                       params: { file: Rack::Test::UploadedFile.new(StringIO.new('name,role'), 'text/csv', original_filename: 'users.csv') }
     expect(body['item']['files'].map { |f| f['name'] }).to eq(['users.csv'])
     post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep)
-    expect(body['item']).to include('status' => 'done', 'done_by' => client_rep.full_name)
+    expect(body['item']).to include('status' => 'review', 'done_by' => client_rep.full_name)
     expect(body['item']['notes'].map { |n| [n['side'], n['body']] }).to eq([['client', 'Sending it today']])
 
-    expect(bells(tom).pluck(:message)).to include(a_string_including('Sending it today'), a_string_including('uploaded users.csv'), a_string_including('finished'))
-    expect(client.onboarding_events.pluck(:kind)).to include('note', 'upload', 'done')
+    expect(bells(tom).pluck(:message)).to include(a_string_including('Sending it today'), a_string_including('uploaded users.csv'), a_string_including('waiting for your review'))
+    expect(client.onboarding_events.pluck(:kind)).to include('note', 'upload', 'handed_back')
   end
 
   it 'keeps the lists apart: no other company reaches an item, and only platform admins manage' do
@@ -106,7 +106,7 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     expect { Onboarding::DailySummary.call }.to change { ActionMailer::Base.deliveries.size }.by(2)
     to_tom = ActionMailer::Base.deliveries.find { |m| m.to == [tom.email] }
     expect(to_tom.subject).to include('Client onboarding')
-    expect(to_tom.text_part.body.to_s).to include('Finished by', 'List of users and roles')
+    expect(to_tom.text_part.body.to_s).to include('Sent for your review by', 'List of users and roles')
 
     ActionMailer::Base.deliveries.clear
     expect(Onboarding::DailySummary.call(now: 3.days.from_now)).to eq(0)
@@ -139,5 +139,49 @@ RSpec.describe 'Client onboarding checklist', type: :request do
 
     post "/api/admin/onboarding/#{client.id}/intro", headers: headers_for(tom), params: { user_ids: [outsider.id] }.to_json
     expect(response).to have_http_status(:unprocessable_entity)
+  end
+
+  it 'sends what a client finished to us for review, flags client updates, and lets us accept or send back' do
+    post "/api/admin/onboarding/#{client.id}/start", headers: headers_for(tom)
+    item = client.onboarding_items.find_by!(title: 'List of users and roles')
+    item.update!(assignee: client_rep)
+
+    post "/api/v1/onboarding/items/#{item.id}/files", headers: headers_for(client_rep).except('Content-Type'),
+                                                      params: { file: Rack::Test::UploadedFile.new(StringIO.new('x'), 'text/plain', original_filename: 'wrong.txt') }
+    get '/api/admin/onboarding', headers: headers_for(tom)
+    expect(body['clients'].first).to include('needs_us' => 1)
+    get "/api/admin/onboarding/#{client.id}", headers: headers_for(tom)
+    expect(body['items'].find { |i| i['id'] == item.id }['client_update']).to include('who' => client_rep.full_name, 'what' => ['file'])
+
+    # Seen clears the flag without telling the client.
+    post "/api/admin/onboarding/#{client.id}/items/#{item.id}/seen", headers: headers_for(tom)
+    expect(body['items'].find { |i| i['id'] == item.id }['client_update']).to be_nil
+    expect(body['events'].map { |e| e['kind'] }).not_to include('seen')
+
+    # Finishing it does not close it: it waits with Tom.
+    post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep)
+    expect(item.reload).to have_attributes(status: 'review', assignee_id: tom.id)
+    get "/api/admin/onboarding/#{client.id}", headers: headers_for(tom)
+    expect(body['progress']).to include('review' => 1, 'done' => 0)
+    expect(body['items'].find { |i| i['id'] == item.id }['client_update']['what']).to eq(['finished'])
+
+    # Send back: the client has it again, with their own assignee, and hears why.
+    post "/api/admin/onboarding/#{client.id}/items/#{item.id}/reopen", headers: headers_for(tom), params: { note: 'That is the wrong file' }.to_json
+    expect(item.reload).to have_attributes(status: 'open', assignee_id: client_rep.id)
+    expect(bells(client_rep).last.message).to include('Sent back to you', 'wrong file')
+
+    # Accept: closed, and credited to the client who finished it.
+    post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep)
+    post "/api/admin/onboarding/#{client.id}/items/#{item.id}/done", headers: headers_for(tom)
+    expect(item.reload).to have_attributes(status: 'done', done_by_id: client_rep.id)
+    get '/api/admin/onboarding', headers: headers_for(tom)
+    expect(body['clients'].first).to include('needs_us' => 0)
+  end
+
+  it 'closes at once what we owe, whoever finishes it' do
+    post "/api/admin/onboarding/#{client.id}/start", headers: headers_for(tom)
+    ours = client.onboarding_items.find_by!(title: 'Create users')
+    post "/api/v1/onboarding/items/#{ours.id}/done", headers: headers_for(client_rep)
+    expect(ours.reload.status).to eq('done')
   end
 end

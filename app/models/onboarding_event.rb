@@ -3,7 +3,9 @@
 # What happened on a client's onboarding list, by whom and from which side:
 # the activity feed, the notes, and what the daily summary reports.
 class OnboardingEvent < ApplicationRecord
-  KINDS = %w[added done reopened not_needed note upload assigned].freeze
+  # handed_back: the client finished, now with us to review. seen: we looked
+  # at a client's update and nothing more is needed from us right now.
+  KINDS = %w[added done reopened not_needed note upload assigned handed_back seen].freeze
   SIDES = %w[client dealertide].freeze
 
   belongs_to :company

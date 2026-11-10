@@ -5,7 +5,9 @@
 # started; managed by platform admins. Files go to the private bucket.
 class OnboardingItem < ApplicationRecord
   OWED_BY = %w[client dealertide].freeze
-  STATUSES = %w[open done not_needed].freeze
+  # review: the client finished something they owed; it waits with us until
+  # we accept it (done) or send it back (open).
+  STATUSES = %w[open review done not_needed].freeze
 
   belongs_to :company
   belongs_to :template_item, class_name: 'OnboardingTemplateItem', optional: true, inverse_of: :onboarding_items
@@ -22,8 +24,11 @@ class OnboardingItem < ApplicationRecord
 
   scope :ordered, -> { order(:section, :position, :id) }
   scope :open, -> { where(status: 'open') }
+  scope :in_review, -> { where(status: 'review') }
 
   def open? = status == 'open'
+  def review? = status == 'review'
+  def closed? = %w[done not_needed].include?(status)
   def client_owes? = owed_by == 'client'
   def overdue? = open? && due_on.present? && due_on < Date.current
 

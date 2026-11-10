@@ -52,12 +52,33 @@ module Onboarding
       item
     end
 
+    # The client finishing something they owed does not close it: it comes to
+    # us to check (the file may be the wrong one, or we have work to do with
+    # it), assigned to one of our people. We close it (Accept) or send it back.
+    # Anything else finished by either side closes.
     def complete!(item)
-      return item unless item.open?
+      if !us? && item.client_owes?
+        return item unless item.open?
 
-      item.update!(status: 'done', done_at: Time.current, done_by: actor)
+        reviewer = our_reviewer(item)
+        item.update!(status: 'review', assignee: reviewer || item.assignee, done_at: nil, done_by: actor)
+        record!(item, 'handed_back')
+        tell_us(item, "#{company.name} finished #{item.title}. It is waiting for your review.")
+        return item
+      end
+      return item unless item.open? || (us? && item.review?)
+
+      item.update!(status: 'done', done_at: Time.current, done_by: (item.review? && item.done_by) || actor, assignee: (item.review? ? client_assignee(item) : item.assignee))
       record!(item, 'done')
       tell_us(item, "#{company.name} finished: #{item.title}") unless us?
+      item
+    end
+
+    # We looked at what the client sent and nothing more is needed from us
+    # yet: clears "Client updated" without writing back to them.
+    def seen!(item)
+      us_only!
+      record!(item, 'seen')
       item
     end
 
@@ -68,11 +89,18 @@ module Onboarding
       item
     end
 
+    # From us on an item in review, this is "Send back": the client has it again.
     def reopen!(item, note: nil)
-      item.update!(status: 'open', done_at: nil, done_by: nil)
+      was_review = item.review?
+      # Sent back to whoever at the client finished it, so they hear why.
+      back_to = was_review ? (client_person(item.done_by) || client_assignee(item)) : item.assignee
+      item.update!(status: 'open', done_at: nil, done_by: nil, assignee: back_to)
       record!(item, 'reopened', note.presence)
       if us?
-        tell_client(item, "Reopened: #{item.title}#{note.present? ? ". #{note}" : ''}") if item.client_owes?
+        if item.client_owes?
+          verb = was_review ? 'Sent back to you' : 'Reopened'
+          tell_client(item, "#{verb}: #{item.title}#{note.present? ? ". #{note}" : ''}")
+        end
       else
         tell_us(item, "#{company.name} reopened: #{item.title}")
       end
@@ -159,6 +187,21 @@ module Onboarding
     end
 
     private
+
+    # Who reviews what a client finished: whoever of ours already has it,
+    # else the first of our people following this client.
+    def our_reviewer(item)
+      return item.assignee if item.assignee&.platform_admin?
+
+      self.class.our_people(company).min_by(&:id)
+    end
+
+    # Back on the client's side, an item keeps a client assignee and drops ours.
+    def client_assignee(item) = client_person(item.assignee)
+
+    def client_person(user)
+      user if user && user.company_id == company.id && !user.platform_admin?
+    end
 
     def us_only!
       raise Invalid, 'Only DealerTide changes this' unless us?
