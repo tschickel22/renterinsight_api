@@ -8,7 +8,7 @@ module Api
     
     # RBAC Authorization - tenant_basic is accessible by any authenticated company user
     before_action :authorize_settings_read!, only: [:tenant, :platform, :quotes, :custom_fields, :show_scoped]
-    before_action :authorize_settings_update!, only: [:update, :update_quotes]
+    before_action :authorize_settings_update!, only: [:update, :update_quotes, :update_pipeline_stages]
     before_action :authorize_branding_read!, only: []  # No read-only branding endpoints here
     before_action :authorize_branding_update!, only: [:update_branding]
     before_action :authorize_custom_fields_create!, only: [:create_custom_field]
