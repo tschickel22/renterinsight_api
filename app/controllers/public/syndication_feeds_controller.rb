@@ -5,6 +5,7 @@ module Public
     skip_before_action :authenticate
     before_action :set_partner
     before_action :verify_token
+    before_action :require_active_partner
     before_action :set_cors_headers
 
     # GET /public/feeds/:id?token=xxx
@@ -34,9 +35,18 @@ module Public
     def verify_token
       provided_token = params[:token]
       
-      unless provided_token.present? && provided_token == @partner.feed_token
+      unless provided_token.present? && @partner.feed_token.present? &&
+             ActiveSupport::SecurityUtils.secure_compare(provided_token.to_s, @partner.feed_token.to_s)
         render json: { error: 'Unauthorized - Invalid token' }, status: :unauthorized
       end
+    end
+
+    # A partner switched off by a platform admin serves nothing, so the
+    # listing site stops receiving homes the moment it is disabled.
+    def require_active_partner
+      return if @partner.active?
+
+      render json: { error: 'Syndication partner not found' }, status: :not_found
     end
 
     def set_cors_headers
@@ -46,25 +56,15 @@ module Public
     end
 
     def fetch_listings
-      # PLATFORM-WIDE FEED: Pull listings from ALL companies, not just one
-      Rails.logger.info "=== SYNDICATION FEED DEBUG ==="
-      Rails.logger.info "Partner: #{@partner.name} (ID: #{@partner.id})"
-      Rails.logger.info "Format: #{@partner.format}"
-      Rails.logger.info "Listing Types Filter: #{@partner.listing_types.inspect}"
-      
-      # Get ALL published listings across ALL companies
+      # PLATFORM-WIDE FEED: partners are set up once by platform admins and the
+      # feed carries every dealer's published listings. Each dealer's own
+      # account number at the partner is resolved per listing company by the
+      # feed builders (SyndicationPartner#dealer_identifier_for).
       listings = Listing.published.includes(:vehicle, :company)
-      Rails.logger.info "After published filter (all companies): #{listings.count} listings"
-      
-      # Log all listings before filtering
-      listings.each do |listing|
-        Rails.logger.info "  - Listing #{listing.id}: company=#{listing.company.name}, offer_type=#{listing.offer_type}, vehicle_type=#{listing.vehicle.listing_type}"
-      end
 
       # Filter by partner's listing types (rv vs manufactured_home)
       if @partner.listing_types.present?
         listings = listings.joins(:vehicle).where(vehicles: { listing_type: @partner.listing_types })
-        Rails.logger.info "After listing_types filter: #{listings.count} listings"
       end
 
       # Filter by offer_type based on feed format
@@ -72,26 +72,19 @@ module Public
       when 'mits_xml'
         # MITS/Zillow: Only rental listings
         listings = listings.where(offer_type: ['rent', 'both'])
-        Rails.logger.info "After MITS rental filter: #{listings.count} listings"
       when 'json', 'xml'
-        # Check partner type to determine filtering
         if @partner.partner_type == 'rvt'
           # RVT.com: RVs only, sales only
           listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'rv' })
           listings = listings.where(offer_type: ['sale', 'both'])
-          Rails.logger.info "After RVT.com RV + sale filter: #{listings.count} listings"
         else
           # MH Village: Only manufactured homes (no RVs), only sales
           listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'manufactured_home' })
           listings = listings.where(offer_type: ['sale', 'both'])
-          Rails.logger.info "After MH Village manufactured_home + sale filter: #{listings.count} listings"
         end
       end
-      
-      Rails.logger.info "Final listing count: #{listings.count}"
-      Rails.logger.info "Companies in feed: #{listings.map { |l| l.company.name }.uniq.join(', ')}"
-      Rails.logger.info "=== END DEBUG ==="
 
+      Rails.logger.info "[SyndicationFeed] partner=#{@partner.id} format=#{@partner.format} listings=#{listings.size}"
       listings
     end
 

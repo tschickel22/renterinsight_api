@@ -15,7 +15,7 @@ module Syndication
       if company.nil?
         dealers = listings.group_by(&:company).map do |company, company_listings|
           {
-            dealer_id: partner.account_id || company.id,
+            dealer_id: partner.dealer_identifier_for(company),
             dealer_name: company.name,
             contact_email: partner.lead_email || company_email_for(company),
             listings: company_listings.map { |listing| listing_to_json(listing) }
@@ -26,7 +26,7 @@ module Syndication
       else
         # Single company feed (legacy)
         {
-          dealer_id: partner.account_id || company.id,
+          dealer_id: partner.dealer_identifier_for(company),
           dealer_name: company.name,
           contact_email: partner.lead_email || company_email,
           listings: listings.map { |listing| listing_to_json(listing) }
@@ -45,7 +45,7 @@ module Syndication
         if company.nil?
           listings.group_by(&:company).each do |company, company_listings|
             xml.Dealer do
-              xml.DealerID partner.account_id || company.id
+              xml.DealerID partner.dealer_identifier_for(company)
               xml.DealerName company.name
               xml.ContactEmail partner.lead_email || company_email_for(company)
               
@@ -56,7 +56,7 @@ module Syndication
           end
         else
           # Single company feed (legacy)
-          xml.DealerID partner.account_id || company.id
+          xml.DealerID partner.dealer_identifier_for(company)
           xml.DealerName company.name
           xml.ContactEmail partner.lead_email || company_email
           

@@ -468,6 +468,9 @@ Rails.application.routes.draw do
         get  'failure-log',        to: 'report_ai#failure_log'
       end
 
+      # Listing partners, dealer side: list platform partners, save own account number
+      resources :listing_partners, only: [:index, :update]
+
       # ==================== COMPANY SETTINGS (OPERATIONAL) ====================
       scope path: 'company_settings', controller: 'company_settings' do
         get 'operational', action: :show_operational

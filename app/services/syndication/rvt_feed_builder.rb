@@ -17,7 +17,7 @@ module Syndication
           {
             dealer_name: company.name,
             dealer_phone: company_phone_for(company),
-            dealer_id: partner.account_id || company.id,
+            dealer_id: partner.dealer_identifier_for(company),
             total_listings: company_listings.count,
             listings: company_listings.map { |listing| listing_to_json(listing) }
           }
@@ -33,7 +33,7 @@ module Syndication
           feed_generated_at: Time.current.iso8601,
           dealer_name: company.name,
           dealer_phone: company_phone,
-          dealer_id: partner.account_id || company.id,
+          dealer_id: partner.dealer_identifier_for(company),
           total_listings: listings.count,
           listings: listings.map { |listing| listing_to_json(listing) }
         }.to_json
@@ -55,7 +55,7 @@ module Syndication
             xml.Dealer do
               xml.DealerName company.name
               xml.DealerPhone company_phone_for(company)
-              xml.DealerIdentifyer partner.account_id || company.id
+              xml.DealerIdentifyer partner.dealer_identifier_for(company)
               xml.TotalListings company_listings.count
               
               xml.Listings do
@@ -69,7 +69,7 @@ module Syndication
           # Single company feed (legacy)
           xml.DealerName company.name
           xml.DealerPhone company_phone
-          xml.DealerIdentifyer partner.account_id || company.id
+          xml.DealerIdentifyer partner.dealer_identifier_for(company)
           xml.TotalListings listings.count
           
           xml.Listings do
@@ -91,7 +91,7 @@ module Syndication
       {
         # Basic Info
         dealername: listing.company.name,
-        DealerIdentifyer: partner.account_id || listing.company.id,
+        DealerIdentifyer: partner.dealer_identifier_for(listing.company),
         Phone: company_phone_for(listing.company),
         UniqueID: listing.id,
         StockNumber: vehicle.inventory_id,
@@ -149,7 +149,7 @@ module Syndication
       xml.Listing do
         # Basic Info
         xml.dealername listing.company.name
-        xml.DealerIdentifyer partner.account_id || listing.company.id
+        xml.DealerIdentifyer partner.dealer_identifier_for(listing.company)
         xml.Phone company_phone_for(listing.company)
         xml.UniqueID listing.id
         xml.StockNumber vehicle.inventory_id
