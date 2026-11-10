@@ -29,6 +29,21 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
     company.update!(meta_catalog_token: 'feed-token') if company.meta_catalog_token.blank?
   end
 
+  # A home's own page is only linked when the app has a public origin
+  # (APP_URL or FRONTEND_URL). Those came from a developer's gitignored .env,
+  # so on a machine without one every link fell back to the enquiry form and
+  # the landing specs failed. Pin the origin so the specs test the code.
+  around do |example|
+    saved = ENV.to_h.slice('APP_URL', 'FRONTEND_URL')
+    ENV.delete('APP_URL')
+    ENV['FRONTEND_URL'] = 'https://app.example.test'
+    example.run
+  ensure
+    ENV.delete('APP_URL')
+    ENV.delete('FRONTEND_URL')
+    saved.each { |k, v| ENV[k] = v }
+  end
+
   def feed_get(suffix = '.csv', params = { token: 'feed-token' })
     get "/api/v1/meta/catalog/#{company.id}/feed#{suffix}", params: params
   end
