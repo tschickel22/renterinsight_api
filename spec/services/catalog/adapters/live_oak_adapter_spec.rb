@@ -13,6 +13,11 @@ RSpec.describe Catalog::Adapters::LiveOakAdapter do
   end
   let(:adapter) { described_class.new(source) }
 
+  # The real spec sheet has a row for runner-singlewide; these fixture tests are
+  # about what the website carries, so they run without it. The spec sheet has
+  # its own describe below.
+  before { allow(described_class).to receive(:spec_for).and_return({}) }
+
   def term(name)
     { 'taxonomy' => 'project_category', 'name' => name }
   end
@@ -121,6 +126,71 @@ RSpec.describe Catalog::Adapters::LiveOakAdapter do
       stub_http(html: nil)
       home = adapter.parse(adapter.fetch('runner-singlewide'))
       expect(home.image_source_urls).to eq(["#{root}/wp-content/uploads/2020/06/featured.jpg"])
+    end
+  end
+
+  describe 'the floor plan spec sheet' do
+    let(:spec) do
+      { 'model_id' => 'L-5763I', 'bathrooms' => 2, 'square_feet' => 1130, 'dimensions' => '16 x 80',
+        'floor_plan_url' => 'https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/bolt.png',
+        'plan_pdf_url' => 'https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/bolt.pdf' }
+    end
+    let(:home) do
+      allow(described_class).to receive(:spec_for).with('runner-singlewide').and_return(spec)
+      stub_http
+      adapter.parse(adapter.fetch('runner-singlewide'))
+    end
+
+    it 'fills the specs the website leaves out' do
+      expect(home).to have_attributes(model_id: 'L-5763I', bathrooms: 2, square_feet: 1130, dimensions: '16 x 80')
+      expect(home.raw['plan_pdf_url']).to eq(spec['plan_pdf_url'])
+    end
+
+    it 'adds the plan as a floor plan image after the photos, already archived' do
+      plan = home.images.last
+      expect(plan).to include('source_url' => spec['floor_plan_url'], 'local_url' => spec['floor_plan_url'],
+                              'is_floorplan' => true, 'alt' => 'Bolt floor plan')
+      expect(home.floorplan_images.size).to eq(1)
+      expect(home.image_source_urls.first).to eq("#{root}/wp-content/uploads/2020/06/featured.jpg")
+    end
+
+    it 'keeps the floor plan out of the listing photos' do
+      attrs = Catalog::IngestionService.catalog_attrs_from(home, source: source)
+      expect(attrs[:floor_plan_images]).to eq([{ 'url' => spec['floor_plan_url'], 'alt' => 'Bolt floor plan' }])
+      expect(attrs[:images].map { |i| i['url'] }).not_to include(spec['floor_plan_url'])
+      expect(attrs).to include(bathrooms: 2, square_feet: 1130, width: 16, length: 80)
+    end
+
+    it 'passes the full smoke check once the sheet fills baths and square feet' do
+      expect(home.valid_smoke?).to be(true)
+    end
+  end
+
+  describe 'the spec sheet file' do
+    before { RSpec::Mocks.space.proxy_for(described_class).reset }
+
+    let(:homes) { JSON.parse(File.read(described_class::SPEC_SHEET))['homes'] }
+
+    it 'gives every home a model number, baths, size and a plan in the catalog bucket' do
+      expect(homes.size).to be >= 90
+      homes.each do |slug, row|
+        expect(row['model_id']).to match(/\A[A-Z]-\d{4}[A-Z]\z/), slug
+        expect([1, 1.5, 2, 2.5, 3, 3.5]).to include(row['bathrooms']), slug
+        expect(row['square_feet']).to be_between(400, 3500), slug
+        expect(row['dimensions']).to match(/\A\d{2} x \d{2}\z/), slug
+        expect(row['floor_plan_url']).to start_with('https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/'), slug
+      end
+    end
+
+    it 'changes the parsed home cache fingerprint when the sheet changes' do
+      before_fp = Catalog::ParsedHomeCache.send(:fingerprint, source)
+      allow(described_class).to receive(:data_fingerprint).and_return('edited')
+      expect(Catalog::ParsedHomeCache.send(:fingerprint, source)).not_to eq(before_fp)
+    end
+
+    it 'looks up a home by its website slug and returns nothing for one it lacks' do
+      expect(described_class.spec_for('runner-singlewide')['model_id']).to eq('L-5763I')
+      expect(described_class.spec_for('no-such-home')).to eq({})
     end
   end
 

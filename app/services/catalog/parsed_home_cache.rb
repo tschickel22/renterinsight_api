@@ -106,9 +106,23 @@ module Catalog
         value.is_a?(Hash) ? value : nil
       end
 
+      # An adapter that reads a data file of its own (Live Oak's floor plan spec
+      # sheet) reports a digest of it as data_fingerprint, so editing that file
+      # stales the cache the same way changing the config does.
       def fingerprint(source)
         config = source.config.is_a?(Hash) ? source.config : {}
-        Digest::SHA256.hexdigest([source.base_url, config.sort.to_json].join('|'))
+        parts = [source.base_url, config.sort.to_json]
+        # Appended only when present, so every other source keeps the fingerprint
+        # (and the cache) it already has.
+        data  = adapter_data_fingerprint(source)
+        parts << data if data.present?
+        Digest::SHA256.hexdigest(parts.join('|'))
+      end
+
+      def adapter_data_fingerprint(source)
+        class_name = Catalog::AdapterRegistry::ADAPTERS[source.adapter_type]
+        klass = class_name&.safe_constantize
+        klass.respond_to?(:data_fingerprint) ? klass.data_fingerprint.to_s : ''
       end
 
       def parse_time(value)

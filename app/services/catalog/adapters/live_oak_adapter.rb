@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'digest'
 
 module Catalog
   module Adapters
@@ -22,9 +23,15 @@ module Catalog
     #
     # THE SITE PUBLISHES NO BATHS, SQUARE FEET, DIMENSIONS, MODEL NUMBERS,
     # DESCRIPTIONS OR FLOOR PLANS. Measured across all 101 homes on 2026-11-02:
-    # none in page text, REST content or the media library. Mark those fields
-    # untracked on the source (ADAPTER_CONFIG_DEFAULTS does this). Never infer
-    # them here: a guessed bath count on a dealer listing is worse than a blank.
+    # none in page text, REST content or the media library. Never infer them
+    # here: a guessed bath count on a dealer listing is worse than a blank.
+    #
+    # They come instead from Live Oak's own floor plan sheets, read once into
+    # db/catalog_specs/live_oak.json (keyed by slug) with the plan images in the
+    # public catalog bucket. That covers 93 of the 101 homes as of 2026-11-10;
+    # the rest stay blank, which is why the fields remain untracked on the
+    # source (ADAPTER_CONFIG_DEFAULTS). A new home on the site gets no specs
+    # until its sheet is added to that file.
     class LiveOakAdapter < BaseAdapter
       REST_PROJECTS  = '/wp-json/wp/v2/project'
       REST_PAGE_SIZE = 100
@@ -37,6 +44,8 @@ module Catalog
       WIDTH_RE    = /\A(?:single|double|triple)wide\z/i
       # Terms that describe how a home is merchandised, not which series it is.
       NON_SERIES_TERMS = ['featured', 'porch model'].freeze
+
+      SPEC_SHEET = Rails.root.join('db/catalog_specs/live_oak.json')
 
       MATTERPORT_RE = %r{https?://(?:my\.)?matterport\.com/show/\?[^\s"'<>)]*m=[A-Za-z0-9]+[^\s"'<>)]*}i
 
@@ -63,17 +72,24 @@ module Catalog
         doc   = raw[:html].present? ? Nokogiri::HTML(raw[:html]) : nil
         entry = raw[:entry]
         terms = term_names(entry)
+        name  = extract_name(entry)
+        spec  = self.class.spec_for(raw[:key])
 
         NormalizedHome.new(
           source_key:       raw[:key],
           source_url:       raw[:url],
-          model_name:       extract_name(entry),
+          model_name:       name,
+          model_id:         spec['model_id'],
           series:           extract_series(terms),
           property_type:    terms.grep(WIDTH_RE),
           bedrooms:         extract_bedrooms(terms),
-          images:           extract_images(entry, doc),
+          bathrooms:        spec['bathrooms'],
+          square_feet:      spec['square_feet'],
+          dimensions:       spec['dimensions'],
+          images:           extract_images(entry, doc) + floor_plan_images(spec, name),
           virtual_tour_url: scan_regex(raw[:html], MATTERPORT_RE),
-          raw:              { 'porch_model' => terms.any? { |t| t.casecmp?('porch model') } }
+          raw:              { 'porch_model' => terms.any? { |t| t.casecmp?('porch model') },
+                              'plan_pdf_url' => spec['plan_pdf_url'] }.compact
         )
       end
 
@@ -94,7 +110,30 @@ module Catalog
         out
       end
 
+      # The floor plan sheet values for one slug, or {} when there is none.
+      def self.spec_for(slug)
+        spec_sheet.fetch(slug.to_s, {})
+      end
+
+      def self.spec_sheet
+        @spec_sheet ||= JSON.parse(File.read(SPEC_SHEET)).fetch('homes', {})
+      end
+
+      # Lets ParsedHomeCache treat homes parsed under an older spec sheet as stale.
+      def self.data_fingerprint
+        @data_fingerprint ||= Digest::SHA256.file(SPEC_SHEET).hexdigest
+      end
+
       private
+
+      # Already in our own bucket, so local_url is set and the image archiver
+      # leaves it alone instead of copying it a second time.
+      def floor_plan_images(spec, name)
+        url = spec['floor_plan_url']
+        return [] if url.blank?
+
+        [{ 'source_url' => url, 'local_url' => url, 'alt' => "#{name} floor plan".strip, 'is_floorplan' => true }]
+      end
 
       # slug => REST entry, across every page. One failed page raises rather
       # than returning a short list: a run reads homes it did not see as removed
