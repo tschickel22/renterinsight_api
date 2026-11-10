@@ -28,7 +28,11 @@ class Role < ApplicationRecord
   validates :key, presence: true, length: { maximum: 100 }
   validates :name, presence: true
   validates :key, uniqueness: { scope: [:company_id, :tier] }
-  validate :name_unique_within_company, if: -> { company_id.present? && (new_record? || will_save_change_to_name?) }
+  # Checked only when a person names a role on the Roles screen (the controller
+  # sets this). Seeders and bulk invite create roles by name on purpose, and a
+  # company may already hold clashing names from before the check.
+  attr_accessor :check_name_clash
+  validate :name_unique_within_company, if: -> { check_name_clash && company_id.present? && (new_record? || will_save_change_to_name?) }
 
   # Scopes
   scope :active, -> { where(active: true) }

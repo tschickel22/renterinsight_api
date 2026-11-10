@@ -194,6 +194,7 @@ module Api
         @role.is_system_role = false
         @role.active = true
         
+        @role.check_name_clash = true
         if @role.save
           if params[:permissions].present?
             apply_permissions(@role, params[:permissions])
@@ -215,6 +216,7 @@ module Api
       def update
         return unless shared_role_change_allowed!
 
+        @role.check_name_clash = true
         if @role.update(role_params)
           render json: {
             role: serialize_role(@role, include_permissions: true),
@@ -305,6 +307,7 @@ module Api
         # so letting the copy widen would quietly hand a Sales Rep every lot.
         new_role.tier = @role.tier
         
+        new_role.check_name_clash = true
         if new_role.save
           @role.role_permissions.each do |permission|
             RolePermission.create!(
