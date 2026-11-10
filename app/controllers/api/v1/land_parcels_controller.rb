@@ -310,6 +310,7 @@ module Api
           displayName: parcel.display_name,
           status: parcel.status,
           zoningType: parcel.zoning_type,
+          zoningLabel: (::LandParcel.zoning_label(parcel.zoning_type) if parcel.zoning_type.present?),
           acreage: parcel.acreage&.to_f,
           price: parcel.price&.to_f,
           pricePerAcre: parcel.price_per_acre&.to_f,
