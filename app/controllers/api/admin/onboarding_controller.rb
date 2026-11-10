@@ -7,15 +7,17 @@
 class Api::Admin::OnboardingController < ApplicationController
   before_action :require_platform_admin!
   before_action :set_client, except: %i[index template create_template update_template destroy_template]
-  before_action :set_item, only: %i[update_item destroy_item done reopen not_needed note upload download save_to_standard]
+  before_action :set_item, only: %i[update_item destroy_item done reopen not_needed note upload download save_to_standard seen]
 
   # GET /api/admin/onboarding
-  # Clients with a list, the ones waiting longest on top; plus every tenant to start one.
+  # Clients with a list, with how many items need us (in review or updated by
+  # the client since we looked); plus every tenant to start one.
   def index
     ids = OnboardingItem.distinct.pluck(:company_id)
     clients = Company.where(id: ids).order(:name).map do |c|
       last = c.onboarding_events.maximum(:created_at)
-      { id: c.id, name: c.name, progress: Onboarding::View.progress(c), last_activity_at: last&.iso8601 }
+      { id: c.id, name: c.name, progress: Onboarding::View.progress(c), needs_us: Onboarding::View.needs_us(c),
+        last_activity_at: last&.iso8601 }
     end
     render json: { clients: clients, tenants: Company.where.not(id: ids).order(:name).limit(500).pluck(:id, :name).map { |id, name| { id: id, name: name } } }
   end
@@ -58,7 +60,9 @@ class Api::Admin::OnboardingController < ApplicationController
     render json: client_json
   end
 
+  # done on an item in review is Accept; reopen on one is Send back.
   def done = answer { checklist.complete!(@item) }
+  def seen = answer { checklist.seen!(@item) }
   def reopen = answer { checklist.reopen!(@item, note: params[:note]) }
   def not_needed = answer { checklist.not_needed!(@item) }
   def note = answer { checklist.note!(@item, params[:body]) }

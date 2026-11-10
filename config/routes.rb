@@ -3440,6 +3440,7 @@ Rails.application.routes.draw do
       delete 'onboarding/:company_id/items/:id', to: 'onboarding#destroy_item'
       post   'onboarding/:company_id/items/:id/done', to: 'onboarding#done'
       post   'onboarding/:company_id/items/:id/reopen', to: 'onboarding#reopen'
+      post   'onboarding/:company_id/items/:id/seen', to: 'onboarding#seen'
       post   'onboarding/:company_id/items/:id/not_needed', to: 'onboarding#not_needed'
       post   'onboarding/:company_id/items/:id/note', to: 'onboarding#note'
       post   'onboarding/:company_id/items/:id/files', to: 'onboarding#upload'

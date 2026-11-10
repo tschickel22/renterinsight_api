@@ -13,17 +13,18 @@ module Onboarding
 
     WINDOW = 24.hours
     WORDS = { 'added' => 'Added', 'done' => 'Finished', 'reopened' => 'Reopened', 'not_needed' => 'Not needed',
-              'note' => 'Note', 'upload' => 'File', 'assigned' => 'Assigned' }.freeze
+              'note' => 'Note', 'upload' => 'File', 'assigned' => 'Assigned',
+              'handed_back' => 'Sent for your review' }.freeze
 
     # @return [Integer] emails sent
     def call(now: Time.current)
       since = now - WINDOW
       per_user = Hash.new { |h, k| h[k] = [] }
-      company_ids = (OnboardingEvent.where('created_at >= ?', since).distinct.pluck(:company_id) +
+      company_ids = (OnboardingEvent.where.not(kind: 'seen').where('created_at >= ?', since).distinct.pluck(:company_id) +
                      OnboardingItem.open.where('due_on < ?', now.to_date).distinct.pluck(:company_id)).uniq
 
       Company.where(id: company_ids).find_each do |company|
-        events = company.onboarding_events.where('created_at >= ?', since).includes(:onboarding_item, :user).order(:created_at).to_a
+        events = company.onboarding_events.where.not(kind: 'seen').where('created_at >= ?', since).includes(:onboarding_item, :user).order(:created_at).to_a
         overdue = company.onboarding_items.open.where('due_on < ?', now.to_date).order(:due_on).to_a
 
         theirs = lines(events.select { |e| e.side == 'dealertide' }) + overdue.select(&:client_owes?).map { |i| "Overdue since #{i.due_on.strftime('%b %-d')}: #{i.title}" }
