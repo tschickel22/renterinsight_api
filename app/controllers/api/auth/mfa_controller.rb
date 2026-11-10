@@ -4,6 +4,10 @@ module Api
   module Auth
     class MfaController < ApplicationController
       skip_before_action :authenticate, only: [:request_code, :verify_code]
+      include AbuseRateLimit
+      abuse_limit to: 10, within: 15.minutes, only: :request_code, name: 'mfa-request'
+      # Six-digit codes: keep guessing slow.
+      abuse_limit to: 10, within: 15.minutes, only: :verify_code, name: 'mfa-verify'
 
       # POST /api/auth/mfa/request_code
       # Request a new MFA code during login

@@ -4,6 +4,10 @@ module Api
   module Auth
     class PasswordResetController < ApplicationController
       skip_before_action :authenticate, only: [:request_reset, :verify_token, :reset_password]
+      include AbuseRateLimit
+      abuse_limit to: 10, within: 15.minutes, only: :request_reset, name: 'reset-ip'
+      abuse_limit to: 5, within: 1.hour, only: :request_reset, name: 'reset-email', by: AbuseRateLimit::BY_EMAIL
+      abuse_limit to: 20, within: 15.minutes, only: [:verify_token, :reset_password], name: 'reset-token'
 
       # POST /api/auth/request_password_reset
       def request_reset
