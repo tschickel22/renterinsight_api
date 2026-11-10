@@ -38,12 +38,22 @@ module Api
 
         templates = templates.order(:name)
 
-        render json: {
+        payload = {
           items: templates.map do |t|
             t.as_json(only: %i[id name description template_type is_default is_active phase_count default_vendor_id default_assigned_to_id location_id created_at updated_at])
               .merge('project_template_phases' => phases_json(t.project_template_phases.ordered))
           end
         }
+
+        # A deal's Create Project preselects the default template for that deal's type.
+        if params[:deal_id].present?
+          deal = @company.deals.find_by(id: params[:deal_id])
+          suggested_type = deal && ProjectTemplate.suggested_type_for(deal)
+          payload[:suggested_template_type] = suggested_type
+          payload[:suggested_template_id] = ProjectTemplate.default_for(templates.to_a, suggested_type)&.id
+        end
+
+        render json: payload
       end
 
       # GET /api/v1/project_templates/:id

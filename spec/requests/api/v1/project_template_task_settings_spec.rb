@@ -69,6 +69,36 @@ RSpec.describe 'Project template task settings', type: :request do
       .to have_attributes(estimated_days: nil, visible_to_client: false, is_required: true)
   end
 
+  describe 'default template for a deal' do
+    let!(:standard) { company.project_templates.create!(name: 'A Standard', template_type: 'standard', is_default: true, is_active: true) }
+    let!(:used) { company.project_templates.create!(name: 'B Used', template_type: 'used_home', is_default: true, is_active: true) }
+    let!(:land) { company.project_templates.create!(name: 'C Land', template_type: 'land_home', is_default: true, is_active: true) }
+
+    let(:buyer) { company.contacts.create!(first_name: 'Pat', last_name: 'Diaz', email: "p-#{SecureRandom.hex(3)}@example.com") }
+
+    def deal_of(type) = company.deals.create!(name: type, deal_type: type, contact_id: buyer.id)
+
+    def suggested_for(deal)
+      get "/api/v1/project-templates?active_only=true&deal_id=#{deal.id}", headers: headers
+      body['suggested_template_id']
+    end
+
+    it "picks the default of the deal's type, and the standard default when the deal says nothing" do
+      expect(suggested_for(deal_of('used'))).to eq(used.id)
+      expect(suggested_for(deal_of('Land in Lieu'))).to eq(land.id)
+      expect(suggested_for(deal_of('Chattel'))).to eq(standard.id)
+    end
+
+    it "does not suggest anything for another company's deal" do
+      other = Company.create!(name: 'Elsewhere')
+      theirs = other.contacts.create!(first_name: 'Not', last_name: 'Ours', email: "n-#{SecureRandom.hex(3)}@example.com")
+      deal = other.deals.create!(name: 'Theirs', deal_type: 'used', contact_id: theirs.id)
+      get "/api/v1/project-templates?deal_id=#{deal.id}", headers: headers
+      expect(body['suggested_template_type']).to be_nil
+      expect(body['suggested_template_id']).to eq(standard.id)
+    end
+  end
+
   it 'copies the plain task rows when a template is duplicated' do
     template = company.project_templates.create!(name: 'Original', template_type: 'standard')
     phase = template.project_template_phases.create!(name: 'Set', position: 0)
