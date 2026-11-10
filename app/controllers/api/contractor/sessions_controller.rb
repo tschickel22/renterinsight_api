@@ -11,9 +11,12 @@ module Api
 
       # POST /api/contractor/sessions/magic_link
       def magic_link
-        contractor = ::Contractor.find_by(email: params[:email]&.downcase&.strip, is_deleted: [false, nil])
+        # Any vendor doing project work can sign in, so several vendor rows may
+        # share an email; pick an active one deterministically.
+        contractor = ::Vendor.where(email: params[:email]&.downcase&.strip, is_deleted: [false, nil], status: 'active')
+                             .order(:created_at).first
 
-        if contractor && contractor.status == 'active'
+        if contractor
           contractor.generate_portal_token!
 
           CommunicationService.send_email(
@@ -35,7 +38,7 @@ module Api
       def login
         email = params[:email]&.downcase&.strip
 
-        contractor = ::Contractor.where(email: email, is_deleted: [false, nil], status: 'active')
+        contractor = ::Vendor.where(email: email, is_deleted: [false, nil], status: 'active')
           .where.not(password_digest: [nil, ''])
           .where(password_login_enabled: true)
           .first
@@ -43,7 +46,7 @@ module Api
         if contractor&.authenticate(params[:password])
           contractor.update!(last_portal_login_at: Time.current)
 
-          all_records = ::Contractor.where(email: email, is_deleted: [false, nil], status: 'active').order(:created_at)
+          all_records = ::Vendor.where(email: email, is_deleted: [false, nil], status: 'active').order(:created_at)
           primary = all_records.first || contractor
 
           token = Api::Contractor::BaseController.generate_contractor_token(contractor)
@@ -81,7 +84,7 @@ module Api
           contractor.consume_portal_link_token! if contractor.portal_link_token.present?
           contractor.update!(portal_access_token: nil, portal_token_expires_at: nil, last_portal_login_at: Time.current)
 
-          all_records = ::Contractor.where(email: contractor.email.downcase.strip, is_deleted: [false, nil], status: 'active').order(:created_at)
+          all_records = ::Vendor.where(email: contractor.email.downcase.strip, is_deleted: [false, nil], status: 'active').order(:created_at)
           primary = all_records.first || contractor
 
           token = Api::Contractor::BaseController.generate_contractor_token(contractor)
@@ -107,11 +110,11 @@ module Api
 
       def find_contractor_for_token(submitted)
         unless short_code?(submitted)
-          candidate = ::Contractor.find_by(portal_link_token: submitted, is_deleted: [false, nil])
+          candidate = ::Vendor.find_by(portal_link_token: submitted, is_deleted: [false, nil])
           return candidate&.portal_link_valid?(submitted) ? candidate : nil
         end
 
-        candidate = ::Contractor.find_by(portal_access_token: submitted, is_deleted: [false, nil])
+        candidate = ::Vendor.find_by(portal_access_token: submitted, is_deleted: [false, nil])
         candidate&.portal_token_valid?(submitted) ? candidate : nil
       end
 
