@@ -372,10 +372,9 @@ class ImapSentEmailService
   # Without this the sync re-logged every email the CRM had already sent,
   # because it only ever looked for records a previous sync had created.
   #
-  # The platform may have sent it from a different record with the same
-  # address (another lead, the contact, a quote or brochure), so with a
-  # subject the window also looks across the company: same address, same
-  # subject, within a minute. Matching the record only re-logged about 200
+  # The platform may have sent it from a different lead or contact with the
+  # same address, so with a subject the window also looks across the
+  # company's leads and contacts: same address, same subject, within a minute. Matching the record only re-logged about 200
   # emails on production (Heather Taylor, 2026-11-09).
   def self.already_logged?(message_id:, communicable: nil, to_address: nil, sent_at: nil, subject: nil)
     if message_id.present?
@@ -403,7 +402,10 @@ class ImapSentEmailService
     company_id = communicable.try(:company_id)
     return false if company_id.blank? || subject.blank?
 
-    Communication.where(company_id: company_id, channel: 'email', direction: 'outbound')
+    # Only a send already on a person's record. A quote, brochure or user send
+    # is filed there, so the synced copy is the only one the lead's page shows.
+    Communication.where(company_id: company_id, channel: 'email', direction: 'outbound',
+                        communicable_type: %w[Lead Contact])
                  .where('LOWER(to_address) = ?', to_address.to_s.downcase)
                  .where('LOWER(subject) = ?', subject.to_s.strip.downcase)
                  .where(sent_at: (sent_at - 60.seconds)..(sent_at + 60.seconds))
