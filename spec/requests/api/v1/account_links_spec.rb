@@ -28,6 +28,17 @@ RSpec.describe 'Api::V1 account links', type: :request do
     AccountingSettings.for_company(company).update!(default_sales_revenue_account: revenues[0])
   end
 
+  describe 'GET index' do
+    it 'lists inactive mappings too, so they show as Off' do
+      on  = company.account_links.create!(linkable: location, chart_of_account: revenues[1], link_purpose: 'revenue')
+      off = company.account_links.create!(linkable: location, chart_of_account: revenues[2], link_purpose: 'cogs', is_active: false)
+      get base, headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(json.map { |l| l['id'] }).to contain_exactly(on.id, off.id)
+      expect(json.find { |l| l['id'] == off.id }['is_active']).to be(false)
+    end
+  end
+
   describe 'POST create' do
     it 'creates a mapping on one of the company\'s locations' do
       post base, params: link_body, headers: headers, as: :json

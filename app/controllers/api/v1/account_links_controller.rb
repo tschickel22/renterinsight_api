@@ -24,7 +24,9 @@ class Api::V1::AccountLinksController < ApplicationController
   def index
     return unless authorize_action!('accounting', 'read')
 
-    links = @company.account_links.active.includes(:chart_of_account)
+    # Inactive mappings are listed too, so the settings table can show them
+    # as Off and they can be switched back on.
+    links = @company.account_links.includes(:chart_of_account)
     links = links.where(linkable_type: params[:linkable_type]) if params[:linkable_type].present?
     links = links.for_purpose(params[:purpose]) if params[:purpose].present?
 
