@@ -55,7 +55,7 @@ module SiteScanTasks
       # A credential belongs to the host that issued it, and that is the likely
       # story whenever the other environment would have accepted it: an API key
       # cannot expire, so for those it is the only story.
-      if token.to_s.start_with?('ri_')
+      if ApiKey.api_key_token?(token)
         "refused by #{target}: an API key never expires, so this one was issued by " \
           "another host or has been revoked. Try TARGET=#{counterpart(target)}"
       else
@@ -94,9 +94,9 @@ module SiteScanTasks
   end
 
   def describe(token)
-    if token.start_with?('ri_') then 'API key (does not expire)'
+    if ApiKey.api_key_token?(token) then 'API key (does not expire)'
     elsif token.start_with?('eyJ') then 'browser login (expires after 7 days)'
-    else 'unrecognised — expected ri_live_... or eyJ...'
+    else 'unrecognised: expected dt_live_... (or an older ri_live_...) or eyJ...'
     end
   end
 end
@@ -169,7 +169,7 @@ namespace :site_scan do
   #
   # Two kinds of credential work, and one of them is much better here.
   #
-  #   An API KEY (ri_live_...) from Settings, carrying websites:write. It does
+  #   An API KEY (dt_live_..., or ri_live_... if older) from Settings, carrying websites:write. It does
   #   not expire, so a workflow that runs whenever a prospect turns up keeps
   #   working. Preferred.
   #
@@ -204,15 +204,15 @@ namespace :site_scan do
 
         It comes from DealerTide, not from this machine. Either:
 
-          an API key from Settings carrying websites:write (starts ri_live_,
-          never expires — the better one for this), or
+          an API key from Settings carrying websites:write (starts dt_live_, or ri_live_ if older,
+          never expires, the better one for this), or
 
           your browser login: sign in to #{app}, DevTools,
           Application, Local Storage, copy authToken (lasts 7 days).
 
         Then either put it in this repo's .env, one line per host:
 
-            SITE_SCAN_PUSH_TOKEN_#{target.include?('staging') ? 'STAGING' : 'PRODUCTION'}=ri_live_...
+            SITE_SCAN_PUSH_TOKEN_#{target.include?('staging') ? 'STAGING' : 'PRODUCTION'}=dt_live_...
 
         or pass it for one run:
 

@@ -39,8 +39,8 @@ RSpec.describe 'Api::V1 ApiKeys bulk create', type: :request do
 
     # Each key is scoped to exactly one location and reveals a bearer token.
     body['api_keys'].each do |k|
-      expect(k['key']).to match(/\Ari_live_/)
-      expect(k['name']).to include('Facebook Lead Ads —')
+      expect(k['key']).to match(/\Adt_live_/)
+      expect(k['name']).to start_with('Facebook Lead Ads (')
       expect(Array(k.dig('permissions', 'leads'))).to include('read', 'write')
     end
 

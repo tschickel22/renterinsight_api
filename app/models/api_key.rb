@@ -25,6 +25,16 @@ class ApiKey < ApplicationRecord
   # Callbacks
   before_validation :generate_key, on: :create
 
+  # New keys start dt_live_. Keys made before the rebrand start ri_live_ and
+  # keep working: a key is found by its digest, never by its prefix. The list
+  # is only for telling an API key apart from a browser login token.
+  KEY_PREFIX = "dt_live_"
+  TOKEN_PREFIXES = %w[dt_live_ ri_live_].freeze
+
+  def self.api_key_token?(token)
+    TOKEN_PREFIXES.any? { |prefix| token.to_s.start_with?(prefix) }
+  end
+
   # Only a SHA-256 digest and a display preview are persisted. The plaintext is
   # held in memory on the instance that created it, so the create endpoint can
   # hand it back exactly once. Keys are 192 random bits, so an unsalted fast
@@ -53,22 +63,40 @@ class ApiKey < ApplicationRecord
     self.key_preview = token.present? ? self.class.preview_for(token) : nil
   end
   
-  # ==================== AUTOMATED API SCOPE GENERATION ====================
-  # Auto-generate available resources from the resources table
-  # This eliminates need to manually update when adding new modules
-  
-  # Returns array of available resources with their permissions
-  # Format: [{ resource: 'leads', name: 'Leads', actions: ['read', 'write', 'delete'] }, ...]
+  # Resources the partner API (Api::Partner::V1 and the site scan import)
+  # checks a key for, with the switches that mean something for each. The
+  # picker used to list every RBAC resource (66 of them), and most of those
+  # switches granted nothing because no partner endpoint reads them.
+  PARTNER_RESOURCES = {
+    'leads'           => %w[read write],
+    'contacts'        => %w[read write],
+    'accounts'        => %w[read write],
+    'deals'           => %w[read write],
+    'quotes'          => %w[read write],
+    'invoices'        => %w[read write],
+    'payments'        => %w[read write],
+    'loans'           => %w[read write],
+    'vehicles'        => %w[read write],
+    'service_tickets' => %w[read write],
+    'locations'       => %w[read write],
+    'users'           => %w[read],
+    'webhooks'        => %w[read write],
+    'websites'        => %w[write]
+  }.freeze
+
+  # The partner resources that are also active RBAC resources, so a key can be
+  # granted them (validate_permissions checks the resources table). Format:
+  # [{ resource: 'leads', name: 'Leads', actions: ['read', 'write'] }, ...]
   def self.available_resources
-    Resource.active.order(:position, :name).map do |resource|
+    Resource.active.where(key: PARTNER_RESOURCES.keys).order(:position, :name).map do |resource|
       {
         resource: resource.key,
         name: resource.name,
-        actions: %w[read write delete]  # Standard CRUD permissions
+        actions: PARTNER_RESOURCES.fetch(resource.key)
       }
     end
   end
-  
+
   # Returns flattened list of all valid resource:action combinations
   # Used for validation and frontend display
   def self.valid_permission_keys
@@ -129,7 +157,7 @@ class ApiKey < ApplicationRecord
   private
 
   def generate_key
-    self.key = "ri_live_#{SecureRandom.hex(24)}" if key_digest.blank?
+    self.key = "#{KEY_PREFIX}#{SecureRandom.hex(24)}" if key_digest.blank?
   end
   
   # Validate that all permission resources exist in resources table
