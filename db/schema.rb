@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_10_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_10_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2011,7 +2011,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_10_170000) do
     t.datetime "updated_at", null: false
     t.bigint "default_lead_owner_id"
     t.index ["active"], name: "index_champion_lead_feed_configs_on_active"
-    t.index ["company_id", "location_id"], name: "idx_champion_lead_configs_company_location", unique: true
+    t.index ["company_id", "location_id"], name: "idx_champion_lead_configs_company_loc"
     t.index ["company_id"], name: "index_champion_lead_feed_configs_on_company_id"
     t.index ["default_lead_owner_id"], name: "index_champion_lead_feed_configs_on_default_lead_owner_id"
     t.index ["location_id"], name: "index_champion_lead_feed_configs_on_location_id"

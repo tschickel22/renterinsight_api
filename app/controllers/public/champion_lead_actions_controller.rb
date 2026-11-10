@@ -117,19 +117,14 @@ module Public
     end
 
     # Find the right Champion feed config for this lead.
-    # Priority: location-specific → company-wide → config saved on the lead.
+    # Priority: the config that brought the lead in (a location can hold one
+    # DIGS key per Champion factory, and only that key can act on its leads),
+    # then location-specific, then company-wide.
     def find_config(lead)
-      company_id = lead.company_id
-
-      config = nil
-      if lead.location_id.present?
-        config = ChampionLeadFeedConfig.active.find_by(company_id: company_id, location_id: lead.location_id)
-      end
-      config ||= ChampionLeadFeedConfig.active.find_by(company_id: company_id, location_id: nil)
-      if config.nil? && lead.champion_config_id.present?
-        config = ChampionLeadFeedConfig.active.find_by(company_id: company_id, id: lead.champion_config_id)
-      end
-      config
+      scope = ChampionLeadFeedConfig.active.where(company_id: lead.company_id)
+      config = scope.find_by(id: lead.champion_config_id) if lead.champion_config_id.present?
+      config ||= scope.order(:id).find_by(location_id: lead.location_id) if lead.location_id.present?
+      config || scope.order(:id).find_by(location_id: nil)
     end
 
     # Public-safe lead shape — only customer-facing context, no internal IDs

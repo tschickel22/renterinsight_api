@@ -112,33 +112,14 @@ class Api::V1::ChampionLeads::ActionsController < ApplicationController
   end
 
   # Find the right config for this lead.
-  # Priority: location-specific → company-wide → by config ID stored on lead
+  # Priority: the config that brought the lead in (a location can hold one
+  # DIGS key per Champion factory, and only that key can act on its leads),
+  # then location-specific, then company-wide.
   def find_config
-    config = nil
-
-    # 1. Try location-specific config
-    if @lead.location_id.present?
-      config = ChampionLeadFeedConfig.active.find_by(
-        company_id: @company.id,
-        location_id: @lead.location_id
-      )
-    end
-
-    # 2. Try company-wide config (location_id is nil)
-    config ||= ChampionLeadFeedConfig.active.find_by(
-      company_id: @company.id,
-      location_id: nil
-    )
-
-    # 3. Try by the config ID stored on the lead itself
-    if config.nil? && @lead.champion_config_id.present?
-      config = ChampionLeadFeedConfig.active.find_by(
-        company_id: @company.id,
-        id: @lead.champion_config_id
-      )
-    end
-
-    config
+    scope = ChampionLeadFeedConfig.active.where(company_id: @company.id)
+    config = scope.find_by(id: @lead.champion_config_id) if @lead.champion_config_id.present?
+    config ||= scope.order(:id).find_by(location_id: @lead.location_id) if @lead.location_id.present?
+    config || scope.order(:id).find_by(location_id: nil)
   end
 
   # Don't demote leads that are further in the pipeline
