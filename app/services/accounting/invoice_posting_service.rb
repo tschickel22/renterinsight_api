@@ -226,7 +226,8 @@ module Accounting
           revenue_account = AccountLinkResolver.resolve(
             company: @company,
             entity: entity,
-            purpose: 'revenue'
+            purpose: 'revenue',
+            location_id: @invoice.location_id
           ) || default_revenue
 
           next unless revenue_account

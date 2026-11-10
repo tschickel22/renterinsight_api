@@ -76,7 +76,8 @@ module Accounting
       recon_dedicated = recon_cost > 0 && recon_cogs && recon_wip
       folded_recon = recon_dedicated ? BigDecimal('0') : recon_cost
 
-      revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
+      revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue',
+                                                    location_id: deal_location_id) ||
                         settings.default_sales_revenue_account
 
       if selling_price > 0
@@ -94,7 +95,8 @@ module Accounting
 
       cogs_relief = home_cost + folded_recon
       if cogs_relief > 0
-        cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs') ||
+        cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs',
+                                                   location_id: deal_location_id) ||
                        settings.default_cogs_account
         inventory_account = @company.chart_of_accounts.find_by(account_number: '1210')
 
