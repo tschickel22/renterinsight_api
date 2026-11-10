@@ -506,7 +506,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   def authorize_key_or_login!
     token = request.headers['Authorization'].to_s.split(' ').last
 
-    if token.to_s.start_with?('ri_')
+    if ApiKey.api_key_token?(token)
       authorize_with_api_key!(token)
     else
       authenticate

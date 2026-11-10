@@ -15,6 +15,17 @@ module Api
         render json: ApiKey.available_resources
       end
       
+      # GET /api/v1/api-keys/partner_info
+      # The address partners send to, for the setup instructions. Built the same
+      # way as the 3CX template's address: production sets MCP_PUBLIC_BASE_URL
+      # (the customer-facing API host), staging falls back to RAILS_API_URL.
+      def partner_info
+        return unless authorize_action!("api_keys", "read")
+
+        base = (ENV['MCP_PUBLIC_BASE_URL'].presence || ENV['RAILS_API_URL'].presence || request.base_url).chomp('/')
+        render json: { base_url: base, leads_url: "#{base}/api/partner/v1/leads" }
+      end
+
       # GET /api/v1/api-keys
       def index
         return unless authorize_action!("api_keys", "read")
@@ -65,7 +76,7 @@ module Api
 
           render json: {
             api_key: json,
-            message: "API key created. Save the key now — only a masked preview will be shown after this."
+            message: "API key created. Save the key now. Only a masked preview will be shown after this."
           }, status: :created
         else
           render json: { errors: api_key.errors.full_messages }, status: :unprocessable_entity
@@ -163,7 +174,7 @@ module Api
             end
 
             key = ApiKey.new(
-              name: "#{base_name} — #{location_map[loc_id]}",
+              name: "#{base_name} (#{location_map[loc_id]})",
               rate_limit: (params[:rate_limit] || 1000).to_i,
               permissions: normalize_permissions(params[:permissions] || {}),
               webhook_config: per_key_config,
@@ -196,7 +207,7 @@ module Api
             json[:location_name] = location_map[json[:location_id]]
             json
           end,
-          message: "Generated #{created.size} API #{created.size == 1 ? 'key' : 'keys'}. Save each key now — they will be masked after this response."
+          message: "Generated #{created.size} API #{created.size == 1 ? 'key' : 'keys'}. Save each key now. They will be masked after this response."
         }, status: :created
       end
 
