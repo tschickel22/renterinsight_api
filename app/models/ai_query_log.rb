@@ -55,20 +55,20 @@ class AiQueryLog < ApplicationRecord
   end
 
   # --- Shared monthly AI budget (same limit/usage logic report_ai enforces) ----
-  # Limit source matches ReportAiController#get_ai_report_limit: platform admins are
-  # effectively unlimited, then company Setting, then platform Setting, then a default
-  # when the AI module is subscribed, else 0 (disabled).
+  # The one place the monthly limit is decided (ReportAiController uses it too):
+  # platform admins are effectively unlimited; then a saved company limit (0 turns
+  # AI off for that company); then a platform limit; then 100 when the company has
+  # the management_ai_reports add-on, else 0 (disabled).
   def self.monthly_limit_for(company, user: nil)
     return 999 if user&.role == 'platform_admin'
 
     company_limit = Setting.get('Company', company.id, 'ai_report_queries_monthly_limit', nil) rescue nil
-    return company_limit.to_i if company_limit.present? && company_limit.to_i > 0
+    return [company_limit.to_i, 0].max if company_limit.to_s.strip.present?
 
     platform_limit = Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', nil) rescue nil
     return platform_limit.to_i if platform_limit.present? && platform_limit.to_i > 0
 
-    has_module = (company.platform_modules.to_a.include?('management_ai_reports') rescue false)
-    has_module ? 100 : 0
+    company.has_module?('management_ai_reports') ? 100 : 0
   end
 
   # Count of metered (non-rate-limited) AI rows this month across the shared features.
