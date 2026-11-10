@@ -251,7 +251,11 @@ class Public::InventoryController < ApplicationController
       pick = by_vehicle[vehicle.id]
       vehicle_list_json(vehicle).merge(
         featured_title: pick&.display_title || [vehicle.year, vehicle.make, vehicle.model].compact.join(' '),
-        featured_description: pick ? pick.display_description : vehicle.description
+        featured_description: pick ? pick.display_description : vehicle.description,
+        # Only when the dealer turned on this home's sale for the site and the
+        # sale is running today. Shown even on a site with pricing hidden: the
+        # switch on this one home is the dealer saying to show it.
+        featured_sale: (pick&.show_sale ? WebsiteFeaturedHome.sale_json(vehicle) : nil)
       )
     end
 
@@ -850,7 +854,7 @@ class Public::InventoryController < ApplicationController
   # The sale price to show, or nil: none set, or a special discount past its end date.
   def sale_price_for(vehicle)
     return nil unless vehicle.sale_price.present? && vehicle.sale_price > 0
-    return nil if vehicle.sale_expired?
+    return nil if vehicle.sale_expired? || vehicle.sale_not_started?
 
     vehicle.sale_price.to_f.round(2)
   end
@@ -1032,7 +1036,7 @@ class Public::InventoryController < ApplicationController
       special_discount_enabled: vehicle.respond_to?(:special_discount_enabled) ? (vehicle.special_discount_enabled && !vehicle.sale_expired?) : false,
       discount_type: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
       discount_value: vehicle.respond_to?(:discount_value) ? vehicle.discount_value : nil,
-      discounted_price: vehicle.respond_to?(:discounted_price) && !vehicle.sale_expired? ? vehicle.discounted_price&.to_f : nil,
+      discounted_price: vehicle.respond_to?(:discounted_price) && !vehicle.sale_expired? && !vehicle.sale_not_started? ? vehicle.discounted_price&.to_f : nil,
       inventory_packages: packages_data,
 
       # Full description
