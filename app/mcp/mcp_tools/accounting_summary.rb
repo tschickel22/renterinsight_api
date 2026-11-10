@@ -15,7 +15,9 @@ module McpTools
                 'same count list_invoices gives). Sections the user cannot see are listed under skipped (always ' \
                 'present, empty when nothing was skipped). profit_and_loss.notes says when invoices are not set ' \
                 'to post to the books. Note: profit only reflects what has been booked, so a large ' \
-                'uncategorized bank feed means the P&L is incomplete.'
+                'uncategorized bank feed means the P&L is incomplete. Unless the dealer lets AI apps see dealer cost, ' \
+                'cost of goods sold, gross profit and net income are left out (costs_hidden says so) and bill ' \
+                'amounts leave out bills for homes and jobs.'
     input_schema(
       properties: {
         start_date: { type: 'string', description: 'ISO date; default the first of this month' },
@@ -121,7 +123,7 @@ module McpTools
       cogs = reports.sum { |r| r[:total_cogs].to_d }
       expenses = reports.sum { |r| r[:total_expenses].to_d }
       net = reports.sum { |r| r[:net_income].to_d }
-      {
+      out = {
         from: from.iso8601, to: to.iso8601,
         revenue: AccountingAccess.money(revenue), cost_of_goods_sold: AccountingAccess.money(cogs),
         gross_profit: AccountingAccess.money(revenue - cogs), expenses: AccountingAccess.money(expenses),
@@ -129,7 +131,16 @@ module McpTools
         top_expenses: top_rows(reports.flat_map { |r| r[:expenses] }),
         top_revenue: top_rows(reports.flat_map { |r| r[:revenue] })
       }
+      return out if ctx.book_costs_visible?
+
+      # Net income goes too: with revenue and expenses beside it, it gives
+      # cost of goods sold away by subtraction.
+      out.except(:cost_of_goods_sold, :gross_profit, :net_income).merge(costs_hidden: COSTS_HIDDEN)
     end
+
+    COSTS_HIDDEN = 'Cost of goods sold, gross profit and net income are left out because they show dealer cost. ' \
+                   'expenses are operating expenses only. An admin can allow them under Settings, Integrations, AI ' \
+                   'Apps, "Let AI apps see dealer cost and gross"; the full P&L is in the app.'
 
     def self.top_rows(rows)
       rows.group_by { |r| [r[:account_number], r[:account_name]] }
@@ -192,12 +203,20 @@ module McpTools
 
     def self.bills(ctx)
       open = AccountingAccess.bills(ctx).where(status: AccountingAccess::OPEN_BILL_STATUSES)
+      # Amounts add up only the bills whose amount may be shown; counts cover all.
+      shown, hidden = AccountingAccess.split_cost_bills(ctx, open)
+      hidden_count = hidden.count
       overdue = open.where('bills.due_date < ?', Date.current)
-      { unpaid: open.count, balance_due: AccountingAccess.money(open.sum(:balance_due)),
-        overdue: overdue.count, overdue_balance: AccountingAccess.money(overdue.sum(:balance_due)),
-        due_next_7_days: AccountingAccess.money(open.where(due_date: Date.current..(Date.current + 7)).sum(:balance_due)),
+      { unpaid: open.count, balance_due: AccountingAccess.money(shown.sum(:balance_due)),
+        overdue: overdue.count, overdue_balance: AccountingAccess.money(shown.where('bills.due_date < ?', Date.current).sum(:balance_due)),
+        due_next_7_days: AccountingAccess.money(shown.where(due_date: Date.current..(Date.current + 7)).sum(:balance_due)),
         drafts_not_entered: AccountingAccess.bills(ctx).where(status: 'draft').count,
-        url: ctx.app_url('/accounting/bills') }
+        amounts_hidden: (hidden_count if hidden_count.positive?),
+        note: (if hidden_count.positive?
+                 "The amounts leave out #{hidden_count} unpaid bill#{'s' unless hidden_count == 1}. " \
+                   "#{AccountingAccess::COST_HIDDEN_NOTE}"
+               end),
+        url: ctx.app_url('/accounting/bills') }.compact
     end
   end
 end

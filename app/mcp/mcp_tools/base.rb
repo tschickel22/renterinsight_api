@@ -63,7 +63,11 @@ module McpTools
 
         begin
           ctx.require_scope!(required_scope)
-          ctx.check_change_limit! if write_tool?
+          if write_tool?
+            ctx.check_change_limit!
+          else
+            ctx.check_read_budget!
+          end
           result = with_current(ctx) { perform(ctx, **args) }
           result = Result.new(payload: result, count: 0) unless result.is_a?(Result)
           status = 'ok'

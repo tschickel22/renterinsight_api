@@ -8,7 +8,8 @@ module McpTools
     title 'Actual revenue and expenses by month'
     description "A fiscal year's actual revenue and expenses from the posted books, by account and month (fiscal " \
                 'order, month_labels names them), with how many months have entries. Use it to build or check a ' \
-                'budget. Company-wide figures. Most dealers have little or no history yet; coverage says so.'
+                'budget. Company-wide figures. Most dealers have little or no history yet; coverage says so. Unless the ' \
+                'dealer lets AI apps see dealer cost, cost of goods sold and net income are left out (costs_hidden).'
     input_schema(
       properties: { fiscal_year: { type: 'integer', description: 'Default: last fiscal year' } }
     )
@@ -27,14 +28,25 @@ module McpTools
       rows = accounts.map { |a| [a, (1..12).map { |m| actuals[a.id][m] }] }
                      .reject { |_, months| months.all?(&:zero?) }
       groups, net = BudgetArea.pl_groups(rows)
+      unless ctx.book_costs_visible?
+        # Actual cost of goods sold is dealer cost, and net income beside
+        # revenue and expenses would give it back by subtraction.
+        groups = groups.reject { |g| g[:group] == 'cost_of_goods_sold' }
+        net = nil
+      end
 
       payload = {
         fiscal_year: year, month_labels: BudgetArea.month_labels(company, year),
         coverage: coverage.slice(:months_with_data, :coverage_count, :first_data_month, :last_data_month, :is_partial, :is_empty),
         has_pl_history: rows.any?,
         note: coverage_note(coverage, rows.any?),
-        groups: groups, net_income: net
-      }
+        groups: groups, net_income: net,
+        costs_hidden: (unless ctx.book_costs_visible?
+                         'Cost of goods sold and net income are left out because they show dealer cost. An admin ' \
+                           'can allow them under Settings, Integrations, AI Apps, "Let AI apps see dealer cost and ' \
+                           'gross". When building a budget, ask the owner for cost of goods sold.'
+                       end)
+      }.compact
       Base::Result.new(payload: payload, count: rows.size)
     end
 
