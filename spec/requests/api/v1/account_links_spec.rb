@@ -28,6 +28,51 @@ RSpec.describe 'Api::V1 account links', type: :request do
     AccountingSettings.for_company(company).update!(default_sales_revenue_account: revenues[0])
   end
 
+  describe 'POST create' do
+    it 'creates a mapping on one of the company\'s locations' do
+      post base, params: link_body, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'refuses another company\'s location' do
+      post base, params: link_body(linkable_id: other_location.id), headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(company.account_links.count).to eq(0)
+    end
+
+    it 'refuses another company\'s GL account' do
+      post base, params: link_body(chart_of_account_id: other_revenue.id), headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+    end
+
+    it 'refuses a record type it cannot check' do
+      post base, params: link_body(linkable_type: 'User', linkable_id: user.id), headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+    end
+  end
+
+  describe 'PATCH update' do
+    let!(:link) { company.account_links.create!(linkable: location, chart_of_account: revenues[1], link_purpose: 'revenue') }
+
+    it 'refuses moving a mapping onto another company\'s location' do
+      patch "#{base}/#{link.id}", params: { account_link: { linkable_id: other_location.id } }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(link.reload.linkable_id).to eq(location.id)
+    end
+
+    it 'refuses another company\'s GL account' do
+      patch "#{base}/#{link.id}", params: { account_link: { chart_of_account_id: other_revenue.id } }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(link.reload.chart_of_account_id).to eq(revenues[1].id)
+    end
+
+    it 'still lets the mapping be switched off' do
+      patch "#{base}/#{link.id}", params: { account_link: { is_active: false } }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(link.reload.is_active).to be(false)
+    end
+  end
+
   describe 'POST resolve' do
     it 'answers what a deal at a mapped location will post to' do
       company.account_links.create!(linkable: location, chart_of_account: revenues[1], link_purpose: 'revenue')
