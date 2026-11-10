@@ -324,14 +324,10 @@ class ImapSentEmailService
         cc_addresses = (msg['ccRecipients'] || []).map { |r| r.dig('emailAddress', 'address') }.compact.join(', ')
         bcc_addresses = (msg['bccRecipients'] || []).map { |r| r.dig('emailAddress', 'address') }.compact.join(', ')
 
-        # Also check if platform already sent this email (matches by to_address + sent_at window)
-        platform_sent = Communication.where(
-          communicable: communicable,
-          channel: 'email',
-          direction: 'outbound',
-          to_address: recipient_email
-        ).where(sent_at: (sent_time - 30.seconds)..(sent_time + 30.seconds)).exists?
-        next if platform_sent
+        # Also check if platform already sent this email. Graph's send call
+        # hands back no Message-ID, so this window is the only way to know.
+        next if already_logged?(message_id: nil, communicable: communicable, to_address: recipient_email,
+                                sent_at: sent_time, subject: subject)
 
         comm = Communication.create!(
           communicable: communicable,
@@ -375,7 +371,13 @@ class ImapSentEmailService
   #
   # Without this the sync re-logged every email the CRM had already sent,
   # because it only ever looked for records a previous sync had created.
-  def self.already_logged?(message_id:, communicable: nil, to_address: nil, sent_at: nil)
+  #
+  # The platform may have sent it from a different record with the same
+  # address (another lead, the contact, a quote or brochure), so with a
+  # subject the window also looks across the company: same address, same
+  # subject, within a minute. Matching the record only re-logged about 200
+  # emails on production (Heather Taylor, 2026-11-09).
+  def self.already_logged?(message_id:, communicable: nil, to_address: nil, sent_at: nil, subject: nil)
     if message_id.present?
       return true if Communication.where(external_id: message_id).exists?
       return true if metadata_contains?(:imap_message_id, message_id)
@@ -391,8 +393,34 @@ class ImapSentEmailService
       channel: 'email',
       direction: 'outbound'
     ).where('LOWER(to_address) = ?', to_address.to_s.downcase)
-     .where(sent_at: (sent_at - 30.seconds)..(sent_at + 30.seconds)).exists?
+     .where(sent_at: (sent_at - 30.seconds)..(sent_at + 30.seconds)).exists? ||
+      sent_from_another_record?(communicable, to_address, sent_at, subject)
   end
+
+  SYNC_SOURCES = %w[graph_sync imap_sync gmail_sync].freeze
+
+  def self.sent_from_another_record?(communicable, to_address, sent_at, subject)
+    company_id = communicable.try(:company_id)
+    return false if company_id.blank? || subject.blank?
+
+    Communication.where(company_id: company_id, channel: 'email', direction: 'outbound')
+                 .where('LOWER(to_address) = ?', to_address.to_s.downcase)
+                 .where('LOWER(subject) = ?', subject.to_s.strip.downcase)
+                 .where(sent_at: (sent_at - 60.seconds)..(sent_at + 60.seconds))
+                 .where(not_a_synced_copy)
+                 .exists?
+  end
+  private_class_method :sent_from_another_record?
+
+  # Leaves out copies an earlier sync made, which are not the platform's send.
+  def self.not_a_synced_copy
+    if Communication.columns_hash['metadata'].sql_type == 'jsonb'
+      ["COALESCE(communications.metadata->>'source', '') NOT IN (?)", SYNC_SOURCES]
+    else
+      SYNC_SOURCES.map { |src| "COALESCE(communications.metadata, '') NOT LIKE '%#{src}%'" }.join(' AND ')
+    end
+  end
+  private_class_method :not_a_synced_copy
 
   # metadata is jsonb in the deployed databases but text in older ones, so
   # both shapes have to be queryable.
@@ -511,7 +539,8 @@ class ImapSentEmailService
             message_id: nil,
             communicable: communicable,
             to_address: recipient_email,
-            sent_at: sent_time
+            sent_at: sent_time,
+            subject: mail.subject
           )
 
           comm = Communication.create!(
