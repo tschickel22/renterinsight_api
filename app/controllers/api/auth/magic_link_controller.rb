@@ -4,6 +4,10 @@ module Api
   module Auth
     class MagicLinkController < ApplicationController
       skip_before_action :authenticate, only: [:request_magic_link, :verify_magic_link]
+      include AbuseRateLimit
+      abuse_limit to: 10, within: 15.minutes, only: :request_magic_link, name: 'magic-ip'
+      abuse_limit to: 5, within: 1.hour, only: :request_magic_link, name: 'magic-email', by: AbuseRateLimit::BY_EMAIL
+      abuse_limit to: 20, within: 15.minutes, only: :verify_magic_link, name: 'magic-verify'
 
       # Same wording whether or not the address matched, for the same reason as
       # PasswordResetService::NEUTRAL_SENT_MESSAGE, and phrased so it never claims a delivery

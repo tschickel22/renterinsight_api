@@ -4,6 +4,12 @@ module Api
   module Auth
     class LoginController < ApplicationController
       skip_before_action :authenticate, only: [:create, :refresh]
+      include AbuseRateLimit
+      # A dealership signs many people in from one office address, so the per-address
+      # limit is loose; the per-email limit is what stops password guessing.
+      abuse_limit to: 30, within: 5.minutes, only: :create, name: 'login-ip'
+      abuse_limit to: 10, within: 15.minutes, only: :create, name: 'login-email', by: AbuseRateLimit::BY_EMAIL
+      abuse_limit to: 10, within: 5.minutes, only: :verify_password, name: 'verify-password'
       before_action :authenticate_user_from_token!, only: [:verify, :me, :accounts, :switch_account]
 
       # POST /api/auth/verify_password
