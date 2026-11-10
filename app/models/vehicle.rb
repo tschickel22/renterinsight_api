@@ -149,6 +149,14 @@ class Vehicle < ApplicationRecord
 
   # The code the home was built to (HUD, modular, park model). See BuildingCode.
   validates :building_code, inclusion: { in: BuildingCode::ALL }, allow_nil: true
+  validate :sale_ends_after_it_starts
+
+  def sale_ends_after_it_starts
+    return unless special_discount_starts_on && special_discount_ends_on
+    return unless special_discount_ends_on < special_discount_starts_on
+
+    errors.add(:special_discount_ends_on, 'must be on or after the day the sale starts')
+  end
 
   # RV-specific validations
   with_options if: -> { listing_type == 'rv' } do
@@ -338,6 +346,32 @@ class Vehicle < ApplicationRecord
     return false unless special_discount_enabled && special_discount_ends_on
 
     special_discount_ends_on < (today || Time.current.in_time_zone(company&.time_zone || 'America/New_York').to_date)
+  end
+
+  # A sale set to start on a later day: on, but not showing yet. Dealer's
+  # time zone, like the end date.
+  def sale_not_started?(today = nil)
+    return false unless special_discount_enabled && special_discount_starts_on
+
+    special_discount_starts_on > (today || Time.current.in_time_zone(company&.time_zone || 'America/New_York').to_date)
+  end
+
+  # A sale buyers can see right now: on, priced, started, not ended. The end
+  # date is optional, so a sale can stay open until someone turns it off.
+  def sale_live?(today = nil)
+    special_discount_enabled && discounted_price.to_f.positive? && !sale_not_started?(today) && !sale_expired?(today)
+  end
+
+  # The price before the sale, as the sale was worked out: the home plus the
+  # packages counted in its total, the figure a "$ off" or "% of total" sale
+  # comes off. A "% of Home Price" sale comes off the home alone.
+  def price_before_sale
+    base = msrp.to_f
+    return nil unless base.positive?
+
+    return base.round(2) if discount_type == '% of Home Price'
+
+    (base + inventory_packages.where(include_in_total: true).sum(:price).to_f).round(2)
   end
 
   # Every sale past its end date turns off, as if a rep turned it off: the

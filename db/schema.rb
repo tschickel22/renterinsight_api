@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_10_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_10_200100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8704,6 +8704,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_10_200000) do
     t.bigint "catalog_plan_variant_id"
     t.string "building_code"
     t.date "special_discount_ends_on"
+    t.date "special_discount_starts_on"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["catalog_plan_variant_id"], name: "index_vehicles_on_catalog_plan_variant_id"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
@@ -8947,6 +8948,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_10_200000) do
     t.text "description"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "show_sale", default: false, null: false
     t.index ["vehicle_id"], name: "index_website_featured_homes_on_vehicle_id"
     t.index ["website_id", "position"], name: "index_website_featured_homes_on_website_id_and_position"
     t.index ["website_id", "vehicle_id"], name: "index_website_featured_homes_on_website_id_and_vehicle_id", unique: true

@@ -50,6 +50,23 @@ class WebsiteFeaturedHome < ApplicationRecord
     end
   end
 
+  # What a featured home's sale shows on the site: was and now, the callout
+  # (the home's Overlay Text in inventory) and the last day when there is one.
+  # Nil when the sale is not running today.
+  def self.sale_json(vehicle, today: nil)
+    return nil unless vehicle.sale_live?(today)
+
+    now = vehicle.discounted_price.to_f.round(2)
+    was = vehicle.price_before_sale
+    {
+      was: (was if was && was > now),
+      now: now,
+      callout: vehicle.overlay_text.to_s.squish.presence,
+      starts_on: vehicle.special_discount_starts_on&.iso8601,
+      ends_on: vehicle.special_discount_ends_on&.iso8601
+    }
+  end
+
   def display_title
     title.presence || [vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
   end

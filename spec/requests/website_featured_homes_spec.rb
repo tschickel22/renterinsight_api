@@ -199,4 +199,62 @@ RSpec.describe 'Website featured homes', type: :request do
       expect(JSON.parse(response.body)['in_use']).to be true
     end
   end
+
+  # Tom 2026-11-10: a featured home can show its sale (was, now, a callout)
+  # while the sale's dates are good. Price and sale are the inventory record,
+  # so editing them here edits the home.
+  describe 'sale pricing on a featured home' do
+    let(:today) { Time.current.in_time_zone('America/New_York').to_date }
+
+    def on_sale(attrs = {})
+      home({ msrp: 100_000, special_discount_enabled: true, discount_type: '$ Flat Amount', discount_value: 7_000,
+             overlay_text: 'Hot Home' }.merge(attrs))
+    end
+
+    it 'shows was, now and the callout only where the switch is on' do
+      shown = on_sale(model: 'Shown')
+      hidden = on_sale(model: 'Hidden')
+      save_picks([{ vehicle_id: shown.id, show_sale: true }, { vehicle_id: hidden.id }])
+
+      items = public_featured['items'].index_by { |i| i['id'] }
+      expect(items[shown.id]['featured_sale']).to include('was' => 100_000.0, 'now' => 93_000.0, 'callout' => 'Hot Home', 'ends_on' => nil)
+      expect(items[hidden.id]['featured_sale']).to be_nil
+    end
+
+    it 'waits for the start day and stops after the end day; no end day stays open' do
+      later = on_sale(model: 'Later', special_discount_starts_on: today + 3)
+      ended = on_sale(model: 'Ended', special_discount_starts_on: today - 10, special_discount_ends_on: today - 1)
+      open_ended = on_sale(model: 'Open', special_discount_starts_on: today - 10)
+      save_picks([later, ended, open_ended].map { |v| { vehicle_id: v.id, show_sale: true } })
+
+      items = public_featured['items'].index_by { |i| i['id'] }
+      expect(items[later.id]['featured_sale']).to be_nil
+      expect(items[later.id]['sale_price']).to be_nil
+      expect(items[ended.id]['featured_sale']).to be_nil
+      expect(items[open_ended.id]['featured_sale']).to include('now' => 93_000.0)
+    end
+
+    it 'writes price and sale edits to the inventory home' do
+      v = home(msrp: 80_000)
+      save_picks([{ vehicle_id: v.id, show_sale: true,
+                    pricing: { msrp: 90_000, special_discount_enabled: true, discount_type: '$ Flat Amount', discount_value: 5_000,
+                               special_discount_starts_on: today.iso8601, special_discount_ends_on: '', overlay_text: ' Only this month ' } }])
+
+      expect(response).to have_http_status(:ok)
+      v.reload
+      expect([v.msrp.to_f, v.discounted_price.to_f, v.special_discount_starts_on, v.special_discount_ends_on, v.overlay_text])
+        .to eq([90_000.0, 85_000.0, today, nil, 'Only this month'])
+      item = JSON.parse(response.body)['items'].first
+      expect(item['show_sale']).to be(true)
+      expect(item['vehicle']['sale_now']).to include('was' => 90_000.0, 'now' => 85_000.0)
+    end
+
+    it 'refuses an end day before the start day' do
+      v = home(msrp: 80_000)
+      save_picks([{ vehicle_id: v.id, pricing: { special_discount_enabled: true, discount_type: '$ Flat Amount', discount_value: 1,
+                                                 special_discount_starts_on: (today + 5).iso8601, special_discount_ends_on: today.iso8601 } }])
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(v.reload.special_discount_enabled).to be(false)
+    end
+  end
 end
