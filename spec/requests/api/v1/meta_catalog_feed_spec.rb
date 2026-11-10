@@ -175,6 +175,18 @@ RSpec.describe 'Api::V1::MetaCatalog feed', type: :request do
       expect(JSON.parse(response.body)['catalog']['active_count']).to eq(1)
     end
 
+    # Ticking a status used to answer with every home in the chosen statuses,
+    # held-back ones included, so the Matching Homes box jumped until reload.
+    it 'returns the same active count from saving statuses as info does' do
+      patch '/api/v1/meta/catalog/settings', headers: auth,
+            params: { statuses: %w[available available_to_order] }.to_json
+
+      saved = JSON.parse(response.body)['catalog']['active_count']
+      get '/api/v1/meta/catalog/info', headers: auth
+      expect(saved).to eq(1)
+      expect(saved).to eq(JSON.parse(response.body)['catalog']['active_count'])
+    end
+
     it 'lists held-back homes only for the selected statuses' do
       get '/api/v1/meta/catalog/info', headers: auth
 

@@ -39,44 +39,11 @@ class Api::V1::MetaCatalogController < ApplicationController
     statuses = catalog_statuses
     form = default_intake_form(@company)
 
-    # Counted across every status the dealer could pick, not just the selected
-    # ones, so the warning against a status is visible before it is ticked. An
-    # Available to Order home usually has no price yet, and would never reach
-    # the catalog however the feed is configured.
-    vehicles = @company.vehicles.includes(:location)
-                        .where(is_deleted: false, status: ALLOWED_STATUSES).order(id: :asc)
-
-    excluded          = []
-    excluded_by_status = Hash.new(0)
-    eligible_by_status = Hash.new(0)
-    # The real link off the first home Meta will accept, so previewing it shows
-    # exactly what a shopper lands on. Rebuilding the URL in the frontend would
-    # preview a guess, and a guess cannot catch a broken link.
-    sample = nil
-
-    # Same serialization the feed runs, so these counts are what Meta will
-    # accept rather than how many rows we would send.
-    vehicles.each do |v|
-      item    = serialize(v, company: @company, form: form)
-      missing = missing_feed_fields(item)
-      status  = v.status.to_s
-
-      if missing.empty?
-        eligible_by_status[status] += 1
-        sample ||= { title: item[:title], link: item[:link] } if statuses.include?(status)
-        next
-      end
-
-      excluded_by_status[status] += 1
-      next unless statuses.include?(status)
-
-      excluded << {
-        id:      item[:id],
-        title:   item[:title].presence || item[:id],
-        status:  status,
-        missing: missing.map(&:to_s)
-      }
-    end
+    scan = feed_eligibility(statuses, form)
+    excluded           = scan[:excluded]
+    excluded_by_status = scan[:excluded_by_status]
+    eligible_by_status = scan[:eligible_by_status]
+    sample             = scan[:sample]
 
     selected_eligible = statuses.sum { |st| eligible_by_status[st] }
 
@@ -127,13 +94,16 @@ class Api::V1::MetaCatalogController < ApplicationController
 
     Setting.set('Company', @company.id, SETTING_KEY, settings.compact)
 
-    vehicle_count = @company.vehicles.where(is_deleted: false, status: requested).count
+    # Same definition as info: homes Meta will accept in the chosen statuses.
+    # Counting every home in those statuses showed a bigger number, including
+    # held-back homes, until the page was loaded again.
+    eligible = feed_eligibility(requested, default_intake_form(@company))[:eligible_by_status]
 
     render json: {
       catalog: {
         statuses:     requested,
         lead_form_id: settings['lead_form_id'],
-        active_count: vehicle_count
+        active_count: requested.sum { |st| eligible[st] }
       }
     }
   end
@@ -189,6 +159,53 @@ class Api::V1::MetaCatalogController < ApplicationController
   end
 
   private
+
+  # Runs every home through the feed serializer, so the counts are what Meta
+  # will accept rather than how many rows we would send. Shared by info and
+  # update_settings so both report the same active_count.
+  def feed_eligibility(statuses, form)
+    # Counted across every status the dealer could pick, not just the selected
+    # ones, so the warning against a status is visible before it is ticked. An
+    # Available to Order home usually has no price yet, and would never reach
+    # the catalog however the feed is configured.
+    vehicles = @company.vehicles.includes(:location)
+                        .where(is_deleted: false, status: ALLOWED_STATUSES).order(id: :asc)
+
+    excluded          = []
+    excluded_by_status = Hash.new(0)
+    eligible_by_status = Hash.new(0)
+    # The real link off the first home Meta will accept, so previewing it shows
+    # exactly what a shopper lands on. Rebuilding the URL in the frontend would
+    # preview a guess, and a guess cannot catch a broken link.
+    sample = nil
+
+    # Same serialization the feed runs, so these counts are what Meta will
+    # accept rather than how many rows we would send.
+    vehicles.each do |v|
+      item    = serialize(v, company: @company, form: form)
+      missing = missing_feed_fields(item)
+      status  = v.status.to_s
+
+      if missing.empty?
+        eligible_by_status[status] += 1
+        sample ||= { title: item[:title], link: item[:link] } if statuses.include?(status)
+        next
+      end
+
+      excluded_by_status[status] += 1
+      next unless statuses.include?(status)
+
+      excluded << {
+        id:      item[:id],
+        title:   item[:title].presence || item[:id],
+        status:  status,
+        missing: missing.map(&:to_s)
+      }
+    end
+
+    { excluded: excluded, excluded_by_status: excluded_by_status,
+      eligible_by_status: eligible_by_status, sample: sample }
+  end
 
   def catalog_statuses
     statuses_for(@company)
