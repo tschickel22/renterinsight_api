@@ -332,18 +332,12 @@ module Api
 
     # GET /api/settings/pipeline_stages
     def pipeline_stages
-      stages = Setting.get('Company', @company.id, 'pipeline_stages', nil)
-
-      if stages.nil?
-        stages = [
-          { key: 'lead',         name: 'Lead',         probability: 10,  color: '#94a3b8', locked: false, active: true, order: 0 },
-          { key: 'qualified',    name: 'Qualified',    probability: 25,  color: '#60a5fa', locked: false, active: true, order: 1 },
-          { key: 'proposal',     name: 'Proposal',     probability: 50,  color: '#f59e0b', locked: false, active: true, order: 2 },
-          { key: 'negotiation',  name: 'Negotiation',  probability: 75,  color: '#f97316', locked: false, active: true, order: 3 },
-          { key: 'won',          name: 'Won',          probability: 100, color: '#22c55e', locked: true,  active: true, order: 4 },
-          { key: 'lost',         name: 'Lost',         probability: 0,   color: '#ef4444', locked: true,  active: true, order: 5 }
-        ]
-      end
+      # Resolve exactly as the deals board and Company#pipeline_stages do: a saved,
+      # non-empty list wins, otherwise the system default. A different fallback
+      # here showed stages the board does not have and flagged every deal as
+      # needing a remap.
+      saved = Setting.get('Company', @company.id, 'pipeline_stages', nil)
+      stages = saved.is_a?(Array) && saved.any? ? saved : default_pipeline_stages_for_settings
 
       # deal_counts lets the settings UI warn before deleting a stage that still
       # holds deals (and prompt to remap them). Keyed by the deal's stage value.
@@ -392,6 +386,12 @@ module Api
         return
       end
 
+      locked_error = locked_stage_error(stages)
+      if locked_error
+        render json: { error: locked_error }, status: :unprocessable_entity
+        return
+      end
+
       ActiveRecord::Base.transaction do
         remap.each do |old_key, new_key|
           next if old_key.to_s == new_key.to_s
@@ -410,6 +410,64 @@ module Api
       render json: { stages: stages, deal_counts: deal_counts_by_stage, message: 'Pipeline stages saved successfully' }
     rescue => e
       render json: { error: e.message }, status: :internal_server_error
+    end
+
+    # The default stages as the settings tab expects them (probability, color,
+    # active), matching DEFAULT_PIPELINE_STAGES in the frontend deal types.
+    def default_pipeline_stages_for_settings
+      ::Company::DEFAULT_PIPELINE_STAGES.map do |s|
+        key = s['key']
+        s.merge(
+          'probability' => ::Company::DEFAULT_STAGE_PROBABILITIES[key],
+          'color' => DEFAULT_STAGE_COLORS[key],
+          'active' => true,
+          'locked' => ::Company::LOCKED_PIPELINE_STAGE_KEYS.include?(key)
+        )
+      end
+    end
+
+    DEFAULT_STAGE_COLORS = {
+      'prospecting' => '#3b82f6', 'qualification' => '#eab308', 'needs_analysis' => '#f97316',
+      'proposal' => '#8b5cf6', 'negotiation' => '#3b82f6', 'closed_won' => '#22c55e', 'closed_lost' => '#ef4444'
+    }.freeze
+
+    # Mirrors the settings tab: a locked stage (Closed Won / Closed Lost) that
+    # the pipeline has today cannot be removed, have its key or name changed,
+    # or be switched off. Probability, color and order stay editable. A saved
+    # pipeline that never had a locked stage is not forced to gain one.
+    def locked_stage_error(stages)
+      current = @company.pipeline_stages
+      incoming = stages.each_with_object({}) do |s, h|
+        key = (s[:key] || s['key']).to_s
+        h[key] = s unless key.blank?
+      end
+
+      ::Company::LOCKED_PIPELINE_STAGE_KEYS.each do |key|
+        existing = current.find { |s| (s['key'] || s[:key]).to_s == key }
+        next unless existing
+
+        name = (existing['name'] || existing[:name]).to_s
+        label = name.presence || key.humanize
+        sent = incoming[key]
+        return "#{label} is a locked stage and cannot be removed or have its key changed" unless sent
+
+        sent_name = (sent[:name] || sent['name']).to_s
+        return "#{label} is a locked stage and cannot be renamed" if sent_name != name
+
+        was_active = stage_value(existing, :active) != false
+        if was_active && stage_value(sent, :active).to_s == 'false'
+          return "#{label} is a locked stage and cannot be switched off"
+        end
+      end
+      nil
+    end
+
+    # Reads a field from a stage given as a string- or symbol-keyed hash or as
+    # params, without `||` turning an explicit false into nil.
+    def stage_value(stage, field)
+      value = stage[field.to_s]
+      value = stage[field.to_sym] if value.nil?
+      value
     end
 
     # Live (non-deleted) deal count per stage value for this company.
