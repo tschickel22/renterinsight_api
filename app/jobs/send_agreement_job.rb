@@ -108,7 +108,7 @@ class SendAgreementJob < ApplicationJob
   # ── SMS to signer ────────────────────────────────────────────────────
 
   def send_signing_sms(agreement, signer, signing_link, branding)
-    body = "#{branding[:company_name]}: You have a document to sign — \"#{agreement.title}\". Sign here: #{signing_link}"
+    body = "#{branding[:company_name]}: You have a document to sign: \"#{agreement.title}\". Sign here: #{signing_link}"
 
     result = CommunicationService.send_sms(
       communicable: agreement,
@@ -157,7 +157,7 @@ class SendAgreementJob < ApplicationJob
   def load_branding(agreement)
     # Platform defaults
     branding = {
-      company_name: 'Platform DMS',
+      company_name: Brand.current.name,
       logo_url: nil,
       primary_color: '#3b82f6',
       secondary_color: '#64748b'
@@ -178,7 +178,7 @@ class SendAgreementJob < ApplicationJob
       branding[:company_name] = agreement.company.name if agreement.company.name.present?
     end
 
-    # Location branding (highest priority — overrides company)
+    # Location branding (highest priority, overrides company)
     if agreement.location_id.present?
       location_raw = Setting.get('Location', agreement.location_id, 'branding', {})
       location_b   = location_raw.is_a?(Hash) ? location_raw : {}
@@ -220,7 +220,7 @@ class SendAgreementJob < ApplicationJob
     end
 
     # Fall back to environment variable
-    ENV['FRONTEND_URL'] || ENV['APP_URL'] || 'https://staging.crm.landlordinsight.com'
+    ENV['FRONTEND_URL'].presence || Brand.app_url(company: agreement.company)
   end
 
   # ── Email templates ──────────────────────────────────────────────────
@@ -233,7 +233,7 @@ class SendAgreementJob < ApplicationJob
           <p style="color: #475569; font-size: 14px; margin: 0; font-style: italic;">
             "#{ERB::Util.html_escape(agreement.message_to_signers)}"
           </p>
-          <p style="color: #94a3b8; font-size: 12px; margin: 8px 0 0 0;">— #{ERB::Util.html_escape(preparer_name)}</p>
+          <p style="color: #94a3b8; font-size: 12px; margin: 8px 0 0 0;">From #{ERB::Util.html_escape(preparer_name)}</p>
         </td>
       </tr>
       <tr><td style="height: 16px;"></td></tr>
