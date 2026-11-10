@@ -14,7 +14,7 @@ RSpec.describe 'Webhook event wiring' do
   end
   let(:source) { Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' } }
 
-  # Some events (location.*, agreement.expired) are sent but not offered in the
+  # Some events (location.*) are sent but not offered in the
   # picker, so the list is written past the picker validation.
   def endpoint(events, location_ids: nil)
     ep = WebhookEndpoint.create!(company: company, url: 'https://example.test/hook', events: ['lead.created'],

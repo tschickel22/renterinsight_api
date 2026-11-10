@@ -1,13 +1,17 @@
 class SendAgreementReminderJob < ApplicationJob
   queue_as :default
 
-  def perform(agreement_id, signer_id)
+  # reminder_id names the AgreementReminder row to mark. The automatic
+  # reminders (AgreementReminderService) pass it; the remind buttons queue
+  # without it and the newest pending row for the signer is marked, as before.
+  # Returns true when at least one channel went out.
+  def perform(agreement_id, signer_id, reminder_id = nil)
     agreement = Agreement.includes(:company, :location, :agreement_signers, :prepared_by).find_by(id: agreement_id)
-    return unless agreement
+    return false unless agreement
 
     signer = agreement.agreement_signers.find_by(id: signer_id)
-    return unless signer
-    return if signer.status == AgreementSigner::STATUS_SIGNED || signer.status == AgreementSigner::STATUS_DECLINED
+    return false unless signer
+    return false if signer.status == AgreementSigner::STATUS_SIGNED || signer.status == AgreementSigner::STATUS_DECLINED
 
     # Reuse SendAgreementJob's branding/email infrastructure
     sender = SendAgreementJob.new
@@ -44,15 +48,21 @@ class SendAgreementReminderJob < ApplicationJob
     signer.record_delivery!(failures, kind: 'reminder')
 
     # Mark the reminder record based on actual delivery result
-    reminder = agreement.agreement_reminders
-                 .where(agreement_signer_id: signer.id, status: 'pending')
-                 .order(created_at: :desc).first
+    reminder = if reminder_id
+                 agreement.agreement_reminders.find_by(id: reminder_id, agreement_signer_id: signer.id)
+               else
+                 agreement.agreement_reminders
+                          .where(agreement_signer_id: signer.id, status: 'pending')
+                          .order(created_at: :desc).first
+               end
 
     if attempted.any? && failures.size < attempted.size
       reminder&.update(sent_at: Time.current, status: 'sent')
       agreement.fire_agreement_webhook('agreement.reminder_sent', signer: signer)
+      true
     else
-      reminder&.update(status: 'failed', error_message: failures.values.last || 'All delivery channels failed')
+      reminder&.update(status: 'failed', error_message: failures.values.last || 'No delivery channel for this signer')
+      false
     end
   end
 
@@ -63,7 +73,7 @@ class SendAgreementReminderJob < ApplicationJob
   end
 
   def send_reminder_email(agreement, signer, signing_link, branding)
-    subject = "Reminder: Please sign \"#{agreement.title}\""
+    subject = "Reminder from #{branding[:company_name]}: \"#{agreement.title}\" is still waiting for your signature"
     body    = build_reminder_email_html(agreement, signer, signing_link, branding)
 
     result = CommunicationService.send_email(
@@ -90,7 +100,7 @@ class SendAgreementReminderJob < ApplicationJob
   end
 
   def send_reminder_sms(agreement, signer, signing_link, branding)
-    body = "Reminder from #{branding[:company_name]}: \"#{agreement.title}\" is waiting for your signature. Sign here: #{signing_link}"
+    body = "Reminder from #{branding[:company_name]}: \"#{agreement.title}\" is still waiting for your signature. Sign here: #{signing_link}"
 
     result = CommunicationService.send_sms(
       communicable: agreement,
