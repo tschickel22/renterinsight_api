@@ -37,6 +37,7 @@ class Api::V1::AccountLinksController < ApplicationController
     return unless authorize_action!('accounting', 'create')
 
     link = @company.account_links.build(link_params)
+    return render_unowned(link) unless references_owned?(link)
 
     if link.save
       render json: link.as_json(
@@ -51,8 +52,10 @@ class Api::V1::AccountLinksController < ApplicationController
     return unless authorize_action!('accounting', 'update')
 
     link = @company.account_links.find(params[:id])
+    link.assign_attributes(link_params)
+    return render_unowned(link) unless references_owned?(link)
 
-    if link.update(link_params)
+    if link.save
       render json: link
     else
       render json: { errors: link.errors }, status: :unprocessable_entity
@@ -111,6 +114,25 @@ class Api::V1::AccountLinksController < ApplicationController
     when 'receivable' then settings.default_ar_account
     when 'payable'    then settings.default_ap_account
     end
+  end
+
+  # The mapped record and the GL account must both be this company's. Only
+  # checked when they are being set or changed, so an old row of a type that
+  # cannot be checked (Home Type, Deal Type) can still be edited otherwise.
+  def references_owned?(link)
+    if link.new_record? || link.linkable_type_changed? || link.linkable_id_changed?
+      scope = LINKABLE_SCOPES[link.linkable_type.to_s]
+      return false unless scope && @company.public_send(scope).exists?(id: link.linkable_id)
+    end
+    if link.new_record? || link.chart_of_account_id_changed?
+      return false unless @company.chart_of_accounts.exists?(id: link.chart_of_account_id)
+    end
+    true
+  end
+
+  def render_unowned(_link)
+    render json: { errors: { base: ['The record or GL account was not found in this company'] } },
+           status: :unprocessable_entity
   end
 
   def link_params
