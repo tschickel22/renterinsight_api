@@ -4,7 +4,9 @@
 # for polling leads from the Champion Retailer API.
 #
 # Champion issues one non-expiring API key per retailer location via their
-# DIGS portal. The key authenticates via X-API-Key header against either
+# DIGS portal, and a location that buys from more than one Champion factory
+# gets one key per factory. So a location can have several configs; each lead
+# remembers the config that brought it in (leads.champion_config_id). The key authenticates via X-API-Key header against either
 # the Stage or Production API server.
 #
 # Stage:      https://digs-api-stage.championhomes.com
@@ -33,8 +35,7 @@ class ChampionLeadFeedConfig < ApplicationRecord
   validates :api_token, presence: true
   validates :environment, presence: true,
             inclusion: { in: %w[stage production], message: 'must be stage or production' }
-  validates :company_id, uniqueness: { scope: :location_id,
-            message: 'already has a Champion lead config for this location' }
+  validate  :api_token_not_already_used
   validates :sync_interval_minutes, numericality: { greater_than_or_equal_to: 5, less_than_or_equal_to: 1440 }
 
   # ------------------------------------------------------------------
@@ -76,5 +77,17 @@ class ChampionLeadFeedConfig < ApplicationRecord
       last_sync_error_at: Time.current,
       last_sync_error: error_message.truncate(2000)
     )
+  end
+
+  private
+
+  # The same key added twice would import every lead twice. Tokens are
+  # encrypted, so compare them in Ruby; a company has only a handful.
+  def api_token_not_already_used
+    return if api_token.blank? || company.nil?
+    return unless new_record? || will_save_change_to_api_token?
+    others = company.champion_lead_feed_configs.where.not(id: id)
+    return unless others.any? { |c| c.api_token == api_token }
+    errors.add(:api_token, 'is already used by another Champion feed')
   end
 end
