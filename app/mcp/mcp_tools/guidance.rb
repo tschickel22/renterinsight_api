@@ -17,12 +17,17 @@ module McpTools
 
       cost_answer =
         if ctx.show_costs?
-          'Cost and gross figures appear under "costs" on deals and inventory when this person can see them in ' \
-            "#{app}; commission is never available here. Treat cost as internal: never put it in anything written " \
-            'for a customer.'
+          'Cost and gross figures appear under "costs" on deals, inventory and projects when this person can see ' \
+            "them in #{app}, and the accounting tools include cost of goods sold, net income and the amounts on " \
+            'bills for homes and jobs for people who can read the books; commission is never available here. ' \
+            'Treat cost as internal: never put it in anything written for a customer.'
         else
-          "Dealer cost, gross, margin or commission: \"Those figures are not available through this connector; " \
-            "your #{app} admin can allow it under Settings, Integrations, AI Apps.\""
+          "Dealer cost, gross, margin or commission: \"Dealer cost and gross are not shown through this connector; " \
+            "your #{app} admin can allow it under Settings, Integrations, AI Apps. Commission is never shown.\" " \
+            'Deals, inventory and projects leave cost out; accounting_summary, budget_variance and budget_history ' \
+            'leave out cost of goods sold and net income (costs_hidden says so); bills for homes and jobs show ' \
+            'amounts_hidden. Journal entries and bank feed lines are the books as recorded and keep their amounts ' \
+            'for people who can read them: use them for bookkeeping, never to work out what a home or a deal cost.'
         end
 
       <<~TEXT.squish

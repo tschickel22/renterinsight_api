@@ -128,6 +128,9 @@ RSpec.describe 'MCP budget tools', :mcp, type: :request do
     end
 
     it 'compares with the posted books exactly as the Budget vs Actual report does' do
+      # Net income comes back only when the dealer lets AI apps see dealer cost
+      # (mcp_dealer_cost_spec covers it being off).
+      Setting.set('Company', company.id, 'mcp_settings', { 'show_costs' => true })
       budget = budget!({ status: 'active' }, sales => 2_000, ads => 10)
       post!(bank, sales, 1_500)
       post!(ads, bank, 400)

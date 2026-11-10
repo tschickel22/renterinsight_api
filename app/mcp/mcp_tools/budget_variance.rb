@@ -8,7 +8,9 @@ module McpTools
     title 'Budget against actual'
     description 'Compare a budget with the posted books for a month, a quarter, the year to date or the full ' \
                 'year: every revenue and expense account with budget, actual and the difference, plus the biggest ' \
-                'misses and wins in dollars. Leave id out to use the active budget for the current fiscal year.'
+                'misses and wins in dollars. Leave id out to use the active budget for the current fiscal year. Unless ' \
+                'the dealer lets AI apps see dealer cost, cost of goods sold accounts and net income are left out ' \
+                '(costs_hidden says so).'
     input_schema(
       properties: {
         id: { type: 'string', description: 'budget:12; optional' },
@@ -34,18 +36,43 @@ module McpTools
                          'Actual report in DealerTide.'
       end
 
-      rows = report[:groups].flat_map { |g| g[:rows] }.map { |r| row(r) }
+      groups = visible_groups(ctx, report[:groups])
+      rows = groups.flat_map { |g| g[:rows] }.map { |r| row(r) }
       payload = {
         budget: BudgetArea.summary(ctx, budget),
         period: report[:period].slice(:kind, :start_date, :end_date).merge(quarter: quarter).compact,
-        net_income: money_hash(report[:net_income]),
-        subtotals: report[:groups].to_h { |g| [g[:account_type], money_hash(g[:subtotal])] },
+        net_income: (money_hash(report[:net_income]) if ctx.book_costs_visible?),
+        costs_hidden: (COSTS_HIDDEN unless ctx.book_costs_visible?),
+        subtotals: groups.to_h { |g| [g[:account_type], money_hash(g[:subtotal])] },
         biggest_misses: rows.select { |r| r[:impact].negative? }.sort_by { |r| r[:impact] }.first(5),
         biggest_wins: rows.select { |r| r[:impact].positive? }.sort_by { |r| -r[:impact] }.first(5),
         no_actuals_posted: rows.all? { |r| r[:actual].zero? },
         rows: rows
       }
-      Base::Result.new(payload: payload, count: 1)
+      Base::Result.new(payload: payload.compact, count: 1)
+    end
+
+    COSTS_HIDDEN = 'Cost of goods sold accounts and net income are left out, and the expense subtotal leaves them ' \
+                   'out, because actual cost of goods sold shows dealer cost. An admin can allow it under Settings, ' \
+                   'Integrations, AI Apps, "Let AI apps see dealer cost and gross".'
+
+    # Without the dealer cost switch, cost of goods sold rows go, and each
+    # subtotal is worked out again from the rows that are left so it cannot
+    # give them back by subtraction.
+    def self.visible_groups(ctx, groups)
+      return groups if ctx.book_costs_visible?
+
+      cogs_ids = ctx.company.chart_of_accounts.where(sub_type: 'cost_of_goods_sold').pluck(:id).to_set
+      groups.filter_map do |g|
+        kept = g[:rows].reject { |r| cogs_ids.include?(r[:account_id]) }
+        next if kept.empty?
+        next g if kept.size == g[:rows].size
+
+        b = kept.sum { |r| r[:budget_amount].to_d }
+        a = kept.sum { |r| r[:actual_amount].to_d }
+        g.merge(rows: kept, subtotal: { budget_amount: b, actual_amount: a, variance_amount: a - b,
+                                        variance_percent: b.nonzero? ? (((a - b) / b) * 100).round(2).to_f : nil })
+      end
     end
 
     # impact: dollars better (positive) or worse (negative) than budget, so

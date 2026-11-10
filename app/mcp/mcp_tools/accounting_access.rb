@@ -175,12 +175,37 @@ module McpTools
       }.compact
     end
 
-    def bill(ctx, bill)
+    # Bills whose amount is the cost of a home or a job: tied to a project, or
+    # with a line coded to an inventory or cost of goods sold account (a
+    # manufacturer's invoice for a home is booked to inventory). Their amounts
+    # are left out unless the dealer lets AI apps see dealer cost.
+    COST_BILL_SQL = '(bills.project_id IS NOT NULL OR EXISTS (SELECT 1 FROM bill_line_items cost_bli ' \
+                    'JOIN chart_of_accounts cost_coa ON cost_coa.id = cost_bli.chart_of_account_id ' \
+                    'WHERE cost_bli.bill_id = bills.id AND (cost_bli.project_id IS NOT NULL OR ' \
+                    "cost_coa.sub_type IN ('inventory', 'cost_of_goods_sold'))))"
+
+    COST_HIDDEN_NOTE = 'Amounts on bills for homes and jobs (coded to inventory or cost of goods sold, or tied to a ' \
+                       'project) are left out because they show dealer cost. An admin can allow it under Settings, ' \
+                       'Integrations, AI Apps, "Let AI apps see dealer cost and gross".'
+
+    # [bills whose amounts may be shown and added up, bills whose amounts are hidden]
+    def split_cost_bills(ctx, rel)
+      return [rel, rel.none] if ctx.book_costs_visible?
+
+      [rel.where("NOT #{COST_BILL_SQL}"), rel.where(COST_BILL_SQL)]
+    end
+
+    def bill(ctx, bill, hide_amounts: false)
       overdue = bill.due_date && bill.due_date < Date.current && OPEN_BILL_STATUSES.include?(bill.status)
+      amounts = if hide_amounts
+                  { amounts_hidden: 'dealer cost' }
+                else
+                  { total: money(bill.total_amount), paid: money(bill.amount_paid), balance_due: money(bill.balance_due) }
+                end
       {
         id: "bill:#{bill.id}", bill_number: bill.bill_number.presence, vendor: bill.vendor_name.presence || bill.vendor&.name,
         status: bill.status, bill_date: bill.bill_date&.iso8601, due_date: bill.due_date&.iso8601,
-        total: money(bill.total_amount), paid: money(bill.amount_paid), balance_due: money(bill.balance_due),
+        **amounts,
         days_overdue: overdue ? (Date.current - bill.due_date).to_i : nil, terms: bill.payment_terms.presence,
         memo: bill.memo.to_s.first(300).presence, location: ctx.location_names[bill.location_id],
         url: ctx.app_url('/accounting/bills')

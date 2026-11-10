@@ -127,9 +127,19 @@ module McpTools
     # Apps; when on, a person sees through the AI exactly what they see in the
     # app: deal costs by the same permission call the deals screen makes (its
     # quirks included), inventory costs for anyone who can read inventory, as
-    # the inventory screen does.
+    # the inventory screen does (its Cost Details card and the vehicle JSON
+    # are not permission gated; checked 2026-11-10).
     def show_costs?
       mcp_settings['show_costs'] == true
+    end
+
+    # Cost of goods sold, gross and net profit, and the amounts on bills for
+    # homes and jobs, in the accounting tools. In the app anyone who can read
+    # those reports sees them; through the connector the dealer's switch is
+    # needed too. Journal entries and bank feed lines are the raw books and
+    # are not covered (the AI needs the amounts to categorize them).
+    def book_costs_visible?
+      show_costs?
     end
 
     def deal_costs_visible?
@@ -187,12 +197,19 @@ module McpTools
     # parallel can each overshoot by up to one page (MAX_ROWS). Accepted: the
     # budget is a brake on bulk export, not an exact quota.
     def row_limit(requested)
-      remaining = daily_record_limit - records_used_today
-      if remaining <= 0
-        raise LimitReached, "Daily limit of #{daily_record_limit} records reached for this connection. It resets at midnight."
-      end
-
+      remaining = check_read_budget!
       [[requested.to_i.positive? ? requested.to_i : 20, MAX_ROWS].min, remaining].min
+    end
+
+    # Every read tool passes through this before it runs (Base.call), so a
+    # limit of 0 pauses all reading, single record lookups included. Returns
+    # what is left of today's budget.
+    def check_read_budget!
+      remaining = daily_record_limit - records_used_today
+      return remaining if remaining.positive?
+
+      raise LimitReached, "Daily limit of #{daily_record_limit} records reached for this person, across all their " \
+                          'AI apps. It resets at midnight, or ask an admin to raise it.'
     end
 
     def app_url(path)

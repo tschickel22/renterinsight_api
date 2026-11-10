@@ -51,6 +51,10 @@ than silently picking one.
 
 Call `accounting_summary` for the month. Report revenue, cost of sales, expenses and
 net income in four lines, and anything the tool says it skipped for permissions.
+If `profit_and_loss.period.costs_hidden` is there, cost of sales and net income are
+held back by the dealer's cost setting: report revenue and expenses, and say that
+cost of sales and net income are in the P&L report in the app or need an admin to
+allow dealer cost under Settings, Integrations, AI Apps. Never work them out yourself.
 
 Read `profit_and_loss.fiscal_period` first: if the month is already closed or locked,
 say so in the verdict, since nothing posted now would land in it without reopening.
