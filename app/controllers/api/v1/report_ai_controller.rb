@@ -801,35 +801,7 @@ module Api
       end
 
       def get_ai_report_limit
-        return 999 if current_user&.role == 'platform_admin'
-
-        # Check if the company has the AI module enabled via subscription
-        company_has_module = begin
-          @company.platform_modules.to_a.include?('management_ai_reports')
-        rescue
-          false
-        end
-
-        company_limit = begin
-          Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil)
-        rescue => e
-          Rails.logger.debug "[ReportAI] Could not read company limit setting: #{e.message}"
-          nil
-        end
-        return company_limit.to_i if company_limit.present? && company_limit.to_i > 0
-
-        platform_limit = begin
-          Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', nil)
-        rescue => e
-          Rails.logger.debug "[ReportAI] Could not read platform limit setting: #{e.message}"
-          nil
-        end
-        return platform_limit.to_i if platform_limit.present? && platform_limit.to_i > 0
-
-        # Module is subscribed but no limit configured yet — default to 100
-        return 100 if company_has_module
-
-        0
+        AiQueryLog.monthly_limit_for(@company, user: current_user)
       end
 
       def check_ai_enabled

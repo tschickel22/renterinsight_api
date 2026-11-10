@@ -672,54 +672,18 @@ module Api
       end
 
       # GET /api/v1/company_settings/ai_settings
+      # Shows the limit the company actually gets (AiQueryLog.monthly_limit_for), not a
+      # placeholder: a blank company setting used to display the platform default of
+      # 100 while the API was enforcing 0.
       def ai_settings
         unless current_user&.role == 'platform_admin'
           return render json: { error: 'Platform admin required' }, status: :forbidden
         end
-        limit = begin
-          Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil)
-        rescue
-          nil
-        end
-        platform_default = begin
-          Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', 100)
-        rescue
-          100
-        end
-        render json: { ai_report_queries_monthly_limit: limit&.to_i || platform_default.to_i }
-      end
-
-      # PATCH /api/v1/company_settings/ai_settings
-      def update_ai_settings
-        unless current_user&.role == 'platform_admin'
-          return render json: { error: 'Platform admin required' }, status: :forbidden
-        end
-        limit = params[:ai_report_queries_monthly_limit].to_i
-        begin
-          Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
-          render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
-        rescue => e
-          Rails.logger.error "[CompanySettings] Failed to save AI limit: #{e.class} - #{e.message}"
-          render json: { error: "Failed to save: #{e.message}" }, status: :unprocessable_entity
-        end
-      end
-
-      # GET /api/v1/company_settings/ai_settings
-      def ai_settings
-        unless current_user&.role == 'platform_admin'
-          return render json: { error: 'Platform admin required' }, status: :forbidden
-        end
-        limit = begin
-          Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil)
-        rescue
-          nil
-        end
-        platform_default = begin
-          Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', 100)
-        rescue
-          100
-        end
-        render json: { ai_report_queries_monthly_limit: limit&.to_i || platform_default.to_i }
+        stored = Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil) rescue nil
+        render json: {
+          ai_report_queries_monthly_limit: AiQueryLog.monthly_limit_for(@company),
+          company_override: stored.to_s.strip.present?
+        }
       end
 
       # PATCH /api/v1/company_settings/ai_settings
