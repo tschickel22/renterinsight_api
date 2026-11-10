@@ -6,6 +6,9 @@ module Api
     # they blocked, the private link that puts their DealerTide appointments in
     # their own calendar, and their calendar's private address for busy times.
     # Quinn AI only offers times that are open here. Each user edits their own.
+    #
+    # busy_feed_detail is the rep's choice of how much of their own calendar
+    # shows on their DealerTide calendar, which managers and admins can open.
     class MyAvailabilityController < ApplicationController
       before_action :set_company_scope
 
@@ -17,10 +20,18 @@ module Api
       end
 
       def update
-        attrs = params.require(:availability).permit(:busy_feed_url, :use_location_hours, working_hours: {})
+        attrs = params.require(:availability).permit(:busy_feed_url, :busy_feed_detail, :use_location_hours, working_hours: {})
         if attrs.key?(:working_hours) || attrs.key?(:use_location_hours)
           use_location = ActiveModel::Type::Boolean.new.cast(attrs[:use_location_hours])
           current_user.update!(working_hours: use_location ? nil : clean_hours(attrs[:working_hours]))
+        end
+        if attrs.key?(:busy_feed_detail)
+          detail = attrs[:busy_feed_detail].to_s
+          unless CalendarBusyBlock::FEED_DETAILS.include?(detail)
+            return render(json: { error: 'Choose what to show from your calendar' }, status: :unprocessable_entity)
+          end
+
+          change_feed_detail(detail)
         end
         if attrs.key?(:busy_feed_url)
           url = attrs[:busy_feed_url].to_s.strip.presence
@@ -57,6 +68,20 @@ module Api
 
       private
 
+      # Showing less takes effect at once: titles and places the rep no longer
+      # wants shown are wiped now, not at the next read. Showing more needs a
+      # fresh read, since nothing beyond what was chosen was ever stored.
+      def change_feed_detail(detail)
+        previous = current_user.busy_feed_detail.to_s
+        return if previous == detail
+
+        current_user.update!(busy_feed_detail: detail)
+        feed_rows = CalendarBusyBlock.where(user_id: current_user.id, source: 'feed')
+        feed_rows.update_all(title: nil, place: nil) unless %w[titles titles_places].include?(detail)
+        feed_rows.update_all(place: nil) if detail == 'titles'
+        BusyFeedSyncJob.perform_later(current_user.id) if current_user.busy_feed_url.present?
+      end
+
       def payload
         user = current_user
         user.update!(calendar_feed_token: SecureRandom.urlsafe_base64(24)) if user.calendar_feed_token.blank?
@@ -71,6 +96,7 @@ module Api
           busy_feed_url: user.busy_feed_url,
           busy_feed_checked_at: user.busy_feed_checked_at,
           busy_feed_error: user.busy_feed_error,
+          busy_feed_detail: user.busy_feed_detail,
           busy_from_feed: CalendarBusyBlock.where(user_id: user.id, source: 'feed').where('ends_at > ?', Time.current).count,
           blocks: CalendarBusyBlock.where(user_id: user.id, source: 'manual').where('ends_at > ?', Time.current).order(:starts_at).limit(100)
                                    .map { |b| { id: b.id, starts_at: b.starts_at, ends_at: b.ends_at, note: b.note } },

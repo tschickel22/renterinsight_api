@@ -5,12 +5,17 @@ require 'net/http'
 module CalendarFeeds
   # Reads busy times from a rep's own calendar (E96 phase 2): the private
   # address Google ("Secret address in iCal format") or Outlook ("Publish
-  # calendar") gives them. Only start and end are kept, never what an event
-  # is. Free (transparent) and cancelled events are skipped. Repeating events
-  # are expanded for daily and weekly rules, which covers standing meetings;
-  # other rules count their first time only.
+  # calendar") gives them. Free (transparent) and cancelled events are skipped.
+  # Repeating events are expanded for daily and weekly rules, which covers
+  # standing meetings; other rules count their first time only.
+  #
+  # The title and place are kept only when the rep chose to show them on their
+  # DealerTide calendar (User#busy_feed_detail); otherwise only start and end.
+  # Descriptions, guests and meeting links are never kept.
   class BusyReader
     WINDOW = 14.days
+    # Kept a day back so earlier today still shows on the rep's calendar.
+    LOOKBACK = 1.day
     MAX_BYTES = 5_000_000
     DAYS = { 'SU' => 0, 'MO' => 1, 'TU' => 2, 'WE' => 3, 'TH' => 4, 'FR' => 5, 'SA' => 6 }.freeze
 
@@ -26,11 +31,17 @@ module CalendarFeeds
     end
 
     def sync!
-      blocks = busy_times(Time.current, Time.current + WINDOW)
+      blocks = entries(Time.current - LOOKBACK, Time.current + WINDOW)
+      detail = @user.try(:busy_feed_detail).to_s
+      keep_title = %w[titles titles_places].include?(detail)
+      keep_place = detail == 'titles_places'
       CalendarBusyBlock.transaction do
         CalendarBusyBlock.where(user_id: @user.id, source: 'feed').delete_all
-        blocks.first(2000).each do |(s, e)|
-          CalendarBusyBlock.create!(company_id: @user.company_id, user_id: @user.id, starts_at: s, ends_at: e, source: 'feed')
+        blocks.first(2000).each do |b|
+          CalendarBusyBlock.create!(company_id: @user.company_id, user_id: @user.id, starts_at: b[:starts_at], ends_at: b[:ends_at],
+                                    all_day: b[:all_day], source: 'feed',
+                                    title: (b[:title].to_s.truncate(200).presence if keep_title),
+                                    place: (b[:place].to_s.truncate(200).presence if keep_place))
         end
       end
       @user.update_columns(busy_feed_checked_at: Time.current, busy_feed_error: nil)
@@ -43,7 +54,18 @@ module CalendarFeeds
 
     # [[start, end], ...] overlapping the window.
     def busy_times(from, to)
-      events.flat_map { |ev| occurrences(ev, from, to) }.select { |(s, e)| s < to && e > from }.sort
+      entries(from, to).map { |b| [b[:starts_at], b[:ends_at]] }
+    end
+
+    # [{ starts_at:, ends_at:, all_day:, title:, place: }, ...] overlapping the
+    # window, in time order. Callers decide what of the title and place to keep.
+    def entries(from, to)
+      events.flat_map do |ev|
+        all_day = parse_time(ev['DTSTART']).last
+        title = text(ev.dig('SUMMARY', :value))
+        place = text(ev.dig('LOCATION', :value))
+        occurrences(ev, from, to).map { |(s, e)| { starts_at: s, ends_at: e, all_day: all_day, title: title, place: place } }
+      end.select { |b| b[:starts_at] < to && b[:ends_at] > from }.sort_by { |b| b[:starts_at] }
     end
 
     def events
@@ -61,7 +83,7 @@ module CalendarFeeds
 
           name, value = line.split(':', 2)
           key, *params = name.to_s.split(';')
-          current[key.upcase] = { value: value.to_s, params: params } if %w[DTSTART DTEND DURATION RRULE TRANSP STATUS].include?(key.upcase)
+          current[key.upcase] = { value: value.to_s, params: params } if %w[DTSTART DTEND DURATION RRULE TRANSP STATUS SUMMARY LOCATION].include?(key.upcase)
         end
       end
       list.reject { |e| e.dig('TRANSP', :value) == 'TRANSPARENT' || e.dig('STATUS', :value) == 'CANCELLED' || e['DTSTART'].nil? }
@@ -85,6 +107,12 @@ module CalendarFeeds
       raise Error, 'That address is not a calendar' unless res.body.to_s.include?('BEGIN:VCALENDAR')
 
       res.body.to_s
+    end
+
+    # RFC 5545 text: a backslash before n is a line break; before a comma,
+    # semicolon or backslash it escapes that character.
+    def text(value)
+      value.to_s.gsub(/\\([nN,;\\])/) { ::Regexp.last_match(1).casecmp?('n') ? ' ' : ::Regexp.last_match(1) }.squish.presence
     end
 
     def unfold(text)

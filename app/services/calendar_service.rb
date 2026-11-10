@@ -26,6 +26,12 @@ class CalendarService
   # Statuses treated as "done" for the hide_completed filter.
   COMPLETED_STATUSES = %w[completed cancelled done resolved closed].freeze
 
+  # Events from a rep's own Google or Outlook calendar (the private address
+  # they pasted in Availability), shown only as much as that rep chose
+  # (User#busy_feed_detail) and never openable or editable here.
+  OUTSIDE_TYPE = 'outside_calendar'
+  OUTSIDE_COLOR = '#64748B'
+
   attr_reader :user, :company, :params, :permission_service
   
   # Reading a calendar more widely includes the narrower views: someone allowed
@@ -37,10 +43,13 @@ class CalendarService
     scopes.any? { |scope| permission_service.can?('calendar', 'read', scope) }
   end
 
-  def initialize(user, company, params = {})
+  # include_outside: false leaves out events from reps' own calendars (the
+  # stats tiles count DealerTide work, not personal appointments).
+  def initialize(user, company, params = {}, include_outside: true)
     @user = user
     @company = company
     @params = params
+    @include_outside = include_outside
     @permission_service = PermissionService.new(user)
   end
   
@@ -72,6 +81,9 @@ class CalendarService
     if include_type?('service_ticket')
       events += load_service_tickets(view)
     end
+
+    # Add reps' own calendars, as much as each rep chose to show
+    events += load_outside_calendar(view) if @include_outside && include_type?(OUTSIDE_TYPE)
     
     # Apply date range filter
     events = filter_by_date_range(events)
@@ -388,6 +400,58 @@ class CalendarService
     end
   end
   
+  # The people whose own calendars this view covers: yourself on My, your team
+  # on Team, everyone (within the location filter) on All. Only reps who chose
+  # to show their calendar are included.
+  def load_outside_calendar(view)
+    owner_ids = case view
+                when 'my' then [user.id]
+                when 'team' then get_team_user_ids(location_scope)
+                when 'all'
+                  location_scope.present? ? UserLocation.where(location_id: location_scope).distinct.pluck(:user_id) : nil
+                else []
+                end
+    owners = company.users.where.not(busy_feed_detail: 'none')
+    owners = owners.where(id: owner_ids) unless owner_ids.nil?
+    owners = owners.index_by(&:id)
+    return [] if owners.empty?
+
+    from, to = outside_window
+    CalendarBusyBlock.where(company_id: company.id, user_id: owners.keys, source: 'feed')
+                     .overlapping(from, to).order(:starts_at).limit(3000)
+                     .map { |block| outside_event(block, owners[block.user_id]) }
+  end
+
+  def outside_window
+    from = (Time.zone.parse(params[:start_date].to_s) if params[:start_date].present?) rescue nil
+    to = (Time.zone.parse(params[:end_date].to_s) if params[:end_date].present?) rescue nil
+    [from || 1.month.ago, to || 3.months.from_now]
+  end
+
+  def outside_event(block, owner)
+    detail = owner.busy_feed_detail
+    whose = owner.full_name.present? ? "#{owner.full_name}'s own calendar" : 'Own calendar'
+    {
+      id: "outside-#{block.id}",
+      title: CalendarBusyBlock.shown_title(detail, block.title) || 'Busy',
+      type: OUTSIDE_TYPE,
+      start: block.starts_at.iso8601,
+      end: block.ends_at.iso8601,
+      all_day: block.all_day,
+      status: 'busy',
+      priority: nil,
+      description: nil,
+      location: CalendarBusyBlock.shown_place(detail, block.place),
+      assigned_to: { id: owner.id, name: owner.full_name, email: owner.email },
+      source: { type: OUTSIDE_TYPE, id: nil, name: whose },
+      color: OUTSIDE_COLOR,
+      entity_name: whose,
+      entity_type: OUTSIDE_TYPE,
+      entity_id: nil,
+      read_only: true
+    }
+  end
+
   # Convert activity to unified event format
   def activity_to_event(activity, source_type)
     # Determine entity info
