@@ -47,11 +47,7 @@ class Public::InventoryController < ApplicationController
   # - per_page: Items per page (default: company.items_per_page or 12, max: 50)
   def index
     # Base query - use statuses from params or fallback to company's public_statuses
-    statuses = if params[:statuses].present?
-      params[:statuses].split(',').map(&:strip)
-    else
-      get_public_statuses
-    end
+    statuses = requested_statuses
     
     @vehicles = @company.vehicles.includes(:catalog_plan_variant)
                        .where(status: statuses)
@@ -225,7 +221,7 @@ class Public::InventoryController < ApplicationController
   # - statuses (optional): as for index
   # - limit (optional): newest-homes fallback count (default 6, max 24)
   def featured
-    statuses = params[:statuses].present? ? params[:statuses].split(',').map(&:strip) : get_public_statuses
+    statuses = requested_statuses
     website = params[:website_id].present? ? @company.websites.find_by(id: params[:website_id]) : nil
 
     picks = if website
@@ -331,12 +327,8 @@ class Public::InventoryController < ApplicationController
   # - source_filter (optional): Same scope as #index — keeps filter options aligned
   #     with what the catalog will actually display.
   def filters
-    # Use passed statuses param if present, otherwise fall back to company defaults
-    statuses = if params[:statuses].present?
-      params[:statuses].split(',').map(&:strip)
-    else
-      get_public_statuses
-    end
+    # Passed statuses (limited to what the dealer has published), otherwise the company defaults
+    statuses = requested_statuses
     
     vehicles = @company.vehicles
                       .where(status: statuses)
@@ -572,12 +564,9 @@ class Public::InventoryController < ApplicationController
     end
     
     # Check if vehicle status is in allowed statuses
-    # Accept statuses from params (block-configured) or fall back to company defaults
-    statuses = if params[:statuses].present?
-      params[:statuses].split(',').map(&:strip)
-    else
-      get_public_statuses
-    end
+    # Accept statuses from params (block-configured, limited to what the dealer
+    # has published) or fall back to company defaults
+    statuses = requested_statuses
     
     unless statuses.include?(@vehicle.status)
       render json: { error: 'Vehicle not available for public viewing' }, status: :forbidden
@@ -585,6 +574,71 @@ class Public::InventoryController < ApplicationController
     end
   end
   
+  # Homes for sale. Every template, the public inventory page and the payment
+  # calculator ask for these, and the company defaults include both, so they
+  # are always allowed.
+  ALWAYS_PUBLIC_STATUSES = %w[available available_to_order].freeze
+
+  # The statuses a request may see.
+  #
+  # The token is in every public home link, so anyone holding one could pass
+  # statuses=sold,pending,reserved and list homes the dealer never published.
+  # A caller may now only ask for a status the dealer has put on show
+  # somewhere: the company public statuses, a status ticked on a block of one
+  # of their website pages, or a status in their saved inventory embed. Anything
+  # else is dropped from the request, not answered with an error, so a stale
+  # embed shows fewer homes rather than breaking.
+  def requested_statuses
+    return get_public_statuses if params[:statuses].blank?
+
+    requested = params[:statuses].to_s.split(',').map(&:strip).reject(&:blank?).uniq
+    allowed = ALWAYS_PUBLIC_STATUSES | get_public_statuses.map(&:to_s)
+    # Only walk the dealer's pages when the cheap list does not already cover it.
+    allowed |= dealer_published_statuses unless (requested - allowed).empty?
+
+    dropped = requested - allowed
+    if dropped.any?
+      Rails.logger.info(
+        "[Public::Inventory] dropped statuses #{dropped.join(',')} for company #{@company.id} " \
+        "(#{action_name}, referer #{request.referer.to_s.truncate(120)})"
+      )
+    end
+
+    requested & allowed
+  end
+
+  # Statuses the dealer chose on their website blocks or saved embed.
+  def dealer_published_statuses
+    found = []
+
+    pages = WebsitePage.joins(:website)
+                       .where(websites: { company_id: @company.id, is_deleted: [false, nil] })
+                       .where(is_deleted: [false, nil])
+    pages.pluck(:blocks).each { |blocks| collect_statuses(blocks, found) }
+
+    embed = Setting.get('Company', @company.id, 'embed_inventory_config') rescue nil
+    collect_statuses(embed, found) if embed.is_a?(Hash)
+
+    found.map(&:to_s).map(&:strip).reject(&:blank?).uniq
+  end
+
+  # Block content nests (sections, columns), so look for a statuses key at any
+  # depth. Stored as an array or as a comma-separated string.
+  def collect_statuses(node, found)
+    case node
+    when Hash
+      node.each do |key, value|
+        if key.to_s == 'statuses'
+          found.concat(value.is_a?(String) ? value.split(',') : Array(value).select { |v| v.is_a?(String) })
+        else
+          collect_statuses(value, found)
+        end
+      end
+    when Array
+      node.each { |child| collect_statuses(child, found) }
+    end
+  end
+
   # Get public statuses as array, handling different storage formats
   def get_public_statuses
     statuses = @company.public_statuses

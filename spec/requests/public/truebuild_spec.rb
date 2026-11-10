@@ -13,7 +13,12 @@ RSpec.describe 'Public TrueBuild', type: :request do
   # Requests come from the dealer's DealerTide site unless a spec says otherwise (TruebuildReach).
   let!(:site) do
     location = company.locations.create!(name: 'Main Lot')
-    Website.create!(company_id: company.id, location_id: location.id, name: 'Summit', slug: "s-#{SecureRandom.hex(4)}", status: 'published')
+    Website.create!(company_id: company.id, location_id: location.id, name: 'Summit', slug: "s-#{SecureRandom.hex(4)}", status: 'published').tap do |w|
+      # The dealer ticked On Order on their inventory block. The public catalog
+      # only serves a status the dealer has published somewhere, so the
+      # requests below that ask for on_order need this.
+      w.website_pages.create!(title: 'Homes', blocks: [{ 'type' => 'inventory', 'content' => { 'statuses' => %w[available on_order] } }])
+    end
   end
   let(:mfr) { Manufacturer.create!(name: "Champion #{SecureRandom.hex(3)}", industry_type: 'manufactured_home') }
   let(:factory) { mfr.factories.create!(name: 'Topeka', code: "TOP#{SecureRandom.hex(2)}") }
