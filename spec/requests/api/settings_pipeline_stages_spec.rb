@@ -105,4 +105,18 @@ RSpec.describe 'Settings pipeline stages', type: :request do
       expect(response).to have_http_status(:ok)
     end
   end
+
+  describe 'who can save' do
+    let(:company) { create(:company, use_rbac_system: true) }
+    let(:user) do
+      User.create!(email: "rep-#{SecureRandom.hex(3)}@example.com", password: 'Password123!', company: company,
+                   first_name: 'Sales', last_name: 'Rep', role: 'user', status: 'active')
+    end
+
+    it 'refuses someone without permission to change company settings' do
+      patch_stages(Company::DEFAULT_PIPELINE_STAGES.map { |st| st.merge('active' => true) })
+      expect(response).to have_http_status(:forbidden)
+      expect(Setting.get('Company', company.id, 'pipeline_stages', nil)).to be_nil
+    end
+  end
 end
