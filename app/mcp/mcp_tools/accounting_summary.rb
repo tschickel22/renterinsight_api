@@ -140,7 +140,7 @@ module McpTools
     end
 
     COSTS_HIDDEN = 'Cost of goods sold and gross profit are left out because they show dealer cost; net income is shown. ' \
-                   'expenses are operating expenses only. An admin can allow them under Settings, Integrations, AI ' \
+                   'Expenses are operating expenses only. An admin can allow them under Settings, Integrations, AI ' \
                    'Apps, "Let AI apps see dealer cost and gross"; the full P&L is in the app.'
 
     def self.top_rows(rows)

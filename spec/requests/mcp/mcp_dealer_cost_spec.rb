@@ -4,8 +4,8 @@ require 'rails_helper'
 require_relative '../../support/mcp_connector_helpers'
 
 # "Let AI apps see dealer cost and gross" covers the accounting tools too.
-# Off (the default): cost of goods sold, gross profit and net income stay out
-# of the accounting summary and the budget tools, and bills for homes and
+# Off (the default): cost of goods sold and gross profit stay out of the
+# accounting summary and the budget tools (net income is shown), and bills for homes and
 # jobs show no amounts. On: the books as the person's role reads them.
 # Also: a daily record limit of 0 pauses every read tool, single record
 # lookups included, as the AI Apps tab says.
