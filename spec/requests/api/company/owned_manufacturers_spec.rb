@@ -60,9 +60,11 @@ RSpec.describe 'Company-owned manufacturers', type: :request do
   describe 'claim counts in the list' do
     it 'returns per-manufacturer submitted/approved/total counts scoped to the company' do
       owned = Manufacturer.create!(name: 'Counted Co', industry_type: 'manufactured_home', company_id: company.id)
+      # One open claim per ticket is enforced by an index, so each claim gets its own ticket.
       ticket = ServiceTicket.create!(company_id: company.id, title: 'T', description: 'D')
+      ticket2 = ServiceTicket.create!(company_id: company.id, title: 'T2', description: 'D')
       WarrantyClaim.create!(company: company, service_ticket: ticket, manufacturer: owned, status: 'submitted')
-      WarrantyClaim.create!(company: company, service_ticket: ticket, manufacturer: owned, status: 'approved')
+      WarrantyClaim.create!(company: company, service_ticket: ticket2, manufacturer: owned, status: 'approved')
 
       get '/api/company/manufacturers', headers: headers
       row = JSON.parse(response.body)['manufacturers'].find { |r| r['id'] == owned.id }
@@ -129,6 +131,33 @@ RSpec.describe 'Company-owned manufacturers', type: :request do
       delete "/api/company/manufacturers/owned/#{m.id}", headers: headers
       expect(response).to have_http_status(:no_content)
       expect(Manufacturer.exists?(m.id)).to be(false)
+    end
+
+    it 'refuses with a 422 and keeps the company link when catalog records block the delete' do
+      m = Manufacturer.create!(name: 'Has Book', industry_type: 'manufactured_home', company_id: company.id)
+      link = company.company_manufacturers.create!(manufacturer_id: m.id, active: true)
+      CatalogPriceBook.create!(manufacturer: m, name: '2026 Book', status: 'draft')
+
+      delete "/api/company/manufacturers/owned/#{m.id}", headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/can't be deleted because it still has price books/)
+      expect(Manufacturer.exists?(m.id)).to be(true)
+      expect(CompanyManufacturer.exists?(link.id)).to be(true)
+    end
+
+    it 'refuses with a 422 and keeps the company link when other records point at it' do
+      m = Manufacturer.create!(name: 'At A Lot', industry_type: 'manufactured_home', company_id: company.id)
+      link = company.company_manufacturers.create!(manufacturer_id: m.id, active: true)
+      location = Location.create!(company: company, name: 'Lot One')
+      LocationManufacturer.create!(location: location, manufacturer: m)
+
+      delete "/api/company/manufacturers/owned/#{m.id}", headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/location manufacturers still use it/)
+      expect(Manufacturer.exists?(m.id)).to be(true)
+      expect(CompanyManufacturer.exists?(link.id)).to be(true)
     end
   end
 end

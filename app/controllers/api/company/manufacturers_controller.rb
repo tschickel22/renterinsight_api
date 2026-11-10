@@ -184,9 +184,23 @@ class Api::Company::ManufacturersController < ApplicationController
                     status: :unprocessable_entity
     end
 
-    @company.company_manufacturers.where(manufacturer_id: manufacturer.id).destroy_all
-    manufacturer.destroy
-    head :no_content
+    # Unlink and delete together. If the manufacturer cannot be deleted (it still has
+    # catalog records or other records point at it), roll the unlink back too, so it
+    # does not quietly drop into Available Manufacturers while the screen says deleted.
+    blocked = nil
+    ActiveRecord::Base.transaction do
+      @company.company_manufacturers.where(manufacturer_id: manufacturer.id).destroy_all
+      next if manufacturer.destroy
+
+      blocked = owned_manufacturer_delete_blocker(manufacturer)
+      raise ActiveRecord::Rollback
+    end
+    return head :no_content unless blocked
+
+    render json: { error: blocked }, status: :unprocessable_entity
+  rescue ActiveRecord::InvalidForeignKey => e
+    table = e.message.scan(/on table "([^"]+)"/).flatten.last
+    render json: { error: owned_manufacturer_in_use_message(table) }, status: :unprocessable_entity
   end
 
   # POST /api/company/manufacturers/import
@@ -236,6 +250,25 @@ class Api::Company::ManufacturersController < ApplicationController
   end
 
   private
+
+  # Plain reason for a blocked delete, built from the restrict_with_error associations.
+  def owned_manufacturer_delete_blocker(manufacturer)
+    labels = {
+      catalog_plans: 'floor plans', catalog_plan_variants: 'plan variants',
+      catalog_price_books: 'price books', catalog_option_groups: 'option groups',
+      catalog_options: 'options'
+    }
+    found = labels.select { |assoc, _| manufacturer.public_send(assoc).exists? }.values
+    return owned_manufacturer_in_use_message(nil) if found.empty?
+
+    "#{manufacturer.name} can't be deleted because it still has #{found.to_sentence} in the catalog. " \
+      'Deactivate it instead.'
+  end
+
+  def owned_manufacturer_in_use_message(table)
+    what = table.present? ? table.to_s.tr('_', ' ') : 'other records'
+    "This manufacturer can't be deleted because #{what} still use it. Deactivate it instead."
+  end
 
   def read_import_csv
     if params[:file].respond_to?(:read)
