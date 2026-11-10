@@ -37,6 +37,8 @@ module Api
       # PATCH /api/v1/listing_partners/:id
       # Body: { dealer_account_id: "..." } (blank clears it)
       def update
+        return unless authorize_action!('company_settings', 'update')
+
         unless can_edit?
           return render json: { error: 'Only company administrators can change listing partner settings' },
                         status: :forbidden
@@ -59,8 +61,10 @@ module Api
         render json: { error: 'Not found' }, status: :not_found
       end
 
+      # Saving needs both the company_settings:update permission (the same one
+      # every other settings save checks) and a company administrator role.
       def can_edit?
-        current_user.effective_admin?
+        current_user.effective_admin? && can?('company_settings', 'update')
       end
 
       def partner_json(partner, dealer_account_id)

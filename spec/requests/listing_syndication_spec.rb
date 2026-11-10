@@ -145,5 +145,22 @@ RSpec.describe 'Listing syndication', type: :request do
       expect(response).to have_http_status(:forbidden)
       expect(partner.dealer_account_id_for(dealer_a)).to be_nil
     end
+
+    # Found while filming: #update checked only effective_admin?, never the
+    # company_settings:update permission every other settings save requires.
+    # A legacy admin role user without that permission in an RBAC company
+    # could still save an account number.
+    it 'requires the company settings update permission, not just an admin role' do
+      dealer_a.update!(use_rbac_system: true)
+      legacy = user(dealer_a, 'admin', 'legacy@example.com')
+
+      get '/api/v1/listing_partners', headers: auth(legacy)
+      expect(response).to have_http_status(:forbidden)
+
+      patch "/api/v1/listing_partners/#{partner.id}", params: { dealer_account_id: 'X' }, headers: auth(legacy)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body['required_permission']).to eq('company_settings:update:all')
+      expect(SyndicationPartner.find(partner.id).dealer_account_id_for(dealer_a)).to be_nil
+    end
   end
 end
