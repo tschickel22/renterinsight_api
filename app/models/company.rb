@@ -634,6 +634,10 @@ class Company < ApplicationRecord
     { 'key' => 'closed_lost',    'name' => 'Closed Lost',    'order' => 6 }
   ].freeze
 
+  # Won and lost stages the settings screen locks: they cannot be removed,
+  # renamed or switched off (enforced in Api::SettingsController too).
+  LOCKED_PIPELINE_STAGE_KEYS = %w[closed_won closed_lost].freeze
+
   # Resolved stages: the company's saved override, else the system default.
   def pipeline_stages
     saved = Setting.get('Company', id, 'pipeline_stages', nil)
