@@ -128,6 +128,9 @@ events:
   - value: agreement.voided
     label: Agreement Voided
     category: Agreement Events
+  - value: agreement.expired
+    label: Agreement Expired
+    category: Agreement Events
   - value: agreement.reminder_sent
     label: Agreement Reminder Sent
     category: Agreement Events

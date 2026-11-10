@@ -223,6 +223,20 @@ default: &default
     class: AccountingIntegrityCheckJob
     queue: default
     schedule: every day at 1pm
+  expire_agreements:
+    # Agreements still out for signature past their expiry date become expired
+    # and fire agreement.expired. Neither agreement job was scheduled before
+    # 2026-11-10, so nothing expired and no automatic reminder went out.
+    class: ExpireAgreementsJob
+    queue: default
+    schedule: every hour at minute 20
+  agreement_reminders:
+    # Automatic signing reminders, at a reasonable hour for the signer. Only
+    # agreements sent in the last 30 days, at most 3 per signer
+    # (AgreementReminderService limits).
+    class: AgreementReminderJob
+    queue: default
+    schedule: every day at 10am America/Denver
 
   # Server watch (backlog E79): error spikes, failing jobs, and the jobs
   # heartbeat the outside watcher reads. Tells Tom, not customers.
