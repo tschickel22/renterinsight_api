@@ -61,6 +61,48 @@ RSpec.describe ImapSentEmailService do
       end
     end
 
+    # Heather Taylor, 2026-11-09: sent from her contact, the sync matched her
+    # address to a lead with the same email and logged a second copy there.
+    context 'when the platform sent it from another record with the same address' do
+      let(:sent_at) { Time.current }
+      let(:contact) { Contact.create!(company_id: company.id, first_name: 'Heather', last_name: 'T', email: 'Buyer@example.com') }
+
+      def sent_from(record, subject:, metadata: {})
+        create(:communication, :sent, communicable: record, company_id: company.id, to_address: 'Buyer@example.com',
+                                      subject: subject, sent_at: sent_at, metadata: metadata)
+      end
+
+      it 'is already logged when the subject matches' do
+        sent_from(contact, subject: 'Demo Follow Up')
+        expect(described_class.already_logged?(
+          message_id: nil, communicable: lead, to_address: lead.email, sent_at: sent_at + 20.seconds, subject: 'demo follow up'
+        )).to be true
+      end
+
+      it 'is a different email when the subject differs' do
+        sent_from(contact, subject: 'Your quote')
+        expect(described_class.already_logged?(
+          message_id: nil, communicable: lead, to_address: lead.email, sent_at: sent_at, subject: 'Demo Follow Up'
+        )).to be false
+      end
+
+      it 'does not count an earlier synced copy as the platform send' do
+        sent_from(contact, subject: 'Demo Follow Up', metadata: { 'source' => 'graph_sync' })
+        expect(described_class.already_logged?(
+          message_id: nil, communicable: lead, to_address: lead.email, sent_at: sent_at, subject: 'Demo Follow Up'
+        )).to be false
+      end
+
+      it 'does not look at another company' do
+        other = create(:company)
+        create(:communication, :sent, communicable: create(:lead, company: other, email: 'buyer@example.com'), company_id: other.id,
+                                      to_address: 'buyer@example.com', subject: 'Demo Follow Up', sent_at: sent_at)
+        expect(described_class.already_logged?(
+          message_id: nil, communicable: lead, to_address: lead.email, sent_at: sent_at, subject: 'Demo Follow Up'
+        )).to be false
+      end
+    end
+
     context 'timestamp fallback, for sends whose Message-ID never reached external_id' do
       let(:sent_at) { Time.current }
 

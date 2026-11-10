@@ -163,7 +163,8 @@ class SyncSentEmailsJob < ApplicationJob
       message_id: nil,
       communicable: (lead || contact),
       to_address: to_email,
-      sent_at: sent_time
+      sent_at: sent_time,
+      subject: envelope.subject
     )
 
     # Create Communication record
