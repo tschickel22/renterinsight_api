@@ -298,7 +298,10 @@ module Api
         new_role.key = params[:name] || "#{@role.key}_#{SecureRandom.hex(4)}"
         new_role.name = params[:display_name] || "#{@role.name} (Custom)"
         new_role.description = params[:description] || @role.description
-        new_role.tier = params[:tier] || 'company'
+        # A copy keeps the original's reach. Location roles stay location roles:
+        # a company-tier role gives its people every location (User#accessible_locations),
+        # so letting the copy widen would quietly hand a Sales Rep every lot.
+        new_role.tier = @role.tier
         
         if new_role.save
           @role.role_permissions.each do |permission|
@@ -381,6 +384,14 @@ module Api
         )
       end
       
+      # People holding the role in this company. Shared system roles are held in
+      # every company, so their count is narrowed to the one being looked at.
+      def role_users_count(role)
+        scope = role.user_role_assignments.active
+        scope = scope.where(company_id: current_company_id) if role.company_id.nil? && current_company_id
+        scope.distinct.count(:user_id)
+      end
+
       def serialize_role(role, include_permissions: false)
         data = {
           id: role.id,
@@ -395,7 +406,7 @@ module Api
           active: role.active,  # ✅ Add for frontend compatibility
           is_hidden_for_company: role.system_role? && current_company_id ? role.hidden_for_company?(current_company_id) : false,
           company_id: role.company_id,
-          users_count: role.user_role_assignments.count,
+          users_count: role_users_count(role),
           created_at: role.created_at,
           updated_at: role.updated_at
         }
