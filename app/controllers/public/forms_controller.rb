@@ -110,8 +110,10 @@ module Public
           message: @form.thank_you_message || 'Thank you for your submission!',
           redirect_url: @form.redirect_url,
           lead_created: submission.lead_created,
-          submission_id: submission.id
-        }
+          submission_id: submission.id,
+          # The buyer can keep talking with Quinn on the page (E96).
+          chat: chat_after_form(submission)
+        }.compact
       else
         Rails.logger.error "Submission failed: #{submission.errors.full_messages}"
         render json: { 
@@ -126,6 +128,19 @@ module Public
     end
     
     private
+
+    # Opens a website chat on the new lead when the dealer has the chat, so
+    # the page can show it straight away: { key: } for the widget.
+    def chat_after_form(submission)
+      lead = submission.lead_id && @form.company.leads.find_by(id: submission.lead_id)
+      return nil unless lead && ModuleAccessService.new(@form.company).module_enabled?(Assistant::Settings::CHAT_MODULE_KEY)
+
+      conversation = Assistant::WebChat.after_form!(lead: lead, page_url: request.referrer)
+      { key: conversation.visitor_token }
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Forms] chat after form failed: #{e.class}: #{e.message}")
+      nil
+    end
     
     def set_form
       @form = IntakeForm.active.find_by!(public_id: params[:public_id])
