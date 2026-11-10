@@ -72,55 +72,80 @@ class SyndicationPartner < ApplicationRecord
   end
   
   # Feed URL generation
+  #
+  # The host comes from configuration, never a hardcoded brand domain:
+  # PUBLIC_FEED_BASE_URL wins, then RAILS_API_URL (the API's own public
+  # address, which provider webhooks already use), then the local dev server.
+  def self.feed_base_url
+    (ENV['PUBLIC_FEED_BASE_URL'].presence ||
+      ENV['RAILS_API_URL'].presence ||
+      'https://localhost:3001').chomp('/')
+  end
+
+  # The address to give the partner, built from the current host. The stored
+  # feed_url column can still hold an old host written before a rebrand.
+  def public_feed_url
+    return nil if feed_token.blank?
+
+    "#{self.class.feed_base_url}/public/feeds/#{id}?token=#{feed_token}"
+  end
+
   def generate_feed_url
     return if feed_url.present?
-    
-    # Use environment-appropriate base URL
-    base_url = if Rails.env.development?
-      'https://localhost:3001'
-    elsif Rails.env.staging?
-      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://renterinsight-api-staging.onrender.com')
-    else
-      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://api.landlordinsight.com')
-    end
-    
-    token = SecureRandom.urlsafe_base64(32)
-    
-    update_column(:feed_url, "#{base_url}/public/feeds/#{id}?token=#{token}")
-    update_column(:feed_token, token)
+
+    regenerate_feed_url
   end
-  
+
   def regenerate_feed_url
-    # Use environment-appropriate base URL
-    base_url = if Rails.env.development?
-      'https://localhost:3001'
-    elsif Rails.env.staging?
-      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://renterinsight-api-staging.onrender.com')
-    else
-      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://api.landlordinsight.com')
-    end
-    
     token = SecureRandom.urlsafe_base64(32)
-    
-    update_column(:feed_url, "#{base_url}/public/feeds/#{id}?token=#{token}")
     update_column(:feed_token, token)
+    update_column(:feed_url, public_feed_url)
   end
-  
+
   def update_feed_url_format
-    # Just update the feed_url without changing the token
-    # This preserves the existing token when only format changes
-    base_url = if Rails.env.development?
-      'https://localhost:3001'
-    elsif Rails.env.staging?
-      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://renterinsight-api-staging.onrender.com')
-    else
-      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://api.landlordinsight.com')
-    end
-    
-    # Keep existing token
-    update_column(:feed_url, "#{base_url}/public/feeds/#{id}?token=#{feed_token}")
+    # Keep the existing token; only refresh the stored address.
+    update_column(:feed_url, public_feed_url) if feed_token.present?
   end
-  
+
+  # ---- Per-dealer identifier --------------------------------------------
+  #
+  # Partners are set up once by platform admins and their feed carries every
+  # dealer's published listings. Each dealer may have its own account number
+  # at the partner site, saved by that dealer on the Listing Partners tab.
+  # The feed sends that number for the dealer's own listings and falls back to
+  # our company id. It never sends one dealer's number on another's homes.
+  DEALER_ACCOUNT_SETTING_KEY = 'listing_partner_dealer_ids'
+
+  def self.dealer_account_ids_for(company_id)
+    raw = Setting.get('Company', company_id, DEALER_ACCOUNT_SETTING_KEY)
+    raw.is_a?(Hash) ? raw : {}
+  end
+
+  def dealer_account_id_for(company)
+    return nil unless company
+
+    @dealer_account_ids ||= {}
+    ids = @dealer_account_ids[company.id] ||= self.class.dealer_account_ids_for(company.id)
+    ids[id.to_s].presence
+  end
+
+  def dealer_identifier_for(company)
+    dealer_account_id_for(company) || company&.id
+  end
+
+  def set_dealer_account_id!(company, value)
+    ids = self.class.dealer_account_ids_for(company.id).deep_stringify_keys
+    value = value.to_s.strip
+    if value.present?
+      ids[id.to_s] = value
+    else
+      ids.delete(id.to_s)
+    end
+    Setting.set('Company', company.id, DEALER_ACCOUNT_SETTING_KEY, ids)
+    @dealer_account_ids&.delete(company.id)
+    value.presence
+  end
+
   # Sync tracking
   def mark_synced!
     update(last_sync_at: Time.current)

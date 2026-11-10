@@ -2,13 +2,20 @@
 
 module Api
   module Platform
+    # Listing syndication partners are platform-level: a platform admin sets
+    # each one up once and its feed carries every dealer's published listings
+    # (see Public::SyndicationFeedsController). Rows still carry the company of
+    # the admin who created them because the column is required, but that
+    # company does not limit anything. Dealers see partners and save their own
+    # account number through Api::V1::ListingPartnersController.
     class SyndicationPartnersController < ApplicationController
+      before_action :require_platform_admin!
       before_action :set_company
       before_action :set_partner, only: [:show, :update, :destroy, :toggle, :regenerate_token]
 
       # GET /api/platform/syndication-partners
       def index
-        partners = @company.syndication_partners.order(created_at: :desc)
+        partners = SyndicationPartner.order(created_at: :desc)
         
         render json: {
           partners: partners.map { |p| partner_json(p) }
@@ -81,7 +88,7 @@ module Api
       end
 
       def set_partner
-        @partner = @company.syndication_partners.find(params[:id])
+        @partner = SyndicationPartner.find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Syndication partner not found' }, status: :not_found
       end
@@ -108,7 +115,7 @@ module Api
           listingTypes: partner.listing_types || [],
           accountId: partner.account_id,
           active: partner.active,
-          feedUrl: partner.feed_url,
+          feedUrl: partner.public_feed_url || partner.feed_url,
           createdAt: partner.created_at,
           updatedAt: partner.updated_at
         }
