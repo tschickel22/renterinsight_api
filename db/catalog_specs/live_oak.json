@@ -1,0 +1,842 @@
+{
+ "about": "Live Oak floor plan sheets, read from the PDFs in the manufacturer's Google Drive folder 1JR7pxX8ZvsxijXmQzCyhsJzyJj9alf-I on 2026-11-10. Keyed by the website slug (the catalog source_key). Square feet is the heated figure, without porch. Dimensions are the nominal size printed on the sheet. Images live in the public catalog bucket.",
+ "homes": {
+  "5k": {
+   "model_id": "V-3725B",
+   "bathrooms": 3,
+   "square_feet": 2136,
+   "dimensions": "32 x 76",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/5k-v-3725b-577c6bd80c.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/5k-v-3725b-577c6bd80c.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-3725B-ELITE-BROCHURE (5K) new.pdf"
+  },
+  "ace": {
+   "model_id": "L-5763H",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/ace-l-5763h-33a29077aa.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/ace-l-5763h-33a29077aa.pdf",
+   "from_file": "CLASSIC OAKS/L-5763H-CLASSIC-ACE.pdf"
+  },
+  "apache": {
+   "model_id": "L-5762B",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/apache-l-5762b-98afee5a82.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/apache-l-5762b-98afee5a82.pdf",
+   "from_file": "Signature Oaks Series - Final/L-5762B - APACHE 2 - SIGNATURE.pdf"
+  },
+  "arlington": {
+   "model_id": "P-7764A",
+   "bathrooms": 3,
+   "square_feet": 2514,
+   "dimensions": "45 x 76",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/arlington-p-7764a-f5ce735ddf.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/arlington-p-7764a-f5ce735ddf.pdf",
+   "from_file": "PLANTATIONS/P-7764A - ARLINGTON (NEW).pdf"
+  },
+  "assassin": {
+   "model_id": "L-2523B",
+   "bathrooms": 2,
+   "square_feet": 1352,
+   "dimensions": "28 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/assassin-l-2523b-7e36e9ca28.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/assassin-l-2523b-7e36e9ca28.pdf",
+   "from_file": "CLASSIC OAKS/L-2523B-CLASSIC-ASSASSIN.pdf"
+  },
+  "big-horn": {
+   "model_id": "H-3684F",
+   "bathrooms": 2,
+   "square_feet": 2017,
+   "dimensions": "32 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/big-horn-h-3684f-cc9769348e.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/big-horn-h-3684f-cc9769348e.pdf",
+   "from_file": "XT SERIES/H-3684F-XT-BIG HORN.pdf"
+  },
+  "big-kahuna": {
+   "model_id": "D-3764W",
+   "bathrooms": 2,
+   "square_feet": 2254,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/big-kahuna-d-3764w-96c8aff6f0.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/big-kahuna-d-3764w-96c8aff6f0.pdf",
+   "from_file": "XT SERIES/D-3764W-XT-BIG KAHUNA.pdf"
+  },
+  "blitz": {
+   "model_id": "V-2764L",
+   "bathrooms": 3,
+   "square_feet": 1976,
+   "dimensions": "28 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/blitz-v-2764l-f079cd7e60.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/blitz-v-2764l-f079cd7e60.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2764L-ELITE-BLITZ BROCHURE.pdf"
+  },
+  "blue-ridge": {
+   "model_id": "H-3583B",
+   "bathrooms": 2,
+   "square_feet": 1720,
+   "dimensions": "32 x 62",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/blue-ridge-h-3583b-d4d67ed7bf.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/blue-ridge-h-3583b-d4d67ed7bf.pdf",
+   "from_file": "XT SERIES/H-3583B-XT-BLUE RIDGE.pdf"
+  },
+  "boulder": {
+   "model_id": "D-3583C",
+   "bathrooms": 2,
+   "square_feet": 1720,
+   "dimensions": "32 x 62",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/boulder-d-3583c-a7ccc64716.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/boulder-d-3583c-a7ccc64716.pdf",
+   "from_file": "XT SERIES/D-3583C-XT-BOULDER.pdf"
+  },
+  "brunswick": {
+   "model_id": "M-5602A",
+   "bathrooms": 2,
+   "square_feet": 890,
+   "dimensions": "16 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/brunswick-m-5602a-1cbb1de54c.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/brunswick-m-5602a-1cbb1de54c.pdf",
+   "from_file": "CLASSIC OAKS/M-5602A-CLASSIC-BRUNSWICK.pdf"
+  },
+  "buck-creek": {
+   "model_id": "V-5763Y",
+   "bathrooms": 2,
+   "square_feet": 1127,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/buck-creek-v-5763y-ae0e434f6b.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/buck-creek-v-5763y-ae0e434f6b.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-5763Y-ELITE-BROCHURE.pdf"
+  },
+  "buckhead-2": {
+   "model_id": "S-3583A",
+   "bathrooms": 2,
+   "square_feet": 1720,
+   "dimensions": "32 x 62",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/buckhead-2-s-3583a-575292dd78.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/buckhead-2-s-3583a-575292dd78.pdf",
+   "from_file": "Signature Oaks Series - Final/S-3583A - BUCKHEAD - SIGNATURE.pdf"
+  },
+  "canyon": {
+   "model_id": "D-2603L",
+   "bathrooms": 2.5,
+   "square_feet": 1560,
+   "dimensions": "28 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/canyon-d-2603l-cee30d5eba.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/canyon-d-2603l-cee30d5eba.pdf",
+   "from_file": "DD EXTREME (EX)/D-2603L-EX-BROCHURE CANYON.pdf"
+  },
+  "cardinal": {
+   "model_id": "L-2483O",
+   "bathrooms": 2,
+   "square_feet": 1248,
+   "dimensions": "28 x 52",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/cardinal-l-2483o-9936f96c36.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/cardinal-l-2483o-9936f96c36.pdf",
+   "from_file": "CLASSIC OAKS/L-2483O-CLASSIC - CARDINAL.pdf"
+  },
+  "charger": {
+   "model_id": "D-3663A",
+   "bathrooms": 2,
+   "square_feet": 1958,
+   "dimensions": "32 x 70",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/charger-d-3663a-bffb50d055.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/charger-d-3663a-bffb50d055.pdf",
+   "from_file": "XT SERIES/D-3663A-XT-CHARGER.pdf"
+  },
+  "cobblestone": {
+   "model_id": "D-7644A",
+   "bathrooms": 3,
+   "square_feet": 2225,
+   "dimensions": "42 x 68",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/cobblestone-d-7644a-de96bd0cfb.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/cobblestone-d-7644a-de96bd0cfb.pdf",
+   "from_file": "XT SERIES/D-7644A-XT-Cobblestone.pdf"
+  },
+  "costner": {
+   "model_id": "L-2684H",
+   "bathrooms": 2,
+   "square_feet": 1768,
+   "dimensions": "28 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/costner-l-2684h-bde09adeec.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/costner-l-2684h-bde09adeec.pdf",
+   "from_file": "SUPERSTARS/L-2684H-THE COSTNER.pdf"
+  },
+  "curry": {
+   "model_id": "L-2523C",
+   "bathrooms": 2,
+   "square_feet": 1352,
+   "dimensions": "28 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/curry-l-2523c-62f86a70e1.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/curry-l-2523c-62f86a70e1.pdf",
+   "from_file": "SUPERSTARS/L-2523C-THE CURRY.pdf"
+  },
+  "dart": {
+   "model_id": "L-4723A",
+   "bathrooms": 2,
+   "square_feet": 936,
+   "dimensions": "14 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/dart-l-4723a-de4099bcc4.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/dart-l-4723a-de4099bcc4.pdf",
+   "from_file": "RUNNERS/L-4723A-DART.pdf"
+  },
+  "dash": {
+   "model_id": "X-5662B",
+   "bathrooms": 2,
+   "square_feet": 979,
+   "dimensions": "16 x 70",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/dash-x-5662b-77f7f92dd2.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/dash-x-5662b-77f7f92dd2.pdf",
+   "from_file": "RUNNERS/X-5662B-1 13- DASH 2.pdf"
+  },
+  "defender": {
+   "model_id": "S-2503A",
+   "bathrooms": 2,
+   "square_feet": 1300,
+   "dimensions": "28 x 54",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/defender-s-2503a-f63f75254e.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/defender-s-2503a-f63f75254e.pdf",
+   "from_file": "Signature Oaks Series - Final/S-2503A-SIG-BROCHURE DEFENDER.pdf"
+  },
+  "denali": {
+   "model_id": "H-2563M",
+   "bathrooms": 2,
+   "square_feet": 1456,
+   "dimensions": "28 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/denali-h-2563m-951573b04d.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/denali-h-2563m-951573b04d.pdf",
+   "from_file": "XT SERIES/H-2563M-XT-DENALI.pdf"
+  },
+  "dogwood": {
+   "model_id": "H-3724D",
+   "bathrooms": 2,
+   "square_feet": 2136,
+   "dimensions": "32 x 76",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/dogwood-h-3724d-b37bf4b19a.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/dogwood-h-3724d-b37bf4b19a.pdf",
+   "from_file": "XT SERIES/H-3724D-XT-DOGWOOD.pdf"
+  },
+  "double-pantry": {
+   "model_id": "L-2563H",
+   "bathrooms": 2,
+   "square_feet": 1456,
+   "dimensions": "28 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/double-pantry-l-2563h-15139e0d02.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/double-pantry-l-2563h-15139e0d02.pdf",
+   "from_file": "Signature Oaks Series - Final/L-2563H - DOUBLE PANTRY - SIGNATURE.pdf"
+  },
+  "driftwood": {
+   "model_id": "L-5662H",
+   "bathrooms": 2,
+   "square_feet": 890,
+   "dimensions": "16 x 70",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/driftwood-l-5662h-a2b397816e.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/driftwood-l-5662h-a2b397816e.pdf",
+   "from_file": "CLASSIC OAKS/L-5662H-CLASSIC-DRIFTWOOD.pdf"
+  },
+  "earnhardt": {
+   "model_id": "L-2604F",
+   "bathrooms": 2,
+   "square_feet": 1560,
+   "dimensions": "28 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/earnhardt-l-2604f-bf4dc7e314.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/earnhardt-l-2604f-bf4dc7e314.pdf",
+   "from_file": "SUPERSTARS/L-2604F-THE EARNHARDT (2).pdf"
+  },
+  "elevation": {
+   "model_id": "S-2603K",
+   "bathrooms": 2,
+   "square_feet": 1560,
+   "dimensions": "28 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/elevation-s-2603k-4779325c73.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/elevation-s-2603k-4779325c73.pdf",
+   "from_file": "Signature Oaks Series - Final/S-2603K-SIG-ELEVATION.pdf"
+  },
+  "escalade": {
+   "model_id": "H-5763T",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/escalade-h-5763t-dc0b5177e4.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/escalade-h-5763t-dc0b5177e4.pdf",
+   "from_file": "XT SERIES/H-5763T-XT-ESCALADE.pdf"
+  },
+  "fancy": {
+   "model_id": "L-3764Z",
+   "bathrooms": 3,
+   "square_feet": 2254,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/fancy-l-3764z-b8b9251f28.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/fancy-l-3764z-b8b9251f28.pdf",
+   "from_file": "CLASSIC OAKS/L-3764Z-CLASSIC-THE FANCY.pdf"
+  },
+  "fat-boy": {
+   "model_id": "L-5562A",
+   "bathrooms": 2,
+   "square_feet": 830,
+   "dimensions": "16 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/fat-boy-l-5562a-bd1788be1c.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/fat-boy-l-5562a-bd1788be1c.pdf",
+   "from_file": "CLASSIC OAKS/L-5562A-CLASSIC-FAT BOY.pdf"
+  },
+  "flash": {
+   "model_id": "L-2363C",
+   "bathrooms": 2,
+   "square_feet": 936,
+   "dimensions": "28 x 40",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/flash-l-2363c-d466ac70ea.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/flash-l-2363c-d466ac70ea.pdf",
+   "from_file": "RUNNERS/L-2363C FLASH.pdf"
+  },
+  "gametime": {
+   "model_id": "V-3764A",
+   "bathrooms": 3,
+   "square_feet": 2254,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/gametime-v-3764a-726e674d3b.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/gametime-v-3764a-726e674d3b.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-3764A-ELITE-BROCHURE GAMETIME.pdf"
+  },
+  "georgia-giant": {
+   "model_id": "S-3805A",
+   "bathrooms": 3,
+   "square_feet": 2373,
+   "dimensions": "32 x 84",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/georgia-giant-s-3805a-81b58fc202.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/georgia-giant-s-3805a-81b58fc202.pdf",
+   "from_file": "CLASSIC OAKS/S-3805A-CLASSIC-GEORGIA GIANT.pdf"
+  },
+  "guardian": {
+   "model_id": "V-2684G",
+   "bathrooms": 2,
+   "square_feet": 1768,
+   "dimensions": "28 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/guardian-v-2684g-47a775da0b.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/guardian-v-2684g-47a775da0b.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2684G-ELITE- GAURDIAN BROCHURE.pdf"
+  },
+  "hamilton": {
+   "model_id": "V-2443G",
+   "bathrooms": 2,
+   "square_feet": 1144,
+   "dimensions": "28 x 48",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/hamilton-v-2443g-e7c7ab07b0.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/hamilton-v-2443g-e7c7ab07b0.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2443G-ELITE HAMILTON-BROCHURE.pdf"
+  },
+  "heritage": {
+   "model_id": "P-3663C",
+   "bathrooms": 2,
+   "square_feet": 1942,
+   "dimensions": "32 x 70",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/heritage-p-3663c-b65263b7f1.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/heritage-p-3663c-b65263b7f1.pdf",
+   "from_file": "PLANTATIONS/P-3663C - HERITAGE.pdf"
+  },
+  "high-country": {
+   "model_id": "D-3764S",
+   "bathrooms": 2.5,
+   "square_feet": 2254,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/high-country-d-3764s-162bbc30d3.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/high-country-d-3764s-162bbc30d3.pdf",
+   "from_file": "DD EXTREME (EX)/D-3764S-EX-BROCHURE HIGH COUNTRY.pdf"
+  },
+  "highlander": {
+   "model_id": "H-3764X",
+   "bathrooms": 3,
+   "square_feet": 2254,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/highlander-h-3764x-0687446b64.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/highlander-h-3764x-0687446b64.pdf",
+   "from_file": "XT SERIES/H-3764X-XT-HIGHLANDER.pdf"
+  },
+  "horizon": {
+   "model_id": "U-3563E",
+   "bathrooms": 2,
+   "square_feet": 1661,
+   "dimensions": "32 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/horizon-u-3563e-28137a8f27.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/horizon-u-3563e-28137a8f27.pdf",
+   "from_file": "CLASSIC OAKS/U-3563E-CLASSIC-HORIZON.pdf"
+  },
+  "j-low": {
+   "model_id": "L-4401F",
+   "bathrooms": 1,
+   "square_feet": 520,
+   "dimensions": "14 x 44",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/j-low-l-4401f-c12bc05058.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/j-low-l-4401f-c12bc05058.pdf",
+   "from_file": "SUPERSTARS/L-4401F-THE J-LOW.pdf"
+  },
+  "jet": {
+   "model_id": "L-2483I",
+   "bathrooms": 2,
+   "square_feet": 1244,
+   "dimensions": "28 x 52",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/jet-l-2483i-e2337e0b05.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/jet-l-2483i-e2337e0b05.pdf",
+   "from_file": "RUNNERS/L-2483I JET.pdf"
+  },
+  "lakeview": {
+   "model_id": "D-2643B",
+   "bathrooms": 2,
+   "square_feet": 1792,
+   "dimensions": "28 x 68",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/lakeview-d-2643b-8f37303a1c.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/lakeview-d-2643b-8f37303a1c.pdf",
+   "from_file": "XT SERIES/D-2643B-XT-LAKEVIEW.pdf"
+  },
+  "laramie": {
+   "model_id": "D-3603Q",
+   "bathrooms": 2,
+   "square_feet": 1795,
+   "dimensions": "32 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/laramie-d-3603q-849ad0d741.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/laramie-d-3603q-849ad0d741.pdf",
+   "from_file": "DD EXTREME (EX)/D-3603Q-EX-BROCHURE LARAMIE.pdf"
+  },
+  "lexi": {
+   "model_id": "L-5762F",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/lexi-l-5762f-99155dab29.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/lexi-l-5762f-99155dab29.pdf",
+   "from_file": "Signature Oaks Series - Final/L-5762F- LEXI - SIGNATURE.pdf"
+  },
+  "lightning": {
+   "model_id": "L-4562A",
+   "bathrooms": 2,
+   "square_feet": 728,
+   "dimensions": "14 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/lightning-l-4562a-f99743feb0.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/lightning-l-4562a-f99743feb0.pdf",
+   "from_file": "RUNNERS/L-4562A-LIGHTNING.pdf"
+  },
+  "lonestar": {
+   "model_id": "H-7724A",
+   "bathrooms": 3,
+   "square_feet": 2402,
+   "dimensions": "45 x 76",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/lonestar-h-7724a-529f867246.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/lonestar-h-7724a-529f867246.pdf",
+   "from_file": "XT SERIES/H-7724A-XT-Lonestar.pdf"
+  },
+  "madison": {
+   "model_id": "V-2643A",
+   "bathrooms": 2.5,
+   "square_feet": 1664,
+   "dimensions": "28 x 68",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/madison-v-2643a-0d3de6664c.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/madison-v-2643a-0d3de6664c.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2643A-ELITE-BROCHURE MADISON.pdf"
+  },
+  "mahomes": {
+   "model_id": "L-5662E",
+   "bathrooms": 2,
+   "square_feet": 979,
+   "dimensions": "16 x 70",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/mahomes-l-5662e-e051212793.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/mahomes-l-5662e-e051212793.pdf",
+   "from_file": "SUPERSTARS/L-5662E-THE MAHOMES.pdf"
+  },
+  "maverick": {
+   "model_id": "D-2443J",
+   "bathrooms": 2,
+   "square_feet": 1144,
+   "dimensions": "28 x 48",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/maverick-d-2443j-b286742f32.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/maverick-d-2443j-b286742f32.pdf",
+   "from_file": "DD EXTREME (EX)/D-2443J-EX-BROCHURE MAVERICK.pdf"
+  },
+  "mayberry": {
+   "model_id": "S-2523G",
+   "bathrooms": 2,
+   "square_feet": 1352,
+   "dimensions": "28 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/mayberry-s-2523g-d035a960cf.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/mayberry-s-2523g-d035a960cf.pdf",
+   "from_file": "CLASSIC OAKS/S-2523G-CLASSIC-MAYBERRY.pdf"
+  },
+  "messi": {
+   "model_id": "L-3645B",
+   "bathrooms": 3,
+   "square_feet": 1898,
+   "dimensions": "32 x 68",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/messi-l-3645b-004abb6416.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/messi-l-3645b-004abb6416.pdf",
+   "from_file": "SUPERSTARS/L-3645B-SS  THE MESSI.pdf"
+  },
+  "miguel": {
+   "model_id": "B-2482A",
+   "bathrooms": 2,
+   "square_feet": 1092,
+   "dimensions": "28 x 48",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/miguel-b-2482a-ecc62dc889.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/miguel-b-2482a-ecc62dc889.pdf",
+   "from_file": "XT SERIES/B-2482A-XT-MIGUEL.pdf"
+  },
+  "mill-creek": {
+   "model_id": "V-2403I",
+   "bathrooms": 2,
+   "square_feet": 1040,
+   "dimensions": "28 x 44",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/mill-creek-v-2403i-0122bc9762.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/mill-creek-v-2403i-0122bc9762.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2403I-ELITE - MILL CREEK.pdf"
+  },
+  "mj": {
+   "model_id": "L-2764K",
+   "bathrooms": 3,
+   "square_feet": 1976,
+   "dimensions": "28 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/mj-l-2764k-a7d274e86f.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/mj-l-2764k-a7d274e86f.pdf",
+   "from_file": "SUPERSTARS/L-2764K-THE MJ (2).pdf"
+  },
+  "monster-mansion": {
+   "model_id": "S-3725A",
+   "bathrooms": 3,
+   "square_feet": 2136,
+   "dimensions": "32 x 76",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/monster-mansion-s-3725a-8e23673fd0.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/monster-mansion-s-3725a-8e23673fd0.pdf",
+   "from_file": "Signature Oaks Series - Final/S-3725A-SIG-Monster Mansion.pdf"
+  },
+  "naples": {
+   "model_id": "M-5763O",
+   "bathrooms": 2,
+   "square_feet": 1127,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/naples-m-5763o-1e279a52a7.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/naples-m-5763o-1e279a52a7.pdf",
+   "from_file": "Signature Oaks Series - Final/M-5763O - NAPLES - SIGNATURE.pdf"
+  },
+  "nitro": {
+   "model_id": "V-2603J",
+   "bathrooms": 2,
+   "square_feet": 1560,
+   "dimensions": "28 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/nitro-v-2603j-fd1cfe13f2.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/nitro-v-2603j-fd1cfe13f2.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2603J-ELITE-NITRO - BROCHURE.pdf"
+  },
+  "nitro-quatro": {
+   "model_id": "V-2604H",
+   "bathrooms": 3,
+   "square_feet": 1560,
+   "dimensions": "28 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/nitro-quatro-v-2604h-4d76e28d39.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/nitro-quatro-v-2604h-4d76e28d39.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2604H-ELITE-NITRO QUATRO BROCHURE.pdf"
+  },
+  "pistol": {
+   "model_id": "U-2443H",
+   "bathrooms": 2,
+   "square_feet": 1144,
+   "dimensions": "28 x 48",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/pistol-u-2443h-430dff59b2.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/pistol-u-2443h-430dff59b2.pdf",
+   "from_file": "Signature Oaks Series - Final/U-2443H - PISTOL - SIGNATURE.pdf"
+  },
+  "predator": {
+   "model_id": "L-2704D",
+   "bathrooms": 2,
+   "square_feet": 1820,
+   "dimensions": "28 x 74",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/predator-l-2704d-b13c25dbcd.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/predator-l-2704d-b13c25dbcd.pdf",
+   "from_file": "CLASSIC OAKS/L-2704D-CLASSIC-PREDATOR.pdf"
+  },
+  "quail-ridge": {
+   "model_id": "D-3764D",
+   "bathrooms": 3.5,
+   "square_feet": 2254,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/quail-ridge-d-3764d-b18753b6f7.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/quail-ridge-d-3764d-b18753b6f7.pdf",
+   "from_file": "XT SERIES/D-3764D-XT-QUAIL RIDGE.pdf"
+  },
+  "raptor": {
+   "model_id": "L-3524F",
+   "bathrooms": 2,
+   "square_feet": 1542,
+   "dimensions": "32 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/raptor-l-3524f-51c3974e48.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/raptor-l-3524f-51c3974e48.pdf",
+   "from_file": "CLASSIC OAKS/L-3524F-CLASSIC-RAPTOR.pdf"
+  },
+  "raven": {
+   "model_id": "H-2483N",
+   "bathrooms": 2,
+   "square_feet": 1248,
+   "dimensions": "28 x 52",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/raven-h-2483n-a0e84f5140.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/raven-h-2483n-a0e84f5140.pdf",
+   "from_file": "XT SERIES/H-2483N-XT-RAVEN.pdf"
+  },
+  "rock": {
+   "model_id": "L-3725C",
+   "bathrooms": 3,
+   "square_feet": 2136,
+   "dimensions": "32 x 76",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/rock-l-3725c-9b33084471.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/rock-l-3725c-9b33084471.pdf",
+   "from_file": "SUPERSTARS/L-3725C-THE ROCK.pdf"
+  },
+  "rocky-mountain": {
+   "model_id": "H-3705A",
+   "bathrooms": 3,
+   "square_feet": 2076,
+   "dimensions": "32 x 74",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/rocky-mountain-h-3705a-ff83dbbb17.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/rocky-mountain-h-3705a-ff83dbbb17.pdf",
+   "from_file": "XT SERIES/H-3705A-XT-ROCKY MOUNTAIN.pdf"
+  },
+  "runner-28x64": {
+   "model_id": "L-2603G",
+   "bathrooms": 2,
+   "square_feet": 1560,
+   "dimensions": "28 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/runner-28x64-l-2603g-51486ea5cf.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/runner-28x64-l-2603g-51486ea5cf.pdf",
+   "from_file": "RUNNERS/L-2603G-GUNNER.pdf"
+  },
+  "runner-singlewide": {
+   "model_id": "L-5763I",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/runner-singlewide-l-5763i-e46e50f6fa.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/runner-singlewide-l-5763i-e46e50f6fa.pdf",
+   "from_file": "RUNNERS/L-5763I-BOLT.pdf"
+  },
+  "sandy-point": {
+   "model_id": "V-3603R",
+   "bathrooms": 2.5,
+   "square_feet": 1780,
+   "dimensions": "32 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/sandy-point-v-3603r-086063de7b.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/sandy-point-v-3603r-086063de7b.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-3603R-ELITE-BROCHURE.pdf"
+  },
+  "savannah": {
+   "model_id": "D-3684G",
+   "bathrooms": 2,
+   "square_feet": 2017,
+   "dimensions": "32 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/savannah-d-3684g-e2b7c3df2a.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/savannah-d-3684g-e2b7c3df2a.pdf",
+   "from_file": "XT SERIES/D-3684G-XT-SAVANNAH.pdf"
+  },
+  "sawgrass": {
+   "model_id": "S-3684H",
+   "bathrooms": 3,
+   "square_feet": 2017,
+   "dimensions": "32 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/sawgrass-s-3684h-d6bae01a99.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/sawgrass-s-3684h-d6bae01a99.pdf",
+   "from_file": "CLASSIC OAKS/S-3684H-CLASSIC-SAWGRASS.pdf"
+  },
+  "shelby": {
+   "model_id": "M-3603H",
+   "bathrooms": 2,
+   "square_feet": 1760,
+   "dimensions": "32 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/shelby-m-3603h-18a5093a47.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/shelby-m-3603h-18a5093a47.pdf",
+   "from_file": "CLASSIC OAKS/M-3603H-CLASSIC-SHELBY.pdf"
+  },
+  "silverado": {
+   "model_id": "D-2523H",
+   "bathrooms": 2,
+   "square_feet": 1352,
+   "dimensions": "28 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/silverado-d-2523h-9b4afa3082.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/silverado-d-2523h-9b4afa3082.pdf",
+   "from_file": "DD EXTREME (EX)/D-2523H-EX-BROCHURE SILVERADO.pdf"
+  },
+  "sling-shot": {
+   "model_id": "S-5562B",
+   "bathrooms": 2,
+   "square_feet": 830,
+   "dimensions": "16 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/sling-shot-s-5562b-43de0821c7.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/sling-shot-s-5562b-43de0821c7.pdf",
+   "from_file": "CLASSIC OAKS/S-5562B-CLASSIC-SLING SHOT.pdf"
+  },
+  "slugger": {
+   "model_id": "S-5763W",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/slugger-s-5763w-3f9c5c4dda.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/slugger-s-5763w-3f9c5c4dda.pdf",
+   "from_file": "CLASSIC OAKS/S-5763W-CLASSIC - SLUGGER.pdf"
+  },
+  "sonic": {
+   "model_id": "L-2684B",
+   "bathrooms": 2,
+   "square_feet": 1768,
+   "dimensions": "28 x 72",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/sonic-l-2684b-956e296dd6.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/sonic-l-2684b-956e296dd6.pdf",
+   "from_file": "RUNNERS/L-2684B-R  SONIC.pdf"
+  },
+  "southerncharm": {
+   "model_id": "L-2403C",
+   "bathrooms": 2,
+   "square_feet": 1040,
+   "dimensions": "28 x 44",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/southerncharm-l-2403c-bd88522eeb.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/southerncharm-l-2403c-bd88522eeb.pdf",
+   "from_file": "CLASSIC OAKS/L-2403C-CLASSIC-SOUTHERN CHARM.pdf"
+  },
+  "spark": {
+   "model_id": "L-2564F",
+   "bathrooms": 2,
+   "square_feet": 1456,
+   "dimensions": "28 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/spark-l-2564f-59aa823ed8.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/spark-l-2564f-59aa823ed8.pdf",
+   "from_file": "RUNNERS/L-2564F-SPARK.pdf"
+  },
+  "spring-ridge": {
+   "model_id": "V-2524A",
+   "bathrooms": 2,
+   "square_feet": 1352,
+   "dimensions": "28 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/spring-ridge-v-2524a-80fa8f09f4.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/spring-ridge-v-2524a-80fa8f09f4.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2524A-ELITE SPRING RIDGE-BROCHURE.pdf"
+  },
+  "sprinter": {
+   "model_id": "L-2563G",
+   "bathrooms": 2,
+   "square_feet": 1456,
+   "dimensions": "28 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/sprinter-l-2563g-21411c84b0.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/sprinter-l-2563g-21411c84b0.pdf",
+   "from_file": "RUNNERS/L-2563G-SPRINTER.pdf"
+  },
+  "st-augustine": {
+   "model_id": "U-5763E",
+   "bathrooms": 2,
+   "square_feet": 1130,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/st-augustine-u-5763e-51a5b64516.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/st-augustine-u-5763e-51a5b64516.pdf",
+   "from_file": "CLASSIC OAKS/U-5763E-CLASSIC-AUGUSTINE.pdf"
+  },
+  "telford": {
+   "model_id": "V-3524G",
+   "bathrooms": 2,
+   "square_feet": 1525,
+   "dimensions": "32 x 52",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/telford-v-3524g-1cc074de71.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/telford-v-3524g-1cc074de71.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-3524G-ELITE-TELFORD BROCHURE.pdf"
+  },
+  "tremor": {
+   "model_id": "D-2764M",
+   "bathrooms": 3,
+   "square_feet": 1976,
+   "dimensions": "28 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/tremor-d-2764m-3a8f94b913.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/tremor-d-2764m-3a8f94b913.pdf",
+   "from_file": "DD EXTREME (EX)/D-2764M-EX-BROCHURE TREMOR.pdf"
+  },
+  "trenton": {
+   "model_id": "V-2523I",
+   "bathrooms": 2,
+   "square_feet": 1352,
+   "dimensions": "28 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/trenton-v-2523i-604b5603bf.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/trenton-v-2523i-604b5603bf.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-2523I-ELITE-TRENTON BROCHURE.pdf"
+  },
+  "troy": {
+   "model_id": "V-5763P",
+   "bathrooms": 2,
+   "square_feet": 1127,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/troy-v-5763p-f81cfd8fd4.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/troy-v-5763p-f81cfd8fd4.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-5763P-ELITE-BROCHURE TROY.pdf"
+  },
+  "tswift": {
+   "model_id": "L-4562A",
+   "bathrooms": 2,
+   "square_feet": 728,
+   "dimensions": "14 x 56",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/tswift-l-4562a-deb058f90f.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/tswift-l-4562a-deb058f90f.pdf",
+   "from_file": "SUPERSTARS/L-4562A-THE T-SWIFT.pdf"
+  },
+  "tundra": {
+   "model_id": "D-3604B",
+   "bathrooms": 2,
+   "square_feet": 1780,
+   "dimensions": "32 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/tundra-d-3604b-089be2f29c.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/tundra-d-3604b-089be2f29c.pdf",
+   "from_file": "XT SERIES/D-3604B-XT-TUNDRA.pdf"
+  },
+  "veranda": {
+   "model_id": "P-3603P",
+   "bathrooms": 2,
+   "square_feet": 1655,
+   "dimensions": "32 x 64",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/veranda-p-3603p-ed658d3c78.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/veranda-p-3603p-ed658d3c78.pdf",
+   "from_file": "PLANTATIONS/P-3603P - VERANDA.pdf"
+  },
+  "victorian": {
+   "model_id": "P-3764O",
+   "bathrooms": 2,
+   "square_feet": 2273,
+   "dimensions": "32 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/victorian-p-3764o-f329fc6dfa.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/victorian-p-3764o-f329fc6dfa.pdf",
+   "from_file": "PLANTATIONS/P-3764O-Victorian.pdf"
+  },
+  "vin-diesel": {
+   "model_id": "L-5763R",
+   "bathrooms": 2,
+   "square_feet": 1128,
+   "dimensions": "16 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/vin-diesel-l-5763r-480de192a6.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/vin-diesel-l-5763r-480de192a6.pdf",
+   "from_file": "SUPERSTARS/L-5763R-THE VIN DIESEL.pdf"
+  },
+  "yellow-jacket": {
+   "model_id": "V-5562K",
+   "bathrooms": 2,
+   "square_feet": 830,
+   "dimensions": "16 x 60",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/yellow-jacket-v-5562k-90fae2c6e2.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/yellow-jacket-v-5562k-90fae2c6e2.pdf",
+   "from_file": "SUWANNEE VALLEY/SUWANNEE VALLEY - ELITE/V-5562K-ELITE-YELLOWJACET- BROCHURE.pdf"
+  },
+  "yellowstone": {
+   "model_id": "H-3664B",
+   "bathrooms": 2,
+   "square_feet": 1958,
+   "dimensions": "32 x 70",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/yellowstone-h-3664b-ff70d7e482.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/yellowstone-h-3664b-ff70d7e482.pdf",
+   "from_file": "XT SERIES/H-3664B-XT-YELLOWSTONE.pdf"
+  },
+  "yukon": {
+   "model_id": "S-2764I",
+   "bathrooms": 3,
+   "square_feet": 1976,
+   "dimensions": "28 x 80",
+   "floor_plan_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/floor_plans/yukon-s-2764i-0e9f02913d.png",
+   "plan_pdf_url": "https://dt-catalog-assets-production.s3.us-west-2.amazonaws.com/catalog/live_oak/plan_pdfs/yukon-s-2764i-0e9f02913d.pdf",
+   "from_file": "Signature Oaks Series - Final/S-2764I-YUKON.pdf"
+  }
+ }
+}
