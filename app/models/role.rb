@@ -28,6 +28,7 @@ class Role < ApplicationRecord
   validates :key, presence: true, length: { maximum: 100 }
   validates :name, presence: true
   validates :key, uniqueness: { scope: [:company_id, :tier] }
+  validate :name_unique_within_company, if: -> { company_id.present? && (new_record? || will_save_change_to_name?) }
 
   # Scopes
   scope :active, -> { where(active: true) }
@@ -783,6 +784,17 @@ class Role < ApplicationRecord
         granted: true
       )
     end
+  end
+
+  # A company's role pickers list the shared roles and its own roles together, by
+  # name, so two roles called the same thing cannot be told apart there.
+  def name_unique_within_company
+    return if name.blank?
+
+    taken = Role.where('LOWER(name) = ?', name.strip.downcase)
+                .where('company_id = ? OR (is_system_role = ? AND company_id IS NULL)', company_id, true)
+    taken = taken.where.not(id: id) if persisted?
+    errors.add(:name, 'is already used by another role in this company') if taken.exists?
   end
 
   def invalidate_permission_cache
