@@ -36,6 +36,15 @@ class WebhookDeliveryJob < ApplicationJob
 
   private
 
+  # From the brand kernel, so the platform name is not hardcoded here:
+  # "DealerTide-Webhooks/1.0" once the platform name is DealerTide.
+  def user_agent
+    name = Brand.current.short_name.to_s.gsub(/[^A-Za-z0-9]/, '')
+    "#{name.presence || 'Platform'}-Webhooks/1.0"
+  rescue StandardError
+    'Platform-Webhooks/1.0'
+  end
+
   def make_request(url:, body:, signature:, delivery_id:)
     uri = URI.parse(url)
     http = Net::HTTP.new(uri.host, uri.port)
@@ -45,7 +54,7 @@ class WebhookDeliveryJob < ApplicationJob
 
     request = Net::HTTP::Post.new(uri.path.presence || "/")
     request["Content-Type"] = "application/json"
-    request["User-Agent"] = "RenterInsight-Webhooks/1.0"
+    request["User-Agent"] = user_agent
     request["X-Webhook-Signature"] = signature
     request["X-Webhook-Id"] = delivery_id.to_s
     request.body = body

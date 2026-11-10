@@ -74,7 +74,7 @@ module Api
 
           render json: {
             webhook_endpoint: json,
-            message: "Webhook endpoint created. Save the signing secret — use it to verify payloads."
+            message: "Webhook endpoint created. Save the signing secret now; it is shown only once. Use it to verify payloads."
           }, status: :created
         else
           render json: { errors: endpoint.errors.full_messages }, status: :unprocessable_entity

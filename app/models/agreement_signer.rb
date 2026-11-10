@@ -89,6 +89,8 @@ class AgreementSigner < ApplicationRecord
       metadata: { method: params[:signature_method] }
     )
 
+    agreement.fire_agreement_webhook('agreement.signed', signer: self)
+
     # Check if all required signers have signed
     if agreement.all_signed?
       agreement.complete!

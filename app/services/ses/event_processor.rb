@@ -163,7 +163,7 @@ module Ses
         suppress!(send_record, reason: 'complaint')
         fail_enrollment!(send_record, reason: 'spam complaint', status: 'unsubscribed')
         record_campaign_event(send_record, 'complaint', payload)
-        fire_webhook(send_record, 'campaign.complaint', feedback_type: complaint['complaintFeedbackType'])
+        fire_webhook(send_record, 'campaign.complained', feedback_type: complaint['complaintFeedbackType'])
       end
     end
 

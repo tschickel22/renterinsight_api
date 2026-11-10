@@ -5,17 +5,10 @@ class ExpireAgreementsJob < ApplicationJob
     expired_count = 0
 
     Agreement.expired_unprocessed.find_each do |agreement|
-      agreement.expire!
-      expired_count += 1
-
-      # Trigger webhook
-      if defined?(WebhookService)
-        WebhookService.trigger(
-          company: agreement.company,
-          event: 'agreement.expired',
-          payload: agreement.as_json(only: [:id, :title, :agreement_number, :status, :expires_at])
-        )
-      end
+      # expire! fires agreement.expired through Agreement#trigger_webhooks.
+      # This used to call WebhookService.trigger, which does not exist, so the
+      # job raised after the first agreement it expired.
+      expired_count += 1 if agreement.expire!
     end
 
     Rails.logger.info("[ExpireAgreementsJob] Expired #{expired_count} agreements")

@@ -84,9 +84,6 @@ events:
   - value: vehicle.sold
     label: Vehicle Sold
     category: Inventory Events
-  - value: vehicle.archived
-    label: Vehicle Archived
-    category: Inventory Events
   - value: inventory.increase
     label: Inventory Increase
     category: Inventory Events
@@ -130,9 +127,6 @@ events:
     category: Agreement Events
   - value: agreement.voided
     label: Agreement Voided
-    category: Agreement Events
-  - value: agreement.expired
-    label: Agreement Expired
     category: Agreement Events
   - value: agreement.reminder_sent
     label: Agreement Reminder Sent

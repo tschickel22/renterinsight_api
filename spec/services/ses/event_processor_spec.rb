@@ -248,6 +248,16 @@ RSpec.describe Ses::EventProcessor do
 
       expect(CampaignSuppression.find_by(company_id: company.id, email_address: lead.email)).to be_present
     end
+
+    # The picker offers campaign.complained; this used to fire campaign.complaint,
+    # which is not an event, so nothing was ever sent.
+    it 'fires the campaign.complained webhook' do
+      allow(WebhookService).to receive(:fire)
+
+      described_class.process(complaint)
+
+      expect(WebhookService).to have_received(:fire).with(hash_including(event: 'campaign.complained'))
+    end
   end
 
   describe 'unmatched messages' do

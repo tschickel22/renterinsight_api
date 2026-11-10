@@ -168,7 +168,8 @@ class InventoryTransaction < ApplicationRecord
         notes: notes,
         transaction_date: transaction_date&.iso8601,
         created_by_id: created_by_id
-      }
+      },
+      location_id: location_id
     )
   rescue => e
     Rails.logger.error "[InventoryTransaction] Failed to fire #{event} webhook: #{e.message}"
@@ -196,7 +197,8 @@ class InventoryTransaction < ApplicationRecord
         reorder_point: rule.reorder_point,
         reorder_quantity: rule.reorder_quantity,
         total_on_hand: part&.total_on_hand
-      }
+      },
+      location_id: location_id
     )
   rescue => e
     Rails.logger.error "[InventoryTransaction] Failed to fire parts.low_stock webhook: #{e.message}"
