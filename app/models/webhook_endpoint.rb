@@ -59,7 +59,10 @@ class WebhookEndpoint < ApplicationRecord
     company_id.present?
   end
 
-  # Check if this endpoint should fire for a given location
+  # Check if this endpoint should fire for a given location. An endpoint
+  # limited to some locations still receives events that carry no location
+  # (company-wide records such as campaigns, parts and social posts, or a
+  # record saved without a location); the Edit Webhook screen says so.
   def matches_location?(location_id)
     # No location filter = matches all locations
     return true if location_ids.blank?
@@ -124,7 +127,10 @@ class WebhookEndpoint < ApplicationRecord
     return if events.blank?
     
     valid_event_values = self.class.available_events.map { |e| e[:value] }
-    invalid = events - valid_event_values
+    # An event taken out of the picker stays valid on endpoints that already
+    # had it, so editing an older endpoint does not fail on an event the dealer
+    # can no longer see.
+    invalid = events - valid_event_values - Array(events_was)
     
     if invalid.any?
       errors.add(:events, "contains invalid events: #{invalid.join(', ')}")

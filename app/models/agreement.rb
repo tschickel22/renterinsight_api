@@ -81,7 +81,7 @@ class Agreement < ApplicationRecord
   ACTIVE_STATUSES = [STATUS_SENT, STATUS_VIEWED, STATUS_PARTIALLY_SIGNED].freeze
 
   # Callbacks
-  after_save :trigger_webhooks, if: :saved_change_to_status?
+  after_save :trigger_webhooks, if: -> { previously_new_record? || saved_change_to_status? }
   after_create :log_creation
 
   # === Status Transitions ===
@@ -351,6 +351,27 @@ class Agreement < ApplicationRecord
     account_id || deal&.try(:account_id) || contact&.try(:account_id)
   end
 
+  # Used by the status changes above and by AgreementSigner (agreement.signed)
+  # and SendAgreementReminderJob (agreement.reminder_sent), which add the signer.
+  def fire_agreement_webhook(event, signer: nil)
+    payload = as_json(
+      only: [:id, :title, :agreement_number, :status, :category, :sent_at, :completed_at, :expires_at],
+      include: {
+        agreement_signers: { only: [:id, :name, :email, :role, :status, :signed_at] }
+      }
+    )
+    payload['signer'] = signer.as_json(only: [:id, :name, :email, :role, :status, :signed_at]) if signer
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: payload,
+      location_id: location_id
+    )
+  rescue => e
+    Rails.logger.error("[Agreement] Webhook #{event} failed: #{e.message}")
+  end
+
   private
 
   # An agreement is pdf_upload or rich_text; a template's words are upload
@@ -392,8 +413,14 @@ class Agreement < ApplicationRecord
     self.agreement_number = "#{prefix}#{sequence.to_s.rjust(5, '0')}"
   end
 
+  # agreement.created when the record is first saved, then one event per
+  # status it moves to. partially_signed has no event of its own: each signature
+  # fires agreement.signed from AgreementSigner#sign!.
   def trigger_webhooks
     return unless company.present?
+
+    fire_agreement_webhook('agreement.created') if previously_new_record?
+    return unless saved_change_to_status?
 
     event = case status
     when STATUS_SENT then 'agreement.sent'
@@ -402,21 +429,9 @@ class Agreement < ApplicationRecord
     when STATUS_VOIDED then 'agreement.voided'
     when STATUS_EXPIRED then 'agreement.expired'
     when STATUS_DECLINED then 'agreement.declined'
-    else return
     end
 
-    WebhookService.fire(
-      company_id: company.id,
-      event: event,
-      payload: as_json(
-        only: [:id, :title, :agreement_number, :status, :category, :sent_at, :completed_at, :expires_at],
-        include: {
-          agreement_signers: { only: [:id, :name, :email, :role, :status, :signed_at] }
-        }
-      )
-    ) if defined?(WebhookService)
-  rescue => e
-    Rails.logger.error("[Agreement] Webhook trigger failed: #{e.message}")
+    fire_agreement_webhook(event) if event
   end
 
   def log_creation

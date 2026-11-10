@@ -17,6 +17,10 @@ class CampaignEnrollment < ApplicationRecord
   # per campaign.
   after_update_commit :emit_unsubscribe_to_workflows,
                       if: -> { saved_change_to_status? && status == 'unsubscribed' }
+  # Both ways an enrollment finishes (the last step sent, or the sender finding
+  # no step left) save status 'completed' with update!, so this sees each one.
+  after_update_commit :fire_enrollment_completed_webhook,
+                      if: -> { saved_change_to_status? && status == 'completed' }
 
   scope :active, -> { where(status: %w[pending active]) }
   # Only enrollments whose parent campaign is actually running are due. Without
@@ -72,5 +76,18 @@ class CampaignEnrollment < ApplicationRecord
 
   def emit_unsubscribe_to_workflows
     Campaigns::WorkflowBridge.emit(:unsubscribed, enrollment: self)
+  end
+
+  def fire_enrollment_completed_webhook
+    return if metadata.is_a?(Hash) && metadata['test_send'].to_s == 'true'
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: 'campaign.enrollment_completed',
+      payload: { campaign_id: campaign_id, enrollment_id: id,
+                 recipient_type: recipient_type, recipient_id: recipient_id }
+    )
+  rescue => e
+    Rails.logger.error("[CampaignEnrollment] enrollment_completed webhook failed: #{e.message}")
   end
 end

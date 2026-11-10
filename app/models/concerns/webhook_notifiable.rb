@@ -55,10 +55,17 @@ module WebhookNotifiable
     WebhookService.fire(
       company_id: company_id,
       event: event,
-      payload: webhook_payload
+      payload: webhook_payload,
+      location_id: webhook_location_id
     )
   rescue => e
     Rails.logger.error "[WebhookNotifiable] Failed to fire #{event} for #{self.class.name}##{id}: #{e.message}"
+  end
+
+  # The location a webhook's Location Filter matches against. Records with no
+  # location column (or a blank one) return nil and reach every endpoint.
+  def webhook_location_id
+    has_attribute?(:location_id) ? self[:location_id] : nil
   end
 
   # Override in model to customize payload

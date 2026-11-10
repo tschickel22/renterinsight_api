@@ -501,7 +501,8 @@ class Invoice < ApplicationRecord
     WebhookService.fire(
       company_id: company_id,
       event: event,
-      payload: webhook_payload
+      payload: webhook_payload,
+      location_id: webhook_location_id
     )
   rescue => e
     Rails.logger.error "[Invoice] Failed to fire lifecycle webhook #{event}: #{e.message}"

@@ -50,6 +50,7 @@ class SendAgreementReminderJob < ApplicationJob
 
     if attempted.any? && failures.size < attempted.size
       reminder&.update(sent_at: Time.current, status: 'sent')
+      agreement.fire_agreement_webhook('agreement.reminder_sent', signer: signer)
     else
       reminder&.update(status: 'failed', error_message: failures.values.last || 'All delivery channels failed')
     end

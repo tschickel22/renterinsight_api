@@ -6,13 +6,16 @@ class WebhookService
     lead.created lead.updated lead.deleted lead.converted
     account.created account.updated account.deleted
     deal.created deal.updated deal.deleted deal.won deal.lost
-    vehicle.created vehicle.updated vehicle.deleted vehicle.sold vehicle.archived
+    vehicle.created vehicle.updated vehicle.deleted vehicle.sold
     invoice.created invoice.updated invoice.deleted invoice.paid invoice.overdue
     service_ticket.created service_ticket.updated service_ticket.deleted
     quote.created quote.updated quote.deleted quote.approved quote.rejected
     location.created location.updated location.deleted
     payment.created payment.updated payment.deleted payment.received payment.refunded
     loan.created loan.updated loan.deleted
+    agreement.created agreement.sent agreement.viewed agreement.signed
+    agreement.completed agreement.declined agreement.voided agreement.expired
+    agreement.reminder_sent
     inventory.increase
     inventory.decrease
     parts.added
@@ -33,7 +36,10 @@ class WebhookService
   # @param company_id [Integer] The company that owns the data
   # @param event [String] Event name, e.g. "contact.created"
   # @param payload [Hash] The data to send
-  # @param location_id [Integer, nil] Optional location context for filtering
+  # @param location_id [Integer, nil] The record's location. An endpoint limited
+  #   to some locations gets events from those locations, plus every event that
+  #   has no location (company-wide records such as campaigns and parts), so a
+  #   location filter never silently hides those.
   def self.fire(company_id:, event:, payload:, location_id: nil)
     return unless EVENTS.include?(event.to_s)
 

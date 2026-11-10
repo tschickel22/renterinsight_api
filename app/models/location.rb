@@ -3,6 +3,11 @@
 class Location < ApplicationRecord
   include QuickbooksIntegration
   include WebhookNotifiable
+
+  # A location's own events belong to that location for the webhook Location Filter.
+  def webhook_location_id
+    id
+  end
   
   # Associations
   belongs_to :company

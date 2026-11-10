@@ -663,7 +663,7 @@ class Vehicle < ApplicationRecord
 
   # Fire custom lifecycle webhook events on status transitions
   # WebhookNotifiable handles generic vehicle.created/updated/deleted
-  # This adds vehicle.sold and vehicle.archived for specific transitions.
+  # This adds vehicle.sold when a vehicle is marked sold.
   # Sync the features JSON array → inventory_features table (Option B)
   # Runs whenever the features column changes, keeping both in sync.
   def sync_inventory_features
@@ -698,7 +698,8 @@ class Vehicle < ApplicationRecord
     WebhookService.fire(
       company_id: company_id,
       event: event,
-      payload: webhook_payload
+      payload: webhook_payload,
+      location_id: webhook_location_id
     )
   rescue => e
     Rails.logger.error "[Vehicle] Failed to fire lifecycle webhook #{event}: #{e.message}"
