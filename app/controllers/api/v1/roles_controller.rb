@@ -3,14 +3,14 @@
 # API::V1::RolesController
 #
 # Manages roles and their permissions for companies using RBAC system.
-# Supports CRUD operations, permission management, and system role cloning.
+# Supports CRUD operations, permission management, and role copies.
 
 module Api
   module V1
     class RolesController < ApplicationController
       before_action :ensure_rbac_enabled, except: [:system_roles, :index]
       before_action :set_role, only: [:show, :update, :destroy, :clone, :permissions, :set_permissions]
-      before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions, :toggle_visibility]
+      before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions]
       
       # GET /api/v1/roles
       # FIX: Include permissions by default for proper matrix display
@@ -205,7 +205,7 @@ module Api
           }, status: :created
         else
           render json: {
-            error: 'Failed to create role',
+            error: @role.errors.full_messages.to_sentence.presence || 'Failed to create role',
             errors: @role.errors.full_messages
           }, status: :unprocessable_entity
         end
@@ -222,7 +222,7 @@ module Api
           }
         else
           render json: {
-            error: 'Failed to update role',
+            error: @role.errors.full_messages.to_sentence.presence || 'Failed to update role',
             errors: @role.errors.full_messages
           }, status: :unprocessable_entity
         end
@@ -285,10 +285,12 @@ module Api
       
       # POST /api/v1/roles/:id/clone
       def clone
-        unless @role.system_role?
+        # A company copies the shared roles and its own roles, never another
+        # company's (set_role already narrows this for everyone but super admins).
+        unless @role.system_role? || (@role.company_id.present? && @role.company_id == current_company_id)
           render json: {
-            error: 'Can only clone system roles'
-          }, status: :unprocessable_entity
+            error: 'Role not found'
+          }, status: :not_found
           return
         end
         
@@ -320,7 +322,7 @@ module Api
           }, status: :created
         else
           render json: {
-            error: 'Failed to clone role',
+            error: new_role.errors.full_messages.to_sentence.presence || 'Failed to clone role',
             errors: new_role.errors.full_messages
           }, status: :unprocessable_entity
         end
