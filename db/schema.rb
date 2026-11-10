@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_10_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1273,6 +1273,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.string "note"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "title"
+    t.string "place"
+    t.boolean "all_day", default: false, null: false
     t.index ["company_id"], name: "index_calendar_busy_blocks_on_company_id"
     t.index ["user_id", "starts_at"], name: "index_calendar_busy_blocks_on_user_id_and_starts_at"
   end
@@ -8419,6 +8422,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_09_120000) do
     t.text "busy_feed_url"
     t.datetime "busy_feed_checked_at"
     t.string "busy_feed_error"
+    t.string "busy_feed_detail", default: "none", null: false
     t.index ["calendar_feed_token"], name: "index_users_on_calendar_feed_token", unique: true, where: "(calendar_feed_token IS NOT NULL)"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin

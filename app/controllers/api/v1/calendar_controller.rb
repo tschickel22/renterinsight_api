@@ -166,7 +166,7 @@ module Api
         return render json: { error: 'Forbidden' }, status: :forbidden
       end
         
-        service = CalendarService.new(current_user, @company, calendar_params)
+        service = CalendarService.new(current_user, @company, calendar_params, include_outside: false)
         events = service.aggregated_events
         
         stats = {
