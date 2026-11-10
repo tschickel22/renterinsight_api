@@ -49,6 +49,30 @@ class ProjectTemplate < ApplicationRecord
     new_template.reload
   end
 
+  # The template type that fits a deal. Deals carry no project type of their
+  # own, so it is read from what the deal does say: a used home, a land deal
+  # (financing type naming land, or a home sold in a land and home package),
+  # or a factory build on the deal sheet. nil when nothing says.
+  def self.suggested_type_for(deal)
+    return 'used_home' if deal.commission_deal_type == 'used'
+
+    land = deal.deal_type.to_s.downcase.include?('land') ||
+           (deal.vehicle_id && LandHomePackage.where(company_id: deal.company_id, vehicle_id: deal.vehicle_id).exists?)
+    return 'land_home' if land
+    return 'factory_order' if deal.home_build.present?
+
+    nil
+  end
+
+  # Default kept one per type (ensure_single_default). Prefer the default for
+  # the suggested type, then the standard default, then any default.
+  def self.default_for(templates, type)
+    defaults = templates.select(&:is_default?)
+    (type && defaults.find { |t| t.template_type == type }) ||
+      defaults.find { |t| t.template_type.blank? || t.template_type == 'standard' } ||
+      defaults.first
+  end
+
   # Create a project from this template, optionally linked to a deal
   def create_project!(company:, deal: nil, name: nil, owner: nil, created_by: nil)
     project_name = name || (deal ? "#{deal.customer_display_name} - #{deal.vehicle&.display_name || deal.name}" : self.name)
