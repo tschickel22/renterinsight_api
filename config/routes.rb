@@ -598,6 +598,12 @@ Rails.application.routes.draw do
         put   'quick-log', action: :update
         patch 'quick-log', action: :update
       end
+      # Land zoning choices (Company Settings, Customize, Land Zoning)
+      scope path: 'company', controller: 'land_zoning_options' do
+        get   'land-zoning', action: :show
+        put   'land-zoning', action: :update
+        post  'land-zoning/add', action: :add
+      end
 
       # ==================== CONVERSION TRACKING ====================
       # Company default + per-location overrides for public-form ad tracking.
