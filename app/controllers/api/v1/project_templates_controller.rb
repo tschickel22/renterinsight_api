@@ -188,6 +188,10 @@ module Api
                 'task_type' => task_data[:task_type] || 'task',
                 'position' => task_data[:position] || tidx,
                 'estimated_hours' => task_data[:estimated_hours],
+                'estimated_days' => task_data[:estimated_days].presence&.to_i,
+                'visible_to_client' => ActiveModel::Type::Boolean.new.cast(task_data[:visible_to_client]) || false,
+                'is_required' => ActiveModel::Type::Boolean.new.cast(task_data[:is_required]) || false,
+                'client_actionable' => ActiveModel::Type::Boolean.new.cast(task_data[:client_actionable]) || false,
                 'checklist_items' => task_data[:checklist_items] || [],
                 'default_vendor_id' => task_data[:default_vendor_id].presence&.to_i,
                 'default_assigned_to_id' => task_data[:default_assigned_to_id].presence&.to_i
