@@ -62,27 +62,12 @@ module Public
       # feed builders (SyndicationPartner#dealer_identifier_for).
       listings = Listing.published.includes(:vehicle, :company)
 
-      # Filter by partner's listing types (rv vs manufactured_home)
-      if @partner.listing_types.present?
-        listings = listings.joins(:vehicle).where(vehicles: { listing_type: @partner.listing_types })
-      end
-
-      # Filter by offer_type based on feed format
-      case @partner.format
-      when 'mits_xml'
-        # MITS/Zillow: Only rental listings
-        listings = listings.where(offer_type: ['rent', 'both'])
-      when 'json', 'xml'
-        if @partner.partner_type == 'rvt'
-          # RVT.com: RVs only, sales only
-          listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'rv' })
-          listings = listings.where(offer_type: ['sale', 'both'])
-        else
-          # MH Village: Only manufactured homes (no RVs), only sales
-          listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'manufactured_home' })
-          listings = listings.where(offer_type: ['sale', 'both'])
-        end
-      end
+      # Narrow by what this partner takes: its listing types and, by feed
+      # format, sale or rent (SyndicationPartner#feed_listing_types and
+      # #feed_offer_types hold the rule, shared with the dealer tab).
+      types = @partner.feed_listing_types
+      listings = listings.joins(:vehicle).where(vehicles: { listing_type: types }) unless types.nil?
+      listings = listings.where(offer_type: @partner.feed_offer_types)
 
       Rails.logger.info "[SyndicationFeed] partner=#{@partner.id} format=#{@partner.format} listings=#{listings.size}"
       listings

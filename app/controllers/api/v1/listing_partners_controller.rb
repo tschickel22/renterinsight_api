@@ -42,6 +42,11 @@ module Api
                         status: :forbidden
         end
 
+        if params[:dealer_account_id].to_s.strip.present? && !@partner.sends_dealer_account_id?
+          return render json: { error: "#{@partner.name} does not use your account number" },
+                        status: :unprocessable_entity
+        end
+
         value = @partner.set_dealer_account_id!(@company, params[:dealer_account_id])
         render json: { partner: partner_json(@partner, value) }
       end
@@ -64,8 +69,10 @@ module Api
           name: partner.name,
           partnerType: partner.partner_type,
           listingTypes: partner.listing_types || [],
+          sends: partner.dealer_sends,
+          usesAccountNumber: partner.sends_dealer_account_id?,
           active: partner.active?,
-          dealerAccountId: dealer_account_id.presence
+          dealerAccountId: (dealer_account_id.presence if partner.sends_dealer_account_id?)
         }
       end
     end

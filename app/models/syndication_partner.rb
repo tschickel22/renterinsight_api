@@ -107,6 +107,46 @@ class SyndicationPartner < ApplicationRecord
     update_column(:feed_url, public_feed_url) if feed_token.present?
   end
 
+  # ---- What the feed actually carries ------------------------------------
+  #
+  # The public feed narrows the stored listing_types by format: the MH Village
+  # style feeds (json/xml) carry manufactured homes for sale, the RVT feed
+  # carries RVs for sale, and MITS (mits_xml) carries rentals only. These two
+  # methods are the single source for that rule, used by the feed itself and
+  # by the dealer Listing Partners tab so the tab says what is really sent.
+
+  # Vehicle listing types the feed sends, or nil when any type is sent.
+  def feed_listing_types
+    forced =
+      case format
+      when 'json', 'xml' then rvt? ? ['rv'] : ['manufactured_home']
+      end
+    stored = listing_types.presence
+    return stored if forced.nil?
+    return forced if stored.nil?
+
+    stored & forced
+  end
+
+  # Listing offer types the feed sends.
+  def feed_offer_types
+    feed_format_mits_xml? ? %w[rent both] : %w[sale both]
+  end
+
+  # For the dealer tab: the kinds of home really sent (only types a vehicle
+  # can have), and whether they go out for sale or for rent.
+  def dealer_sends
+    types = feed_listing_types
+    types = types.nil? ? Vehicle::TYPES.dup : (types & Vehicle::TYPES)
+    { listingTypes: types, offer: feed_format_mits_xml? ? 'rent' : 'sale' }
+  end
+
+  # Only the json/xml feed builders send a dealer's own account number. The
+  # MITS builder identifies each dealer by its company id.
+  def sends_dealer_account_id?
+    feed_format_json? || feed_format_xml?
+  end
+
   # ---- Per-dealer identifier --------------------------------------------
   #
   # Partners are set up once by platform admins and their feed carries every
