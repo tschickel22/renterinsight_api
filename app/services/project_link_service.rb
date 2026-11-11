@@ -245,7 +245,7 @@ class ProjectLinkService
     bill = nil
     ActiveRecord::Base.transaction do
       pl.lock!
-      invoice = installer_invoice!(pl, amount, notes)
+      invoice = installer_invoice!(pl, amount, notes, invoice_number)
       dealer_project = pl.dealer_project
       bill = ContractorInvoiceService.new(contractor: link.dealer_vendor, project: dealer_project, phase: pl.dealer_phase)
                                      .submit_linked!(amount: amount, invoice_number: invoice_number.presence || invoice.invoice_number,
@@ -451,11 +451,16 @@ class ProjectLinkService
     status.in?(ProjectPhase::STATUSES) ? status : 'not_started'
   end
 
-  def installer_invoice!(pl, amount, notes)
+  # The number the installer typed is its own invoice's number too, so both
+  # companies' records carry the same one; left blank, its next number.
+  def installer_invoice!(pl, amount, notes, number = nil)
+    number = number.to_s.strip.presence
+    raise Error, "You already have an invoice #{number}. Use another number or leave it blank." if number && @company.invoices.exists?(invoice_number: number)
+
     account = pl.company_link.installer_dealer_account
     location_id = pl.installer_project&.location_id || @company.locations.order(:id).pick(:id)
     invoice = @company.invoices.new(
-      location_id: location_id, recipient: account, source: pl.installer_project, billing_category: 'customer',
+      location_id: location_id, recipient: account, source: pl.installer_project, billing_category: 'customer', invoice_number: number,
       invoice_date: Date.current, due_date: Date.current + 30, status: 'draft',
       notes: ["#{pl.scope_label} for #{pl.dealer_project.customer_display_name}", notes.presence].compact.join("\n")
     )

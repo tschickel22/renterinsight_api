@@ -135,10 +135,13 @@ RSpec.describe 'Linked installer pricing', type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(body['error']).to include('$5,700.00')
 
-    post "/api/v1/project_links/#{pl.id}/bill", headers: h(boss), params: {}.to_json
+    # The number the installer types is on its own invoice and on the dealer's bill.
+    post "/api/v1/project_links/#{pl.id}/bill", headers: h(boss), params: { invoice_number: 'PV-1188' }.to_json
     expect(response).to have_http_status(:ok), response.body
     bill = pl.reload.dealer_bill
     expect(bill.total_amount).to eq(5700)
+    expect(pl.installer_invoice.invoice_number).to eq('PV-1188')
+    expect(bill.reference_number).to eq('PV-1188')
     expect(pl.dealer_cost_item.reload.bill_id).to eq(bill.id)
     expect(project.project_cost_items.not_deleted.sum(:amount)).to eq(5700) # counted once
   end
