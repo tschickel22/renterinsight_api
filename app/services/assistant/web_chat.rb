@@ -136,7 +136,8 @@ module Assistant
       Assistant::Learn.record_question(conversation, result, reason, problem)
       listings = (home_card(result.photo_home_id) + matches).uniq { |l| l[:id] }.first(4)
       # A training video that shows what they asked about (software company).
-      actions = result.video ? [Assistant::Software.video_action(result.video)] : []
+      # Once per chat: Quinn tends to set the same video again on the next reply.
+      actions = result.video && !video_shown?(result.video) ? [Assistant::Software.video_action(result.video)] : []
 
       if problem
         Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)
@@ -154,6 +155,13 @@ module Assistant
       # Never silence in front of a buyer: a person takes it.
       Assistant::Handoff.perform!(conversation, reason: 'error', summary: nil) if conversation.reload.assistant_answering?
       Reply.new(messages: [])
+    end
+
+    def video_shown?(video)
+      page = video[:url].to_s.split('?').first
+      conversation.chat_messages.where(direction: 'outbound').where.not(actions: [nil, []]).any? do |m|
+        Array(m.actions).any? { |a| a.to_h['url'].to_s.split('?').first == page }
+      end
     end
 
     # The visitor gave a name and an email: make the lead through the dealer's
