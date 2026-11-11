@@ -21,7 +21,7 @@ module Api
           :quiet_start_hour, :quiet_end_hour, :source_ids, :link_website_id, :auto_start, :goal,
           :texts_from, :cadence, :follow_up_channels, :use_website_text,
           :email_replies, :handoff_on_ready, :handoff_on_unknown, :handoff_after,
-          :books_visits, :visit_minutes, :booking_notice_hours, :cold_texts,
+          :books_visits, :visit_minutes, :booking_notice_hours, :cold_texts, :book_with_user_id, :visit_kind,
           source_ids: [], faqs: %i[q a], chat_sites: []
         ).to_h
         # An emptied list arrives as no key at all.
@@ -123,6 +123,13 @@ module Api
             add_on: settings.chat_add_on?,
             embed_code: settings.chat_add_on? ? embed_code : nil,
             sites: settings.chat_sites
+          },
+          # Who Quinn books with and whether it is a video call (a software
+          # company books demos by video), and whether that person has a link.
+          booking: {
+            video: settings.video_visits?,
+            software: Assistant::Software.for?(@company),
+            book_with_has_meeting_url: settings.book_with_user&.meeting_url.present?
           },
           texting: {
             own_numbers: own,

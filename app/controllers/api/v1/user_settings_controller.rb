@@ -37,6 +37,7 @@ module Api
           user_type: @user_type,
           landing_page: @user.respond_to?(:landing_page) ? @user.landing_page : nil,
           booking_url: @user.respond_to?(:booking_url) ? @user.booking_url : nil,
+          meeting_url: @user.respond_to?(:meeting_url) ? @user.meeting_url : nil,
           email_signature: @user.respond_to?(:email_signature) ? @user.email_signature : nil,
           sms_signature: @user.respond_to?(:sms_signature) ? @user.sms_signature : nil,
           workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {},
@@ -47,7 +48,7 @@ module Api
       # PATCH /api/v1/user_settings/profile
       def update_profile
         profile_params = params.permit(
-          :first_name, :last_name, :title, :phone, :office_phone, :office_phone_ext, :customer_phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
+          :first_name, :last_name, :title, :phone, :office_phone, :office_phone_ext, :customer_phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url, :meeting_url,
           :email_signature, :sms_signature,
           workqueue_preferences: {}, calendar_preferences: {}
         )
@@ -90,6 +91,7 @@ module Api
             updates[:email] = profile_params[:email] if profile_params[:email].present?
             updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?
             updates[:booking_url] = profile_params[:booking_url] if profile_params.key?(:booking_url)
+            updates[:meeting_url] = profile_params[:meeting_url].to_s.strip.presence&.then { |u| u.match?(%r{\Ahttps?://\S+\z}i) ? u : nil } if profile_params.key?(:meeting_url) && @user.has_attribute?(:meeting_url)
             # Signature Block. The email one is formatted text, kept to safe tags;
             # the text one is a single short line.
             if profile_params.key?(:email_signature) && @user.respond_to?(:email_signature)

@@ -62,7 +62,6 @@ module Appointments
     def deliver(activity, customer, channel)
       rep = activity.assigned_to || activity.user
       when_text = TimeText.for(activity, customer.company)
-      place = activity.try(:meeting_location).presence || activity.try(:location).presence
       company = customer.company.name
       with = [rep.try(:first_name).presence, company].compact.join(' at ')
       metadata = { 'source' => 'appointment_reminder', 'activity_type' => activity.class.name, 'activity_id' => activity.id }
@@ -70,7 +69,7 @@ module Appointments
       when 'sms'
         return nil if customer.phone.blank?
 
-        body = "Reminder: your appointment with #{with} is #{when_text}#{" at #{place}" if place}. Reply here with any questions."
+        body = "Reminder: your appointment with #{with} is #{when_text}#{BookingText.place_phrase(activity)}. Reply here with any questions."
         CommunicationService.send_sms(communicable: customer.record, to: customer.phone, body: body, category: 'transactional',
                                       sender_user_id: rep&.id, metadata: metadata)
       when 'email'
@@ -79,7 +78,7 @@ module Appointments
         greeting = customer.record.try(:first_name).presence || customer.name
         body = <<~HTML
           <p>Hi#{" #{ERB::Util.h(greeting)}" if greeting},</p>
-          <p>This is a reminder of your appointment with #{ERB::Util.h(with)} on <strong>#{ERB::Util.h(when_text)}</strong>#{place ? " at #{ERB::Util.h(place)}" : ''}.</p>
+          <p>This is a reminder of your appointment with #{ERB::Util.h(with)} on <strong>#{ERB::Util.h(when_text)}</strong>#{ERB::Util.h(BookingText.place_phrase(activity, links: true))}.</p>
           <p>If anything changes, just reply to this email.</p>
         HTML
         args = { communicable: customer.record, to: customer.email, subject: "Reminder: your appointment #{when_text}",

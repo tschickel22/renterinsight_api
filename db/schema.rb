@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_11_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_11_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8441,6 +8441,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_190000) do
     t.string "office_phone"
     t.string "office_phone_ext"
     t.string "customer_phone", default: "mobile", null: false
+    t.string "meeting_url"
     t.index ["calendar_feed_token"], name: "index_users_on_calendar_feed_token", unique: true, where: "(calendar_feed_token IS NOT NULL)"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin

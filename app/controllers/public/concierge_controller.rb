@@ -159,7 +159,7 @@ module Public
         chat_key: conversation.visitor_token, messages: reply.messages, person: conversation.reload.handed_off?,
         ask_consent: reply.ask_consent == true, visitor: reply.visitor || {},
         # The single-answer shape older widgets read.
-        text: last&.dig(:content), actions: [], listings: last ? last[:listings] : [], source: 'quinn',
+        text: last&.dig(:content), actions: last ? Array(last[:actions]) : [], listings: last ? last[:listings] : [], source: 'quinn',
         quick_actions: embed? ? quick_actions.reject { |a| a[:type] == 'form' } : quick_actions,
         lead_capture: lead_capture_config, platform_brand: platform_brand
       }

@@ -20,6 +20,7 @@ module Assistant
     QUALIFICATION_FIELDS = %w[
       budget monthly_target timeline credit_self_rating land_status home_type
       bedrooms delivery_area trade_in best_time
+      business_type locations team_size current_system
     ].freeze
 
     HANDOFF_REASONS = %w[
@@ -33,7 +34,7 @@ module Assistant
 
     Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :question, :question_answered,
                         :question_topic, :handoff, :handoff_reason, :summary, :usage, :subject, :book_slot, :cancel_visit,
-                        keyword_init: true)
+                        :video, keyword_init: true)
 
     # opener: write the first text to a new lead (Quinn starts it, E96).
     # showing: names of homes the website chat shows as cards under this reply.
@@ -60,6 +61,13 @@ module Assistant
       @settings = settings
       @history = Array(history).last(HISTORY)
       @feedback = feedback
+      # A software company (DealerTide's own chat): product, help articles
+      # and videos instead of homes, and a demo instead of a visit.
+      @software = Assistant::Software.for?(@company)
+    end
+
+    def software?
+      @software
     end
 
     def call
@@ -83,12 +91,15 @@ module Assistant
         subject: input['subject'].to_s.strip.presence,
         book_slot: booking? ? input['book_slot'].to_s.strip.upcase.presence : nil,
         cancel_visit: booking? && input['cancel_visit'] == true,
+        video: videos.detect { |v| "V#{v[:id]}" == input['video_id'].to_s.strip.upcase },
         usage: { model: response['model'], input_tokens: response.dig('usage', 'input_tokens'),
                  output_tokens: response.dig('usage', 'output_tokens') }
       )
     end
 
     def system_prompt
+      return software_prompt if software?
+
       facts = knowledge.to_h
       name = @settings.assistant_name
       <<~PROMPT
@@ -154,7 +165,149 @@ module Assistant
       PROMPT
     end
 
+    # Quinn for a software company (Assistant::Software): what it sells, the
+    # help articles and videos that match the question, and a demo to book.
+    def software_prompt
+      facts = knowledge.to_h
+      name = @settings.assistant_name
+      company = facts[:dealer_name]
+      <<~PROMPT
+        #{@web ? "You chat with visitors on the website of #{company}, a software company." : "You write to people who asked #{company}, a software company, about its software."}
+        #{company} makes software for manufactured home dealers, RV dealers and communities: what it does is in PRODUCT,
+        HELP ARTICLES and VIDEOS below. Your name is #{name}. You work with the team at #{company}. If asked, you are
+        #{company}'s assistant and a person on the team can take over at any time.
+        Tone: #{@settings['tone'] == 'professional' ? 'polite and professional' : 'warm, friendly and relaxed'}.
+
+        #{software_goal_text}
+        #{opener_text}
+        #{software_words(follow_up_text)}
+        #{software_words(missed_visit_text)}
+        RULES. Breaking one of these costs a sale or worse.
+        1. #{style_rule}
+        2. Answer ONLY from PRODUCT, HELP ARTICLES, VIDEOS and the facts below. Never invent a feature, integration,
+           report, price, contract term or policy. If it is not there, say you are not sure it does that.
+           #{unknown_rule}
+        3. Never state a price, plan cost, setup fee, discount or contract length, even a range. Say pricing depends
+           on what they need and the team goes over it on the demo, then offer to set up a demo. Do not hand off for this.
+        4. #{software_links_rule}
+        5. Do not use dashes as punctuation.
+        6. If they ask to talk with a person, are upset, or ask about legal, security, a contract or a complaint, hand
+           off with a short friendly reply saying someone from the team will #{follow_up_word}.
+           #{software_demo_rule}
+        7. Do not repeat a question they already answered. Do not greet them again after the first message.
+        8. If they ask about a demo already booked (when, how to join, with whom), answer from THEIR APPOINTMENTS below.
+           If they ask for the invite again, set resend_invite and say it is on its way to their email (only when an
+           email is on file).
+
+        Always call the respond tool.
+
+        FACTS
+        Company: #{company}
+        Phone: #{facts[:phone] || 'not provided'}
+        Hours: #{facts[:hours].presence || 'not provided'}
+        Demo: #{@settings.visit_minutes} minutes, by video call
+        #{@settings['extra_facts'].present? ? "More from the team: #{@settings['extra_facts'].to_s.squish}" : ''}
+
+        ANSWERS TO COMMON QUESTIONS
+        #{faq_lines.presence || 'None yet.'}
+
+        PRODUCT (the add-ons it offers, by area)
+        #{Assistant::Software.product_lines}
+
+        HELP ARTICLES (how it works, from the help center; the ones matching their question)
+        #{software_article_lines.presence || 'None match.'}
+
+        VIDEOS (short training videos that show it on screen)
+        #{video_lines.presence || 'None match.'}
+
+        THIS PERSON
+        Name on file: #{name_on_file}
+        Email on file: #{@lead.try(:email).presence || 'none'}
+        #{@web ? "Mobile on file: #{@lead.try(:phone).present? ? 'yes' : 'none'}" : ''}
+        Came from: #{source_name || 'unknown'}
+        What they first asked: #{first_request || 'nothing recorded'}
+        Known so far: #{@conversation.qualification.presence&.to_json || 'nothing yet'}
+
+        THEIR APPOINTMENTS
+        #{appointment_lines.presence || 'None booked.'}
+        #{booking? ? "\nOPEN TIMES (the only times you may offer or book, with #{@booking.rep&.first_name.presence || 'the team'})\n#{@booking.prompt_lines}" : ''}
+        #{@feedback ? "\nYour last draft could not be sent (#{@feedback}). Write a new one that follows the rules." : ''}
+      PROMPT
+    end
+
     private
+
+    # The follow-up and missed-visit wording, for a demo instead of homes.
+    def software_words(text)
+      text.to_s.gsub('one or two homes from HOMES that fit what they told you, by name with the price, and why they fit (use photo_home_id for one home by text)',
+                     'one thing from PRODUCT or HELP ARTICLES that fits what they told you, and why it fits')
+          .gsub('Only mention homes that fit what they said. Never mention sales, specials, discounts or new arrivals unless they asked.',
+                'Never mention prices, specials or discounts.')
+          .gsub('one useful fact from the dealer facts', 'one useful fact from PRODUCT')
+          .gsub('visit', 'demo')
+    end
+
+    def software_goal_text
+      learn = 'Learn, one question at a time and only when it fits: their business name, what kind of business it is ' \
+              '(manufactured home dealer, RV dealer, community or other), how many locations and salespeople they have, ' \
+              'what they use today, and what they most want to fix.'
+      contact = @web ? 'To set up a demo, ask for their name and an email address (the invite goes there). The chat itself asks ' \
+                       'whether texting is OK, so do not ask that.' :
+                       'To set up a demo and you do not have their full name or email address, ask for it.'
+      case @settings.goal
+      when 'answer_only'
+        'Your job is to answer their questions. Do not ask them qualifying questions. When they ask for a person, ' \
+          "want a demo, or ask something you cannot answer, hand off. #{contact}"
+      else
+        "Your goal is a #{@settings.visit_minutes} minute demo by video call. Answer their questions, learn what they need, " \
+          "and when it fits, invite them to see it on a demo. #{learn} #{contact} " +
+          (booking? ? 'When they are open to a demo, offer two open times and book the one they pick (see DEMOS).' :
+            'Once they give a day and time for a demo and you have their name and email, hand off with reason ' \
+            'appointment, saying the team will confirm that time. Never say a time is booked.')
+      end
+    end
+
+    def software_demo_rule
+      unless booking?
+        return 'If they want to book, change or cancel a demo, hand off (reason appointment).'
+      end
+
+      'DEMOS: you book demos yourself. When they want one, offer EXACTLY TWO times from OPEN TIMES in plain words ' \
+        '(never the [id], never a list of more), on different days or a morning and an afternoon; if they name a day, ' \
+        'offer two times that day. When they clearly accept one, set book_slot to its id. A confirmation with the day, ' \
+        'time and how to join is sent for you, so your reply must be empty or a few warm words that do not repeat the ' \
+        'time (for example "Great, talk then."). To move a booked demo, offer times and set book_slot for the new one. ' \
+        'If they ask to cancel, set cancel_visit. Never say a demo is booked unless you set book_slot. If there are no ' \
+        'open times, hand off (reason appointment). You need their name and email before booking.'
+    end
+
+    def software_links_rule
+      if @web
+        'Never write a web address. When a video in VIDEOS shows what they asked about, answer in a sentence and ' \
+          'offer it ("Want to see how that works? Here is a short video."), setting video_id to its [V number]; a ' \
+          'Watch button is added under your reply for you. Offer a video at most once per question.'
+      else
+        'Never send a link or a web address of any kind.'
+      end
+    end
+
+    def software_article_lines
+      Assistant::Software.article_lines(question)
+    end
+
+    def videos
+      return [] unless software? && @web
+
+      @videos ||= Assistant::Software.videos(question)
+    end
+
+    def video_lines
+      videos.map { |v| "[V#{v[:id]}] #{v[:title]}#{" (the part on #{v[:label]})" if v[:label].present?}" }.join("\n")
+    end
+
+    def question
+      @question ||= Assistant::Software.question_from(@history)
+    end
 
     # "Text from (352) ..." is what we called them before anyone knew.
     def name_on_file
@@ -376,7 +529,7 @@ module Assistant
             subject: { type: 'string', description: 'Only for an email follow-up: the subject line, under 60 characters.' },
             book_slot: { type: 'string', description: 'The [id] from OPEN TIMES they clearly accepted, to book (or move their visit to). Omit otherwise.' },
             cancel_visit: { type: 'boolean', description: 'True only when they clearly asked to cancel their booked visit.' }
-          },
+          }.merge(software? ? { video_id: { type: 'string', description: 'The [V number] of one video from VIDEOS to show under your reply, when it shows what they asked about. Omit otherwise.' } } : {}),
           required: %w[reply handoff summary]
         }
       }
