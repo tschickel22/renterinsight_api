@@ -670,7 +670,15 @@ class Vehicle < ApplicationRecord
     # If discount is disabled, clear the computed prices
     unless special_discount_enabled
       self.discounted_price = nil
-      self.sale_price = nil if special_discount_enabled_changed?
+      if special_discount_enabled_changed?
+        self.sale_price = nil
+      elsif msrp_changed? && msrp.to_f.positive? && sale_price.present? && !sale_price_changed?
+        # No discount running: the sale price is the Base Sale Price. Keep the
+        # older sale_price column in step, or screens that read it first (deal
+        # start price, websites) keep showing a figure nobody can see to change
+        # (Tom 2026-11-11, home 69 kept $142,566 after its base became $132,245).
+        self.sale_price = msrp
+      end
       return
     end
 
