@@ -2,7 +2,7 @@
 
 module Truebuild
   # Model photos from a catalog source whose homes carry the price book's own
-  # model number as their key: Clayton's SKUs ("47TRT14602DH") are both the
+  # model number as their key (or as model_id, for a source keyed on slugs): Clayton's SKUs ("47TRT14602DH") are both the
   # feed key and the number in the book. The source names the TrueBuild
   # plants it feeds (config factory_ids); the feed is read directly, so no
   # dealer has to carry the homes in inventory.
@@ -42,8 +42,13 @@ module Truebuild
         home = adapter.parse(adapter.fetch(key))
         next unless home
 
-        number = Catalog::ModelNumber.normalize(home.source_key.to_s)
-        matches = Array(by_number[number])
+        # The key is the book's number for Clayton. Jessup keys on the page
+        # slug and prints the book's number on the page (model_id).
+        number, matches = [home.source_key, home.model_id].filter_map do |id|
+          n = Catalog::ModelNumber.normalize(id.to_s)
+          [n, by_number[n]] if by_number[n].present?
+        end.first
+        matches = Array(matches)
         next if matches.empty?
 
         seen << number

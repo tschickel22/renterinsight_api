@@ -33,7 +33,9 @@ module Catalog
       # manufacturer to onboard behind it.
       'adventure_homes'            => 'Catalog::Adapters::AdventureHomesAdapter',
       # Single-site type too: its specs live in one site-specific taxonomy.
-      'live_oak'                   => 'Catalog::Adapters::LiveOakAdapter'
+      'live_oak'                   => 'Catalog::Adapters::LiveOakAdapter',
+      # Single-site type: Beaver Builder pages nested under series pages.
+      'jessup_housing'             => 'Catalog::Adapters::JessupHousingAdapter'
     }.freeze
 
     module_function

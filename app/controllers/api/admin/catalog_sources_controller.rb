@@ -31,6 +31,8 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   ADVENTURE_UNTRACKED_FIELDS = %w[description].freeze
   # Live Oak's site publishes none of these on any home. See LiveOakAdapter.
   LIVE_OAK_UNTRACKED_FIELDS = %w[model_id bathrooms dimensions square_feet description].freeze
+  # Jessup publishes every tracked field except prose copy.
+  JESSUP_UNTRACKED_FIELDS = %w[description].freeze
 
   # Debounces directory rebuilds across typeahead keystrokes.
   CLAYTON_REFRESH_LOCK      = 'clayton_directory_refresh_enqueued'
@@ -727,7 +729,10 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     # which Adventure never publishes, so a run that parsed all 130 homes
     # perfectly still reports degraded.
     'adventure_homes' => { 'untracked_fields' => ADVENTURE_UNTRACKED_FIELDS },
-    'live_oak'        => { 'untracked_fields' => LIVE_OAK_UNTRACKED_FIELDS }
+    'live_oak'        => { 'untracked_fields' => LIVE_OAK_UNTRACKED_FIELDS },
+    # Every Jessup home is HUD code (thermal and wind zones on each page), and
+    # the site never prints the code itself.
+    'jessup_housing'  => { 'untracked_fields' => JESSUP_UNTRACKED_FIELDS, 'default_building_code' => 'HUD' }
   }.freeze
 
   def apply_adapter_defaults(attrs, adapter_type)
