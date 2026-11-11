@@ -1,6 +1,17 @@
 class TruebuildRenderJob < ApplicationJob
   queue_as :default
 
+  # How many drawings run at once. Each holds full-size photos in libvips.
+  # Where jobs run inside the web server (staging), three at a time took it
+  # past its 2 GB on 2026-11-11 and Render killed it twice in 20 minutes, so
+  # there it is one. Production's separate jobs worker keeps three.
+  # TRUEVIEW_DRAW_CONCURRENCY overrides either.
+  DRAW_CONCURRENCY = Integer(ENV.fetch('TRUEVIEW_DRAW_CONCURRENCY') { ENV['SOLID_QUEUE_IN_PUMA'].present? ? 1 : 3 })
+
+  # Others wait their turn (blocked, not dropped). The semaphore lapses after
+  # duration in case a worker dies holding it; a drawing takes about a minute.
+  limits_concurrency to: DRAW_CONCURRENCY, key: 'truebuild-render', duration: 15.minutes
+
   # A row younger than this may not have its job enqueued yet.
   GRACE = 2.minutes
 
