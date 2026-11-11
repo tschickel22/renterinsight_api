@@ -316,18 +316,21 @@ class Deal < ApplicationRecord
     update(
       stage: company&.default_won_stage_key || 'closed_won',
       won_at: Time.current,
-      actual_close_date: Date.today,
+      actual_close_date: company&.today || Date.current,
       win_reason: reason
     )
   end
 
   def stamp_closed_at
+    # The dealer's calendar day: on UTC, a deal closed after 5 PM in Denver
+    # got tomorrow's close date and its closing entry posted on that day.
+    today = company&.today || Date.current
     if stage_is_won?
       self.won_at ||= Time.current
-      self.actual_close_date ||= Date.current
+      self.actual_close_date ||= today
     elsif stage_is_lost?
       self.lost_at ||= Time.current
-      self.actual_close_date ||= Date.current
+      self.actual_close_date ||= today
     end
   end
 
@@ -335,7 +338,7 @@ class Deal < ApplicationRecord
     update(
       stage: company&.default_lost_stage_key || 'closed_lost',
       lost_at: Time.current,
-      actual_close_date: Date.today,
+      actual_close_date: company&.today || Date.current,
       loss_reason: reason,
       competitor: competitor
     )
