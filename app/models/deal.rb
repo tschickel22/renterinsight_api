@@ -172,6 +172,10 @@ class Deal < ApplicationRecord
   # write-back's scenario price still wins at close) and BEFORE
   # snapshot_landed_cost_on_close + the after_commit GL post, which read off it.
   before_save :mirror_selling_price_from_home_line
+  # A deal moved to a won or lost stage any way (Edit Deal, the pipeline board,
+  # the API) records when, not only through mark_as_won. Dashboards count won
+  # deals by won_at; on production 39 of 141 won deals had none (2026-11-10).
+  before_save :stamp_closed_at, if: :will_save_change_to_stage?
 
   # Deal Desk: in 'on_close' mode, write the selected scenario's structure back to the deal
   # automatically as part of the close save (before the GL post, an after_commit, reads it).
@@ -315,6 +319,16 @@ class Deal < ApplicationRecord
       actual_close_date: Date.today,
       win_reason: reason
     )
+  end
+
+  def stamp_closed_at
+    if stage_is_won?
+      self.won_at ||= Time.current
+      self.actual_close_date ||= Date.current
+    elsif stage_is_lost?
+      self.lost_at ||= Time.current
+      self.actual_close_date ||= Date.current
+    end
   end
 
   def mark_as_lost(reason: nil, competitor: nil)
