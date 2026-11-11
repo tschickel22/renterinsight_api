@@ -47,7 +47,9 @@ class BankFeedPaymentOptions
       approved = deal.gl_posted_at.present?
       owed = invoice&.amount_due&.to_d
       next if approved && invoice && !owed.positive?
-      next if !approved && !@search # deposits on deals not yet approved only when searched for
+      # Deposits on deals not yet approved, and approved deals that never got
+      # an invoice (one is made when the payment is applied), only when searched for.
+      next if !@search && (!approved || invoice.nil?)
 
       next_draw = invoice && Reports::DrawProgress.call(invoice).find { |d| d[:status] != 'paid' }
       {
