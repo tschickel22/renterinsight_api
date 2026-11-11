@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_11_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_11_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4416,6 +4416,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_170000) do
     t.text "cost_basis_notes"
     t.boolean "show_exact_location", default: true, null: false
     t.string "street_view_url"
+    t.decimal "square_feet", precision: 14, scale: 2
+    t.string "size_unit", default: "acres", null: false
     t.index ["acquisition_date"], name: "index_land_parcels_on_acquisition_date"
     t.index ["city", "state"], name: "index_land_parcels_on_city_and_state"
     t.index ["company_id", "parcel_number"], name: "index_land_parcels_on_company_id_and_parcel_number", unique: true
