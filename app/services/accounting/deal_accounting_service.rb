@@ -457,10 +457,15 @@ module Accounting
         @deal.try(:stage)&.downcase&.in?(closed_keys)
     end
 
+    # The day the deal closed, as the dealer counts days. The close date is a
+    # calendar day already; a timestamp is read in the dealer's time zone, or
+    # one after 5 PM in Denver lands on the next UTC day.
     def deal_close_date
-      (@deal.try(:closed_at) ||
-       @deal.try(:won_at) ||
-       @deal.try(:actual_close_date))&.to_date || Date.current
+      return @deal.actual_close_date if @deal.try(:actual_close_date).present?
+
+      zone = ActiveSupport::TimeZone[@company.try(:time_zone).to_s] || Time.zone
+      stamp = @deal.try(:closed_at) || @deal.try(:won_at)
+      stamp ? stamp.in_time_zone(zone).to_date : (@company.try(:today) || Date.current)
     end
 
     def deal_department
