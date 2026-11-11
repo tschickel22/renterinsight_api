@@ -1149,6 +1149,11 @@ Rails.application.routes.draw do
         get 'promo_popup', to: 'website_promo_popups#show'
         put 'promo_popup', to: 'website_promo_popups#update'
 
+        # Edit Website, Inventory: show prices switch, hide rules, homes list
+        get 'inventory_settings', to: 'website_inventory#show'
+        put 'inventory_settings', to: 'website_inventory#update'
+        get 'inventory_homes', to: 'website_inventory#homes'
+
         # Website Media (nested under websites)
         resources :media, controller: 'website_media'
         

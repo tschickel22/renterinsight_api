@@ -124,6 +124,8 @@ class Api::V1::WebsitesController < ApplicationController
 
     # Include calculator settings from company loan_settings
     website_json['calculator_settings'] = build_calculator_settings(@company)
+    # The site's Inventory tab choices (the switch the renderer follows).
+    website_json['inventory_settings'] = Websites::InventorySettings.new(@website).to_h
 
     render json: website_json
   end
@@ -433,6 +435,7 @@ class Api::V1::WebsitesController < ApplicationController
     
     # Include calculator settings from company loan_settings
     website_json['calculator_settings'] = build_calculator_settings(@website.company)
+    website_json['inventory_settings'] = Websites::InventorySettings.new(@website).public_h
 
     # Include inventory embed config for public preview
     website_json['inventory_embed_config'] = {
@@ -541,6 +544,7 @@ class Api::V1::WebsitesController < ApplicationController
 
     company = @website.company
     website_json['calculator_settings'] = build_calculator_settings(company)
+    website_json['inventory_settings'] = Websites::InventorySettings.new(@website).public_h
 
     website_json['inventory_embed_config'] = {
       token: company.public_inventory_token,

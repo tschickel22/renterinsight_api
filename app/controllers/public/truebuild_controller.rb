@@ -27,7 +27,7 @@ class Public::TruebuildController < ApplicationController
     variant = vehicle.catalog_plan_variant
     return not_designable unless Truebuild::BuyerCatalog.designable_home?(@company, vehicle)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle).for_buyer.merge(vehicle_id: vehicle.id, consent: consent_questions)
+    render json: Truebuild::BuyerCatalog.new(@company, variant, vehicle: vehicle, site_prices: site_prices).for_buyer.merge(vehicle_id: vehicle.id, consent: consent_questions)
   end
 
   # GET /public/truebuild/models   Every model this dealer offers, for a site block.
@@ -36,7 +36,7 @@ class Public::TruebuildController < ApplicationController
   def models
     return render json: { models: [] } unless @company.has_module?(Truebuild::BuyerCatalog::MODULE)
 
-    list = Truebuild::ModelList.new(@company)
+    list = Truebuild::ModelList.new(@company, site_prices: site_prices)
     body = { models: list.call(manufacturer_id: params[:manufacturer_id].presence, factory_ids: params[:factory_ids],
                                series: params[:series], trueview_only: ActiveModel::Type::Boolean.new.cast(params[:trueview_only])) }
     body[:facets] = list.facets(manufacturer_id: params[:manufacturer_id].presence) if params[:facets].present?
@@ -47,7 +47,7 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, show_prices: @preview == true).for_buyer.merge(consent: consent_questions)
+    render json: Truebuild::BuyerCatalog.new(@company, variant, show_prices: @preview == true, site_prices: site_prices).for_buyer.merge(consent: consent_questions)
   end
 
   # GET /public/truebuild/models/:variant_id/trueview
@@ -70,7 +70,8 @@ class Public::TruebuildController < ApplicationController
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless designable_model?(variant)
 
-    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location, show_prices: @preview == true)
+    render json: Truebuild::BuyerCatalog.new(@company, variant, location: vehicle&.location, show_prices: @preview == true,
+                                                                site_prices: site_prices)
                                        .price(params[:option_ids], params[:addon_ids])
   end
 
@@ -128,6 +129,15 @@ class Public::TruebuildController < ApplicationController
   end
 
   private
+
+  # The DealerTide site's "Show asking prices" switch (Edit Website,
+  # Inventory) for the site asking, or nil off a DealerTide site or in a
+  # platform admin's preview: then the dealer's TrueBuild setting decides.
+  def site_prices
+    return @site_prices if defined?(@site_prices)
+
+    @site_prices = @preview ? nil : Websites::InventorySettings.for_request(@company, params[:website_id])&.designer_prices
+  end
 
   # On the dealer's own website, only with the add-on (TruebuildReach).
   def require_truebuild_reach

@@ -6,8 +6,10 @@ module Truebuild
   # monthly estimate as the dealer shows prices. Cached per dealer; the key
   # moves when their rules, terms or the published books change.
   class ModelList
-    def initialize(company)
+    # site_prices: as BuyerCatalog (the site's "Show asking prices" switch).
+    def initialize(company, site_prices: nil)
       @company = company
+      @site_prices = site_prices
       @terms = DealerCatalogTerm.effective(company, nil)
       @payments = PaymentEstimate.new(company)
     end
@@ -117,8 +119,8 @@ module Truebuild
       nil
     end
 
-    def show_prices? = BuyerCatalog::SHOWS_PRICES.include?(@terms.price_display)
-    def show_monthly? = BuyerCatalog::SHOWS_MONTHLY.include?(@terms.price_display) && @payments.enabled?
+    def show_prices? = @site_prices.nil? ? BuyerCatalog::SHOWS_PRICES.include?(@terms.price_display) : @site_prices
+    def show_monthly? = @site_prices != false && BuyerCatalog::SHOWS_MONTHLY.include?(@terms.price_display) && @payments.enabled?
 
     def cache_key(manufacturer_id)
       stamp = [@company.dealer_markup_rules.maximum(:updated_at), @company.dealer_catalog_terms.maximum(:updated_at),
@@ -128,7 +130,7 @@ module Truebuild
                @company.dealer_factories.maximum(:updated_at), Factory.maximum(:updated_at)].map { |t| t&.to_i }.join('-')
       # The count too: removing a dealer's factory leaves no newer timestamp.
       stamp += "-#{@company.dealer_factories.count}"
-      "truebuild:models:v3:#{@company.id}:#{manufacturer_id}:#{stamp}"
+      "truebuild:models:v3:#{@company.id}:#{manufacturer_id}:#{stamp}#{":site-#{@site_prices}" unless @site_prices.nil?}"
     end
   end
 end
