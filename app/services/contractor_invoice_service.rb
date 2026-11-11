@@ -104,11 +104,16 @@ class ContractorInvoiceService
     raise Error, "Invoice #{invoice_number} was already submitted" if dup
   end
 
+  def terms_days
+    @contractor.try(:payment_terms).to_s[/\d+/]&.to_i.then { |d| d&.positive? ? d : 30 }
+  end
+
   def create_bill!(amount, invoice_number, invoice_date, notes, scan, attachment, source: 'contractor_portal', extra: {}, due_date: nil)
     account = ProjectCostBillService.expense_account_for(@company, @contractor)
     where = @phase ? "#{@phase.name}, #{@project.name}" : @project.name
     memo = ["Invoice from #{@contractor.name} for #{where}", notes.presence].compact.join(". ")
 
+    bill_date = parse_date(invoice_date) || parse_date(scan&.dig(:bill_date)) || Date.current
     @company.bills.create!(
       vendor: @contractor,
       vendor_name: @contractor.name,
@@ -116,8 +121,11 @@ class ContractorInvoiceService
       location_id: @project.location_id,
       status: 'draft',
       source: source,
-      bill_date: parse_date(invoice_date) || parse_date(scan&.dig(:bill_date)) || Date.current,
-      due_date: due_date || parse_date(scan&.dig(:due_date)),
+      bill_date: bill_date,
+      # A bill with no due date never shows as due or in AP aging. Read off the
+      # invoice, else the vendor's terms ("Net 15"), else 30 days as a linked
+      # installer's invoice has.
+      due_date: due_date || parse_date(scan&.dig(:due_date)) || bill_date + terms_days,
       reference_number: invoice_number,
       memo: memo,
       attachments: [attachment].compact,
