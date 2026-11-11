@@ -113,7 +113,7 @@ class ContractorInvoiceService
     where = @phase ? "#{@phase.name}, #{@project.name}" : @project.name
     memo = ["Invoice from #{@contractor.name} for #{where}", notes.presence].compact.join(". ")
 
-    bill_date = parse_date(invoice_date) || parse_date(scan&.dig(:bill_date)) || Date.current
+    bill_date = parse_date(invoice_date) || parse_date(scan&.dig(:bill_date)) || @company.today
     @company.bills.create!(
       vendor: @contractor,
       vendor_name: @contractor.name,
