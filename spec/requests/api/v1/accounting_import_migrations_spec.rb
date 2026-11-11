@@ -290,6 +290,45 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
                              'choice' => { 'action' => 'map', 'chart_of_account_id' => books[:chart]['1010'].id })
     end
 
+    it 'creates a feed-only bank account for every unmatched QuickBooks bank and card, and matches it' do
+      id = start_migration
+      patch "#{base}/#{id}/banks", params: { matches: [{ qbo_account_id: '1', bank_account_id: books[:banks][:chase].id }] },
+                                   headers: headers, as: :json
+      unmatched = json['qbo_bank_accounts'].reject { |b| b['match'] }.map { |b| b['qbo_account_id'] }
+      expect(unmatched).not_to be_empty
+
+      expect do
+        post "#{base}/#{id}/banks/create", headers: headers, as: :json
+      end.to change { company.bank_accounts.count }.by(unmatched.size)
+      expect(response).to have_http_status(:ok)
+      expect(json).to include('created' => unmatched.size, 'matched_existing' => 0)
+      qbo = json['qbo_bank_accounts'].index_by { |b| b['qbo_account_id'] }
+      expect(qbo['1']['match']).to include('bank_account_id' => books[:banks][:chase].id)
+      expect(json['qbo_bank_accounts']).to all(satisfy { |b| b['match'] && b['match']['bank_account_id'] })
+
+      card = company.bank_accounts.find(qbo['14']['match']['bank_account_id'])
+      expect(card).to have_attributes(bank_name: 'Amex Business Card', account_type: 'credit_card', account_purpose: 'sync_only',
+                                      routing_number: nil, chart_of_account_id: nil)
+      expect(card.feed_start_date).to eq(Date.new(2026, 10, 1))
+
+      expect { post "#{base}/#{id}/banks/create", headers: headers, as: :json }.not_to(change { company.bank_accounts.count })
+      expect(json['created']).to eq(0)
+    end
+
+    it 'matches an unmatched bank account with the same last four instead of making another' do
+      id = start_migration
+      import = company.accounting_imports.find(id)
+      cfg = import.import_config
+      cfg['banks'].find { |b| b['qbo_account_id'] == '2' }['name'] = 'Wells Fargo Payroll 0912'
+      import.update!(import_config: cfg)
+
+      post "#{base}/#{id}/banks/create", headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(json['matched_existing']).to eq(1)
+      wells = json['qbo_bank_accounts'].find { |b| b['qbo_account_id'] == '2' }
+      expect(wells['match']['bank_account_id']).to eq(books[:banks][:wells].id)
+    end
+
     it 'refuses another company\'s bank account' do
       id = start_migration
       other = Company.create!(name: "Other-#{SecureRandom.hex(3)}")

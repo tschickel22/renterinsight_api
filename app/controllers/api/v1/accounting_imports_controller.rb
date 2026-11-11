@@ -7,7 +7,7 @@ class Api::V1::AccountingImportsController < ApplicationController
   # dealers; the frontend hides the entry for everyone else the same way.
   before_action :require_platform_admin!, only: %i[
     create_migration migration update_migration accounts suggest_accounts update_accounts
-    banks update_banks uncleared update_uncleared migration_preview post_migration rollback_migration
+    banks update_banks create_banks uncleared update_uncleared migration_preview post_migration rollback_migration
   ]
 
   def index
@@ -192,6 +192,20 @@ class Api::V1::AccountingImportsController < ApplicationController
     permitted = params.permit(matches: %i[qbo_account_id bank_account_id closed])
     with_migration_errors { wizard.update_banks!(Array(permitted[:matches]).map(&:to_h)) } or return
     render json: wizard.banks_json.merge(migration: wizard.migration_json)
+  end
+
+  # POST /api/v1/accounting_imports/:id/banks/create
+  # A bank account for every QuickBooks bank and card not matched yet, each
+  # matched to it. Creates bank accounts, so it needs that permission too.
+  def create_banks
+    return unless authorize_action!('accounting', 'create')
+    return unless authorize_action!('bank_accounts_accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    result = nil
+    with_migration_errors { result = wizard.create_bank_accounts! } or return
+    render json: wizard.banks_json.merge(migration: wizard.migration_json, created: result[:created],
+                                         matched_existing: result[:matched_existing])
   end
 
   # GET /api/v1/accounting_imports/:id/uncleared
