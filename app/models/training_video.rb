@@ -142,7 +142,7 @@ class TrainingVideo < ApplicationRecord
       id: id, title: title, slug: slug, description: description, module_key: module_key,
       position: position, duration_seconds: duration_seconds, video_url: video_url,
       poster_url: poster_url, captions_url: captions_url, chapters: chapters,
-      is_published: is_published, updated_at: updated_at
+      is_published: is_published, created_at: created_at, updated_at: updated_at
     }
     if admin
       json.merge!(share_token: share_token, share_enabled: share_enabled, video_size: video_size, covers: covers,
