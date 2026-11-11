@@ -542,6 +542,13 @@ class Company < ApplicationRecord
     operational_settings['timezone'].presence || 'America/New_York'
   end
 
+  # The dealer's calendar day, for dates set outside a signed-in dealer
+  # request (contractor portal, installer links, jobs), where the server is UTC.
+  def today
+    zone = ActiveSupport::TimeZone[time_zone] || Time.zone
+    Time.current.in_time_zone(zone).to_date
+  end
+
   # --- Inventory sharing groups -------------------------------------------
   # Two locations under the same dealer can share a physical lot and sell
   # each other's inventory. A "sharing group" is the unit of cross-location
