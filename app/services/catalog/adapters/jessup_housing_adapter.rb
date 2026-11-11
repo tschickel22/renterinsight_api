@@ -259,9 +259,12 @@ module Catalog
         seen.values
       end
 
+      # WP Rocket lazy loads some pages and not others: the real address is
+      # then in data-lazy-src, with src a blank SVG (the copy in <noscript> is
+      # stripped before parsing). The Murphy lost its plan to this on staging.
       def floorplan_img(content)
         content.css('.fl-module-photo img').each do |img|
-          url = [img['data-src'], img['src']].find { |u| uploaded?(u) }
+          url = [img['data-lazy-src'], img['data-src'], img['src']].find { |u| uploaded?(u) }
           return absolutize(url) if url
         end
         nil
