@@ -103,7 +103,7 @@ module Assistant
     end
 
     def pool_number
-      return nil unless Assistant::Pool.within_allowance?(lead.company)
+      return nil unless Assistant::Pool.available_for?(lead.company)
 
       entry = Assistant::Pool.pick_for(lead.phone)
       entry && entry.merge(pool: true)

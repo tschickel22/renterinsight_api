@@ -93,7 +93,8 @@ RSpec.describe 'Lead Assistant', type: :request do
     it 'uses a live pool number with the dealer and platform named on every text' do
       turn_on!
       Setting.set('Platform', 0, 'assistant_pool',
-                  { 'live' => true, 'numbers' => [{ 'number' => '+19704632673', 'messaging_service_sid' => 'MGpool' }] })
+                  { 'live' => true, 'numbers' => [{ 'number' => '+19704632673', 'messaging_service_sid' => 'MGpool' }],
+                    'companies' => [{ 'id' => company.id }] })
 
       Assistant::Starter.for(lead).send_first_text!(body: 'Hi Tia, thanks for asking!')
 
@@ -101,6 +102,16 @@ RSpec.describe 'Lead Assistant', type: :request do
       expect(conversation).to have_attributes(pool: true, sender_number: '+19704632673', messaging_service_sid: 'MGpool')
       expect(sent.last[:body]).to eq("#{company.name} via #{Brand.current.name}: Hi Tia, thanks for asking!")
       expect(sent.last[:pool_messaging_service_sid]).to eq('MGpool')
+    end
+
+    it 'does not use a live pool for a dealer no platform admin has added' do
+      turn_on!
+      Setting.set('Platform', 0, 'assistant_pool',
+                  { 'live' => true, 'numbers' => [{ 'number' => '+19704632673' }], 'companies' => [{ 'id' => company.id + 1000 }] })
+      expect(Assistant::Starter.for(lead).takes_over?).to be(false)
+
+      Assistant::Pool.add_company!(company)
+      expect(Assistant::Starter.for(lead).takes_over?).to be(true)
     end
 
     it 'does not use the pool until it is marked live' do
@@ -214,7 +225,8 @@ RSpec.describe 'Lead Assistant', type: :request do
     end
 
     it 'routes a reply to a pool number by the conversation, since the number names no dealer' do
-      Setting.set('Platform', 0, 'assistant_pool', { 'live' => true, 'numbers' => [{ 'number' => '+19704632673', 'messaging_service_sid' => 'MGpool' }] })
+      Setting.set('Platform', 0, 'assistant_pool', { 'live' => true, 'numbers' => [{ 'number' => '+19704632673', 'messaging_service_sid' => 'MGpool' }],
+                    'companies' => [{ 'id' => company.id }] })
       other = company.leads.create!(first_name: 'Ray', last_name: 'B', phone: '3035550199', owner_id: rep.id, sms_inquiry_consent: true, source_id: source.id)
       TwilioAccount.where(company: company).destroy_all
       Assistant::Starter.for(other).send_first_text!(body: 'Hi Ray!')

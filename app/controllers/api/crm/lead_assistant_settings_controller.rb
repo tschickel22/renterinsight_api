@@ -126,10 +126,11 @@ module Api
           },
           texting: {
             own_numbers: own,
-            pool_live: Assistant::Pool.live?,
+            pool_live: Assistant::Pool.available_for?(@company),
             # What the assistant texts from today: the dealer's own number, the
-            # shared number while theirs is pending, or nothing yet.
-            sends_from: own.any? ? 'own' : (Assistant::Pool.live? ? 'pool' : 'none')
+            # shared number while theirs is pending (only once a platform admin
+            # has added this dealer to it), or nothing yet.
+            sends_from: own.any? ? 'own' : (Assistant::Pool.available_for?(@company) ? 'pool' : 'none')
           }
         }
       end

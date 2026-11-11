@@ -3380,6 +3380,11 @@ Rails.application.routes.draw do
       get 'sms_registrations', to: 'sms_registrations#index'
       post 'sms_registrations/:id/send_to_carriers', to: 'sms_registrations#send_to_carriers'
       post 'sms_registrations/:id/check', to: 'sms_registrations#check'
+      # Shared texting numbers for Quinn AI and which dealers may use them (E96).
+      get 'assistant_pool', to: 'assistant_pool#show'
+      patch 'assistant_pool', to: 'assistant_pool#update'
+      post 'assistant_pool/companies/:company_id', to: 'assistant_pool#add_company'
+      delete 'assistant_pool/companies/:company_id', to: 'assistant_pool#remove_company'
 
       resources :live_visitors, only: [:index] do
         collection do
