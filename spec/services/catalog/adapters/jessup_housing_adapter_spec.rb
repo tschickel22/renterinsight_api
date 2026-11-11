@@ -155,6 +155,12 @@ RSpec.describe Catalog::Adapters::JessupHousingAdapter do
         expect(home.features).to eq('Exterior' => ['Dormer', 'Blank Rear Door'])
       end
 
+      it 'reads a plan WP Rocket lazy loads into data-lazy-src' do
+        lazy = promo.sub(%(src="data:image/png;base64,AAAA" data-src=), %(src="data:image/svg+xml,%3Csvg%3E" data-lazy-src=))
+        home = parse(lazy, key: 'bahama-28x76', path: '/the-promotional-series/bahama-28x76/')
+        expect(home.images.map { |i| [i['source_url'].split('/').last, i['is_floorplan']] }).to eq([['plan.png', true]])
+      end
+
       it 'still has an image when the gallery is empty, and no tour' do
         expect(home.images.map { |i| i['is_floorplan'] }).to eq([true])
         expect(home.virtual_tour_url).to be_nil
