@@ -57,6 +57,27 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(company.accounting_imports.count).to eq(0)
     end
 
+    it 'refuses a cutover date in the future, judged by the dealer\'s own calendar' do
+      tomorrow = company.today + 1
+      post "#{base}/migrations", params: { cutover_date: tomorrow.iso8601 }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(json['error']).to match(/can't be in the future/)
+      expect(company.accounting_imports.count).to eq(0)
+    end
+
+    it 'refuses moving a draft to a future cutover date and keeps the old one' do
+      id = start_migration
+      patch "#{base}/#{id}/migration", params: { cutover_date: (company.today + 20).iso8601 }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(json['error']).to match(/can't be in the future/)
+      expect(company.accounting_imports.find(id).cutover_date).to eq(Date.new(2026, 9, 30))
+    end
+
+    it 'allows today as the cutover' do
+      post "#{base}/migrations", params: { cutover_date: company.today.iso8601 }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+    end
+
     it 'needs a cutover date' do
       post "#{base}/migrations", params: {}, headers: headers, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
