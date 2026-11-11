@@ -13,11 +13,29 @@ namespace :inventory_pricing do
     scope = Vehicle.where(is_deleted: [false, nil]).where.not(status: 'sold')
                    .where(special_discount_enabled: [false, nil])
                    .where('msrp > 0 AND sale_price IS NOT NULL AND sale_price <> msrp')
-    scope.order(:company_id, :id).each do |v|
+    # SKIP_IDS=41,63 leaves homes the dealer will sort out themselves (Tom 2026-11-11).
+    scope = scope.where.not(id: ENV['SKIP_IDS'].split(',').map(&:to_i)) if ENV['SKIP_IDS'].present?
+    rows = scope.order(:company_id, :id).to_a
+    rows.each do |v|
       puts [v.company_id, v.id, v.inventory_id, "#{v.year} #{v.make} #{v.model}".squish, "sale_price #{v.sale_price.to_f}", "asking #{v.msrp.to_f}"].join(' | ')
       v.update_columns(sale_price: v.msrp, updated_at: Time.current) if apply?
     end
-    puts "#{scope.count} home(s)#{apply? ? ' changed' : ' (dry run; APPLY=1 to change)'}"
+    puts "#{rows.size} home(s)#{apply? ? ' changed' : ' (dry run; APPLY=1 to change)'}"
+  end
+
+  desc 'Price list homes not on the lot with only an old legacy sale price (no asking price, no sale running): clear it so they follow the price list. COMPANY_ID=n to limit'
+  task clear_legacy_sale_price: :environment do
+    scope = Vehicle.where(is_deleted: [false, nil]).where.not(status: Vehicle::ON_LOT_STATUSES)
+                   .where.not(catalog_plan_variant_id: nil)
+                   .where(special_discount_enabled: [false, nil])
+                   .where('COALESCE(msrp, 0) = 0 AND sale_price > 0 AND COALESCE(discounted_price, 0) = 0')
+    scope = scope.where(company_id: ENV['COMPANY_ID']) if ENV['COMPANY_ID'].present?
+    rows = scope.order(:company_id, :id).to_a
+    rows.each do |v|
+      puts [v.company_id, v.id, v.inventory_id, v.status, "legacy sale_price #{v.sale_price.to_f}"].join(' | ')
+      v.update_columns(sale_price: nil, updated_at: Time.current) if apply?
+    end
+    puts "#{rows.size} home(s)#{apply? ? ' cleared' : ' (dry run; APPLY=1 to change)'}"
   end
 
   desc 'Homes on a price list that also have an asking price typed (now wins on deal sheets): list only'
