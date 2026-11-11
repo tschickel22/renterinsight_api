@@ -55,6 +55,8 @@ class Api::V1::TruebuildPricingController < ApplicationController
 
     render json: {
       defaults: term_json(@company.dealer_catalog_terms.find_by(manufacturer_id: nil) || @company.dealer_catalog_terms.new),
+      # What buyers see also turns asking prices on or off on these sites (Websites::PriceSync).
+      websites_count: Websites::PriceSync.new(@company).websites_count,
       manufacturers: manufacturers,
       rules: @company.dealer_markup_rules.order(:scope_type, :id).map { |r| rule_json(r) },
       locations: @company.locations.order(:name).map { |l| { id: l.id, name: l.name } },
@@ -178,8 +180,17 @@ class Api::V1::TruebuildPricingController < ApplicationController
     attrs = params.permit(*TERM_FIELDS, **BUYER_LISTS.index_with { [] }).to_h
     attrs.slice(:buyer_featured_option_ids, :buyer_hidden_option_ids).each { |k, v| attrs[k] = Array(v).map(&:to_i).uniq.first(500) }
     attrs[:buyer_hidden_groups] = Array(attrs[:buyer_hidden_groups]).map { |g| g.to_s.strip }.reject(&:empty?).uniq.first(100) if attrs.key?(:buyer_hidden_groups)
+    display_before = terms.price_display.presence || 'hidden'
     if terms.update(attrs)
-      render json: term_json(terms)
+      body = term_json(terms)
+      # What buyers see is company wide: only the company row's change turns
+      # asking prices on or off on every website (Websites::PriceSync). A
+      # manufacturer row's price_display is never read, so it syncs nothing.
+      if manufacturer_id.nil? && attrs.key?(:price_display) && terms.price_display != display_before
+        body = body.merge(websites_changed: Websites::PriceSync.new(@company).from_terms(terms.price_display),
+                          websites_show_prices: terms.price_display != 'hidden')
+      end
+      render json: body
     else
       render json: { errors: terms.errors.full_messages }, status: :unprocessable_entity
     end
