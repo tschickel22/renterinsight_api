@@ -681,6 +681,10 @@ class Vehicle < ApplicationRecord
         # start price, websites) keep showing a figure nobody can see to change
         # (Tom 2026-11-11, home 69 kept $142,566 after its base became $132,245).
         self.sale_price = msrp
+      elsif msrp_changed? && msrp.to_f.zero? && msrp_was.to_f.positive? && !sale_price_changed?
+        # Asking price cleared: the home goes back to its price list or
+        # marked-up price, so the older column must not keep the old figure.
+        self.sale_price = nil
       end
       return
     end

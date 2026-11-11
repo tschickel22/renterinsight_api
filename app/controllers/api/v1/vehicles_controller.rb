@@ -16,7 +16,7 @@ module Api
       NULLABLE_INLINE_FIELDS = %i[
         dealer_cost freight_cost pdi_cost total_cost
         holdback_amount target_gross minimum_price
-        reconditioning_cost pack_amount surcharge_amount
+        reconditioning_cost pack_amount surcharge_amount msrp
       ].freeze
 
       # Media-only edits on a catalog row don't fork the row into a clone.

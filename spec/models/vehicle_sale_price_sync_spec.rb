@@ -35,4 +35,10 @@ RSpec.describe Vehicle, 'sale price follows the Base Sale Price' do
     v.update!(msrp: 120_000)
     expect(v.reload.sale_price.to_f).to eq(108_000.0)
   end
+
+  it 'clears the older sale price when the asking price is cleared' do
+    v = home(msrp: 100_000, sale_price: 100_000)
+    v.update!(msrp: nil)
+    expect(v.reload.sale_price).to be_nil
+  end
 end
