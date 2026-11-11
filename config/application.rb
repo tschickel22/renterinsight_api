@@ -19,6 +19,7 @@ module RenterinsightApi
       assets 
       tasks
       scripts
+      puma
     ])
 
     # Configuration for the application, engines, and railties goes here.
