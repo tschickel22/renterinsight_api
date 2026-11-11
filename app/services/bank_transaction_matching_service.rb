@@ -126,6 +126,8 @@ class BankTransactionMatchingService
       category_account_id: rule.assign_account_id,
       contact_id: rule.assign_contact_id,
       memo: rule.assign_memo.presence || bank_transaction.memo,
+      # E99: a rule can file the line to a job (a project still open).
+      project_id: rule.assign_project_id && @company.projects.not_deleted.where(id: rule.assign_project_id).pick(:id),
       rule_id: rule.id
     )
 

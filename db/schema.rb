@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_10_200100) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_11_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -915,6 +915,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_10_200100) do
     t.datetime "updated_at", null: false
     t.string "action_type", default: "categorize", null: false
     t.string "exclude_reason"
+    t.bigint "assign_project_id"
     t.index ["assign_account_id"], name: "index_bank_rules_on_assign_account_id"
     t.index ["assign_contact_id"], name: "index_bank_rules_on_assign_contact_id"
     t.index ["bank_account_id"], name: "index_bank_rules_on_bank_account_id"
@@ -945,10 +946,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_10_200100) do
     t.bigint "contact_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "project_id"
+    t.bigint "project_phase_id"
+    t.bigint "vendor_id"
+    t.bigint "deal_id"
+    t.bigint "invoice_id"
+    t.bigint "cash_receipt_id"
     t.index ["bank_account_id", "fitid"], name: "idx_bank_txn_fitid_unique", unique: true, where: "(fitid IS NOT NULL)"
     t.index ["bank_account_id", "status"], name: "index_bank_transactions_on_bank_account_id_and_status"
     t.index ["bank_account_id"], name: "index_bank_transactions_on_bank_account_id"
     t.index ["category_account_id"], name: "index_bank_transactions_on_category_account_id"
+    t.index ["deal_id"], name: "index_bank_transactions_on_deal_id"
+    t.index ["project_id"], name: "index_bank_transactions_on_project_id"
     t.index ["company_id"], name: "index_bank_transactions_on_company_id"
     t.index ["contact_id"], name: "index_bank_transactions_on_contact_id"
     t.index ["matched_journal_entry_id"], name: "index_bank_transactions_on_matched_journal_entry_id"

@@ -2608,6 +2608,8 @@ Rails.application.routes.draw do
             post :exclude
             post :unmatch
             get  :suggestions
+            post :apply_payment
+            get  :payment_options
           end
           collection do
             post :auto_match
