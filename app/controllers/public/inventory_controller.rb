@@ -52,6 +52,8 @@ class Public::InventoryController < ApplicationController
     @vehicles = @company.vehicles.includes(:catalog_plan_variant)
                        .where(status: statuses)
                        .where(is_deleted: [false, nil])
+    # Homes this site hides (Edit Website, Inventory) never leave the API.
+    @vehicles = site_inventory.visible(@vehicles) if site_inventory
     
     # Location filtering
     if params[:location_id].present?
@@ -226,7 +228,8 @@ class Public::InventoryController < ApplicationController
 
     picks = if website
               website.featured_homes.includes(vehicle: :catalog_plan_variant).select do |f|
-                statuses.include?(f.vehicle.status) && !f.vehicle.is_deleted
+                statuses.include?(f.vehicle.status) && !f.vehicle.is_deleted &&
+                  !site_inventory&.hidden?(f.vehicle)
               end
             else
               []
@@ -238,9 +241,10 @@ class Public::InventoryController < ApplicationController
       source = 'picked'
     else
       limit = (params[:limit] || 6).to_i.clamp(1, 24)
-      vehicles = @company.vehicles.includes(:catalog_plan_variant)
-                         .where(status: statuses, is_deleted: [false, nil])
-                         .order(created_at: :desc).limit(limit).to_a
+      newest = @company.vehicles.includes(:catalog_plan_variant)
+                        .where(status: statuses, is_deleted: [false, nil])
+      newest = site_inventory.visible(newest) if site_inventory
+      vehicles = newest.order(created_at: :desc).limit(limit).to_a
       source = 'newest'
     end
 
@@ -337,6 +341,7 @@ class Public::InventoryController < ApplicationController
     vehicles = @company.vehicles
                       .where(status: statuses)
                       .where(is_deleted: [false, nil])
+    vehicles = site_inventory.visible(vehicles) if site_inventory
     
     # Apply listing type filter if provided (so filter options match visible vehicles)
     vehicles = apply_listing_type(vehicles, params[:listing_type])
@@ -574,6 +579,12 @@ class Public::InventoryController < ApplicationController
     
     unless statuses.include?(@vehicle.status)
       render json: { error: 'Vehicle not available for public viewing' }, status: :forbidden
+      return
+    end
+
+    # Hidden from this site (Edit Website, Inventory): as if it were not there.
+    if site_inventory&.hidden?(@vehicle)
+      render json: { error: 'Vehicle not found' }, status: :not_found
       return
     end
   end
@@ -850,56 +861,36 @@ class Public::InventoryController < ApplicationController
     end
   end
 
-  # JSON for vehicle list view (lighter payload)
+  # The DealerTide site asking (website_id), with its Inventory tab choices:
+  # which homes it hides and whether it shows prices. Nil for an embed or the
+  # dealer's own website, which keep the company-wide behavior.
+  def site_inventory
+    return @site_inventory if defined?(@site_inventory)
+
+    @site_inventory = Websites::InventorySettings.for_request(@company, params[:website_id])
+  end
+
+  # What a buyer sees for a price here (Websites::PublicPrice).
+  def public_price
+    @public_price ||= Websites::PublicPrice.new(@company, site: site_inventory)
+  end
+
   # The sale price to show, or nil: none set, or a special discount past its end date.
   def sale_price_for(vehicle)
-    return nil unless vehicle.sale_price.present? && vehicle.sale_price > 0
-    return nil if vehicle.sale_expired? || vehicle.sale_not_started?
-
-    vehicle.sale_price.to_f.round(2)
+    public_price.sale_price(vehicle)
   end
 
-  # The price book's selling price for a home with none of its own (E98), or
-  # nil. Only when the dealer shows prices on their sites (company pricing on,
-  # TrueBuild prices not hidden) and has book pricing on for inventory. Never
-  # cost: the summary carries retail only. See InventoryPricing#public_summary.
-  def public_book_price(vehicle)
-    return nil unless vehicle.catalog_plan_variant_id && @company
-
-    @public_inventory_pricing ||= Truebuild::InventoryPricing.new(@company)
-    @public_inventory_pricing.public_summary(vehicle)
-  rescue StandardError => e
-    Rails.logger.warn("[public inventory] book price for #{vehicle.id}: #{e.class} #{e.message}")
-    nil
-  end
-
+  # JSON for vehicle list view (lighter payload)
   def vehicle_list_json(vehicle)
     # Determine which price to display (prefer sale_price)
     # NOTE: Prices are stored as decimal dollars, not cents
     # A sale past its end date (backlog E72) is over here at once, even before
     # the hourly job turns it off: the home shows its base price.
-    sale = sale_price_for(vehicle)
-    display_price = if sale
-      { 
-        amount: sale,
-        type: 'sale'
-      }
-    elsif vehicle.msrp.present? && vehicle.msrp > 0
-      # The dealer's base asking price, when there is no sale.
-      { amount: vehicle.msrp.to_f.round(2), type: 'base' }
-    elsif vehicle.rent_price.present? && vehicle.rent_price > 0
-      { 
-        amount: vehicle.rent_price.to_f.round(2),
-        type: 'rent'
-      }
-    elsif (book = public_book_price(vehicle))
-      # E98: a home with no price of its own, linked to a price book model,
-      # shows its deal sheet selling price. One number, never itemized, and
-      # only for a dealer whose site shows prices.
-      { amount: book[:retail].round(2), type: 'base', source: 'price_book' }
-    else
-      nil
-    end
+    # A site with "Show asking prices" off sends no price at all (Featured
+    # Homes sends a sale the dealer chose to show on its own: featured_sale).
+    shown = public_price.prices_shown?
+    sale = shown ? sale_price_for(vehicle) : nil
+    display_price = shown ? public_price.price(vehicle) : nil
     
     {
       id: vehicle.id,
@@ -922,10 +913,10 @@ class Public::InventoryController < ApplicationController
       sale_price: sale,
       # The base price, and the sale's last day so a site that copies the feed
       # can take the sale down on that date between pulls.
-      base_price: vehicle.msrp.to_f.positive? ? vehicle.msrp.to_f.round(2) : nil,
+      base_price: (vehicle.msrp.to_f.round(2) if shown && vehicle.msrp.to_f.positive?),
       on_sale: sale.present? && vehicle.special_discount_enabled == true,
       sale_ends_on: (vehicle.special_discount_ends_on&.iso8601 if sale && vehicle.special_discount_enabled),
-      rent_price: vehicle.rent_price&.to_f&.round(2),
+      rent_price: (vehicle.rent_price&.to_f&.round(2) if shown),
       
       # Specifications
       mileage: vehicle.mileage,
@@ -975,7 +966,7 @@ class Public::InventoryController < ApplicationController
       custom_fields: public_custom_fields_for(vehicle),
 
       # Total price (includes add-ons and discounts)
-      total_home_price: vehicle.total_home_price,
+      total_home_price: (vehicle.total_home_price if shown),
 
       # Estimated monthly payment, from this company's own configured rate,
       # term and minimum down payment. The frontend Vehicle type has declared
@@ -1009,7 +1000,7 @@ class Public::InventoryController < ApplicationController
   # route.
   def estimated_monthly_payment(vehicle)
     return nil if @company.nil?
-    return nil if @company.try(:show_pricing) == false
+    return nil unless public_price.payments_shown?
 
     @calculator_settings ||= Websites::CalculatorSettings.new(@company)
     return nil unless @calculator_settings.to_h[:enabled]
@@ -1047,16 +1038,23 @@ class Public::InventoryController < ApplicationController
       }
     }
 
+    shown = public_price.prices_shown?
+    unless shown
+      packages_data = packages_data.map { |pkg| pkg.merge(price: nil) }
+    end
+
     vehicle_list_json(vehicle).merge(
       # Total price with add-ons and discounts
-      total_home_price: vehicle.total_home_price,
+      total_home_price: (vehicle.total_home_price if shown),
       # Pre-discount total (base + packages before any discount)
-      total_price_before_discount: (vehicle.msrp || vehicle.sale_price || 0).to_f + (vehicle.inventory_packages&.where(include_in_total: true)&.sum(:price) || 0).to_f,
-      msrp: vehicle.msrp&.to_f,
-      special_discount_enabled: vehicle.respond_to?(:special_discount_enabled) ? (vehicle.special_discount_enabled && !vehicle.sale_expired?) : false,
-      discount_type: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
-      discount_value: vehicle.respond_to?(:discount_value) ? vehicle.discount_value : nil,
-      discounted_price: vehicle.respond_to?(:discounted_price) && !vehicle.sale_expired? && !vehicle.sale_not_started? ? vehicle.discounted_price&.to_f : nil,
+      total_price_before_discount: (if shown
+                                      (vehicle.msrp || vehicle.sale_price || 0).to_f + (vehicle.inventory_packages&.where(include_in_total: true)&.sum(:price) || 0).to_f
+                                    end),
+      msrp: (vehicle.msrp&.to_f if shown),
+      special_discount_enabled: shown && (vehicle.respond_to?(:special_discount_enabled) ? (vehicle.special_discount_enabled && !vehicle.sale_expired?) : false),
+      discount_type: (vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil if shown),
+      discount_value: (vehicle.respond_to?(:discount_value) ? vehicle.discount_value : nil if shown),
+      discounted_price: (vehicle.respond_to?(:discounted_price) && !vehicle.sale_expired? && !vehicle.sale_not_started? ? vehicle.discounted_price&.to_f : nil if shown),
       inventory_packages: packages_data,
 
       # Full description

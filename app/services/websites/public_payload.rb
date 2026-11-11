@@ -58,6 +58,9 @@ module Websites
       # Normalized and trimmed rather than the raw column, which as_json above
       # also carries. The browser decides the date window; see PromoPopup.
       payload['promo_popup'] = PromoPopup.public_payload(@website)
+      # Only the "Show asking prices" switch. Hidden homes and rules are
+      # applied by the inventory API, never in the browser.
+      payload['inventory_settings'] = InventorySettings.new(@website).public_h
       payload
     end
 

@@ -54,8 +54,12 @@ module Truebuild
 
     # show_prices: a platform admin's preview (PreviewPass) checks the prices
     # whatever the dealer shows buyers. Cached apart from the buyer's catalog.
-    def initialize(company, variant, location: nil, vehicle: nil, show_prices: false)
+    # site_prices: the DealerTide site's "Show asking prices" switch (Edit
+    # Website, Inventory): true shows prices, false hides them and the
+    # monthly estimate, nil follows the dealer's TrueBuild "What buyers see".
+    def initialize(company, variant, location: nil, vehicle: nil, show_prices: false, site_prices: nil)
       @show_prices = show_prices
+      @site_prices = site_prices
       @company = company
       @variant = variant
       @vehicle = vehicle
@@ -138,7 +142,7 @@ module Truebuild
       retail_by_option = engine.lines.select { |l| l[:kind] == 'option' }.to_h { |l| [l[:option_id], l[:retail]] }
       starting = self.class.starting_retail(engine.lines)
       show = prices_shown? && starting.present?
-      monthly = SHOWS_MONTHLY.include?(@terms.price_display) && starting.present? && payments.enabled?
+      monthly = monthly_shown? && starting.present? && payments.enabled?
 
       {
         variant: variant_json,
@@ -171,7 +175,7 @@ module Truebuild
       result = PricingEngine.new(company: @company, variant: @variant, location: @location, include_freight: false,
                                  option_ids: allowed(option_ids), addon_ids: allowed_addons(addon_ids)).call
       show = prices_shown? && result.totals[:retail].present?
-      monthly = SHOWS_MONTHLY.include?(@terms.price_display) && result.totals[:retail].present? && payments.enabled?
+      monthly = monthly_shown? && result.totals[:retail].present? && payments.enabled?
       { show_prices: show, total: show ? result.totals[:retail] : nil,
         monthly: monthly ? payments.monthly(result.totals[:retail]) : nil,
         lines: show ? result.retail_only[:lines] : [], book_id: result.book&.id, option_ids: allowed(option_ids),
@@ -209,7 +213,18 @@ module Truebuild
                                  .where.not(mode: 'quote_only').includes(:source).order(:position, :id).to_a
     end
 
-    def prices_shown? = @show_prices || SHOWS_PRICES.include?(@terms.price_display)
+    def prices_shown?
+      return true if @show_prices
+      return @site_prices unless @site_prices.nil?
+
+      SHOWS_PRICES.include?(@terms.price_display)
+    end
+
+    def monthly_shown?
+      return false if @site_prices == false && !@show_prices
+
+      SHOWS_MONTHLY.include?(@terms.price_display)
+    end
 
     def addon_json(addon, show)
       { id: addon.id, name: addon.name, description: addon.description.presence, price: show ? addon.price.to_f : nil }
@@ -223,7 +238,7 @@ module Truebuild
                CatalogSwatch.where(manufacturer_id: @variant.manufacturer_id).maximum(:updated_at),
                CatalogOptionDecision.stamp(@variant.manufacturer_id),
                @variant.updated_at, @company.updated_at].map { |t| t&.to_i }.join('-')
-      "truebuild:catalog:v15:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}#{':preview' if @show_prices}"
+      "truebuild:catalog:v15:#{@company.id}:#{@variant.id}:#{@location&.id}:#{stamp}#{':preview' if @show_prices}#{":site-#{@site_prices}" unless @site_prices.nil?}"
     end
 
     def offered_prices
