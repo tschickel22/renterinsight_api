@@ -98,6 +98,23 @@ module Truebuild
       base_line[:retail]
     end
 
+    # Whether there is a book to price this model from at all.
+    def priced?
+      @book.present? && @cost_book.present?
+    end
+
+    # The home's own line, as #home_retail works it out: cost, retail and the
+    # detail (factory base, surcharge, program discount, pack, rule). Has cost:
+    # dealer staff only.
+    def home_breakdown
+      base_line
+    end
+
+    # The book retail comes from (the one the dealer accepted).
+    def book_name
+      @book&.name
+    end
+
     # What the dealer sells one option row for on this model, before it is
     # on a sheet: their set price, their markup, or the factory's suggested
     # retail, as a sheet would price it. Nil when the factory gives no price.

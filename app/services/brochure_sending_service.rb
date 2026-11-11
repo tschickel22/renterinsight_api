@@ -292,6 +292,8 @@ class BrochureSendingService
       vehicles.each do |vehicle|
         price = vehicle.sale_price || vehicle.rent_price
         price_display = price ? "$#{format_currency(price)}#{vehicle.rent_price ? '/mo' : ''}" : 'Contact for pricing'
+        # A brochure that hides prices hides them in the email too.
+        price_html = brochure.prices_shown? ? %(<div style="color: #059669; font-weight: bold; font-size: 16px;">#{price_display}</div>) : ''
 
         # Each card links to that home inside the brochure, tracked, so we know
         # which one caught their eye. Falls back to an unlinked card when the
@@ -302,7 +304,7 @@ class BrochureSendingService
             <div style="color: #6b7280; font-size: 14px; margin-bottom: 5px;">
               #{[vehicle.location_city, vehicle.location_state].compact.join(', ')}
             </div>
-            <div style="color: #059669; font-weight: bold; font-size: 16px;">#{price_display}</div>
+            #{price_html}
           </div>
         VEHICLE_HTML
 

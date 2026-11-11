@@ -1167,6 +1167,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_040000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "location_id"
+    t.boolean "show_prices"
     t.index ["company_id", "is_deleted"], name: "index_brochures_on_company_id_and_is_deleted"
     t.index ["company_id", "location_id"], name: "index_brochures_on_company_id_and_location_id"
     t.index ["company_id", "status"], name: "index_brochures_on_company_id_and_status"
@@ -3290,6 +3291,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_040000) do
     t.boolean "website_designer", default: true, null: false
     t.decimal "doc_fee", precision: 10, scale: 2
     t.decimal "dealer_pack", precision: 10, scale: 2
+    t.boolean "inventory_book_pricing"
     t.index "company_id, COALESCE(manufacturer_id, (0)::bigint)", name: "idx_dealer_catalog_terms_unique", unique: true
     t.index ["company_id"], name: "index_dealer_catalog_terms_on_company_id"
     t.index ["manufacturer_id"], name: "index_dealer_catalog_terms_on_manufacturer_id"

@@ -859,6 +859,20 @@ class Public::InventoryController < ApplicationController
     vehicle.sale_price.to_f.round(2)
   end
 
+  # The price book's selling price for a home with none of its own (E98), or
+  # nil. Only when the dealer shows prices on their sites (company pricing on,
+  # TrueBuild prices not hidden) and has book pricing on for inventory. Never
+  # cost: the summary carries retail only. See InventoryPricing#public_summary.
+  def public_book_price(vehicle)
+    return nil unless vehicle.catalog_plan_variant_id && @company
+
+    @public_inventory_pricing ||= Truebuild::InventoryPricing.new(@company)
+    @public_inventory_pricing.public_summary(vehicle)
+  rescue StandardError => e
+    Rails.logger.warn("[public inventory] book price for #{vehicle.id}: #{e.class} #{e.message}")
+    nil
+  end
+
   def vehicle_list_json(vehicle)
     # Determine which price to display (prefer sale_price)
     # NOTE: Prices are stored as decimal dollars, not cents
@@ -878,6 +892,11 @@ class Public::InventoryController < ApplicationController
         amount: vehicle.rent_price.to_f.round(2),
         type: 'rent'
       }
+    elsif (book = public_book_price(vehicle))
+      # E98: a home with no price of its own, linked to a price book model,
+      # shows its deal sheet selling price. One number, never itemized, and
+      # only for a dealer whose site shows prices.
+      { amount: book[:retail].round(2), type: 'base', source: 'price_book' }
     else
       nil
     end
@@ -899,6 +918,7 @@ class Public::InventoryController < ApplicationController
       # Pricing - default to sale_price, fallback to rent_price
       price: display_price&.dig(:amount),
       price_type: display_price&.dig(:type),
+      price_source: display_price&.dig(:source),
       sale_price: sale,
       # The base price, and the sale's last day so a site that copies the feed
       # can take the sale down on that date between pulls.

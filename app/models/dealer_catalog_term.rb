@@ -68,8 +68,15 @@ class DealerCatalogTerm < ApplicationRecord
     # $0 on a builder keeps it out; blank on the company changes nothing.
     ALL_OTHER_HOMES.each { |f| merged[f] = base[f] if merged[f].nil? && base }
     FREIGHT.each { |f| merged[f] = specific&.[](f).nil? ? base&.[](f) : specific[f] }
+    # Inventory showing the price book's deal sheet price (E98): a builder's
+    # own choice, else the company's, else on.
+    merged.inventory_book_pricing = specific&.inventory_book_pricing.nil? ? base&.inventory_book_pricing : specific.inventory_book_pricing
     merged
   end
+
+  # Whether inventory shows the deal sheet price from the price book. On
+  # unless the dealer turned it off (E98).
+  def inventory_book_pricing_on? = inventory_book_pricing != false
 
   # Has the dealer set any freight rate? Until then the deal sheet assumes.
   def freight_set? = FREIGHT.any? { |f| !self[f].nil? }

@@ -110,9 +110,11 @@ module Api
           'vehicle_ids',
           'is_public',
           'status',
+          'show_prices',
           'location_id'
         )
-        
+        safe_params['show_prices'] = cast_show_prices(safe_params['show_prices']) if safe_params.key?('show_prices')
+
         @brochure = @company.brochures.new(safe_params)
         
         # Auto-assign location from Current.location_id (set by X-Location-ID header)
@@ -177,9 +179,11 @@ module Api
           'template_data',
           'vehicle_ids',
           'is_public',
-          'status'
+          'status',
+          'show_prices'
         )
         
+        safe_params['show_prices'] = cast_show_prices(safe_params['show_prices']) if safe_params.key?('show_prices')
         if @brochure.update(safe_params)
           render json: { brochure: brochure_json(@brochure, detailed: true) }
         else
@@ -389,7 +393,10 @@ module Api
         @brochure.increment_view_count!
         
         # Get vehicles with full details
-        vehicles = @brochure.vehicles.active.map { |v| vehicle_json_for_brochure(v) }
+        # Hidden prices never leave the server, so print, screen and a copied
+        # link all agree.
+        prices = @brochure.prices_shown?
+        vehicles = @brochure.vehicles.active.includes(:catalog_plan_variant).map { |v| vehicle_json_for_brochure(v, prices: prices, company: @brochure.company) }
         
         # Get company branding
         company = @brochure.company
@@ -405,7 +412,8 @@ module Api
         # Build calculator settings from loan_settings (public-safe subset only)
         loan_settings = company.loan_settings || {}
         calculator_settings = {
-          enabled: loan_settings['calculator_enabled'] != false, # Default enabled
+          # A payment is a price: no calculator on a brochure that hides prices.
+          enabled: loan_settings['calculator_enabled'] != false && prices, # Default enabled
           defaultInterestRate: (loan_settings['default_interest_rate'] || 6.99).to_f,
           defaultLoanTermMonths: (loan_settings['max_loan_term'] || 240).to_i,
           minDownPaymentPercent: (loan_settings['min_down_payment_percent'] || 10).to_f,
@@ -466,6 +474,7 @@ module Api
             description: @brochure.description,
             templateName: @brochure.template_name,
             templateData: template_data,
+            showPrices: prices,
             vehicles: vehicles,
             viewCount: @brochure.view_count,
             createdAt: @brochure.created_at,
@@ -827,6 +836,10 @@ module Api
           publicUrl: brochure.public_url(base_url),
           templateName: brochure.template_name,
           templateData: template_data,
+          # nil follows the template's Show Prices switch.
+          showPricesOverride: brochure.show_prices,
+          showPrices: brochure.prices_shown?,
+          templateShowsPrices: brochure.template_shows_prices?,
           vehicleIds: brochure.vehicle_ids,
           vehicleCount: brochure.vehicle_count,
           isPublic: brochure.is_public,
@@ -842,7 +855,9 @@ module Api
         
         if detailed
           # Include full vehicle details for detailed view
-          json[:vehicles] = brochure.vehicles.active.map { |v| vehicle_json_for_brochure(v) }
+          json[:vehicles] = brochure.vehicles.active.includes(:catalog_plan_variant).map do |v|
+            vehicle_json_for_brochure(v, prices: brochure.prices_shown?, company: brochure.company)
+          end
         else
           # For list view, include minimal vehicle data for thumbnails
           first_vehicle = brochure.vehicles.active.first
@@ -870,7 +885,41 @@ module Api
         json
       end
 
-      def vehicle_json_for_brochure(vehicle)
+      PRICE_KEYS = %i[salePrice rentPrice msrp discountedPrice totalHomePrice totalPriceBeforeDiscount price].freeze
+
+      # true/false, or nil to follow the template.
+      def cast_show_prices(value)
+        return nil if value.nil? || value.to_s.strip.empty? || value.to_s == 'template'
+
+        ActiveModel::Type::Boolean.new.cast(value)
+      end
+
+      # prices: false leaves every price out (the brochure hides them). With
+      # prices on, a home with no price of its own linked to a price book shows
+      # the book's selling price when the dealer shows prices publicly (E98).
+      def vehicle_json_for_brochure(vehicle, prices: true, company: nil)
+        json = vehicle_json_for_brochure_raw(vehicle)
+        unless prices
+          PRICE_KEYS.each { |k| json[k] = nil }
+          json[:specialDiscountEnabled] = false
+          json[:inventoryPackages] = Array(json[:inventoryPackages]).map { |p| p.merge(price: nil, showPriceInMarketing: false) }
+          return json
+        end
+
+        if company && vehicle.catalog_plan_variant_id
+          @brochure_book_pricing ||= Truebuild::InventoryPricing.new(company)
+          book = @brochure_book_pricing.public_summary(vehicle)
+          json.merge!(price: book[:retail].round(2), priceSource: 'price_book') if book
+        end
+        json
+      rescue StandardError => e
+        raise unless json
+
+        Rails.logger.warn("[brochures] book price for #{vehicle.id}: #{e.class} #{e.message}")
+        json
+      end
+
+      def vehicle_json_for_brochure_raw(vehicle)
         # Use HTTPS for all environments (local dev uses SSL certificates)
         base_url = request.ssl? ? "https://#{request.host}:#{request.port}" : "http://#{request.host}:#{request.port}"
         
