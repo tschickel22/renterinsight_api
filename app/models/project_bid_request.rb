@@ -41,6 +41,14 @@ class ProjectBidRequest < ApplicationRecord
     bids.any? { |b| b.status == 'submitted' } ? 'ready' : 'waiting'
   end
 
+  # The linked installer this awarded work was handed to, while it's with them.
+  def sent_to_installer_name
+    link_id = awarded? && awarded_bid&.project_cost_item&.metadata&.dig('handed_to_project_link_id')
+    return nil unless link_id
+
+    ProjectLink.live.find_by(id: link_id, dealer_company_id: company_id)&.installer_company&.name
+  end
+
   # Shared by the project's Bids tab and the company-wide Bids & Quotes page.
   def as_api_json(include_project: false)
     list = bids.sort_by { |b| [b.amount ? 0 : 1, b.amount.to_d, b.vendor.name.to_s] }
@@ -59,6 +67,8 @@ class ProjectBidRequest < ApplicationRecord
       awarded_bid_id: awarded_bid_id,
       awarded_at: awarded_at,
       award_note: award_note,
+      # The work went to a linked installer with this bid (ProjectLinkHandover).
+      sent_to_installer: sent_to_installer_name,
       cancelled_at: cancelled_at,
       created_at: created_at,
       bids: list.map do |b|

@@ -874,7 +874,9 @@ Rails.application.routes.draw do
         end
 
         # Hand the project or a phase to a linked installer company (E68 step 5)
-        resources :project_links, only: %i[index create]
+        resources :project_links, only: %i[index create] do
+          get :handover_preview, on: :collection
+        end
 
         # Bids on a phase or the whole project (E68 step 4)
         resources :bid_requests, controller: 'project_bid_requests', only: %i[index create] do

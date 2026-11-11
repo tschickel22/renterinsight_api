@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_11_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_11_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -956,11 +956,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_010000) do
     t.index ["bank_account_id", "status"], name: "index_bank_transactions_on_bank_account_id_and_status"
     t.index ["bank_account_id"], name: "index_bank_transactions_on_bank_account_id"
     t.index ["category_account_id"], name: "index_bank_transactions_on_category_account_id"
-    t.index ["deal_id"], name: "index_bank_transactions_on_deal_id"
-    t.index ["project_id"], name: "index_bank_transactions_on_project_id"
     t.index ["company_id"], name: "index_bank_transactions_on_company_id"
     t.index ["contact_id"], name: "index_bank_transactions_on_contact_id"
+    t.index ["deal_id"], name: "index_bank_transactions_on_deal_id"
     t.index ["matched_journal_entry_id"], name: "index_bank_transactions_on_matched_journal_entry_id"
+    t.index ["project_id"], name: "index_bank_transactions_on_project_id"
     t.index ["rule_id"], name: "index_bank_transactions_on_rule_id"
     t.index ["stripe_txn_id"], name: "index_bank_transactions_on_stripe_txn_id", unique: true, where: "(stripe_txn_id IS NOT NULL)"
     t.index ["transaction_date"], name: "index_bank_transactions_on_transaction_date"
@@ -6064,6 +6064,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_010000) do
     t.string "price_source"
     t.jsonb "price_lines", default: [], null: false
     t.bigint "link_rate_card_id"
+    t.string "handover_mode"
+    t.jsonb "handover_bids", default: [], null: false
     t.index ["company_link_id"], name: "index_project_links_on_company_link_id"
     t.index ["dealer_bill_id"], name: "index_project_links_on_dealer_bill_id"
     t.index ["dealer_company_id"], name: "index_project_links_on_dealer_company_id"
@@ -8432,6 +8434,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_010000) do
     t.datetime "busy_feed_checked_at"
     t.string "busy_feed_error"
     t.string "busy_feed_detail", default: "none", null: false
+    t.string "office_phone"
+    t.string "office_phone_ext"
+    t.string "customer_phone", default: "mobile", null: false
     t.index ["calendar_feed_token"], name: "index_users_on_calendar_feed_token", unique: true, where: "(calendar_feed_token IS NOT NULL)"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
@@ -8449,9 +8454,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_010000) do
     t.index ["phone"], name: "index_users_on_phone"
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
     t.index ["primary_user_id"], name: "index_users_on_primary_user_id"
-    t.string "office_phone"
-    t.string "office_phone_ext"
-    t.string "customer_phone", default: "mobile", null: false
   end
 
   create_table "vehicle_documents", force: :cascade do |t|
