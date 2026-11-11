@@ -162,6 +162,10 @@ module Api
         page = params[:page]&.to_i || 1
         per_page = [params[:per_page]&.to_i || 25, 500].min  # Allow up to 500 for dropdown pickers
         vehicles = vehicles.includes(:location).offset((page - 1) * per_page).limit(per_page)
+        # E98: the inventory list asks for the price book's deal sheet price.
+        # Only its own pages, never a 500-home picker.
+        @with_book_price = params[:include_book_price].to_s == 'true' && per_page <= 100
+        vehicles = vehicles.includes(:catalog_plan_variant) if @with_book_price
 
         # For buyer-name matches we want to tell the FE *which* buyer matched —
         # otherwise a vehicle appears in results with no obvious reason. Compute
@@ -2011,6 +2015,19 @@ module Api
         )
       end
 
+      def inventory_pricing
+        @inventory_pricing ||= Truebuild::InventoryPricing.new(@company)
+      end
+
+      # Same rule as the unit's other cost figures (max_advance).
+      def can_see_inventory_cost?
+        return @can_see_inventory_cost if defined?(@can_see_inventory_cost)
+
+        @can_see_inventory_cost = !!(current_user&.platform_admin? || current_user&.company_admin? ||
+                                     current_user&.has_permission?('inventory', 'read', scope: 'view_cost_details') ||
+                                     current_user&.has_permission?('accounting', 'read'))
+      end
+
       def vehicle_json(vehicle, detailed: false)
         # Helper to convert relative image URLs to full URLs
         protocol = request.ssl? ? 'https' : 'http'
@@ -2317,8 +2334,18 @@ module Api
           })
         end
 
+        # E98: the price book's deal sheet price, worked out live. One figure
+        # on the list; how it is built on the home, with cost lines only for
+        # people who may see cost.
+        if @with_book_price && vehicle.catalog_plan_variant_id
+          json[:bookPrice] = inventory_pricing.summary(vehicle)
+        end
+
         # Add related data if detailed view requested
         if detailed
+          if vehicle.catalog_plan_variant_id
+            json[:bookPricing] = inventory_pricing.breakdown(vehicle, include_cost: can_see_inventory_cost?)
+          end
           json[:deals] = vehicle.deals.active.map { |d| deal_summary(d) }
           json[:quotes] = vehicle.quotes.active.map { |q| quote_summary(q) }
 

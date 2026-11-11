@@ -31,6 +31,20 @@ class Brochure < ApplicationRecord
     )
   end
 
+  # Whether this brochure shows prices: its own choice (show_prices), else
+  # its listings block's "Show Prices" switch, copied from the template when
+  # the brochure was made. A block that never set the switch shows prices,
+  # as every brochure did before the switch was honored (2026-11-10).
+  def prices_shown?
+    show_prices.nil? ? template_shows_prices? : show_prices
+  end
+
+  def template_shows_prices?
+    blocks = template_data.is_a?(Hash) ? Array(template_data['blocks']) : []
+    gallery = blocks.find { |b| b.is_a?(Hash) && b['type'] == 'gallery' }
+    gallery.nil? || (gallery['config'] || {})['showPrices'] != false
+  end
+
   # Get vehicles for this brochure.
   #
   # Always a relation, never a bare Array: every caller chains a scope onto this
