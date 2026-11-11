@@ -27,7 +27,11 @@ class ProjectLinkService
   # typed) or 'quote' (the installer prices it when accepting, and the dealer
   # approves that before any of it starts). Left out, a fee means 'dealer'
   # and no fee means 'quote'.
-  def offer!(project:, link:, phases: [], fee: nil, note: nil, price_mode: nil, card_lines: [])
+  #
+  # handover: what goes with work the dealer already bid out (contractors,
+  # budget or empty; ProjectLinkHandover). Left out, awarded bids go with
+  # their contractors.
+  def offer!(project:, link:, phases: [], fee: nil, note: nil, price_mode: nil, card_lines: [], handover: nil)
     raise Error, 'Not your project' unless project.company_id == @company.id
     raise Error, 'Pick an active linked installer' unless link&.active? && link.dealer_company_id == @company.id
     phases = Array(phases).uniq
@@ -69,6 +73,7 @@ class ProjectLinkService
                                fee_amount: fee, note: note.presence, offered_by: @actor, offered_at: Time.current,
                                price_source: price_mode, price_lines: lines, link_rate_card: card)
       set_dealer_owner!(pl, link.dealer_vendor_id)
+      ProjectLinkHandover.new(@company, project, phases).hand_off!(pl, handover)
       pl.update!(dealer_cost_item: committed_cost!(pl)) if fee&.positive?
       link.log!('job_offered', "#{@company.name} sent #{pl.scope_label} on #{project.name}", company: @company, user: @actor,
                 project_link: pl, data: { fee: fee&.to_s, price_source: price_mode, rate_card_version: card&.version, phase_ids: phases.map(&:id) })
@@ -109,6 +114,7 @@ class ProjectLinkService
     ActiveRecord::Base.transaction do
       pl.lock!
       project = build_installer_project!(pl)
+      ProjectLinkHandover.apply!(pl, project, actor: @actor)
       pl.update!(status: 'accepted', installer_project: project, responded_by: @actor, responded_at: Time.current)
       pl.company_link.log!('job_accepted', "#{@company.name} accepted #{pl.scope_label}", company: @company, user: @actor, project_link: pl)
       request = create_change!(pl, kind: 'price', lines: lines, description: price_note) if lines
@@ -308,6 +314,7 @@ class ProjectLinkService
       change.update_column(:dealer_cost_item_id, nil)
       line.destroy!
     end
+    ProjectLinkHandover.restore!(pl)
     pl.link_phases.delete_all
   end
 

@@ -173,7 +173,12 @@ module Api
           installer_invoice_number: pl.installer_invoice&.invoice_number,
           # Step 6: the price, and the rate card to quote or add lines from.
           rate_card_items: rate_card_json(pl.company_link.current_rate_card)&.dig(:items) || [],
-          phase_refs: pl.dealer_phases.map { |ph| { id: ph.id, name: ph.name, status: ph.status } }
+          phase_refs: pl.dealer_phases.map { |ph| { id: ph.id, name: ph.name, status: ph.status } },
+          # Bids the dealer took on this work, coming over with it.
+          handover_mode: pl.handover_mode,
+          handover_bids: pl.handover_mode.in?(%w[contractors budget]) ? Array(pl.handover_bids).map { |b|
+            b.slice('dealer_phase_id', 'title', 'amount', *(pl.handover_mode == 'contractors' ? ['vendor_name'] : []))
+          } : []
         }.merge(link_price_json(pl))
       end
     end

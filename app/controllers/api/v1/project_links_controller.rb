@@ -8,7 +8,7 @@ module Api
       include LinkPricingJson
 
       before_action :set_company_scope
-      before_action :set_project, only: %i[index create]
+      before_action :set_project, only: %i[index create handover_preview]
       before_action :set_dealer_link, only: %i[cancel]
       before_action :set_installer_link, only: %i[accept decline bill request_change]
 
@@ -44,10 +44,26 @@ module Api
 
         card_lines = (params.permit(card_lines: %i[item_key qty])[:card_lines] || []).map(&:to_h)
         pl = service.offer!(project: @project, phases: phases, link: link, fee: params[:fee], note: params[:note],
-                            price_mode: params[:price_mode], card_lines: card_lines)
+                            price_mode: params[:price_mode], card_lines: card_lines, handover: params[:handover])
         render json: { project_link: dealer_json(pl) }, status: :created
-      rescue ProjectLinkService::Error, ActiveRecord::RecordInvalid => e
+      rescue ProjectLinkService::Error, ProjectLinkHandover::Error, ActiveRecord::RecordInvalid => e
         render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/projects/:project_id/project_links/handover_preview?company_link_id=&project_phase_ids[]=
+      # The bids awarded on the work about to be sent: which move, whether the
+      # installer already has each contractor, and anything that stops it.
+      def handover_preview
+        return unless authorize_action!('deals', 'read')
+
+        link = CompanyLink.active.find_by(id: params[:company_link_id], dealer_company_id: @company.id)
+        return render json: { error: 'Pick an active linked installer' }, status: :unprocessable_entity unless link
+
+        ids = Array(params[:project_phase_ids]).compact_blank.map(&:to_i).uniq
+        phases = @project.project_phases.where(id: ids).to_a
+        return render json: { error: 'Phase not found' }, status: :not_found if phases.size != ids.size
+
+        render json: ProjectLinkHandover.new(@company, @project, phases).preview(link.installer_company)
       end
 
       # POST /api/v1/project_links/:id/cancel
@@ -129,6 +145,10 @@ module Api
         render json: { error: 'Not found' }, status: :not_found unless @pl
       end
 
+      def handover_bids_json(pl)
+        Array(pl.handover_bids).map { |b| b.slice('dealer_phase_id', 'title', 'vendor_name', 'amount') }
+      end
+
       # What the dealer sees: the installer, the fee, where it stands. The
       # installer's own tasks, subcontractors and costs stay with them.
       def dealer_json(pl)
@@ -138,7 +158,8 @@ module Api
           phase_ids: pl.dealer_phases.map(&:id), whole_project: pl.whole_project?,
           fee_amount: pl.fee_amount&.to_f, note: pl.note, decline_reason: pl.decline_reason,
           offered_at: pl.offered_at, responded_at: pl.responded_at,
-          dealer_bill_id: pl.dealer_bill_id, can_cancel: pl.status.in?(%w[offered accepted]) && pl.dealer_bill_id.nil?
+          dealer_bill_id: pl.dealer_bill_id, can_cancel: pl.status.in?(%w[offered accepted]) && pl.dealer_bill_id.nil?,
+          handover_mode: pl.handover_mode, handover_bids: handover_bids_json(pl)
         }.merge(link_price_json(pl))
       end
     end

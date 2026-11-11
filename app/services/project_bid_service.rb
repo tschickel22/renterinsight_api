@@ -174,6 +174,9 @@ class ProjectBidService
 
     bid = request.awarded_bid
     cost = bid&.project_cost_item
+    if (installer = request.sent_to_installer_name)
+      raise Error, "This work is with #{installer} now. Take the job back from them first."
+    end
     if cost && (cost.bill_id.present? || cost.journal_entry_id.present? || cost.status != 'pending')
       raise Error, 'The awarded cost is already billed or paid, so the award stays'
     end
