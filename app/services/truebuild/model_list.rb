@@ -102,13 +102,17 @@ module Truebuild
         {
           plan_id: plan.id, name: plan.name, series: plan.series, manufacturer: vs.first.manufacturer&.name, factory_id: plan.factory_id,
           image: Array(media['elevations']).first || media.dig('photos', 0, 'url'),
+          # For a builder's floor plan cards, which lead with the plan drawing.
+          floor_plan: vs.lazy.map { |v| Array(v.shown_media['floor_plans']).first }.find(&:present?),
+          photo_count: Array(media['photos']).size, tour: vs.any? { |v| v.shown_media['matterport_url'].present? },
           beds: vs.map(&:beds).compact.uniq.sort, baths: vs.map { |v| v.baths&.to_f }.compact.uniq.sort,
+          square_feet: vs.map(&:square_feet).compact.uniq.sort,
           sizes: vs.filter_map { |v| "#{v.width_ft}' x #{v.length_ft}'" if v.width_ft && v.length_ft }.uniq,
           starting_price: show_prices? ? cheapest&.last : nil,
           starting_monthly: show_monthly? && cheapest ? @payments.monthly(cheapest.last) : nil,
           variants: vs.sort_by { |v| [v.width_ft.to_i, v.length_ft.to_i, v.model_number] }
                       .map { |v| { id: v.id, model_number: v.model_number, building_code: v.building_code, beds: v.beds,
-                                   baths: v.baths&.to_f, width_ft: v.width_ft, length_ft: v.length_ft } }
+                                   baths: v.baths&.to_f, width_ft: v.width_ft, length_ft: v.length_ft, square_feet: v.square_feet } }
         }
       end.sort_by { |p| [p[:image] ? 0 : 1, p[:series].to_s, p[:name].to_s] } # photographed homes lead
     end
@@ -130,7 +134,7 @@ module Truebuild
                @company.dealer_factories.maximum(:updated_at), Factory.maximum(:updated_at)].map { |t| t&.to_i }.join('-')
       # The count too: removing a dealer's factory leaves no newer timestamp.
       stamp += "-#{@company.dealer_factories.count}"
-      "truebuild:models:v3:#{@company.id}:#{manufacturer_id}:#{stamp}#{":site-#{@site_prices}" unless @site_prices.nil?}"
+      "truebuild:models:v4:#{@company.id}:#{manufacturer_id}:#{stamp}#{":site-#{@site_prices}" unless @site_prices.nil?}"
     end
   end
 end

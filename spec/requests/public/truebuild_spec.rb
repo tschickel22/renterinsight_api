@@ -292,6 +292,33 @@ RSpec.describe 'Public TrueBuild', type: :request do
     expect(response.body).not_to match(/cost/i)
   end
 
+  it 'gives a builder card the floor plan, square feet, photo count and whether there is a tour' do
+    variant.update!(square_feet: 1_568, media: { 'floor_plans' => ['https://img/plan.jpg'], 'matterport_url' => 'https://my.matterport.com/show/?m=x',
+                                                 'photos' => [{ 'url' => 'https://img/k', 'room' => 'kitchen' }] })
+    get '/public/truebuild/models', params: { token: token, website_id: site.id }
+    model = JSON.parse(response.body)['models'].first
+    expect(model).to include('floor_plan' => 'https://img/plan.jpg', 'square_feet' => [1_568], 'photo_count' => 1, 'tour' => true)
+    expect(model['variants'].first['square_feet']).to eq(1_568)
+  end
+
+  it 'lists every finish the homes come in for a decor page, with its sample, whether or not TrueView drew it' do
+    # Nothing drawn: the designer would show no finishes, the decor page still does.
+    allow(Truebuild::Trueview::Buyer).to receive(:held_back).and_call_original
+    CatalogSwatch.create!(manufacturer: mfr, factory: factory, set_name: 'Siding', name: 'Clay', hex: '#A0978B',
+                          image_url: 'https://img/clay.jpg', note: 'Lap siding')
+    get '/public/truebuild/finishes', params: { token: token, website_id: site.id }
+    expect(response).to have_http_status(:ok)
+    exterior_group = JSON.parse(response.body)['groups'].find { |g| g['name'] == 'Exterior' }
+    siding = exterior_group['sets'].find { |st| st['name'] == 'Siding' }
+    expect(siding['options'].map { |o| o['name'] }).to eq(%w[Clay Olive White]) # Olive: the plan's "Siding: Olive"
+    expect(siding['options'].first).to include('standard' => true, 'swatch_url' => 'https://img/clay.jpg', 'hex' => '#A0978B', 'note' => 'Lap siding')
+    expect(response.body).not_to match(/cost|price/i)
+
+    company.tenant_module_overrides.find_by(module_key: 'sales.configurator').update!(is_enabled: false)
+    get '/public/truebuild/finishes', params: { token: token, website_id: site.id }
+    expect(JSON.parse(response.body)['groups']).to eq([])
+  end
+
   it 'lists a line with no factory price, priced on request, even before the dealer sets up pricing' do
     tc = Manufacturer.create!(name: "Timber Creek #{SecureRandom.hex(3)}", industry_type: 'manufactured_home')
     bear = tc.factories.create!(name: 'Bear Creek', code: "BC#{SecureRandom.hex(2)}", truebuild_released_at: Time.current)

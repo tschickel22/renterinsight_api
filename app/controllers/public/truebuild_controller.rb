@@ -7,6 +7,7 @@
 #   GET  /public/truebuild/homes/:vehicle_id   design data for a home on the lot
 #   GET  /public/truebuild/models/:variant_id  design data for a catalog model
 #   GET  /public/truebuild/models/:variant_id/trueview  finish layers for the model's photos
+#   GET  /public/truebuild/finishes            the finishes the dealer's homes come in (a Decor page)
 #   POST /public/truebuild/price               { variant_id, option_ids }
 #   POST /public/truebuild/designs             { variant_id, vehicle_id, option_ids, contact, context }
 #   GET  /public/truebuild/designs/:design_token      a saved design, for its share link
@@ -41,6 +42,15 @@ class Public::TruebuildController < ApplicationController
                                series: params[:series], trueview_only: ActiveModel::Type::Boolean.new.cast(params[:trueview_only])) }
     body[:facets] = list.facets(manufacturer_id: params[:manufacturer_id].presence) if params[:facets].present?
     render json: body
+  end
+
+  # GET /public/truebuild/finishes   Every finish the dealer's homes come in,
+  # with the factory's sample picture, for a Decor page (Truebuild::FinishBook).
+  #   factory_ids[], series[]: only those, as /models.
+  def finishes
+    return render json: { groups: [] } unless @company.has_module?(Truebuild::BuyerCatalog::MODULE)
+
+    render json: { groups: Truebuild::FinishBook.new(@company).call(factory_ids: params[:factory_ids], series: params[:series]) }
   end
 
   def model
