@@ -16,7 +16,7 @@ module Api
       NULLABLE_INLINE_FIELDS = %i[
         dealer_cost freight_cost pdi_cost total_cost
         holdback_amount target_gross minimum_price
-        reconditioning_cost pack_amount
+        reconditioning_cost pack_amount surcharge_amount
       ].freeze
 
       # Media-only edits on a catalog row don't fork the row into a clone.
@@ -938,7 +938,7 @@ module Api
             
             <h2>Pricing &amp; Configuration <span style="font-size:9pt;color:#b91c1c;font-weight:normal;">(Internal — for sales rep use)</span></h2>
             <table>
-              #{@vehicle.msrp.present? ? "<tr><th>Base Sale Price</th><td class='price-highlight'>#{format_currency(@vehicle.msrp)}</td></tr>" : ''}
+              #{@vehicle.msrp.present? ? "<tr><th>Asking Price</th><td class='price-highlight'>#{format_currency(@vehicle.msrp)}</td></tr>" : ''}
               #{@vehicle.rent_price.present? ? "<tr><th>Monthly Rent</th><td>#{format_currency(@vehicle.rent_price)}/month</td></tr>" : ''}
               #{@vehicle.rent_to_own_price.present? ? "<tr><th>Rent-to-Own</th><td>#{format_currency(@vehicle.rent_to_own_price)}/month</td></tr>" : ''}
               #{@vehicle.deposit_amount.present? ? "<tr><th>Deposit Amount</th><td>#{format_currency(@vehicle.deposit_amount)}</td></tr>" : ''}
@@ -1518,7 +1518,7 @@ module Api
 
       # Build the Items & Add-Ons + cost breakdown for the internal print snapshot. These are
       # the unit's inventory_packages (home-associated add-ons, NOT deal line items). Produces:
-      #  - a sale-side table: Base Sale Price + each add-on price -> Configured Total Sale Price
+      #  - a sale-side table: Asking Price + each add-on price -> Configured Total Sale Price
       #  - a cost-side table: Home Cost + Freight + PDI + add-on costs -> Total Actual Cost
       # plus the resulting gross. Returns '' when there are no packages AND no cost components,
       # so a bare unit with nothing entered shows nothing here.
@@ -1538,7 +1538,7 @@ module Api
         sale_html = packages.any? ? <<~SALE : ''
           <h2>Items &amp; Add-Ons <span style="font-size:9pt;color:#666;font-weight:normal;">(associated with this home)</span></h2>
           <table>
-            <tr><th>Base Sale Price</th><td>#{format_currency(base)}</td></tr>
+            <tr><th>Asking Price</th><td>#{format_currency(base)}</td></tr>
             #{addon_sale_rows}
             <tr style="border-top:2px solid #333;"><th style="font-weight:bold;">Configured Total Sale Price</th><td style="font-weight:bold;">#{format_currency(configured_sale_total)}</td></tr>
           </table>
@@ -1597,7 +1597,7 @@ module Api
               <tr style="border-top:2px solid #333;"><th style="font-weight:bold;">Total Actual Cost</th><td style="font-weight:bold;">#{format_currency(total_cost)}</td></tr>
               <tr><th style="font-weight:bold;">Estimated Gross (Sale − Cost)</th><td style="font-weight:bold;color:#15803d;">#{format_currency(gross)}</td></tr>
             </table>
-            <p style="font-size:9pt;color:#666;margin-top:-8px;">Gross uses the configured sale price (Base Sale Price + add-ons in total) minus total landed cost. Holdback, floor-plan interest, and delivery/setup are not included here.</p>
+            <p style="font-size:9pt;color:#666;margin-top:-8px;">Gross uses the configured sale price (asking price + add-ons in total) minus total landed cost. Holdback, floor-plan interest, and delivery/setup are not included here.</p>
           COST
         end
 
@@ -1848,6 +1848,7 @@ module Api
           totalCost: :total_cost,
           holdbackAmount: :holdback_amount,
           reconditioningCost: :reconditioning_cost,
+          surchargeAmount: :surcharge_amount,
           floorPlanRate: :floor_plan_rate,
           floorPlanAmount: :floor_plan_amount,
           floorPlanLender: :floor_plan_lender,
@@ -1912,7 +1913,7 @@ module Api
           :repo, :sale_pending, :package_type,
           # Cost details
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost, :pack_amount,
-          :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
+          :holdback_amount, :reconditioning_cost, :surcharge_amount, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
           :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
@@ -2016,7 +2017,7 @@ module Api
           :video_url, :virtual_tour_url, :matterport_url, :special_features, :overlay_text,
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost, :pack_amount,
-          :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
+          :holdback_amount, :reconditioning_cost, :surcharge_amount, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
           :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
@@ -2185,7 +2186,8 @@ module Api
           floorPlanLender: vehicle.floor_plan_lender,
           floorPlanStartDate: vehicle.floor_plan_start_date,
           # Reconditioning cost — inventory-level source the deal/approval pulls from.
-          reconditioningCost: (vehicle.respond_to?(:reconditioning_cost) ? vehicle.reconditioning_cost&.to_f : nil)
+          reconditioningCost: (vehicle.respond_to?(:reconditioning_cost) ? vehicle.reconditioning_cost&.to_f : nil),
+          surchargeAmount: vehicle.surcharge_amount&.to_f
         }
 
         # Add type-specific fields
@@ -2393,6 +2395,10 @@ module Api
             # change it or who can.
             json[:bookPricing]&.merge!(can_change: !!can?('company_settings', 'update'))
           end
+          # The Pricing tab's figures: asking price, marked-up price, cost, gross, margin.
+          json[:pricingSummary] = Truebuild::HomePricing.new(@company, inventory_pricing: inventory_pricing)
+                                                        .for(vehicle, include_cost: can_see_inventory_cost?)
+                                                        .merge(can_change_pricing: !!can?('company_settings', 'update'))
           json[:deals] = vehicle.deals.active.map { |d| deal_summary(d) }
           json[:quotes] = vehicle.quotes.active.map { |q| quote_summary(q) }
 

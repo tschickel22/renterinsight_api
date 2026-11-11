@@ -722,6 +722,17 @@ module Truebuild
         end
         line.unit_cost = source[:cost] unless meta['set_cost']
         line.unit_retail = source[:retail] unless meta['set_retail']
+        # A home on the lot with an asking price sells at it (Tom 2026-11-11):
+        # what inventory, the website and the rep say is what the sheet starts at.
+        if line.kind == 'base'
+          asking = meta['set_retail'] ? nil : lot_asking_price
+          if asking
+            line.unit_retail = asking
+            meta['retail_from'] = 'asking_price'
+          else
+            meta.delete('retail_from')
+          end
+        end
         line.is_standard = source.dig(:detail, :standard) == true if line.kind == 'option'
         # The dealer's own cost from their price list, and their name for the option (E85).
         source.dig(:detail, :dealer_cost_set) ? meta['dealer_cost_set'] = true : meta.delete('dealer_cost_set')
@@ -923,14 +934,24 @@ module Truebuild
       (deal.pack_amount.presence || @build.vehicle&.pack_amount.presence || terms.dealer_pack.presence || deal.effective_pack_amount).to_d
     end
 
-    # A catalog home prices from the book and the dealer's rules, which stay in
-    # charge (Tom, 2026-11-04). Inventory can advertise something else, and a buyer
-    # may have seen that figure, so the rep is told.
+    # The asking price typed on a home on the lot, nil when none (the price
+    # list and markup price it then). The asking price (once Base Sale Price) is the msrp column; an
+    # older home may carry only sale_price.
+    def lot_asking_price
+      vehicle = @build.vehicle
+      return nil if vehicle.nil? || @build.source != 'lot' || manual_home?
+
+      own = vehicle.msrp.to_d.positive? ? vehicle.msrp : (vehicle.special_discount_enabled ? nil : vehicle.sale_price)
+      own.to_d.positive? ? own.to_d : nil
+    end
+
+    # Inventory can advertise a sale the sheet does not carry, and a buyer may
+    # have seen that figure, so the rep is told.
     def warn_inventory_price(lines, discounts)
       vehicle = @build.vehicle
       return if vehicle.nil? || manual_home? || @build.deal.cost_snapshotted?
 
-      listed = vehicle.discounted_price.presence || vehicle.sale_price.presence || vehicle.msrp.presence
+      listed = (vehicle.special_discount_enabled && vehicle.discounted_price.presence) || vehicle.msrp.presence || vehicle.sale_price.presence
       retail = lines.find { |l| l.kind == 'base' }&.retail
       return unless listed.to_d.positive? && retail
 
@@ -940,7 +961,7 @@ module Truebuild
 
       words = ActiveSupport::NumberHelper
       @warnings << "Inventory lists this home at #{words.number_to_currency(listed, precision: 0)}, but this sheet prices it at " \
-                   "#{words.number_to_currency(sheet, precision: 0)} from the price book and your markup rules. Change one if the buyer was quoted the other."
+                   "#{words.number_to_currency(sheet, precision: 0)}. Change one if the buyer was quoted the other."
     end
 
     # What a lot home really cost, unless the rep set the base cost; nil otherwise.

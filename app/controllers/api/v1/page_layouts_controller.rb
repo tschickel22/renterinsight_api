@@ -629,8 +629,8 @@ module Api
           { key: 'date_sold', label: 'Date Sold', type: 'date', source: 'standard', required: false, protected: false, visibility: 'internal' },
 
           # Pricing (external)
-          { key: 'msrp', label: 'Base Sale Price', type: 'currency', source: 'standard', required: false, protected: true, visibility: 'both', description: 'The home’s selling price before packages and add-ons. This is what the customer pays for the base home — add-ons build on top of it. Not a cost.' },
-          { key: 'sale_price', label: 'Sale Price (Legacy)', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Legacy field — use Base Sale Price instead' },
+          { key: 'msrp', label: 'Asking Price', type: 'currency', source: 'standard', required: false, protected: true, visibility: 'both', description: 'What you want for this home before add-ons. Blank uses your cost x markup. The inventory list, a new deal sheet and your website use it.' },
+          { key: 'sale_price', label: 'Sale Price (Legacy)', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Legacy field. Use Asking Price instead.' },
           { key: 'special_discount_enabled', label: 'Special Discount', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enable a special discounted price for this unit' },
           { key: 'discount_type', label: 'Discount Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both', options: ['% of Home Price', '$ Flat Amount', '% of Total w/ Packages'], options_locked: true, description: '% of Home Price, flat $ off, or % of Total (Home Price + packages)' },
           { key: 'discount_value', label: 'Discount Value', type: 'number', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enter percentage or dollar amount' },

@@ -204,20 +204,23 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
     end
   end
 
-  describe 'a catalog home inventory lists at another price' do
+  describe 'a catalog home with an asking price in inventory (Tom 2026-11-11)' do
     let(:vehicle) { company.vehicles.create!(vin: SecureRandom.hex(8), make: 'Champion', model: 'Apex', year: 2026, catalog_plan_variant_id: double.id, msrp: 90_000) }
 
-    it 'warns, and the sheet keeps the price book figure' do
+    it 'starts the sheet at the asking price, with nothing to warn about' do
       post sheet_path(new_deal(vehicle: vehicle)), headers: headers, params: { variant_id: double.id, vehicle_id: vehicle.id }.to_json
       expect(response).to have_http_status(:created)
-      expect(body.dig('build', 'totals', 'gross')).not_to eq(90_000.0)
-      expect(body.dig('build', 'totals', 'warnings').join).to include('Inventory lists this home at $90,000')
+      base = body.dig('build', 'lines').find { |l| l['kind'] == 'base' }
+      expect(base['unit_retail'].to_f).to eq(90_000.0)
+      expect(body.dig('build', 'totals', 'warnings').join).not_to include('Inventory lists')
     end
 
-    it 'says nothing when they agree, or differ by a dollar of rounding' do
-      vehicle.update!(msrp: 102_001)
+    it 'uses the price list and markup when no asking price is typed' do
+      vehicle.update!(msrp: nil)
       post sheet_path(new_deal(vehicle: vehicle)), headers: headers, params: { variant_id: double.id, vehicle_id: vehicle.id }.to_json
-      expect(body.dig('build', 'totals', 'warnings').join).not_to include('Inventory lists')
+      base = body.dig('build', 'lines').find { |l| l['kind'] == 'base' }
+      expect(base['unit_retail'].to_f).not_to eq(90_000.0)
+      expect(base['unit_retail'].to_f).to be_positive
     end
   end
 

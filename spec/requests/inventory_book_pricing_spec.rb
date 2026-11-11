@@ -82,34 +82,60 @@ RSpec.describe 'Inventory price book pricing', type: :request do
         JSON.parse(response.body)['vehicles'].map { |x| x['id'].to_s }
       end
 
-      let!(:linked) { home(msrp: 40_000) }                        # deal sheet uses the book: 90,000
+      let!(:linked) { home }                                       # no asking price: the price list's 90,000
+      let!(:asked) { home(msrp: 40_000) }                          # on a price list, asking price wins
       let!(:typed) { home(catalog_plan_variant_id: nil, msrp: 70_000) }
       let!(:unpriced) { home(catalog_plan_variant_id: nil) }
 
-      it 'shows the book figure for a linked home and the own price for the rest' do
+      it 'shows the asking price when one is typed, else the marked-up price' do
         get '/api/v1/vehicles', params: { per_page: 25, include_book_price: 'true' }, headers: headers
         rows = JSON.parse(response.body)['vehicles'].index_by { |x| x['id'].to_s }
         expect(rows[linked.id.to_s]['listPrice']).to eq('amount' => 90_000.0, 'source' => 'book', 'beforeSurcharge' => true)
+        expect(rows[asked.id.to_s]['listPrice']).to eq('amount' => 40_000.0, 'source' => 'home', 'beforeSurcharge' => false)
         expect(rows[typed.id.to_s]['listPrice']).to eq('amount' => 70_000.0, 'source' => 'home', 'beforeSurcharge' => false)
         expect(rows[unpriced.id.to_s]['listPrice']).to be_nil
       end
 
       it 'sorts every page by that price, homes with no price last' do
-        expect(ids_for(sort_by: 'list_price', sort_order: 'desc')).to eq([linked, typed, unpriced].map { |v| v.id.to_s })
-        expect(ids_for(sort_by: 'list_price', sort_order: 'asc')).to eq([typed, linked, unpriced].map { |v| v.id.to_s })
-        expect(ids_for(sort_by: 'list_price', sort_order: 'asc', per_page: 1, page: 2)).to eq([linked.id.to_s])
-        expect(JSON.parse(response.body).dig('meta', 'total_count')).to eq(3)
+        expect(ids_for(sort_by: 'list_price', sort_order: 'desc')).to eq([linked, typed, asked, unpriced].map { |v| v.id.to_s })
+        expect(ids_for(sort_by: 'list_price', sort_order: 'asc', per_page: 1, page: 2)).to eq([typed.id.to_s])
+        expect(JSON.parse(response.body).dig('meta', 'total_count')).to eq(4)
       end
 
-      it 'filters on that price, including a home priced only from the book' do
+      it 'filters on that price' do
         expect(ids_for(min_price: 80_000)).to eq([linked.id.to_s])
-        expect(ids_for(max_price: 75_000)).to eq([typed.id.to_s])
-        expect(JSON.parse(response.body).dig('meta', 'total_count')).to eq(1)
+        expect(ids_for(max_price: 50_000)).to eq([asked.id.to_s])
       end
 
       it 'ignores a sort key that is not a column' do
-        expect(ids_for(sort_by: 'id; drop table vehicles', sort_order: 'sideways').size).to eq(3)
+        expect(ids_for(sort_by: 'id; drop table vehicles', sort_order: 'sideways').size).to eq(4)
         expect(response).to have_http_status(:ok)
+      end
+    end
+
+    describe 'the Pricing tab summary' do
+      it 'fills factory price and surcharge from the price list, with gross and margin' do
+        CatalogVariantPrice.find_by(variant: variant).update!(required_adders: [{ name: 'Surcharge', amount: 4_000 }])
+        v = home
+        get "/api/v1/vehicles/#{v.id}", headers: headers
+        sum = JSON.parse(response.body).dig('vehicle', 'pricingSummary')
+        expect(sum).to include('listed' => 96_000.0, 'listed_from' => 'marked_up', 'on_price_list' => true)
+        expect(sum['cost']).to include('factory_price' => 60_000.0, 'factory_price_from' => 'price_list', 'surcharge' => 4_000.0,
+                                       'surcharge_from' => 'price_list', 'total' => 64_000.0, 'your_cost' => 64_000.0)
+        expect(sum['gross']).to eq(32_000.0)
+        expect(sum['margin_pct']).to eq(33.3)
+        expect(sum.dig('markup', 'times')).to eq(1.5)
+      end
+
+      it 'takes the invoice surcharge first and never adds it to an invoice cost twice' do
+        v = home(catalog_plan_variant_id: nil, dealer_cost: 70_000, surcharge_amount: 3_000, msrp: 100_000)
+        expect(v.structured_cost).to eq(73_000.0)
+        VehicleInvoice.create!(vehicle: v, company: company, material_surcharge: 2_500, gross_invoice: 70_000)
+        v.reload
+        expect(v.structured_cost).to eq(70_000.0)
+        get "/api/v1/vehicles/#{v.id}", headers: headers
+        cost = JSON.parse(response.body).dig('vehicle', 'pricingSummary', 'cost')
+        expect(cost).to include('surcharge' => 2_500.0, 'surcharge_from' => 'invoice', 'surcharge_in_total' => 'included', 'total' => 70_000.0)
       end
     end
 
