@@ -326,6 +326,60 @@ module Accounting
         save!
       end
 
+      # Gives every QuickBooks bank and card that has no match yet a
+      # DealerTide bank account and matches it, so a dealer with nine of them
+      # does not type nine in. Each is feed-only (no routing or account number
+      # needed) and carries the last four digits from its QuickBooks name.
+      # Connect a bank later attaches to an account of the same type and last
+      # four (StripeBankFeedService#connect_fc_account!), so connecting fills
+      # these in rather than adding a second copy. An existing unmatched
+      # account of the same type and last four is matched instead of creating
+      # another. No GL account is set: an unlinked bank takes the one its
+      # QuickBooks account maps to when the switch posts.
+      #
+      # Returns { created:, matched_existing: } counts.
+      def create_bank_accounts!
+        ensure_draft!
+        rows = account_rows.index_by { |r| r['qbo_account_id'] }
+        taken = bank_rows.filter_map { |b| b.dig('match', 'bank_account_id') }
+        matches = []
+        created = 0
+        existing = 0
+
+        BankAccount.transaction do
+          bank_rows.each do |bank|
+            next if bank['match'].present?
+
+            type = bank_account_type(bank, rows[bank['qbo_account_id']])
+            last4 = bank['name'].to_s[/(\d{4})\D*\z/, 1]
+            ba = last4 && company_bank_accounts.find do |a|
+              !taken.include?(a.id) && a.account_type == type &&
+                (a.account_mask.to_s.end_with?(last4) || a.display_last_four == last4)
+            end
+            if ba
+              existing += 1
+            else
+              ba = @company.bank_accounts.create!(
+                bank_name: bank['name'].to_s.strip.presence || 'Bank account',
+                account_type: type,
+                account_purpose: BankAccount::ACCOUNT_PURPOSE_SYNC_ONLY,
+                display_last_four: last4,
+                account_mask: last4,
+                created_by: 'quickbooks_switch'
+              )
+              company_bank_accounts << ba
+              created += 1
+            end
+            taken << ba.id
+            matches << { 'qbo_account_id' => bank['qbo_account_id'], 'bank_account_id' => ba.id }
+          end
+
+          update_banks!(matches) if matches.any?
+        end
+
+        { created: created, matched_existing: existing }
+      end
+
       # Why a matched bank cannot carry its QuickBooks balance as matched. A
       # bank's balance is an asset and a card's is owed, so a card matched to
       # a checking account (or one whose GL is cash) would book what is owed
@@ -825,6 +879,14 @@ module Accounting
 
       def company_bank_accounts
         @company_bank_accounts ||= @company.bank_accounts.where(is_deleted: [false, nil]).order(:id).to_a
+      end
+
+      # checking, savings or credit_card for a QuickBooks bank row.
+      def bank_account_type(bank, row)
+        return 'credit_card' if bank['kind'] == 'credit_card'
+
+        sub = row ? row['qbo_sub_type'].to_s : ''
+        sub.match?(/saving|moneymarket/i) || bank['name'].to_s.match?(/\bsavings?\b/i) ? 'savings' : 'checking'
       end
 
       def default_location_id
