@@ -113,6 +113,15 @@ RSpec.describe 'Inventory price book pricing', type: :request do
       end
     end
 
+    it 'goes back to the price list when the asking price is cleared' do
+      v = home(msrp: 40_000, sale_price: 40_000)
+      patch "/api/v1/vehicles/#{v.id}", params: { vehicle: { msrp: nil } }.to_json, headers: headers.merge('Content-Type' => 'application/json')
+      expect(response).to have_http_status(:ok)
+      expect(v.reload.msrp).to be_nil
+      expect(v.sale_price).to be_nil
+      expect(Truebuild::InventoryPricing.new(company).list_price(v)).to include(source: 'book', amount: 90_000.0)
+    end
+
     describe 'the Pricing tab summary' do
       it 'fills factory price and surcharge from the price list, with gross and margin' do
         CatalogVariantPrice.find_by(variant: variant).update!(required_adders: [{ name: 'Surcharge', amount: 4_000 }])
