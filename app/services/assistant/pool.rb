@@ -18,7 +18,6 @@ module Assistant
   # handset (CLAUDE.md, A2P 10DLC delivery).
   module Pool
     KEY = 'assistant_pool'
-    MAX_DAYS = 45
 
     module_function
 
@@ -55,17 +54,11 @@ module Assistant
     # Everything that must hold before a dealer's assistant may start a new
     # conversation on a shared number.
     def available_for?(company)
-      live? && company_allowed?(company) && within_allowance?(company)
+      live? && company_allowed?(company)
     end
 
     def first_pool_text_at(company)
       Conversation.where(company_id: company.id, pool: true).minimum(:started_at)
-    end
-
-    # Days left of the dealer's MAX_DAYS on the pool, or nil before their first pool text.
-    def days_left(company)
-      first = first_pool_text_at(company)
-      first && [MAX_DAYS - ((Time.current - first) / 1.day).floor, 0].max
     end
 
     def update!(attrs)
@@ -108,10 +101,5 @@ module Assistant
       entries.detect { |e| busy.exclude?(e[:number]) }
     end
 
-    # A dealer stays on the pool at most MAX_DAYS after their first pool text.
-    def within_allowance?(company)
-      first = first_pool_text_at(company)
-      first.nil? || first > MAX_DAYS.days.ago
-    end
   end
 end

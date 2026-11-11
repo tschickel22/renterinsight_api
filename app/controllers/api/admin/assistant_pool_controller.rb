@@ -47,7 +47,6 @@ class Api::Admin::AssistantPoolController < ApplicationController
     {
       live: Assistant::Pool.config['live'] == true,
       numbers: Assistant::Pool.entries,
-      max_days: Assistant::Pool::MAX_DAYS,
       companies: entries.filter_map do |e|
         c = companies[e[:id]]
         next unless c
@@ -57,7 +56,6 @@ class Api::Admin::AssistantPoolController < ApplicationController
           quinn_on: settings.enabled?,
           own_number: own.include?(c.id),
           first_pool_text_at: Assistant::Pool.first_pool_text_at(c),
-          days_left: Assistant::Pool.days_left(c),
           open_conversations: Conversation.open_now.where(company_id: c.id, pool: true).count }
       end,
       # Dealers with Quinn texting on who could be added.
