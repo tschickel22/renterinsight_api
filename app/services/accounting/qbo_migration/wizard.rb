@@ -33,6 +33,8 @@ module Accounting
         existing = company.accounting_imports.migrations.find_by(status: 'draft')
         return existing if existing
 
+        check_cutover!(company, cutover_date)
+
         unless QboMigration.fixture_mode? || QboMigration.connection_for(company)
           raise Error, 'QuickBooks Online is not connected. Connect it under Integrations, then start the switch again.'
         end
@@ -46,6 +48,20 @@ module Accounting
       rescue StandardError
         import&.destroy if import&.persisted? && import.import_config['accounts'].nil?
         raise
+      end
+
+      # The switch reads QuickBooks when it starts or the date changes, and
+      # bank feeds skip everything up to the cutover. A cutover still to come
+      # would read QuickBooks as it is today and lose whatever is entered
+      # between now and then from both systems. So the cutover must be a day
+      # that has already started: today at the latest, usually the last day
+      # of a month already finished in QuickBooks.
+      def self.check_cutover!(company, date)
+        return unless date && date > company.today
+
+        raise Error, "The cutover date can't be in the future. Pick a day that has already happened, usually the " \
+                     'last day of a month you have finished in QuickBooks. To switch at the end of this month, ' \
+                     'start the switch once the month is over.'
       end
 
       def self.d(value)
@@ -146,6 +162,8 @@ module Accounting
       def change_cutover!(new_date)
         ensure_draft!
         return self if new_date == cutover_date
+
+        self.class.check_cutover!(@company, new_date)
 
         @import.update!(cutover_date: new_date)
         Array(config['banks']).each do |bank|
