@@ -28,7 +28,7 @@ RSpec.describe 'Quinn AI shared numbers (platform admin)', type: :request do
 
     post "/api/admin/assistant_pool/companies/#{dealer.id}", headers: headers
     expect(body['companies'].map { |c| c['id'] }).to eq([dealer.id])
-    expect(body['companies'].first).to include('name' => dealer.name, 'days_left' => nil, 'own_number' => false)
+    expect(body['companies'].first).to include('name' => dealer.name, 'first_pool_text_at' => nil, 'own_number' => false)
     expect(Assistant::Pool.available_for?(dealer)).to be(true)
 
     post "/api/admin/assistant_pool/companies/#{dealer.id}", headers: headers
