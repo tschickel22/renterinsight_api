@@ -106,6 +106,7 @@ class Api::V1::BankRulesController < ApplicationController
       action_type: action_type,
       assign_account_id: action_type == 'categorize' ? txn.category_account_id : nil,
       assign_contact_id: action_type == 'categorize' ? txn.contact_id : nil,
+      assign_project_id: action_type == 'categorize' ? txn.project_id : nil,
       assign_memo: action_type == 'categorize' ? txn.memo : nil,
       exclude_reason: action_type == 'exclude' ? (params[:exclude_reason] || 'Auto-excluded by rule') : nil,
       auto_confirm: false,
@@ -132,7 +133,7 @@ class Api::V1::BankRulesController < ApplicationController
     params.require(:bank_rule).permit(
       :name, :bank_account_id, :match_type, :match_field, :match_value,
       :min_amount, :max_amount, :transaction_direction,
-      :assign_account_id, :assign_contact_id, :assign_memo,
+      :assign_account_id, :assign_contact_id, :assign_memo, :assign_project_id,
       :auto_confirm, :priority, :is_active,
       :action_type, :exclude_reason
     )

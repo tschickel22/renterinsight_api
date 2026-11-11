@@ -37,7 +37,7 @@ class JournalEntry < ApplicationRecord
   # cost. Bills keep their own cost lines and reversals are 'auto', so only
   # these two sources are counted here.
   JOB_COST_SOURCES = %w[manual quick_entry].freeze
-  after_save :sync_project_job_cost, if: -> { JOB_COST_SOURCES.include?(source_type) }
+  after_save :sync_project_job_cost, if: :job_cost_entry?
   before_destroy :drop_project_job_cost
 
   scope :posted, -> { where(is_void: false) }
@@ -208,7 +208,7 @@ class JournalEntry < ApplicationRecord
                                   .transform_values(&:to_d)
              end
 
-    status = source_type == 'quick_entry' ? 'paid' : 'approved'
+    status = paid_from_bank? ? 'paid' : 'approved'
     description = (job_cost_description.presence || memo.presence || "Journal entry #{entry_number}").truncate(250)
     vendor_attrs = job_cost_vendor ? { vendor_id: job_cost_vendor.id, vendor_name: job_cost_vendor.name } : {}
     linked.each do |item|
@@ -234,6 +234,21 @@ class JournalEntry < ApplicationRecord
         **vendor_attrs
       )
     end
+  end
+
+  # E99: a bank feed line categorized to an expense on a project is job cost
+  # too, paid, like Record Expense. Other auto entries (bills, receipts,
+  # reversals) keep their own cost lines or have none.
+  def job_cost_entry?
+    JOB_COST_SOURCES.include?(source_type) || bank_feed_entry?
+  end
+
+  def bank_feed_entry?
+    source_type == 'auto' && source_entity_type == 'BankTransaction'
+  end
+
+  def paid_from_bank?
+    source_type == 'quick_entry' || bank_feed_entry?
   end
 
   def phase_on?(project_id)

@@ -3,7 +3,7 @@
 class Api::V1::BankTransactionsController < ApplicationController
   before_action :set_company_scope
   before_action :set_bank_account
-  before_action :set_transaction, only: [:show, :categorize, :match, :exclude, :unmatch, :suggestions]
+  before_action :set_transaction, only: [:show, :categorize, :match, :exclude, :unmatch, :suggestions, :apply_payment, :payment_options]
 
   def index
     return unless authorize_action!('bank_accounts_accounting', 'read')
@@ -47,7 +47,7 @@ class Api::V1::BankTransactionsController < ApplicationController
           rule: { only: [:id, :name] },
           contact: { only: [:id, :first_name, :last_name, :company_name] }
         }
-      ),
+      ).zip(transactions).map { |json, txn| json.merge(booked_to(txn)) },
       meta: {
         total: filtered_count,
         page: page,
@@ -78,18 +78,54 @@ class Api::V1::BankTransactionsController < ApplicationController
 
     account = @company.chart_of_accounts.find(params[:account_id])
     contact = params[:contact_id].present? ? @company.contacts.find(params[:contact_id]) : nil
+    project = params[:project_id].present? ? @company.projects.not_deleted.find(params[:project_id]) : nil
+    phase = project && params[:project_phase_id].present? ? project.project_phases.find(params[:project_phase_id]) : nil
+    vendor = params[:vendor_id].present? ? @company.vendors.find(params[:vendor_id]) : nil
 
     @transaction.categorize!(
       account: account,
       contact: contact,
       memo: params[:memo],
       create_je: params[:create_je] == true || params[:create_je] == 'true',
-      source: 'manual'
+      source: 'manual',
+      project: project,
+      project_phase: phase,
+      vendor: vendor
     )
 
-    render json: @transaction.reload
+    render json: @transaction.reload.as_json.merge(booked_to(@transaction))
+  rescue ActiveRecord::RecordNotFound => e
+    render json: { error: "Not found: #{e.model}" }, status: :unprocessable_entity
   rescue => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/bank_accounts/:bank_account_id/transactions/:id/apply_payment
+  # E99: a deposit that is a payment on a deal (fills its draws, or a deposit
+  # before approval) or on an open invoice. Params: deal_id or invoice_id, memo.
+  def apply_payment
+    return unless authorize_action!('bank_accounts_accounting', 'update')
+    return unless authorize_action!('accounting', 'create')
+
+    deal = params[:deal_id].present? ? @company.deals.where(deleted_at: nil).find(params[:deal_id]) : nil
+    invoice = params[:invoice_id].present? ? @company.invoices.not_deleted.find(params[:invoice_id]) : nil
+    receipt = @transaction.apply_payment!(deal: deal, invoice: invoice, memo: params[:memo], user: current_user)
+    render json: @transaction.reload.as_json.merge(booked_to(@transaction)).merge(
+      receipt: { id: receipt.id, receipt_number: receipt.receipt_number, applied: receipt.amount_applied.to_f, held: receipt.amount_unapplied.to_f }
+    )
+  rescue ActiveRecord::RecordNotFound => e
+    render json: { error: "Not found: #{e.model}" }, status: :unprocessable_entity
+  rescue BankTransaction::PostingError, BankTransaction::AlreadyBooked, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # GET /api/v1/bank_accounts/:bank_account_id/transactions/:id/payment_options
+  # E99: deals and open invoices a deposit could be a payment on. Ones whose
+  # next draw or amount owed equals the deposit come first, marked exact.
+  def payment_options
+    return unless authorize_action!('bank_accounts_accounting', 'read')
+
+    render json: BankFeedPaymentOptions.new(@company, @transaction, search: params[:search]).call
   end
 
   # POST /api/v1/bank_accounts/:bank_account_id/transactions/:id/match
@@ -174,6 +210,18 @@ class Api::V1::BankTransactionsController < ApplicationController
   end
 
   private
+
+  # What a line was booked to, named for the feed list (E99).
+  def booked_to(txn)
+    {
+      'project' => txn.project && { id: txn.project.id, name: txn.project.name, project_number: txn.project.project_number },
+      'project_phase' => txn.project_phase && { id: txn.project_phase.id, name: txn.project_phase.name },
+      'vendor' => txn.vendor && { id: txn.vendor.id, name: txn.vendor.name },
+      'deal' => txn.deal && { id: txn.deal.id, deal_number: txn.deal.deal_number, name: txn.deal.try(:customer_display_name) },
+      'invoice' => txn.invoice && { id: txn.invoice.id, invoice_number: txn.invoice.invoice_number },
+      'cash_receipt' => txn.cash_receipt && { id: txn.cash_receipt.id, receipt_number: txn.cash_receipt.receipt_number }
+    }
+  end
 
   def set_bank_account
     @bank_account = @company.bank_accounts.find(params[:bank_account_id])
