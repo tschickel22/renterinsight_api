@@ -123,8 +123,13 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
     # QuickBooks connection status is not sensitive data
     # Allow all authenticated users in the company to view it
     # No RBAC check needed
-    
+
     entity = determine_quickbooks_entity
+    # A company connected per location, asked without naming one (the
+    # QuickBooks switch asks this way), gets its one connected location, the
+    # same login the switch itself uses. Without this the switch read "not
+    # connected" and its Connect button 400'd for want of a location.
+    entity ||= switch_connection if params[:location_id].blank?
     
     Rails.logger.info "[QB Status] Entity: #{entity&.class&.name}##{entity&.id}"
     Rails.logger.info "[QB Status] Token expires at: #{entity&.quickbooks_token_expires_at.inspect}"
@@ -199,6 +204,12 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
   private
   
   # Determine which entity (company or location) to use for QuickBooks
+  def switch_connection
+    Accounting::QboMigration.connection_for(@company)
+  rescue Accounting::QboMigration::Error
+    nil
+  end
+
   def determine_quickbooks_entity
     if params[:location_id].present?
       # Location-specific request
