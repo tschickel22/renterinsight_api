@@ -11,7 +11,7 @@ class ProjectCostBillService
   SETTING_KEY = 'cost_lines_post_via_bills'
 
   # Expense accounts tried in order when the vendor has no default account.
-  ACCOUNT_NAME_HINTS = ['Delivery & Setup', 'Subcontract', 'Setup', 'Install'].freeze
+  ACCOUNT_NAME_PATTERNS = [/deliver.*set ?up|set ?up.*deliver/i, /install/i, /set ?up/i, /subcontract/i].freeze
 
   def self.enabled?(company)
     settings = Setting.get('company', company.id, 'project_management')
@@ -28,8 +28,13 @@ class ProjectCostBillService
     default_id = vendor&.default_expense_account_id
     return accounts.find_by(id: default_id) if default_id && accounts.exists?(id: default_id)
 
-    ACCOUNT_NAME_HINTS.each do |hint|
-      found = accounts.where('name ILIKE ?', "%#{hint}%").order(:account_number).first
+    # By name, since charts word it differently ("Delivery & Setup Costs",
+    # "Setup & Delivery Costs"). Never a reconditioning account: that is for
+    # used homes, and a set or site crew's bill landed there when the only
+    # "Subcontract" account was "Reconditioning Subcontractor".
+    usable = accounts.where.not('name ILIKE ?', '%recondition%').order(:account_number).to_a
+    ACCOUNT_NAME_PATTERNS.each do |re|
+      found = usable.find { |a| a.name =~ re }
       return found if found
     end
     nil
