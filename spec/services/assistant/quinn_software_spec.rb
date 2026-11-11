@@ -88,6 +88,9 @@ RSpec.describe 'Quinn for a software company', type: :request do
     message = conversation.chat_messages.where(direction: 'outbound').last
     expect(message.actions.first).to include('type' => 'link', 'label' => 'Watch: Text campaigns')
     expect(message.actions.first['url']).to end_with("/watch/#{shared_video.share_token}?t=42")
+
+    Assistant::WebChat.new(conversation).visitor_says!('Nice. What else?')
+    expect(conversation.chat_messages.where(direction: 'outbound').last.actions).to eq([])
   end
 
   it 'books the demo with the chosen person on their video link, whoever owns the lead' do
