@@ -104,8 +104,7 @@ module Api
         # Advanced MH filters
         vehicles = vehicles.where(bedrooms: params[:bedrooms]) if params[:bedrooms].present?
         vehicles = vehicles.where(bathrooms: params[:bathrooms]) if params[:bathrooms].present?
-        vehicles = vehicles.where('sale_price >= ?', params[:min_price].to_f) if params[:min_price].present?
-        vehicles = vehicles.where('sale_price <= ?', params[:max_price].to_f) if params[:max_price].present?
+        # min_price / max_price filter on the list price (see list_price_ids below).
         vehicles = vehicles.where(home_type: params[:home_type]) if params[:home_type].present?
         vehicles = vehicles.with_building_code(params[:building_code].to_s.split(',')) if params[:building_code].present?
         
@@ -150,22 +149,46 @@ module Api
           vehicles = vehicles.where(id: matching_ids)
         end
 
-        # Sorting
-        sort_by = params[:sort_by] || 'created_at'
-        sort_order = params[:sort_order] || 'desc'
-        vehicles = vehicles.order("#{sort_by} #{sort_order}")
-        
+        # Sorting. Only real columns, so a sort key can never carry SQL.
+        sort_order = params[:sort_order].to_s.downcase == 'asc' ? 'asc' : 'desc'
+        sort_by = params[:sort_by].to_s
+        by_price = sort_by == 'list_price'
+        sort_by = 'created_at' unless Vehicle.column_names.include?(sort_by)
+
+        # E98: price filter and price sort use the list price, which for a home
+        # linked to a price book is worked out live, so they run over the ids.
+        ordered_ids = nil
+        if by_price || params[:min_price].present? || params[:max_price].present?
+          ordered_ids = list_price_ids(vehicles.order("vehicles.#{sort_by} #{sort_order}"), by_price ? sort_order : nil)
+          vehicles = vehicles.where(id: ordered_ids)
+        end
+        vehicles = vehicles.order("vehicles.#{sort_by} #{sort_order}")
+
         # Count AFTER search filter (for pagination)
-        filtered_count = vehicles.count
+        filtered_count = ordered_ids ? ordered_ids.size : vehicles.count
 
         # Pagination
         page = params[:page]&.to_i || 1
+        page = 1 if page < 1
         per_page = [params[:per_page]&.to_i || 25, 500].min  # Allow up to 500 for dropdown pickers
-        vehicles = vehicles.includes(:location).offset((page - 1) * per_page).limit(per_page)
+        per_page = 25 if per_page < 1
+        vehicles = if ordered_ids && by_price
+                     page_ids = ordered_ids.slice((page - 1) * per_page, per_page) || []
+                     found = vehicles.unscope(:order).where(id: page_ids).includes(:location).index_by(&:id)
+                     page_ids.filter_map { |id| found[id] }
+                   else
+                     vehicles.includes(:location).offset((page - 1) * per_page).limit(per_page)
+                   end
         # E98: the inventory list asks for the price book's deal sheet price.
         # Only its own pages, never a 500-home picker.
         @with_book_price = params[:include_book_price].to_s == 'true' && per_page <= 100
-        vehicles = vehicles.includes(:catalog_plan_variant) if @with_book_price
+        if @with_book_price
+          if vehicles.is_a?(Array)
+            ActiveRecord::Associations::Preloader.new(records: vehicles, associations: %i[catalog_plan_variant inventory_packages]).call
+          else
+            vehicles = vehicles.includes(:catalog_plan_variant, :inventory_packages)
+          end
+        end
 
         # For buyer-name matches we want to tell the FE *which* buyer matched —
         # otherwise a vehicle appears in results with no obvious reason. Compute
@@ -2015,6 +2038,24 @@ module Api
         )
       end
 
+      # Ids of the scope that pass the price filter, in list price order when
+      # sort_order is given (homes with no price last), else in the scope's order.
+      def list_price_ids(scope, sort_order)
+        min = params[:min_price].presence&.to_f
+        max = params[:max_price].presence&.to_f
+        rows = scope.includes(:catalog_plan_variant, :inventory_packages, :location).map do |v|
+          [v.id, inventory_pricing.list_price(v)&.dig(:amount)]
+        end
+        rows = rows.select { |_, amount| amount && (!min || amount >= min) && (!max || amount <= max) } if min || max
+        if sort_order
+          priced, unpriced = rows.partition { |_, amount| amount }
+          priced = priced.sort_by { |_, amount| amount }
+          priced.reverse! if sort_order == 'desc'
+          rows = priced + unpriced
+        end
+        rows.map(&:first)
+      end
+
       def inventory_pricing
         @inventory_pricing ||= Truebuild::InventoryPricing.new(@company)
       end
@@ -2337,14 +2378,20 @@ module Api
         # E98: the price book's deal sheet price, worked out live. One figure
         # on the list; how it is built on the home, with cost lines only for
         # people who may see cost.
-        if @with_book_price && vehicle.catalog_plan_variant_id
-          json[:bookPrice] = inventory_pricing.summary(vehicle)
+        if @with_book_price
+          json[:bookPrice] = inventory_pricing.summary(vehicle) if vehicle.catalog_plan_variant_id
+          list = inventory_pricing.list_price(vehicle)
+          json[:listPrice] = list && { amount: list[:amount], source: list[:source], beforeSurcharge: list[:before_surcharge] }
         end
 
         # Add related data if detailed view requested
         if detailed
           if vehicle.catalog_plan_variant_id
             json[:bookPricing] = inventory_pricing.breakdown(vehicle, include_cost: can_see_inventory_cost?)
+            # Whether this person may change the price list and markup rules the
+            # figure comes from (TrueBuild pricing), so the screen says how to
+            # change it or who can.
+            json[:bookPricing]&.merge!(can_change: !!can?('company_settings', 'update'))
           end
           json[:deals] = vehicle.deals.active.map { |d| deal_summary(d) }
           json[:quotes] = vehicle.quotes.active.map { |q| quote_summary(q) }
