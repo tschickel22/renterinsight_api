@@ -142,7 +142,7 @@ module Api
         
         csv_data = CSV.generate(headers: true) do |csv|
           csv << [
-            'Parcel Number', 'Name', 'Status', 'Zoning', 'Acreage',
+            'Parcel Number', 'Name', 'Status', 'Zoning', 'Acreage', 'Sq Ft', 'Size Typed In',
             'Price', 'Price/Acre', 'Address', 'City', 'State', 'ZIP',
             'County', 'Utilities', 'Features', 'Owner', 'Acquisition Date'
           ]
@@ -154,6 +154,8 @@ module Api
               parcel.status,
               parcel.zoning_type,
               parcel.acreage,
+              parcel.square_feet,
+              (parcel.sq_ft? ? 'sq ft' : 'acres'),
               parcel.price,
               parcel.price_per_acre,
               parcel.address,
@@ -227,6 +229,8 @@ module Api
           'parcelNumber' => :parcel_number,
           'zoningType' => :zoning_type,
           'pricePerAcre' => :price_per_acre,
+          'squareFeet' => :square_feet,
+          'sizeUnit' => :size_unit,
           'ownerName' => :owner_name,
           'ownerPhone' => :owner_phone,
           'ownerEmail' => :owner_email,
@@ -242,7 +246,7 @@ module Api
         # Direct fields (same in both camelCase and snake_case)
         direct_fields = [
           'name', 'address', 'city', 'state', 'zip', 'county',
-          'latitude', 'longitude', 'acreage', 'status', 'price',
+          'latitude', 'longitude', 'acreage', 'square_feet', 'size_unit', 'status', 'price',
           'description', 'notes', 'utilities', 'features', 'images', 'documents'
         ]
         
@@ -267,7 +271,7 @@ module Api
         # Return as ActionController::Parameters
         ActionController::Parameters.new(transformed).permit(
           :parcel_number, :name, :address, :city, :state, :zip, :county,
-          :latitude, :longitude, :acreage, :zoning_type, :status, :price,
+          :latitude, :longitude, :acreage, :square_feet, :size_unit, :zoning_type, :status, :price,
           :price_per_acre, :owner_name, :owner_phone, :owner_email,
           :acquisition_date, :description, :notes, :show_exact_location, :street_view_url,
           utilities: {}, features: [], images: [], documents: []
@@ -312,8 +316,12 @@ module Api
           zoningType: parcel.zoning_type,
           zoningLabel: (::LandParcel.zoning_label(parcel.zoning_type) if parcel.zoning_type.present?),
           acreage: parcel.acreage&.to_f,
+          squareFeet: parcel.square_feet&.to_f,
+          sizeUnit: parcel.size_unit,
+          sizeLabel: parcel.size_label,
           price: parcel.price&.to_f,
           pricePerAcre: parcel.price_per_acre&.to_f,
+          pricePerSqFt: parcel.price_per_sq_ft&.to_f,
           address: parcel.address,
           city: parcel.city,
           state: parcel.state,

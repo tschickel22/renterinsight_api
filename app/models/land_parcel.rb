@@ -16,6 +16,11 @@ class LandParcel < ApplicationRecord
   ZONING_MAX_LENGTH = 60
   ZONING_MAX_OPTIONS = 50
   STATUSES = %w[available pending sold under_contract withdrawn].freeze
+  # Lot size can be typed in acres or square feet. acreage is always filled
+  # (filters, sorting and price per acre use it); square_feet too, so either
+  # unit can be shown. size_unit is the one the dealer typed in.
+  SIZE_UNITS = %w[acres sq_ft].freeze
+  SQ_FT_PER_ACRE = 43_560
   
   # Validations
   validates :parcel_number, presence: true, uniqueness: { scope: :company_id }
@@ -24,6 +29,8 @@ class LandParcel < ApplicationRecord
   # removed from the list stays on the parcels that already have it.
   validates :zoning_type, length: { maximum: ZONING_MAX_LENGTH }, allow_nil: true
   validates :acreage, numericality: { greater_than: 0 }, allow_nil: true
+  validates :square_feet, numericality: { greater_than: 0 }, allow_nil: true
+  validates :size_unit, inclusion: { in: SIZE_UNITS }
   validates :price, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :latitude, numericality: { greater_than_or_equal_to: -90, less_than_or_equal_to: 90 }, allow_nil: true
   # A Google Maps link, so the website never links buyers anywhere else.
@@ -53,6 +60,7 @@ class LandParcel < ApplicationRecord
   
   # Callbacks
   before_validation :normalize_fields
+  before_validation :sync_size
   before_validation :calculate_price_per_acre
   before_validation :generate_parcel_number, on: :create
   
@@ -90,6 +98,26 @@ class LandParcel < ApplicationRecord
                latitude: latitude&.to_f, longitude: longitude&.to_f, street_view_url: street_view_url.presence)
   end
   
+  def sq_ft?
+    size_unit == 'sq_ft'
+  end
+
+  # "5,000 sq ft" or "2.5 acres", in the unit the dealer typed.
+  def size_label
+    if sq_ft? && square_feet.present?
+      "#{ActiveSupport::NumberHelper.number_to_delimited(square_feet.to_f.round)} sq ft"
+    elsif acreage.present?
+      n = acreage.to_f
+      "#{n.round(4).to_s.sub(/\.0\z/, '')} #{n == 1 ? 'acre' : 'acres'}"
+    end
+  end
+
+  def price_per_sq_ft
+    return nil unless price.present? && square_feet.to_d.positive?
+
+    (price / square_feet).round(2)
+  end
+
   def has_utilities?
     utilities.present? && utilities.any? { |_k, v| v == true }
   end
@@ -172,6 +200,21 @@ class LandParcel < ApplicationRecord
     self.zoning_type = self.class.normalize_zoning(zoning_type)
   end
   
+  # The unit typed in wins; the other figure follows it.
+  def sync_size
+    self.size_unit = size_unit.to_s.downcase.presence || 'acres'
+    self.size_unit = 'sq_ft' if %w[sqft sq_feet square_feet].include?(size_unit)
+    if sq_ft?
+      if square_feet.present? && (square_feet_changed? || size_unit_changed? || acreage.blank?)
+        self.acreage = (square_feet.to_d / SQ_FT_PER_ACRE).round(4)
+      elsif square_feet.blank? && acreage.present?
+        self.square_feet = (acreage.to_d * SQ_FT_PER_ACRE).round(2)
+      end
+    elsif acreage.present? && (acreage_changed? || size_unit_changed? || square_feet.blank?)
+      self.square_feet = (acreage.to_d * SQ_FT_PER_ACRE).round(2)
+    end
+  end
+
   def calculate_price_per_acre
     if price.present? && acreage.present? && acreage > 0
       self.price_per_acre = price / acreage
