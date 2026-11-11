@@ -11,7 +11,8 @@ module Onboarding
   # Bells ring at once only for what someone acts on: the client finishing,
   # uploading or writing to us; us adding or reopening something they owe, or
   # writing to them; an item assigned to someone. Email is the daily summary
-  # (Onboarding::DailySummary), never one per click.
+  # (Onboarding::DailySummary), except when we tick "Email/Text them now" on
+  # an item (send_now!).
   class Checklist
     class Invalid < StandardError; end
 
@@ -27,7 +28,12 @@ module Onboarding
 
     def us? = side == 'dealertide'
 
-    def add!(attrs)
+    # send_now: { email:, sms: } tells the assignee right away by email and/or
+    # text, instead of waiting for the morning summary. The result is on
+    # #last_sent ({ emails:, texts:, skipped_texts: }).
+    attr_reader :last_sent
+
+    def add!(attrs, send_now: nil)
       us_only!
       item = company.onboarding_items.new(item_attrs(attrs).merge(created_by: actor, status: 'open'))
       item.position = next_position(item.section) if attrs[:position].blank?
@@ -38,10 +44,11 @@ module Onboarding
         tell_client(item, "New for you: #{item.title}")
       end
       tell_assignee(item) if item.assignee
+      send_now!(item, **send_now) if send_now
       item
     end
 
-    def update!(item, attrs)
+    def update!(item, attrs, send_now: nil)
       us_only!
       before = item.assignee_id
       item.update!(item_attrs(attrs))
@@ -49,16 +56,54 @@ module Onboarding
         record!(item, 'assigned', item.assignee.full_name)
         tell_assignee(item)
       end
+      send_now!(item, **send_now) if send_now
       item
+    end
+
+    # Emails and/or texts the item's assignee now. Texts go from our own
+    # number to the mobile on their user record.
+    def send_now!(item, email: false, sms: false)
+      us_only!
+      return @last_sent = nil unless email || sms
+
+      who = item.assignee
+      raise Invalid, 'Assign someone before sending' unless who&.active?
+
+      sent = { emails: 0, texts: 0, skipped_texts: [] }
+      if email && who.email.present?
+        OnboardingMailer.assigned(who, item, actor).deliver_now
+        sent[:emails] += 1
+      end
+      if sms
+        if who.phone.blank?
+          sent[:skipped_texts] << who.full_name
+        else
+          result = TwilioSmsService.send_via_master(to: who.phone, body: assigned_text(who, item))
+          result[:success] ? sent[:texts] += 1 : Rails.logger.warn("[Onboarding] text to user #{who.id} failed: #{result[:error]}")
+        end
+      end
+      @last_sent = sent.merge(to: who.full_name)
+    end
+
+    def self.item_link(item, user)
+      base = Brand.current.app_url.to_s.chomp('/')
+      user.company_id == item.company_id ? "#{base}/?getting_started=1" : "#{base}/admin/onboarding?company_id=#{item.company_id}"
     end
 
     # The client finishing something they owed does not close it: it comes to
     # us to check (the file may be the wrong one, or we have work to do with
     # it), assigned to one of our people. We close it (Accept) or send it back.
     # Anything else finished by either side closes.
-    def complete!(item)
+    #
+    # The client has to tell us what they did: a note or a file on the item
+    # since it was last opened. note: here is written first, so "Done" and the
+    # note can go in one step.
+    def complete!(item, note: nil)
       if !us? && item.client_owes?
         return item unless item.open?
+
+        note!(item, note) if note.to_s.strip.present?
+        raise Invalid, 'Add a note or upload a file first, so DealerTide knows what you sent' unless sent_something?(item)
 
         reviewer = our_reviewer(item)
         item.update!(status: 'review', assignee: reviewer || item.assignee, done_at: nil, done_by: actor)
@@ -186,7 +231,21 @@ module Onboarding
       names.any? { |n| n.match?(/admin/i) }
     end
 
+    # A client note or file on the item since it was added or last reopened.
+    def sent_something?(item)
+      since = item.events.where(kind: 'reopened').maximum(:created_at) || item.created_at
+      item.events.where(side: 'client', kind: %w[note upload]).where('created_at >= ?', since).exists?
+    end
+
     private
+
+    def assigned_text(user, item)
+      brand = Brand.current.name
+      due = item.due_on ? " Due #{item.due_on.strftime('%b %-d')}." : ''
+      who = actor&.full_name.presence || brand
+      "#{brand}: Hi #{user.first_name.presence || 'there'}, #{who} assigned you a setup item for #{company.name}: #{item.title}.#{due} " \
+        "#{self.class.item_link(item, user)}"
+    end
 
     # Who reviews what a client finished: whoever of ours already has it,
     # else the first of our people following this client.

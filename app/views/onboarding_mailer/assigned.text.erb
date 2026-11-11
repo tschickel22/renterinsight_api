@@ -1,0 +1,17 @@
+Hi <%= @user.first_name.presence || 'there' %>,
+
+<%= @sender&.full_name.presence || "The #{@brand.name} team" %> assigned you an item on <%= @client ? "your #{@brand.name} setup list" : "#{@item.company.name}'s onboarding list" %>:
+
+<%= @item.title %>
+<% if @item.detail.present? %>
+<%= @item.detail %>
+<% end %>
+<% if @item.due_on %>
+Due <%= @item.due_on.strftime('%B %-d') %>
+<% end %>
+
+<% if @client %>Where to find it: in <%= @brand.name %>, click Getting started at the top of the screen, then Your project. When it is done, add a note or upload a file and click Done.
+<% end %>
+Open it: <%= @url %>
+
+Questions? Reply to this email<% if @sender&.full_name.present? %> and it goes to <%= @sender.full_name %><% end %>.
