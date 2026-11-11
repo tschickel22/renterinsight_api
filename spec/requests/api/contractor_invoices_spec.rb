@@ -38,6 +38,7 @@ RSpec.describe 'Contractor portal invoices', type: :request do
     expect(bill).to have_attributes(status: 'draft', vendor_id: installer.id, project_id: project.id,
                                     source: 'contractor_portal', reference_number: 'INV-1042', total_amount: 4850)
     expect(bill.journal_entry_id).to be_nil
+    expect(bill.due_date).to eq(bill.bill_date + 30) # no terms on the vendor
     expect(bill.attachments.first['url']).to start_with('s3://dt-private-test/bills/')
     expect(bill.bill_line_items.first.chart_of_account.name).to eq('Delivery & Setup Costs')
 
