@@ -129,6 +129,7 @@ RSpec.describe 'Bank feed to projects and deals', type: :request do
       expect(option).to include('id' => deal.id, 'exact' => true)
       expect(option['next_draw']).to include('description' => 'Down payment', 'balance' => 10_000.0)
       expect(option['project']).to include('id' => project.id)
+      expect(body['invoices'].map { |i| i['id'] }).not_to include(invoice.id) # offered as the deal, not twice
 
       post path(t, 'apply_payment'), headers: headers, params: { deal_id: deal.id }.to_json
       expect(response).to have_http_status(:ok), response.body

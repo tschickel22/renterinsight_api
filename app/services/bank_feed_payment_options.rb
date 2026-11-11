@@ -66,8 +66,11 @@ class BankFeedPaymentOptions
   end
 
   def invoices
+    # A deal's own invoice is offered as the deal above (its draws), not twice.
+    deal_invoice_ids = @company.deals.where.not(deal_invoice_id: nil).select(:deal_invoice_id)
     scope = @company.invoices.not_deleted.where('amount_due > 0').where.not(status: %w[draft cancelled paid])
-                    .where.not(source_type: 'deal_close')
+                    .where(deal_id: nil).where.not(id: deal_invoice_ids)
+                    .where('source_type IS NULL OR source_type <> ?', 'deal_close')
     if @search
       term = "%#{@search}%"
       scope = scope.left_joins(:contact).where(
