@@ -39,7 +39,9 @@ class Api::V1::WebsiteInventoryController < ApplicationController
     stored['featured_price_held'] = true if current.featured_price_held? && !release
 
     @website.update!(inventory_settings: stored.deep_stringify_keys)
-    render json: settings_json
+    # The switch and TrueBuild "What buyers see" stay in step (Websites::PriceSync).
+    synced = (Websites::PriceSync.new(@company).from_site(stored['show_prices']) if stored['show_prices'] != current.show_prices?)
+    render json: settings_json.merge(price_display_changed: synced)
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
@@ -70,7 +72,9 @@ class Api::V1::WebsiteInventoryController < ApplicationController
       settings: settings.to_h,
       options: list.options,
       counts: list.counts,
-      featured_in_use: @website.featured_homes.where(show_sale: true).exists?
+      featured_in_use: @website.featured_homes.where(show_sale: true).exists?,
+      # TrueBuild "What buyers see", which the switch also sets.
+      price_display: DealerCatalogTerm.effective(@company, nil).price_display
     }
   end
 end
