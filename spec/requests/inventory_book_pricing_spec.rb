@@ -76,6 +76,43 @@ RSpec.describe 'Inventory price book pricing', type: :request do
       expect(JSON.parse(response.body)['vehicles'].find { |x| x['id'].to_s == v.id.to_s }).not_to have_key('bookPrice')
     end
 
+    describe 'one list price, sorted and filtered (Tom 2026-11-11)' do
+      def ids_for(params)
+        get '/api/v1/vehicles', params: { per_page: 25, include_book_price: 'true' }.merge(params), headers: headers
+        JSON.parse(response.body)['vehicles'].map { |x| x['id'].to_s }
+      end
+
+      let!(:linked) { home(msrp: 40_000) }                        # deal sheet uses the book: 90,000
+      let!(:typed) { home(catalog_plan_variant_id: nil, msrp: 70_000) }
+      let!(:unpriced) { home(catalog_plan_variant_id: nil) }
+
+      it 'shows the book figure for a linked home and the own price for the rest' do
+        get '/api/v1/vehicles', params: { per_page: 25, include_book_price: 'true' }, headers: headers
+        rows = JSON.parse(response.body)['vehicles'].index_by { |x| x['id'].to_s }
+        expect(rows[linked.id.to_s]['listPrice']).to eq('amount' => 90_000.0, 'source' => 'book', 'beforeSurcharge' => true)
+        expect(rows[typed.id.to_s]['listPrice']).to eq('amount' => 70_000.0, 'source' => 'home', 'beforeSurcharge' => false)
+        expect(rows[unpriced.id.to_s]['listPrice']).to be_nil
+      end
+
+      it 'sorts every page by that price, homes with no price last' do
+        expect(ids_for(sort_by: 'list_price', sort_order: 'desc')).to eq([linked, typed, unpriced].map { |v| v.id.to_s })
+        expect(ids_for(sort_by: 'list_price', sort_order: 'asc')).to eq([typed, linked, unpriced].map { |v| v.id.to_s })
+        expect(ids_for(sort_by: 'list_price', sort_order: 'asc', per_page: 1, page: 2)).to eq([linked.id.to_s])
+        expect(JSON.parse(response.body).dig('meta', 'total_count')).to eq(3)
+      end
+
+      it 'filters on that price, including a home priced only from the book' do
+        expect(ids_for(min_price: 80_000)).to eq([linked.id.to_s])
+        expect(ids_for(max_price: 75_000)).to eq([typed.id.to_s])
+        expect(JSON.parse(response.body).dig('meta', 'total_count')).to eq(1)
+      end
+
+      it 'ignores a sort key that is not a column' do
+        expect(ids_for(sort_by: 'id; drop table vehicles', sort_order: 'sideways').size).to eq(3)
+        expect(response).to have_http_status(:ok)
+      end
+    end
+
     it 'itemizes on the home, with cost for someone who may see it' do
       v = home
       get "/api/v1/vehicles/#{v.id}", headers: headers

@@ -49,6 +49,21 @@ module Truebuild
       summary(vehicle)
     end
 
+    # The one price the inventory list shows, sorts and filters on (Tom
+    # 2026-11-11). A home linked to a price book shows its deal sheet price,
+    # because a deal sheet prices a linked home from the book whatever is typed
+    # on it. Any other home shows its own price (Base Sale Price, or the sale
+    # price after a Special Discount, plus add-ons counted in the total).
+    #   { amount:, source: 'book' | 'home', before_surcharge: }  or nil
+    def list_price(vehicle)
+      if vehicle.catalog_plan_variant_id && (book = summary(vehicle))
+        return { amount: book[:retail], source: 'book', before_surcharge: book[:before_surcharge] }
+      end
+
+      own = vehicle.total_home_price.to_f
+      own.positive? ? { amount: own.round(2), source: 'home', before_surcharge: false } : nil
+    end
+
     def public_prices_shown?
       return @public_prices_shown if defined?(@public_prices_shown)
 
@@ -65,6 +80,7 @@ module Truebuild
       out = sum.merge(
         model_number: vehicle.catalog_plan_variant&.model_number,
         book_name: @memo.dig(key_for(vehicle), :book_name),
+        book_id: @memo.dig(key_for(vehicle), :book_id),
         surcharge: surcharge_of(line).to_f,
         pack: detail[:dealer_pack].to_f,
         markup: detail[:rule]
@@ -91,7 +107,7 @@ module Truebuild
       engine = PricingEngine.new(company: @company, variant: variant, location: vehicle.location,
                                  include_freight: false, pack: vehicle.pack_amount.presence)
       line = engine.priced? ? engine.home_breakdown : nil
-      @memo[key] = { line: line, book_name: (engine.book_name if engine.priced?) }
+      @memo[key] = { line: line, book_name: (engine.book_name if engine.priced?), book_id: (engine.book_id if engine.priced?) }
       line
     rescue ArgumentError => e
       Rails.logger.info("[InventoryPricing] vehicle #{vehicle.id}: #{e.message}")

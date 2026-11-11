@@ -115,6 +115,10 @@ module Truebuild
       @book&.name
     end
 
+    def book_id
+      @book&.id
+    end
+
     # What the dealer sells one option row for on this model, before it is
     # on a sheet: their set price, their markup, or the factory's suggested
     # retail, as a sheet would price it. Nil when the factory gives no price.

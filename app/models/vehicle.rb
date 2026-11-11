@@ -390,7 +390,12 @@ class Vehicle < ApplicationRecord
 
   # Computed total: sale_price + all packages that are included_in_total
   def total_home_price
-    package_total = inventory_packages.included_in_total.sum(:price).to_f
+    # Uses packages already loaded (a list sorting by price loads them once).
+    package_total = if inventory_packages.loaded?
+                      inventory_packages.select(&:include_in_total).sum { |p| p.price.to_f }
+                    else
+                      inventory_packages.included_in_total.sum(:price).to_f
+                    end
 
     if respond_to?(:special_discount_enabled) && special_discount_enabled && discounted_price.present?
       # When discount includes packages in its calculation, don't add them again
