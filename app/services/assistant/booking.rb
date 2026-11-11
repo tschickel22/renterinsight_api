@@ -33,7 +33,7 @@ module Assistant
     end
 
     def rep
-      @rep ||= begin
+      @rep ||= settings.book_with_user || begin
         owner = @company.users.find_by(id: @record.try(:owner_id))
         owner = nil unless owner&.active?
         owner || Assistant::Handoff.handoff_user(conversation)
@@ -117,23 +117,49 @@ module Assistant
       name = [@record.try(:first_name), @record.try(:last_name)].compact_blank.join(' ').presence || 'Buyer'
       visit = model.new(
         key => @record.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', status: 'pending',
-        subject: "Visit: #{name}", start_time: slot.starts_at, end_time: slot.ends_at, duration_minutes: settings.visit_minutes,
-        meeting_location: address, description: "Booked by #{settings.assistant_name} AI in the conversation.",
+        subject: "#{visit_word}: #{name}", start_time: slot.starts_at, end_time: slot.ends_at, duration_minutes: settings.visit_minutes,
+        meeting_location: address, description: description,
         metadata: { 'booked_by' => 'quinn_ai', 'conversation_id' => conversation.id }
       )
+      visit.meeting_link = meeting_url if meeting_url && visit.has_attribute?(:meeting_link)
       visit.quinn_confirms = true
       visit.save!
       visit
     end
 
+    def visit_word
+      return 'Demo' if Assistant::Software.for?(@company)
+
+      settings.video_visits? ? 'Video call' : 'Visit'
+    end
+
+    def description
+      text = "Booked by #{settings.assistant_name} AI in the conversation."
+      link = meeting_url
+      link ? "#{text}\nJoin the video call: #{link}" : text
+    end
+
+    # The rep's own video meeting link (their profile), for a video visit.
+    def meeting_url
+      return nil unless settings.video_visits?
+
+      rep.try(:meeting_url).to_s.strip.presence
+    end
+
+    # Where the appointment is: the video link for a video visit (nil when the
+    # rep has none yet; the invite then says it is a video call), else the
+    # dealership's address.
     def address
+      return meeting_url || 'Video call' if settings.video_visits?
+
       place = availability.location || @company
       [place.try(:address_line1), place.try(:city), place.try(:state)].compact_blank.join(', ').presence
     end
 
     def outcome(visit, kind)
       customer = ::Appointments::Customer.for(visit)
-      text = ::Appointments::BookingText.body(visit, customer, visit.assigned_to || visit.user, kind)
+      # The chat is a web page: the video link can be shown there.
+      text = ::Appointments::BookingText.body(visit, customer, visit.assigned_to || visit.user, kind, links: conversation.web_chat?)
       notify_rep(visit, kind)
       Outcome.new(ok: true, kind: kind, activity: visit, text: text)
     end

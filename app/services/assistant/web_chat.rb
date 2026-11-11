@@ -45,8 +45,9 @@ module Assistant
       conversation = start!(company: lead.company, website: website, lead: lead, page_url: page_url)
       first = lead.try(:first_name).to_s.strip
       first = '' if first.match?(Assistant::Learn::PLACEHOLDER_NAME)
+      about = Assistant::Software.for?(lead.company) ? "#{lead.company.name} or a demo" : 'the homes or a visit'
       greeting = "Thanks#{", #{first}" if first.present?}! I'm #{settings.assistant_name} with #{lead.company.name}. " \
-                 'While you are here, is there anything I can answer about the homes or a visit?'
+                 "While you are here, is there anything I can answer about #{about}?"
       Assistant::Messenger.deliver!(conversation, body: greeting, sent_by: 'assistant')
       conversation
     end
@@ -93,6 +94,8 @@ module Assistant
       # request at once). A specific search ("3 bed under 80k") also shows the
       # matching homes as cards under its reply, straight from the stock the
       # site serves.
+      return brain_answer!([]) if Assistant::Software.for?(@company)
+
       filters = Concierge::InventoryQuery.new(text).call
       matches = filters.present? ? Concierge::InventorySearch.new(company: @company, filters: filters).call.map { |l| absolute(l) } : []
       brain_answer!(matches)
@@ -132,14 +135,16 @@ module Assistant
       lead_from_chat!(result.contact)
       Assistant::Learn.record_question(conversation, result, reason, problem)
       listings = (home_card(result.photo_home_id) + matches).uniq { |l| l[:id] }.first(4)
+      # A training video that shows what they asked about (software company).
+      actions = result.video ? [Assistant::Software.video_action(result.video)] : []
 
       if problem
         Assistant::Handoff.perform!(conversation, reason: reason || 'rule_check', summary: result.summary)
       elsif reason
-        Assistant::Messenger.deliver!(conversation, body: reply, extra_metadata: { listings: listings }) if reply.present?
+        Assistant::Messenger.deliver!(conversation, body: reply, extra_metadata: { listings: listings, actions: actions }) if reply.present?
         Assistant::Handoff.perform!(conversation, reason: reason, summary: result.summary, buyer_text: reply.present? ? nil : :default)
       else
-        Assistant::Messenger.deliver!(conversation, body: reply, extra_metadata: { listings: listings })
+        Assistant::Messenger.deliver!(conversation, body: reply, extra_metadata: { listings: listings, actions: actions })
       end
 
       Reply.new(messages: [], ask_consent: ask_consent?(result.contact), visitor: visitor_details(result.contact),

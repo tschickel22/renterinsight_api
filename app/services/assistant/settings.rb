@@ -74,6 +74,14 @@ module Assistant
       # Quinn books, moves and cancels visits itself (phase 2).
       'books_visits' => true,
       'visit_minutes' => 60,
+      # Book every visit with this person instead of the lead's owner (nil:
+      # the owner, else the handoff person). DealerTide books its demos with
+      # Tom (2026-11-11).
+      'book_with_user_id' => nil,
+      # in_person, or video: the appointment carries the person's video
+      # meeting link (their profile) instead of the dealership's address. nil:
+      # video for a software company, in person for everyone else.
+      'visit_kind' => nil,
       # How far ahead the earliest time it offers is.
       'booking_notice_hours' => 2,
       # Someone texts the dealer's number without answering anything we sent:
@@ -82,6 +90,7 @@ module Assistant
       'cold_texts' => 'new'
     }.freeze
     EMAIL_REPLIES = %w[answer draft rep].freeze
+    VISIT_KINDS = %w[in_person video].freeze
     COLD_TEXTS = %w[new leads off].freeze
     HANDOFF_AFTER = [0, 5, 8, 12].freeze
     MAX_FAQS = 60
@@ -121,6 +130,10 @@ module Assistant
           { 'q' => q, 'a' => a } if q.present? && a.present?
         end.last(MAX_FAQS)
       end
+      if clean.key?('book_with_user_id')
+        clean['book_with_user_id'] = clean['book_with_user_id'].present? ? company.users.find_by(id: clean['book_with_user_id'])&.id : nil
+      end
+      clean['visit_kind'] = nil if clean.key?('visit_kind') && !VISIT_KINDS.include?(clean['visit_kind'])
       if clean.key?('link_website_id')
         clean['link_website_id'] = company.websites.find_by(id: clean['link_website_id'])&.id
       end
@@ -181,6 +194,17 @@ module Assistant
 
     def visit_minutes
       (to_h['visit_minutes'].presence || 60).to_i
+    end
+
+    def book_with_user
+      id = to_h['book_with_user_id']
+      user = id.present? ? company.users.find_by(id: id) : nil
+      user&.active? ? user : nil
+    end
+
+    def video_visits?
+      kind = to_h['visit_kind']
+      VISIT_KINDS.include?(kind) ? kind == 'video' : Assistant::Software.for?(company)
     end
 
     def booking_notice_hours

@@ -34,16 +34,27 @@ module Appointments
       nil
     end
 
-    def body(activity, customer, rep, kind)
+    # links: false for a text message. A video meeting link is then left to
+    # the email invite: dealer numbers are registered without links.
+    def body(activity, customer, rep, kind, links: false)
       when_text = TimeText.for(activity, customer.company)
-      place = activity.try(:meeting_location).presence || activity.try(:location).presence
       with = [rep.try(:first_name).presence, customer.company.name].compact.join(' at ')
-      at = place ? " at #{place}" : ''
+      at = place_phrase(activity, links: links)
       case kind
       when 'booked' then "You are set for #{when_text}#{at} with #{with}. Reply here if you need to change the time."
       when 'moved' then "Your appointment with #{with} has moved to #{when_text}#{at}. Reply here if that does not work."
       else "Your appointment with #{with} on #{when_text} is cancelled. Reply here if you would like a new time."
       end
+    end
+
+    # " at 12 Main St", " on a video call: https://...", or "" when no place.
+    def place_phrase(activity, links: false)
+      place = activity.try(:meeting_location).presence || activity.try(:location).presence
+      return '' unless place
+      return " at #{place}" unless place.match?(%r{\Ahttps?://}i) || place.casecmp?('Video call')
+      return ' by video call' if place.casecmp?('Video call')
+
+      links ? " on a video call: #{place}" : ' by video call (the link to join is in your email invite)'
     end
   end
 end
