@@ -118,6 +118,9 @@ class ContractorInvoiceService
       vendor: @contractor,
       vendor_name: @contractor.name,
       project: @project,
+      # The phase the contractor invoiced for, so the bill shows it and its
+      # cost line keeps it (it read "No particular phase").
+      project_phase_id: @phase&.id,
       location_id: @project.location_id,
       status: 'draft',
       source: source,
