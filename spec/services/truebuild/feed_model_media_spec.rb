@@ -46,6 +46,17 @@ RSpec.describe Truebuild::FeedModelMedia do
     expect(calls.size).to eq(1)
   end
 
+  it "links by the page's model number when the source keys on slugs" do
+    home.source_key = 'the-dogwood'
+    home.model_id = '47TRT14602DH'
+
+    result = described_class.refresh!(source, tagger: ->(_urls) { {} })
+
+    expect(dogwood.reload.media['photos'].size).to eq(3)
+    expect(dogwood.external_ids['feed_key']).to eq('the-dogwood')
+    expect(result).to include(linked: 1, unmatched: ['47TRT14562EH'])
+  end
+
   it 'only reads sources that name the plants they feed' do
     source
     CatalogSource.create!(name: "Other #{SecureRandom.hex(2)}", adapter_type: 'clayton_retail_home_center', base_url: 'https://x', config: {})
