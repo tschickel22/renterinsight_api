@@ -45,13 +45,16 @@ class Api::Admin::OnboardingController < ApplicationController
   end
 
   # POST /api/admin/onboarding/:company_id/items { section, title, detail, owed_by, assignee_id, due_on }
+  # send_email / send_sms: tell the assignee now, not only in the morning summary.
   def create_item
-    answer { checklist.add!(item_params) }
+    c = checklist
+    answer(c) { c.add!(item_params, send_now: send_now_params) }
   end
 
   # PATCH /api/admin/onboarding/:company_id/items/:id
   def update_item
-    answer { checklist.update!(@item, item_params) }
+    c = checklist
+    answer(c) { c.update!(@item, item_params, send_now: send_now_params) }
   end
 
   # DELETE /api/admin/onboarding/:company_id/items/:id
@@ -171,13 +174,19 @@ class Api::Admin::OnboardingController < ApplicationController
       followers: User.where(id: @client.onboarding_followers.select(:user_id)).map { |u| Onboarding::View.person(u) },
       intro: Onboarding::Intro.status(@client),
       intro_people: Onboarding::Intro.default_people(@client).map(&:id),
-      phones: User.where(company_id: @client.id).where.not(phone: [nil, '']).pluck(:id)
+      # Everyone listed with a mobile on file (intro and "Text them now").
+      phones: people.select { |u| u.phone.present? }.map(&:id).uniq
     }
   end
 
-  def answer
+  def send_now_params
+    cast = ->(k) { ActiveModel::Type::Boolean.new.cast(params[k]) || false }
+    { email: cast.(:send_email), sms: cast.(:send_sms) }
+  end
+
+  def answer(c = nil)
     yield
-    render json: client_json
+    render json: c&.last_sent ? client_json.merge(sent: c.last_sent) : client_json
   rescue Onboarding::Checklist::Invalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   rescue ActiveRecord::RecordInvalid => e

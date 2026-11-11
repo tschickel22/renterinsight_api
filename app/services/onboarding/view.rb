@@ -54,7 +54,9 @@ module Onboarding
         overdue: i.overdue?, due_on: i.due_on&.iso8601, position: i.position, template_item_id: i.template_item_id,
         assignee: i.assignee && person(i.assignee), done_at: i.done_at&.iso8601, done_by: i.done_by&.full_name,
         files: i.files.map { |f| { id: f.id, name: f.filename.to_s, size: f.byte_size, at: f.created_at.iso8601 } },
-        notes: notes, client_update: update }
+        notes: notes, client_update: update,
+        # The client wrote or uploaded since it was opened, so they may send it to us.
+        has_proof: i.client_owes? && i.open? ? Checklist.new(i.company, actor: nil, side: 'client').sent_something?(i) : nil }
     end
 
     def events(company, limit: 30)

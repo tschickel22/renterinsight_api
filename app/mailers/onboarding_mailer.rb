@@ -16,6 +16,19 @@ class OnboardingMailer < ApplicationMailer
     mail(to: user.email, from: default_from_address, subject: subject)
   end
 
+  # An item assigned to someone, sent when we tick "Email them now". Replies
+  # go to whoever sent it.
+  def assigned(user, item, sender)
+    @user = user
+    @item = item
+    @sender = sender
+    @brand = Brand.current
+    @client = user.company_id == item.company_id
+    @url = Onboarding::Checklist.item_link(item, user)
+    mail(to: user.email, from: default_from_address, reply_to: sender&.email.presence,
+         subject: @client ? "#{@brand.name} setup: #{item.title}" : "#{item.company.name}: #{item.title}")
+  end
+
   # The intro to a client's setup plan (Onboarding::Intro). Replies go to
   # whoever sent it.
   def intro(user, company, sender, note)

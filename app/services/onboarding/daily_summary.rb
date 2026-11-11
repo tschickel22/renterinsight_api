@@ -24,18 +24,20 @@ module Onboarding
                      OnboardingItem.open.where('due_on < ?', now.to_date).distinct.pluck(:company_id)).uniq
 
       Company.where(id: company_ids).find_each do |company|
-        events = company.onboarding_events.where.not(kind: 'seen').where('created_at >= ?', since).includes(:onboarding_item, :user).order(:created_at).to_a
+        events = company.onboarding_events.where.not(kind: 'seen').where('created_at >= ?', since).includes(:user, onboarding_item: :assignee).order(:created_at).to_a
         overdue = company.onboarding_items.open.where('due_on < ?', now.to_date).order(:due_on).to_a
 
-        theirs = lines(events.select { |e| e.side == 'dealertide' }) + overdue.select(&:client_owes?).map { |i| "Overdue since #{i.due_on.strftime('%b %-d')}: #{i.title}" }
+        theirs = lines(events.select { |e| e.side == 'dealertide' }) + overdue.select(&:client_owes?).map { |i| "Overdue since #{i.due_on.strftime('%b %-d')}: #{i.title}#{assigned_to(i)}" }
         if theirs.any?
           Checklist.client_people(company).each { |u| per_user[u] << { company: company, lines: theirs, client: true } }
-          overdue.select(&:client_owes?).filter_map(&:assignee).uniq.each do |u|
+          # Whoever has an item that changed or is overdue, even if not an admin.
+          assignees = (events.select { |e| e.side == 'dealertide' }.filter_map { |e| e.onboarding_item&.assignee } + overdue.select(&:client_owes?).filter_map(&:assignee))
+          assignees.uniq.select { |u| u.company_id == company.id && u.active? }.each do |u|
             per_user[u] << { company: company, lines: theirs, client: true } unless per_user[u].any? { |s| s[:company] == company }
           end
         end
 
-        ours = lines(events.select { |e| e.side == 'client' }) + overdue.map { |i| "Overdue (#{i.client_owes? ? company.name : 'us'}): #{i.title}" }
+        ours = lines(events.select { |e| e.side == 'client' }) + overdue.map { |i| "Overdue (#{i.client_owes? ? company.name : 'us'}): #{i.title}#{assigned_to(i)}" }
         Checklist.our_people(company).each { |u| per_user[u] << { company: company, lines: ours, client: false } } if ours.any?
       end
 
@@ -52,8 +54,15 @@ module Onboarding
       events.map do |e|
         what = e.onboarding_item&.title || e.body
         extra = %w[note upload reopened assigned].include?(e.kind) && e.body.present? && e.onboarding_item ? ": #{e.body.truncate(200)}" : ''
-        "#{WORDS[e.kind]}#{e.user ? " by #{e.user.full_name}" : ''}: #{what}#{extra}"
+        # An assigned line already names the person.
+        who = e.kind == 'assigned' ? '' : assigned_to(e.onboarding_item)
+        "#{WORDS[e.kind]}#{e.user ? " by #{e.user.full_name}" : ''}: #{what}#{who}#{extra}"
       end
+    end
+
+    def assigned_to(item)
+      name = item&.assignee&.full_name.presence
+      name ? " (assigned to #{name})" : ''
     end
   end
 end

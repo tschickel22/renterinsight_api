@@ -101,7 +101,7 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     post "/api/admin/onboarding/#{client.id}/start", headers: headers_for(tom)
     client_admin
     item = client.onboarding_items.find_by!(title: 'List of users and roles')
-    Onboarding::Checklist.new(client, actor: client_rep, side: 'client').complete!(item)
+    Onboarding::Checklist.new(client, actor: client_rep, side: 'client').complete!(item, note: 'List attached')
 
     expect { Onboarding::DailySummary.call }.to change { ActionMailer::Base.deliveries.size }.by(2)
     to_tom = ActionMailer::Base.deliveries.find { |m| m.to == [tom.email] }
@@ -170,8 +170,12 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     expect(item.reload).to have_attributes(status: 'open', assignee_id: client_rep.id)
     expect(bells(client_rep).last.message).to include('Sent back to you', 'wrong file')
 
-    # Accept: closed, and credited to the client who finished it.
+    # Accept: closed, and credited to the client who finished it. Sent back,
+    # it needs something new before it can go to us again.
     post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep)
+    expect(response).to have_http_status(:unprocessable_entity)
+    post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep), params: { note: 'Right file now' }.to_json
+    expect(item.reload.status).to eq('review')
     post "/api/admin/onboarding/#{client.id}/items/#{item.id}/done", headers: headers_for(tom)
     expect(item.reload).to have_attributes(status: 'done', done_by_id: client_rep.id)
     get '/api/admin/onboarding', headers: headers_for(tom)
@@ -183,5 +187,78 @@ RSpec.describe 'Client onboarding checklist', type: :request do
     ours = client.onboarding_items.find_by!(title: 'Create users')
     post "/api/v1/onboarding/items/#{ours.id}/done", headers: headers_for(client_rep)
     expect(ours.reload.status).to eq('done')
+  end
+
+  it 'will not take a client item as done without a note or a file, and says so' do
+    post "/api/admin/onboarding/#{client.id}/start", headers: headers_for(tom)
+    item = client.onboarding_items.find_by!(title: 'List of users and roles')
+
+    get '/api/v1/onboarding', headers: headers_for(client_rep)
+    expect(body['items'].find { |i| i['id'] == item.id }['has_proof']).to eq(false)
+    post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(body['error']).to include('note or upload a file')
+    expect(item.reload.status).to eq('open')
+
+    # A note sent with Done counts, and lands in the conversation.
+    post "/api/v1/onboarding/items/#{item.id}/done", headers: headers_for(client_rep), params: { note: 'No TRU list exists' }.to_json
+    expect(body['item']).to include('status' => 'review')
+    expect(body['item']['notes'].map { |n| n['body'] }).to eq(['No TRU list exists'])
+
+    # Our own note does not count for them; DealerTide can still close anything.
+    other_item = client.onboarding_items.create!(section: 'Homes', title: 'Price list', owed_by: 'client')
+    post "/api/admin/onboarding/#{client.id}/items/#{other_item.id}/note", headers: headers_for(tom), params: { body: 'Any format' }.to_json
+    post "/api/v1/onboarding/items/#{other_item.id}/done", headers: headers_for(client_rep)
+    expect(response).to have_http_status(:unprocessable_entity)
+    post "/api/admin/onboarding/#{client.id}/items/#{other_item.id}/done", headers: headers_for(tom)
+    expect(other_item.reload.status).to eq('done')
+  end
+
+  it 'names who has each item in the morning email, and sends it to a non-admin assignee' do
+    Setting.set('Platform', 0, 'communications', { 'email' => { 'fromEmail' => 'hello@example.com', 'fromName' => 'DealerTide' } })
+    client_admin
+    post "/api/admin/onboarding/#{client.id}/items", headers: headers_for(tom),
+                                                    params: { section: 'Homes', title: 'Workforce Homes', owed_by: 'client', assignee_id: client_rep.id }.to_json
+
+    Onboarding::DailySummary.call
+    to_rep = ActionMailer::Base.deliveries.find { |m| m.to == [client_rep.email] }
+    to_admin = ActionMailer::Base.deliveries.find { |m| m.to == [client_admin.email] }
+    expect(to_rep).to be_present
+    expect(to_admin.text_part.body.to_s).to include("Workforce Homes (assigned to #{client_rep.full_name})")
+  end
+
+  it 'emails and texts the assignee now when asked, on add or edit' do
+    Setting.set('Platform', 0, 'communications', { 'email' => { 'fromEmail' => 'hello@example.com', 'fromName' => 'DealerTide' } })
+    client_rep.update!(phone: '3035550101')
+    texts = []
+    allow(TwilioSmsService).to receive(:send_via_master) { |to:, body:, **| texts << [to, body]; { success: true } }
+
+    expect do
+      post "/api/admin/onboarding/#{client.id}/items", headers: headers_for(tom),
+                                                      params: { section: 'Deals', title: 'Sales Agreements', owed_by: 'client', due_on: '2026-11-20',
+                                                                assignee_id: client_rep.id, send_email: true, send_sms: true }.to_json
+    end.to change { ActionMailer::Base.deliveries.size }.by(1)
+    expect(body['sent']).to include('emails' => 1, 'texts' => 1, 'to' => client_rep.full_name)
+    mail = ActionMailer::Base.deliveries.last
+    expect(mail.to).to eq([client_rep.email])
+    expect(mail.reply_to).to eq([tom.email])
+    expect(mail.text_part.body.to_s).to include('Sales Agreements', 'Due November 20', 'getting_started=1')
+    expect(texts.last).to eq(['3035550101', texts.last.last])
+    expect(texts.last.last).to include('Sales Agreements', 'Due Nov 20', 'getting_started=1')
+
+    # Edit without the boxes sends nothing; with only text, only a text.
+    item = client.onboarding_items.find_by!(title: 'Sales Agreements')
+    expect do
+      patch "/api/admin/onboarding/#{client.id}/items/#{item.id}", headers: headers_for(tom), params: { title: 'Sales agreements' }.to_json
+    end.not_to(change { ActionMailer::Base.deliveries.size })
+    expect(body['sent']).to be_nil
+    patch "/api/admin/onboarding/#{client.id}/items/#{item.id}", headers: headers_for(tom), params: { send_sms: true }.to_json
+    expect(body['sent']).to include('emails' => 0, 'texts' => 1)
+    expect(texts.size).to eq(2)
+
+    # Nobody assigned: nothing to send to.
+    post "/api/admin/onboarding/#{client.id}/items", headers: headers_for(tom),
+                                                    params: { section: 'Deals', title: 'Nobody', owed_by: 'client', send_email: true }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 end

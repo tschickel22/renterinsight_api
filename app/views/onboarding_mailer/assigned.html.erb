@@ -1,0 +1,8 @@
+<p>Hi <%= @user.first_name.presence || 'there' %>,</p>
+<p><%= @sender&.full_name.presence || "The #{@brand.name} team" %> assigned you an item on <%= @client ? "your #{@brand.name} setup list" : "#{@item.company.name}'s onboarding list" %>:</p>
+<p style="margin:0 0 4px"><strong><%= @item.title %></strong></p>
+<% if @item.detail.present? %><p style="margin:0 0 4px;white-space:pre-line;color:#444"><%= @item.detail %></p><% end %>
+<% if @item.due_on %><p style="margin:0 0 4px">Due <%= @item.due_on.strftime('%B %-d') %></p><% end %>
+<% if @client %><p>Where to find it: in <%= @brand.name %>, click Getting started at the top of the screen, then Your project. When it is done, add a note or upload a file and click Done.</p><% end %>
+<p><a href="<%= @url %>">Open it</a></p>
+<p>Questions? Reply to this email<% if @sender&.full_name.present? %> and it goes to <%= @sender.full_name %><% end %>.</p>

@@ -16,9 +16,10 @@ module Api
                        events: Onboarding::View.events(@company, limit: 15) }
       end
 
-      # POST /api/v1/onboarding/items/:id/done
+      # POST /api/v1/onboarding/items/:id/done { note }
+      # Needs a note or a file on the item first; note here counts.
       def done
-        respond { checklist.complete!(@item) }
+        respond { checklist.complete!(@item, note: params[:note]) }
       end
 
       # POST /api/v1/onboarding/items/:id/reopen
