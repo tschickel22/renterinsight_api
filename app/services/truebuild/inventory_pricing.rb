@@ -49,19 +49,21 @@ module Truebuild
       summary(vehicle)
     end
 
-    # The one price the inventory list shows, sorts and filters on (Tom
-    # 2026-11-11). A home linked to a price book shows its deal sheet price,
-    # because a deal sheet prices a linked home from the book whatever is typed
-    # on it. Any other home shows its own price (Base Sale Price, or the sale
-    # price after a Special Discount, plus add-ons counted in the total).
-    #   { amount:, source: 'book' | 'home', before_surcharge: }  or nil
+    # The one price the inventory list shows, sorts and filters on, and a new
+    # deal sheet starts at (Tom 2026-11-11): the asking price typed on the home
+    # (its sale price while a Special Discount runs, plus add-ons counted in
+    # the total) wins; a home with none that is on a price list shows its
+    # marked-up price.
+    #   { amount:, source: 'home' | 'book', before_surcharge: }  or nil
     def list_price(vehicle)
+      own = vehicle.total_home_price.to_f
+      return { amount: own.round(2), source: 'home', before_surcharge: false } if own.positive?
+
       if vehicle.catalog_plan_variant_id && (book = summary(vehicle))
         return { amount: book[:retail], source: 'book', before_surcharge: book[:before_surcharge] }
       end
 
-      own = vehicle.total_home_price.to_f
-      own.positive? ? { amount: own.round(2), source: 'home', before_surcharge: false } : nil
+      nil
     end
 
     def public_prices_shown?

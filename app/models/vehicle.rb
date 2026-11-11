@@ -36,7 +36,7 @@ class Vehicle < ApplicationRecord
         { key: "stock_number", label: "Stock Number", type: "string", filterable: true,  sortable: true  },
         { key: "bedrooms",     label: "Bedrooms",     type: "number", filterable: true,  sortable: true  },
         { key: "bathrooms",    label: "Bathrooms",    type: "number", filterable: true,  sortable: true  },
-        { key: "msrp",         label: "Base Sale Price", type: "number", filterable: true,  sortable: true  },
+        { key: "msrp",         label: "Asking Price", type: "number", filterable: true,  sortable: true  },
         { key: "sale_price",   label: "Special Sale Price", type: "number", filterable: true,  sortable: true  },
         { key: "cost",         label: "Cost",         type: "number", filterable: true,  sortable: true  },
         { key: "color",        label: "Color",        type: "string", filterable: true,  sortable: false },
@@ -296,7 +296,10 @@ class Vehicle < ApplicationRecord
     tc = total_cost.to_f
     return tc.round(2) if tc > 0
 
-    components_sum = [dealer_cost, freight_cost, pdi_cost].compact.sum(&:to_f)
+    # A surcharge typed on the home counts, unless an invoice carries it (the
+    # invoice's figures already include it).
+    surcharge = surcharge_amount.to_f.positive? && invoice.blank? ? surcharge_amount : nil
+    components_sum = [dealer_cost, freight_cost, pdi_cost, surcharge].compact.sum(&:to_f)
     components_sum > 0 ? components_sum.round(2) : nil
   end
 
@@ -673,7 +676,7 @@ class Vehicle < ApplicationRecord
       if special_discount_enabled_changed?
         self.sale_price = nil
       elsif msrp_changed? && msrp.to_f.positive? && sale_price.present? && !sale_price_changed?
-        # No discount running: the sale price is the Base Sale Price. Keep the
+        # No discount running: the sale price is the asking price. Keep the
         # older sale_price column in step, or screens that read it first (deal
         # start price, websites) keep showing a figure nobody can see to change
         # (Tom 2026-11-11, home 69 kept $142,566 after its base became $132,245).

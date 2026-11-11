@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_11_040000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_11_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -8718,6 +8718,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_11_040000) do
     t.string "building_code"
     t.date "special_discount_ends_on"
     t.date "special_discount_starts_on"
+    t.decimal "surcharge_amount", precision: 15, scale: 2
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["catalog_plan_variant_id"], name: "index_vehicles_on_catalog_plan_variant_id"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"

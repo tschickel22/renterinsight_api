@@ -703,16 +703,16 @@ class PageLayout < ApplicationRecord
             { key: 'sale_price', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'msrp', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rent_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rent_to_own_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'deposit_amount', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'lot_rent', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'utilities', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_price', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'rent_to_own_price', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'deposit_amount', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'lot_rent', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'utilities', type: 'standard', visible: false, required: false, width: 1 },
             { key: 'price_currency', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'sale_pending', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'repo', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'package_type', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'terms', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'terms', type: 'standard', visible: false, required: false, width: 1 }
           ]
         },
         {
@@ -725,10 +725,10 @@ class PageLayout < ApplicationRecord
             { key: 'freight_cost', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'pdi_cost', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'total_cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'holdback_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'holdback_amount', type: 'standard', visible: false, required: false, width: 1 },
             { key: 'floor_plan_rate', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'target_gross', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'minimum_price', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'target_gross', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'minimum_price', type: 'standard', visible: false, required: false, width: 1 }
           ]
         },
 
@@ -916,16 +916,16 @@ class PageLayout < ApplicationRecord
             { key: 'sale_price', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'msrp', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rent_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rent_to_own_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'deposit_amount', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'lot_rent', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'utilities', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_price', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'rent_to_own_price', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'deposit_amount', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'lot_rent', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'utilities', type: 'standard', visible: false, required: false, width: 1 },
             { key: 'price_currency', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'sale_pending', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'repo', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'package_type', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'terms', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'terms', type: 'standard', visible: false, required: false, width: 1 }
           ]
         },
         {
@@ -938,10 +938,10 @@ class PageLayout < ApplicationRecord
             { key: 'freight_cost', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'pdi_cost', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'total_cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'holdback_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'holdback_amount', type: 'standard', visible: false, required: false, width: 1 },
             { key: 'floor_plan_rate', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'target_gross', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'minimum_price', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'target_gross', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'minimum_price', type: 'standard', visible: false, required: false, width: 1 }
           ]
         },
 
@@ -1161,16 +1161,16 @@ class PageLayout < ApplicationRecord
             { key: 'sale_price', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'msrp', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rent_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rent_to_own_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'deposit_amount', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'lot_rent', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'utilities', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_price', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'rent_to_own_price', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'deposit_amount', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'lot_rent', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'utilities', type: 'standard', visible: false, required: false, width: 1 },
             { key: 'price_currency', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'sale_pending', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'repo', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'package_type', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'terms', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'terms', type: 'standard', visible: false, required: false, width: 1 }
           ]
         },
         {
@@ -1183,10 +1183,10 @@ class PageLayout < ApplicationRecord
             { key: 'freight_cost', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'pdi_cost', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'total_cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'holdback_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'holdback_amount', type: 'standard', visible: false, required: false, width: 1 },
             { key: 'floor_plan_rate', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'target_gross', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'minimum_price', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'target_gross', type: 'standard', visible: false, required: false, width: 1 },
+            { key: 'minimum_price', type: 'standard', visible: false, required: false, width: 1 }
           ]
         },
 
