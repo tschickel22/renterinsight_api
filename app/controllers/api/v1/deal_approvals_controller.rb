@@ -83,6 +83,14 @@ class Api::V1::DealApprovalsController < ApplicationController
       gl_posted: @deal.try(:gl_posted) || false,
       delivery_state: @deal.try(:delivery_state),
       total_tax_amount: @deal.try(:total_tax_amount),
+      # The review header shows how the buyer is paying and when it closed; both
+      # read blank (shown as Cash and a dash) because they were never sent.
+      payment_type: @deal.try(:payment_type),
+      lender_name: @deal.try(:lender_name),
+      financed_amount: @deal.try(:financed_amount),
+      actual_close_date: @deal.try(:actual_close_date),
+      closed_at: @deal.try(:won_at),
+      gl_preview: gl_preview_for(@deal),
       # Top-level editable financials so the modal's fromDeal() hydrates on first open
       # (it reads these flat, not from `editable`). unit_cost falls back to the home line
       # item cost mirror so closed deals whose home_cost wasn't snapshotted still show it.
@@ -122,6 +130,7 @@ class Api::V1::DealApprovalsController < ApplicationController
       end
 
       render json: summary.merge(
+        gl_preview: gl_preview_for(@deal),
         id: @deal.id,
         name: @deal.try(:name),
         deal_number: @deal.try(:deal_number),
@@ -579,6 +588,24 @@ class Api::V1::DealApprovalsController < ApplicationController
       total: p.try(:total),
       amount: p.try(:price) || p.try(:amount) || p.try(:total)
     }
+  end
+
+  # What approval will post (the closing entry and its sales tax), one row per
+  # account, so the review's GL preview shows every line item's revenue and
+  # not only the home's. Nothing is posted here.
+  def gl_preview_for(deal)
+    lines = Accounting::DealAccountingService.new(deal).posting_lines
+    names = @company.chart_of_accounts.where(id: lines.map { |l| l[:chart_of_account_id] }.uniq)
+                    .pluck(:id, :account_number, :name).to_h { |id, num, name| [id, [num, name].compact.join(' ')] }
+    lines.group_by { |l| l[:chart_of_account_id] }.map do |id, ls|
+      debit = ls.sum { |l| l[:debit_amount].to_d }
+      credit = ls.sum { |l| l[:credit_amount].to_d }
+      net = debit - credit
+      { account: names[id] || "Account #{id}", debit: net.positive? ? net.to_f : 0.0, credit: net.negative? ? (-net).to_f : 0.0 }
+    end.reject { |r| r[:debit].zero? && r[:credit].zero? }
+  rescue StandardError => e
+    Rails.logger.warn("[DealApprovals] GL preview for deal #{deal.id} failed: #{e.message}")
+    nil
   end
 
   def deal_update_params

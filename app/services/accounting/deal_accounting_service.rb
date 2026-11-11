@@ -98,7 +98,10 @@ module Accounting
         cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs',
                                                    location_id: deal_location_id) ||
                        settings.default_cogs_account
-        inventory_account = @company.chart_of_accounts.find_by(account_number: '1210')
+        # The company's own home inventory account when set (Accounting
+        # Settings), else 1210 as on the default chart.
+        inventory_account = settings.try(:default_vehicle_inventory_account) ||
+                            @company.chart_of_accounts.find_by(account_number: '1210')
 
         if cogs_account && inventory_account
           lines << { chart_of_account_id: cogs_account.id, debit_amount: cogs_relief, credit_amount: 0,
@@ -158,16 +161,23 @@ module Accounting
         end
         next if product_revenue.zero?
 
-        fi_revenue_account = resolve_fi_account(product) ||
-                             @company.chart_of_accounts.find_by(account_number: '4110')
+        # F&I products go to their F&I accounts. Everything else the buyer pays
+        # for with the home (delivery and set, skirting, a porch, a doc fee,
+        # land) is part of the sale, not F&I: it used to fall through to 4110
+        # Extended Warranty Revenue and be marked department fi (E99 video
+        # click-through, 2026-11-10; no production deal had posted one yet).
+        fi = fi_line?(product)
+        line_account = fi ? (resolve_fi_account(product) || @company.chart_of_accounts.find_by(account_number: '4110'))
+                          : (sale_line_revenue_account(product) || revenue_account)
+        label = product.try(:name) || product.try(:product_name) || product.try(:product_type)
+        line_memo = fi ? "F&I: #{label} — #{deal_description}" : "#{label} — #{deal_description}"
+        department = fi ? 'fi' : deal_department
 
-        if fi_revenue_account && ar_account
+        if line_account && ar_account
           lines << { chart_of_account_id: ar_account.id, debit_amount: product_revenue, credit_amount: 0,
-                     memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
-                     location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
-          lines << { chart_of_account_id: fi_revenue_account.id, debit_amount: 0, credit_amount: product_revenue,
-                     memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
-                     location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
+                     memo: line_memo, location_id: deal_location_id, department: department, deal_id: @deal.id }
+          lines << { chart_of_account_id: line_account.id, debit_amount: 0, credit_amount: product_revenue,
+                     memo: line_memo, location_id: deal_location_id, department: department, deal_id: @deal.id }
         end
       end
 
@@ -498,6 +508,33 @@ module Accounting
       subtotal = product.quantity.to_i * product.unit_price.to_d
       off = product.discount_type == 'percentage' ? subtotal * product.discount.to_d / 100 : product.discount.to_d
       (subtotal - off).round(2)
+    end
+
+    # A back-end F&I product: tagged category:product on the line (the deal
+    # sheet's convention) or named like one.
+    def fi_line?(product)
+      category = product.try(:notes).to_s[/category:\s*([a-z_]+)/i, 1]&.downcase
+      return true if category == 'product'
+      return false if category.present?
+
+      (product.try(:product_type).to_s + ' ' + product.try(:product_name).to_s) =~ /warranty|insurance|\bgap\b|service contract|reserve/i ? true : false
+    end
+
+    # The revenue account for a non-F&I line, found by name because account
+    # numbers differ between charts (4300 Delivery & Setup Income on the
+    # default chart, 4100 Setup & Delivery Revenue on others). nil = home sales.
+    def sale_line_revenue_account(product)
+      name = product.try(:product_name).to_s
+      category = product.try(:notes).to_s[/category:\s*([a-z_]+)/i, 1]&.downcase
+      accounts = @company.chart_of_accounts.where(account_type: 'revenue', is_active: [true, nil]).where(is_header: [false, nil])
+      pick = ->(re) { accounts.order(:account_number).detect { |a| a.name =~ re } }
+      if category == 'land' || name =~ /\b(land|lot)\b/i
+        pick.(/land|lot sales/i)
+      elsif name =~ /\bdoc(ument)?\b.*fee|documentation/i
+        pick.(/document/i)
+      else
+        pick.(/deliver|set ?up|setup/i)
+      end
     end
 
     def resolve_fi_account(product)
