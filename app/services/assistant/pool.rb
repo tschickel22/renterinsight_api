@@ -5,7 +5,12 @@ module Assistant
   # number is live (backlog E96, phase 3). Platform setting 'assistant_pool':
   #
   #   { "live" => true,
-  #     "numbers" => [{ "number" => "+19704632673", "messaging_service_sid" => "MG..." }] }
+  #     "numbers" => [{ "number" => "+19704632673", "messaging_service_sid" => "MG..." }],
+  #     "companies" => [{ "id" => 24, "added_at" => "2026-11-11T21:30:00Z" }] }
+  #
+  # A dealer texts from the pool only once a platform admin has added them
+  # (Platform Admin, Texting registrations, Shared numbers). Live alone sends
+  # nothing: every dealer is off the pool until someone decides otherwise.
   #
   # Each environment holds its own numbers on its own Messaging Service and A2P
   # campaign. Nothing is sent from the pool until "live" is true, which is set by
@@ -30,6 +35,53 @@ module Assistant
         number = Conversation.normalize_phone(e['number'])
         number && { number: number, messaging_service_sid: e['messaging_service_sid'].presence }
       end
+    end
+
+    def company_entries
+      Array(config['companies']).filter_map do |c|
+        id = c.is_a?(Hash) ? c['id'].to_i : c.to_i
+        id.positive? ? { id: id, added_at: (c['added_at'] if c.is_a?(Hash)) } : nil
+      end
+    end
+
+    def company_ids
+      company_entries.map { |c| c[:id] }
+    end
+
+    def company_allowed?(company)
+      company.present? && company_ids.include?(company.id)
+    end
+
+    # Everything that must hold before a dealer's assistant may start a new
+    # conversation on a shared number.
+    def available_for?(company)
+      live? && company_allowed?(company) && within_allowance?(company)
+    end
+
+    def first_pool_text_at(company)
+      Conversation.where(company_id: company.id, pool: true).minimum(:started_at)
+    end
+
+    # Days left of the dealer's MAX_DAYS on the pool, or nil before their first pool text.
+    def days_left(company)
+      first = first_pool_text_at(company)
+      first && [MAX_DAYS - ((Time.current - first) / 1.day).floor, 0].max
+    end
+
+    def update!(attrs)
+      Setting.set('Platform', PlatformSetting::PLATFORM_SCOPE_ID, KEY, config.merge(attrs.deep_stringify_keys))
+    end
+
+    def add_company!(company)
+      return if company_allowed?(company)
+
+      list = Array(config['companies']) + [{ 'id' => company.id, 'added_at' => Time.current.utc.iso8601 }]
+      update!('companies' => list)
+    end
+
+    def remove_company!(company)
+      list = Array(config['companies']).reject { |c| (c.is_a?(Hash) ? c['id'] : c).to_i == company.id }
+      update!('companies' => list)
     end
 
     def numbers
@@ -58,7 +110,7 @@ module Assistant
 
     # A dealer stays on the pool at most MAX_DAYS after their first pool text.
     def within_allowance?(company)
-      first = Conversation.where(company_id: company.id, pool: true).minimum(:started_at)
+      first = first_pool_text_at(company)
       first.nil? || first > MAX_DAYS.days.ago
     end
   end
