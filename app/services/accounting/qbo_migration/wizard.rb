@@ -912,7 +912,15 @@ module Accounting
       # ── Customers and vendors ───────────────────────────────────
 
       def list_matcher
-        @list_matcher ||= ListMatcher.new(@company, choices: config['list_choices'])
+        @list_matcher ||= ListMatcher.new(@company, choices: config['list_choices'], open_counts: list_open_counts)
+      end
+
+      # Open invoices and customer credits per QuickBooks customer, open bills
+      # and vendor credits per vendor. One with any can't be left out.
+      def list_open_counts
+        count = ->(*lists, key) { lists.flat_map { |l| Array(config[l]) }.group_by { |i| i[key].to_s }.transform_values(&:size) }
+        { 'customers' => count.call('open_invoices', 'customer_credits', 'customer_external_id'),
+          'vendors' => count.call('open_bills', 'vendor_credits', 'vendor_external_id') }
       end
 
       # Each QuickBooks customer or vendor with what the switch will do with it.
@@ -924,7 +932,7 @@ module Accounting
       def list_counts
         ListMatcher::KINDS.index_with do |kind|
           rows = list_rows(kind)
-          %w[link convert_lead new needs_choice].index_with { |st| rows.count { |r| r[:status] == st } }.symbolize_keys
+          %w[link convert_lead new needs_choice skip].index_with { |st| rows.count { |r| r[:status] == st } }.symbolize_keys
         end.symbolize_keys
       end
 
@@ -933,14 +941,30 @@ module Accounting
           posted: !draft? }
       end
 
-      # choices: [{ kind, external_id, action: 'link' | 'new' | 'auto', type, id }]. 'auto' forgets a
-      # choice so matching decides again.
+      # choices: [{ kind, external_id, action: 'link' | 'new' | 'skip' | 'auto', type, id }]. 'auto' forgets a
+      # choice so matching decides again; 'skip' is Don't bring over, only for
+      # one with nothing open. Without an external_id: 'skip_new' leaves out
+      # every one that would be created and has nothing open, 'bring_all'
+      # brings back every one left out.
       def update_list_choices!(choices)
         ensure_draft!
         saved = (config['list_choices'] ||= {})
         Array(choices).each do |c|
           kind = c['kind'].to_s
           raise Error, 'Unknown list' unless ListMatcher::KINDS.include?(kind)
+
+          if c['external_id'].blank? && %w[skip_new bring_all].include?(c['action'].to_s)
+            if c['action'].to_s == 'skip_new'
+              list_rows(kind).each do |r|
+                (saved[kind] ||= {})[r[:external_id]] = { 'action' => 'skip' } if r[:status] == 'new' && r[:open_items].zero?
+              end
+            else
+              (saved[kind] || {}).delete_if { |_ext, ch| ch['action'] == 'skip' }
+            end
+            @list_matcher = nil
+            @list_rows = nil
+            next
+          end
 
           ext = c['external_id'].to_s
           unless Array(config.dig('lists', kind)).any? { |q| q['external_id'].to_s == ext }
@@ -950,6 +974,13 @@ module Accounting
           case c['action'].to_s
           when 'auto'
             saved[kind]&.delete(ext)
+          when 'skip'
+            open = list_open_counts.dig(kind, ext).to_i
+            if open.positive?
+              raise Error, "#{kind == 'customers' ? 'This customer' : 'This vendor'} has #{open} open " \
+                           "#{kind == 'customers' ? 'invoice or credit' : 'bill or credit'}#{open == 1 ? '' : 's'} in QuickBooks, so it has to come over"
+            end
+            (saved[kind] ||= {})[ext] = { 'action' => 'skip' }
           when 'new'
             (saved[kind] ||= {})[ext] = { 'action' => 'new' }
           when 'link'
