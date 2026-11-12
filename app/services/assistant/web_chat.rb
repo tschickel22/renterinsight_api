@@ -19,7 +19,7 @@ module Assistant
     MAX_REPLY = 700
     KEY = /\A[A-Za-z0-9_-]{20,64}\z/
 
-    Reply = Struct.new(:messages, :ask_consent, :visitor, :usage, keyword_init: true)
+    Reply = Struct.new(:messages, :ask_consent, :visitor, :usage, :events, keyword_init: true)
 
     def self.find(company, key)
       return nil if company.nil? || !key.to_s.match?(KEY)
@@ -121,7 +121,9 @@ module Assistant
       end
       reason = result.handoff ? result.handoff_reason : nil
 
+      events = []
       if !problem && booking && (outcome = booking.apply(result))
+        events << Assistant::Conversions.schedule(outcome.activity) if outcome.ok && outcome.kind == 'booked'
         if outcome.ok
           reply = Assistant::Booking.combine(reply, outcome)
           reason = nil if %w[appointment visit_time].include?(reason)
@@ -132,7 +134,7 @@ module Assistant
         end
       end
 
-      lead_from_chat!(result.contact)
+      events << Assistant::Conversions.lead(lead_from_chat!(result.contact))
       Assistant::Learn.record_question(conversation, result, reason, problem)
       listings = (home_card(result.photo_home_id) + matches).uniq { |l| l[:id] }.first(4)
       # A training video that shows what they asked about (software company).
@@ -149,7 +151,7 @@ module Assistant
       end
 
       Reply.new(messages: [], ask_consent: ask_consent?(result.contact), visitor: visitor_details(result.contact),
-                usage: result.usage)
+                usage: result.usage, events: events.compact)
     rescue StandardError => e
       Rails.logger.error("[Assistant::WebChat] conversation #{conversation.id}: #{e.class}: #{e.message}")
       # Never silence in front of a buyer: a person takes it.
@@ -165,7 +167,8 @@ module Assistant
     end
 
     # The visitor gave a name and an email: make the lead through the dealer's
-    # own form, so it arrives like any other website lead.
+    # own form, so it arrives like any other website lead. Returns the lead
+    # when this message made it (for the page's ad pixel), else nil.
     def lead_from_chat!(contact)
       return if conversation.conversable.present? || contact.blank?
 
@@ -178,6 +181,7 @@ module Assistant
                             consented: false, request_context: @request_context)
       lead = @company.leads.find_by(id: result.lead_id) if result.status == 'created'
       self.class.link!(conversation, lead) if lead
+      lead
     end
 
     # A conversation and the lead made from it, one record from then on.

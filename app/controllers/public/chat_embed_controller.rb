@@ -59,9 +59,29 @@ module Public
               frame.style.cssText = 'position:fixed;bottom:12px;right:12px;width:420px;height:640px;max-height:calc(100% - 24px);border:0;z-index:2147483000;background:transparent;color-scheme:normal;';
             }
           }
+          // Quinn made a lead or booked a visit in the chat: count it on this
+          // page's own ad tags, as a form on the page would. The chat is our
+          // frame, so the page's pixel cannot see it happen. Once per event
+          // id; the same id goes to Meta so a server copy is not double counted.
+          // A page with a cookie banner that sets window.siteConsent waits for it.
+          function conversion(ev) {
+            if (!ev || !/^(Lead|Schedule)$/.test(ev.name) || !/^dt-[a-f0-9]{24}$/.test(ev.id)) return;
+            var key = 'dt_chat_event_' + ev.id;
+            try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, '1'); } catch (x) {}
+            try { window.dispatchEvent(new CustomEvent('dealertide:chat-conversion', { detail: { name: ev.name, id: ev.id } })); } catch (x) {}
+            function fire() {
+              if (typeof window.fbq === 'function') window.fbq('track', ev.name, { content_name: 'Website chat' }, { eventID: ev.id });
+              if (typeof window.gtag === 'function' && ev.name === 'Lead') {
+                window.gtag('event', 'generate_lead', { method: 'website_chat' });
+                if (window.dtGoogleAdsLead) window.gtag('event', 'conversion', { send_to: window.dtGoogleAdsLead });
+              }
+            }
+            if (window.siteConsent && typeof window.siteConsent.onGrant === 'function') window.siteConsent.onGrant(fire); else fire();
+          }
           window.addEventListener('message', function (e) {
             var d = e.data || {};
             if (e.origin === ORIGIN && d.type === 'dealertide-chat-size') size(!!d.open);
+            if (e.origin === ORIGIN && d.type === 'dealertide-chat-event' && e.source === frame.contentWindow) conversion(d.event);
             // A lead form from the same dealer (also our frame) finished: open
             // the chat on that lead so they can keep talking.
             if (e.origin === ORIGIN && d.type === 'dealertide:chat-open' && frame.contentWindow) {

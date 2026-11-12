@@ -139,6 +139,7 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       key = body['chat_key']
       expect(key).to be_present
       expect(body['messages'].map { |m| m['content'] }).to eq(['Happy to help. What size home are you after?'])
+      expect(body['events']).to eq([])
 
       conversation = Conversation.find_by(visitor_token: key)
       expect(conversation).to have_attributes(channel: 'web_chat', status: 'active')
@@ -150,6 +151,15 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       allow_any_instance_of(Concierge::LeadCapture).to receive(:call).and_return(Concierge::LeadCapture::Result.new(status: 'created', lead_id: lead.id))
       post "/concierge/#{token}", params: { message: 'Tia May, tia@example.com', chat_key: key }.to_json, headers: { 'Content-Type' => 'application/json' }
       expect(conversation.reload.conversable).to eq(lead)
+      # The page's ad pixel counts it as a Lead, by an id that does not show the lead's.
+      events = JSON.parse(response.body)['events']
+      expect(events).to eq([{ 'name' => 'Lead', 'id' => Assistant::Conversions.lead(lead)[:id] }])
+      expect(events.first['id']).to match(/\Adt-[a-f0-9]{24}\z/)
+
+      # Once: the next message on the same lead counts nothing.
+      brain_says(reply: 'Anything else?')
+      post "/concierge/#{token}", params: { message: 'Thanks', chat_key: key }.to_json, headers: { 'Content-Type' => 'application/json' }
+      expect(JSON.parse(response.body)['events']).to eq([])
 
       get '/api/crm/conversations', headers: headers
       row = JSON.parse(response.body)['items'].detect { |r| r['id'] == conversation.id }
@@ -202,6 +212,8 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
                                        headers: { 'Content-Type' => 'application/json' }
       expect(lead.reload.sms_inquiry_consent).to be(true)
       expect(lead.phone.gsub(/\D/, '')).to eq('3035550144')
+      # Already counted when the form made the lead.
+      expect(JSON.parse(response.body)).not_to have_key('events')
     end
 
     it 'runs embedded only on the sites the dealer listed' do
@@ -217,6 +229,9 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
 
       get "/chat/#{token}.js", headers: { 'Referer' => 'https://summitparkhomes.com/homes' }
       expect(response.body).to include('/chat-embed/').and include(token)
+      # Fires the chat's lead on the dealer's own pixel, after any cookie consent.
+      expect(response.body).to include("d.type === 'dealertide-chat-event'").and include("window.fbq('track', ev.name")
+                                                                               .and include('siteConsent.onGrant(fire)')
       get "/chat/#{token}.js", headers: { 'Referer' => 'https://stranger.example.com/' }
       expect(response.body).to include('not listed')
     end
