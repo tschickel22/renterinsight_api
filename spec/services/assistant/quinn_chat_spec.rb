@@ -221,6 +221,24 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       expect(response.body).to include('not listed')
     end
 
+    it 'greets a software company as a product chat and offers Contact us and Set a demo' do
+      Assistant::Settings.for(company).update!('chat_sites' => ['summitparkhomes.com'], 'visit_minutes' => 30)
+      get "/concierge/#{token}/config", params: { site: 'summitparkhomes.com' }
+      dealer = JSON.parse(response.body)
+      expect(dealer['greeting']).to include('homes, prices or a visit')
+      expect(dealer['placeholder']).to include('homes')
+      expect(dealer['quick_actions']).to include(hash_including('type' => 'ask', 'label' => 'Book a visit'))
+
+      company.update!(industry: 'saas')
+      get "/concierge/#{token}/config", params: { site: 'summitparkhomes.com' }
+      body = JSON.parse(response.body)
+      expect(body['greeting']).to include('help your dealership').and include('30 minute demo')
+      expect(body['greeting']).not_to include('homes')
+      expect(body['placeholder']).to eq('Ask about our products or a demo…')
+      expect(body['quick_actions'].map { |a| a['label'] }).to eq(['Contact us', 'Set a demo'])
+      expect(body['quick_actions'].last).to include('type' => 'ask', 'message' => "I'd like to set up a demo.")
+    end
+
     it 'opens the chat on the new lead when a form is sent' do
       form = IntakeForm.create!(company: company, name: 'Contact', public_id: "f#{SecureRandom.hex(4)}", is_active: true, auto_create_lead: true,
                                 fields: [{ 'name' => 'first_name', 'label' => 'First name' }, { 'name' => 'email', 'label' => 'Email' }])

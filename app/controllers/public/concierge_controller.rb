@@ -91,7 +91,7 @@ module Public
       render json: {
         dealer_name: company.name, assistant_name: settings.assistant_name,
         color: params[:color].to_s.match?(/\A#[0-9a-f]{6}\z/i) ? params[:color] : chat_color,
-        greeting: "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about homes, prices or a visit.",
+        greeting: chat_greeting(settings), placeholder: chat_placeholder,
         quick_actions: quick_actions.reject { |a| a[:type] == 'form' },
         lead_capture: lead_capture_config, platform_brand: platform_brand
       }
@@ -225,12 +225,22 @@ module Public
         **visitor_details.symbolize_keys.slice(:name, :email, :phone)
       )
       actions = []
-      actions << { type: 'link', label: 'Set a meeting', url: booking } if booking.present?
+      actions << { type: 'link', label: 'Set a meeting', url: booking } if booking.present? && !software?
       actions << if lead_capture_config[:enabled]
                    { type: 'capture', label: 'Contact us', intent: 'contact' }
                  else
                    { type: 'form', label: 'Contact us', path: '/contact' }
                  end
+      # Quinn books in the chat itself, so this chip just says so for them and
+      # the reply offers times. A demo site keeps the answer-only concierge,
+      # which cannot book. A software company books demos, not visits.
+      if !demo? && Assistant::Settings.for(company).books_visits? && (software? || booking.blank?)
+        actions << if software?
+                     { type: 'ask', label: 'Set a demo', message: "I'd like to set up a demo." }
+                   else
+                     { type: 'ask', label: 'Book a visit', message: "I'd like to book a visit." }
+                   end
+      end
       actions
     rescue StandardError
       [{ type: 'form', label: 'Contact us', path: '/contact' }]
@@ -238,6 +248,26 @@ module Public
 
     def capture
       @capture ||= Concierge::LeadCapture.new(company: company, website: website)
+    end
+
+    # A software company (DealerTide itself) sells to dealers: the chat offers a
+    # demo and answers about the product, not homes, prices and visits.
+    def software?
+      return @software if defined?(@software)
+
+      @software = company.present? && Assistant::Software.for?(company)
+    end
+
+    def chat_greeting(settings)
+      if software?
+        "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me how #{company.name} can help your dealership, or set up a #{settings.visit_minutes} minute demo."
+      else
+        "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about homes, prices or a visit."
+      end
+    end
+
+    def chat_placeholder
+      software? ? 'Ask about our products or a demo…' : 'Ask about homes, financing, a visit…'
     end
 
     # Permitted before it travels, so nothing downstream has to reason about
