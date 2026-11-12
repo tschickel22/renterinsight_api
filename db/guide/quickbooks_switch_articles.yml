@@ -89,6 +89,7 @@ articles:
       - Pick the matching account from the list, or
       - Click **Add all from QuickBooks** (or **Add the other ... from QuickBooks**) to make one for each that is left and match it.
       - Choose **Closed, not moving it over** for an account you no longer use. Its balance still comes over, but no bank feed is needed.
+      - Choose **Part of** another card for an employee card the bank puts on the company card's statement (QuickBooks often keeps each employee's card as its own account under the company card). It needs no account or feed of its own: its balance goes to the company card and ties out on that card's one statement. **Add all from QuickBooks** does this for you for cards that sit under another card in QuickBooks.
 
       Connect bank feeds now or later, under **Accounting > Bank Transactions**. Connecting fills in these same accounts by their last four digits. A bank shows **Feed connected** or **No bank feed**. Connect before the Uncleared items step and its statement balance fills in by itself.
 

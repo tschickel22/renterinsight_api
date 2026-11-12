@@ -111,6 +111,12 @@ module Accounting
             created += 1
           end
         end
+        # An account that is part of another card or bank goes to that one's account.
+        rows.each do |row|
+          next unless row.dig('choice', 'action') == 'follow'
+
+          ids[row['qbo_account_id']] = ids[row.dig('choice', 'qbo_account_id').to_s]
+        end
         # Keep the QuickBooks id on mapped accounts that have none yet, so a
         # later sync or a second look can find them.
         rows.each do |row|

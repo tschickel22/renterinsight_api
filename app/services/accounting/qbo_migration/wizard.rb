@@ -14,7 +14,11 @@ module Accounting
     #                              balance is debit minus credit
     #   accounts                   [row] (see #account_row)
     #   banks                      [{ qbo_account_id, name, kind, match: { bank_account_id, closed,
-    #                                 previous_feed_start_date } }]
+    #                                 previous_feed_start_date } | { part_of: qbo_account_id } }]
+    #                              part_of: an employee card (or any account) the bank reports inside
+    #                              another one, e.g. five employee cards on one company card statement.
+    #                              It has no bank account of its own: its balance goes to that card's
+    #                              account and ties out on that card's statement (see #part_of_map)
     #   uncleared                  { qbo_account_id => { statement_balance, statement_source ('bank' | 'typed'),
     #                                bank_balance: { status, amount, current, lines_after, as_of, ... }, items: [...] } }
     #                              bank_balance is what the bank feed says the statement balance was
@@ -128,7 +132,7 @@ module Accounting
           next if match['bank_account_id'] && !bank_ids.include?(match['bank_account_id'])
 
           { 'qbo_account_id' => bank['qbo_account_id'].to_s,
-            'match' => match.slice('bank_account_id', 'closed', 'previous_feed_start_date') }
+            'match' => match.slice('bank_account_id', 'closed', 'previous_feed_start_date', 'part_of') }
         end
         { 'accounts' => accounts, 'banks' => banks }
       end
@@ -424,7 +428,9 @@ module Accounting
             {
               qbo_account_id: b['qbo_account_id'], name: b['name'], kind: b['kind'],
               balance_at_cutover: self.class.money(rows.dig(b['qbo_account_id'], 'balance_at_cutover')),
-              match: match && { bank_account_id: match['bank_account_id'], closed: match['closed'] ? true : false },
+              match: match && { bank_account_id: match['bank_account_id'], closed: match['closed'] ? true : false }
+                                .merge(match['part_of'].present? ? { part_of: match['part_of'] } : {}),
+              qbo_parent_id: qbo_parent_bank_id(b),
               problems: bank_match_problems(b)
             }
           end,
@@ -454,8 +460,23 @@ module Accounting
           previous = bank['match'] || {}
           closed = ActiveModel::Type::Boolean.new.cast(m['closed']) || false
           ba_id = m['bank_account_id'].presence
+          part_of = m['part_of'].presence&.to_s
 
-          if ba_id
+          if part_of
+            target = banks[part_of]
+            if target.nil? || part_of == bank['qbo_account_id']
+              errors << "#{bank['name']}: pick another QuickBooks bank or card to be part of"
+              next
+            elsif target['kind'] != bank['kind']
+              errors << "#{bank['name']} can only be part of another #{bank['kind'] == 'credit_card' ? 'card' : 'bank account'}"
+              next
+            elsif target.dig('match', 'part_of') || banks.values.any? { |o| o.dig('match', 'part_of') == bank['qbo_account_id'] && o['qbo_account_id'] != part_of }
+              errors << "#{bank['name']}: an account can be part of one that stands on its own, not part of a part"
+              next
+            end
+            release_bank_account(previous, retire: true) if previous['bank_account_id']
+            bank['match'] = { 'part_of' => part_of }
+          elsif ba_id
             ba = company_bank_accounts.find { |a| a.id == ba_id.to_i }
             unless ba
               errors << "#{bank['name']}: that bank account was not found"
@@ -482,9 +503,71 @@ module Accounting
         raise Error, errors.join('. ') if errors.any?
 
         config['banks'] = banks.values
+        merge_part_of_items!
         reapply_bank_matches!
         config.delete('preview_viewed_at')
         save!
+      end
+
+      # { child qbo id => the qbo id it is part of }
+      def part_of_map
+        bank_rows.each_with_object({}) do |b, h|
+          parent = b.dig('match', 'part_of')
+          h[b['qbo_account_id']] = parent.to_s if parent.present?
+        end
+      end
+
+      def parts_of(qbo_account_id)
+        bank_rows.select { |b| b.dig('match', 'part_of').to_s == qbo_account_id.to_s }
+      end
+
+      # The QuickBooks bank or card this one sits under, when that is also a
+      # bank or card here: QuickBooks' own parent, or the part of the name
+      # before the last colon ("CORP CC 1849:Justin EHS 1740").
+      def qbo_parent_bank_id(bank)
+        rows = account_rows.index_by { |r| r['qbo_account_id'] }
+        ids = bank_rows.map { |b| b['qbo_account_id'] }.to_set
+        parent = rows.dig(bank['qbo_account_id'], 'qbo_parent_id')
+        return parent if parent && ids.include?(parent) && parent != bank['qbo_account_id']
+
+        name = rows.dig(bank['qbo_account_id'], 'qbo_name') || bank['name']
+        prefix = name.to_s.rpartition(':').first
+        return nil if prefix.blank?
+
+        bank_rows.find { |b| b['qbo_account_id'] != bank['qbo_account_id'] && (rows.dig(b['qbo_account_id'], 'qbo_name') || b['name']) == prefix }&.dig('qbo_account_id')
+      end
+
+      # Uncleared checks and charges QuickBooks holds on an account that is
+      # part of another move to that one's list, marked with where they came
+      # from; when it stands on its own again they move back.
+      def merge_part_of_items!
+        config['uncleared'] ||= {}
+        parts = part_of_map
+        config['uncleared'].to_a.each do |id, state|
+          next if parts.key?(id)
+
+          back = Array(state['items']).select { |i| i['from_account'].present? && parts[i['from_account']] != id }
+          next if back.empty?
+
+          state['items'] = Array(state['items']) - back
+          back.each do |item|
+            dest = config['uncleared'][item['from_account']] ||= { 'statement_balance' => nil, 'items' => [] }
+            dest['items'] = Array(dest['items']) + [item.except('from_account')]
+          end
+        end
+        parts.each do |child, parent|
+          child_state = config['uncleared'].delete(child)
+          next if child_state.nil?
+
+          dest = config['uncleared'][parent] ||= { 'statement_balance' => nil, 'items' => [] }
+          dest['items'] = Array(dest['items']) + Array(child_state['items']).map { |i| i.merge('from_account' => child) }
+        end
+        # One standing on its own again needs its own statement balance.
+        bank_rows.each do |b|
+          next if parts.key?(b['qbo_account_id'])
+
+          config['uncleared'][b['qbo_account_id']] ||= { 'statement_balance' => nil, 'items' => [] }
+        end
       end
 
       # Gives every QuickBooks bank and card that has no match yet a
@@ -514,6 +597,15 @@ module Accounting
         BankAccount.transaction do
           bank_rows.each do |bank|
             next if bank['match'].present?
+
+            # An employee card under a company card in QuickBooks: the bank
+            # sends one statement for the whole card, so it is part of it.
+            parent = bank['kind'] == 'credit_card' ? qbo_parent_bank_id(bank) : nil
+            parent_row = parent && bank_rows.find { |b| b['qbo_account_id'] == parent }
+            if parent_row && parent_row['kind'] == 'credit_card' && parent_row.dig('match', 'part_of').blank?
+              matches << { 'qbo_account_id' => bank['qbo_account_id'], 'part_of' => parent }
+              next
+            end
 
             type = bank_account_type(bank, rows[bank['qbo_account_id']])
             last4 = bank['name'].to_s[/(\d{4})\D*\z/, 1]
@@ -552,6 +644,13 @@ module Accounting
       # balance. Found in the 2026-10-03 browser test, where both happened
       # without a word.
       def bank_match_problems(bank)
+        if (parent_id = bank.dig('match', 'part_of')).present?
+          parent = bank_rows.find { |b| b['qbo_account_id'] == parent_id.to_s }
+          return ['the account it is part of is no longer in this switch'] unless parent
+          return ["#{parent['name']} is not matched to a bank or card here yet"] unless parent.dig('match', 'bank_account_id')
+
+          return []
+        end
         ba_id = bank.dig('match', 'bank_account_id')
         return [] unless ba_id
 
@@ -615,17 +714,21 @@ module Accounting
 
       def uncleared_bank_json(bank)
         state = config.dig('uncleared', bank['qbo_account_id']) || {}
-        row = account_rows.find { |r| r['qbo_account_id'] == bank['qbo_account_id'] } || {}
+        parts = parts_of(bank['qbo_account_id'])
+        rows = account_rows.index_by { |r| r['qbo_account_id'] }
+        balance = ([bank] + parts).sum(BigDecimal('0')) { |b| self.class.d(rows.dig(b['qbo_account_id'], 'balance_at_cutover')) }
         {
           qbo_account_id: bank['qbo_account_id'], name: bank['name'], kind: bank['kind'],
           bank_account_id: bank.dig('match', 'bank_account_id'),
-          balance_at_cutover: self.class.money(row['balance_at_cutover']),
+          includes: parts.map { |b| b['name'] },
+          balance_at_cutover: self.class.money(balance),
           statement_balance: self.class.money(state['statement_balance']),
           statement_from_bank: statement_from_bank?(state),
           bank_balance: bank_balance_json(state['bank_balance']),
           items: Array(state['items']).map do |i|
             { id: i['id'], date: i['date'], kind: i['kind'], payee: i['payee'], reference: i['reference'],
-              amount: self.class.money(i['amount']), from_quickbooks: i['from_quickbooks'] ? true : false }
+              amount: self.class.money(i['amount']), from_quickbooks: i['from_quickbooks'] ? true : false,
+              from_account: i['from_account'].presence && bank_rows.find { |b| b['qbo_account_id'] == i['from_account'] }&.dig('name') }
           end,
           difference: self.class.money(uncleared_difference(bank))
         }
@@ -635,8 +738,9 @@ module Accounting
         state = config.dig('uncleared', bank['qbo_account_id']) || {}
         return nil if state['statement_balance'].nil?
 
-        row = account_rows.find { |r| r['qbo_account_id'] == bank['qbo_account_id'] } || {}
-        dp_book = self.class.d(row['tb_balance'])
+        # An account that is part of this one ties out on its statement too.
+        ids = [bank['qbo_account_id']] + parts_of(bank['qbo_account_id']).map { |b| b['qbo_account_id'] }
+        dp_book = account_rows.select { |r| ids.include?(r['qbo_account_id']) }.sum(BigDecimal('0')) { |r| self.class.d(r['tb_balance']) }
         dp_statement = statement_dp(bank, state['statement_balance'])
         flows = Array(state['items']).sum(BigDecimal('0')) { |i| item_flow(i) }
         dp_diff = dp_book - dp_statement - flows
@@ -712,8 +816,9 @@ module Accounting
               'id' => id, 'date' => date&.iso8601, 'kind' => item['kind'], 'payee' => item['payee'].presence,
               'reference' => item['reference'].presence, 'amount' => amount.round(2).to_s('F'),
               'from_quickbooks' => old_items.dig(id, 'from_quickbooks') || false,
-              'qbo_txn_id' => old_items.dig(id, 'qbo_txn_id')
-            }
+              'qbo_txn_id' => old_items.dig(id, 'qbo_txn_id'),
+              'from_account' => old_items.dig(id, 'from_account')
+            }.compact
           end
           state['items'] = items
         end
@@ -1277,6 +1382,7 @@ module Accounting
           'qbo_account_id' => acct[:external_id].to_s,
           'qbo_name' => acct[:fully_qualified_name].presence || acct[:name],
           'qbo_number' => acct[:account_number],
+          'qbo_parent_id' => acct[:parent_external_id].presence&.to_s,
           'qbo_type' => acct[:qbo_type],
           'qbo_sub_type' => acct[:qbo_sub_type],
           'active' => acct[:is_active] != false,
@@ -1330,6 +1436,7 @@ module Accounting
           balance_at_cutover: self.class.money(row['balance_at_cutover']),
           suggestion: row['suggestion'], choice: row['choice'], confirmed: row['confirmed'] ? true : false,
           bank_match: row['bank_match'] ? true : false,
+          part_of: row.dig('choice', 'action') == 'follow' ? bank_rows.find { |b| b['qbo_account_id'] == row.dig('choice', 'qbo_account_id') }&.dig('name') : nil,
           type_problem: type_mismatch(row)
         }
       end
@@ -1355,6 +1462,18 @@ module Accounting
           row['choice'] = { 'action' => 'map', 'chart_of_account_id' => gl.id }
           row['confirmed'] = true
         end
+        # An account that is part of another goes wherever that one goes: the
+        # same DealerTide account, decided by the matched bank's GL or on the
+        # accounts step (Poster and OpeningEntryBuilder follow it).
+        part_of_map.each do |child, parent|
+          row = rows[child]
+          next unless row && rows[parent]
+
+          row['bank_match'] = true
+          row['suggestion'] = nil
+          row['choice'] = { 'action' => 'follow', 'qbo_account_id' => parent }
+          row['confirmed'] = true
+        end
         # A row pinned to a bank account's GL that is no longer matched (closed,
         # unmatched or matched elsewhere) drops the pin, so it does not keep
         # posting to the old bank's GL account. Found in the 2026-10-03
@@ -1370,8 +1489,18 @@ module Accounting
         config['accounts'] = rows.values
       end
 
-      def release_bank_account(match)
+      # retire: the account is not needed any more (its QuickBooks account
+      # became part of another). One the switch made itself, with no feed,
+      # GL account or lines, is removed so it does not sit empty in Bank
+      # Transactions.
+      def release_bank_account(match, retire: false)
         ba = @company.bank_accounts.find_by(id: match['bank_account_id'])
+        if retire && ba && ba.created_by == 'quickbooks_switch' && !ba.feed_connected? && ba.chart_of_account_id.nil? &&
+           !ba.bank_transactions.exists?
+          ba.soft_delete!
+          @company_bank_accounts = nil
+          return
+        end
         return unless ba && ba.feed_start_date == cutover_date + 1
 
         prior = parse_date(match['previous_feed_start_date'])
@@ -1429,6 +1558,8 @@ module Accounting
             config['uncleared'][id] = old[id]
             next
           end
+          # Already moved into the account it is part of.
+          next if !reset && bank.dig('match', 'part_of').present?
 
           row = account_rows.find { |r| r['qbo_account_id'] == id } || {}
           names = [row['qbo_name'], bank['name']].compact.map(&:downcase)
@@ -1443,6 +1574,7 @@ module Accounting
             end
           }
         end
+        merge_part_of_items!
       end
 
       def jsonable(hash)

@@ -194,7 +194,7 @@ class Api::V1::AccountingImportsController < ApplicationController
     return unless authorize_action!('accounting', 'create')
     return unless (wizard = load_wizard)
 
-    permitted = params.permit(matches: %i[qbo_account_id bank_account_id closed])
+    permitted = params.permit(matches: %i[qbo_account_id bank_account_id closed part_of])
     with_migration_errors { wizard.update_banks!(Array(permitted[:matches]).map(&:to_h)) } or return
     render json: wizard.banks_json.merge(migration: wizard.migration_json)
   end

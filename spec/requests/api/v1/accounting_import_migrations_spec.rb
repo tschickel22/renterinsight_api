@@ -362,6 +362,21 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
     end
   end
 
+  describe 'part of another bank or card' do
+    it 'matches one as part of another and lists it on that one\'s tie-out' do
+      id = start_migration
+      patch "#{base}/#{id}/banks", params: { matches: [{ qbo_account_id: '1', bank_account_id: books[:banks][:chase].id },
+                                                       { qbo_account_id: '2', part_of: '1' }] }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(json['qbo_bank_accounts'].find { |b| b['qbo_account_id'] == '2' }['match']).to include('part_of' => '1', 'bank_account_id' => nil)
+
+      get "#{base}/#{id}/uncleared", headers: headers
+      chase = json['banks'].find { |b| b['qbo_account_id'] == '1' }
+      expect(chase['includes']).to eq(['Wells Fargo Payroll'])
+      expect(json['banks'].map { |b| b['qbo_account_id'] }).not_to include('2')
+    end
+  end
+
   describe 'uncleared' do
     it 'suggests items from QuickBooks and ties once the statement balance is entered' do
       id = start_migration

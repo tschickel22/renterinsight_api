@@ -25,6 +25,8 @@ module Accounting
         d = Wizard.method(:d)
         uncleared = @wizard.config['uncleared'] || {}
         matched = @wizard.matched_banks.index_by { |b| b['qbo_account_id'] }
+        part_of = @wizard.part_of_map
+        @rows_by_id = @wizard.account_rows.index_by { |r| r['qbo_account_id'] }
 
         lines = []
         summary = {}
@@ -43,8 +45,13 @@ module Accounting
 
           bank = matched[row['qbo_account_id']]
           state = bank && uncleared[row['qbo_account_id']]
+          parent = part_of[row['qbo_account_id']]
           if state && !state['statement_balance'].nil?
             lines.concat(bank_lines(row, bank, state, key, account_id))
+          elsif parent && matched[parent] && !uncleared.dig(parent, 'statement_balance').nil?
+            # Part of another card or bank: that one's statement line and
+            # uncleared items already carry this balance.
+            next
           else
             aggregate[key] += balance
           end
@@ -102,9 +109,12 @@ module Accounting
           credit_amount: net.negative? ? (-net).round(2) : BigDecimal('0'), memo: memo }.merge(extra)
       end
 
-      def preview_resolver(row)
+      def preview_resolver(row, depth = 0)
         choice = row['choice'] || {}
         case choice['action']
+        when 'follow'
+          parent = @rows_by_id && @rows_by_id[choice['qbo_account_id'].to_s]
+          return preview_resolver(parent, depth + 1) if parent && depth < 2
         when 'map'
           acct = @accounts[choice['chart_of_account_id'].to_i]
           return ["coa:#{acct.id}", "#{acct.account_number} #{acct.name}", acct.id] if acct
