@@ -16,6 +16,9 @@ module Accounting
     #   new           nothing found; the switch creates one
     #   needs_choice  more than one possible match, or a lead found by name
     #                 only; a person picks (Wizard#update_list_choices!)
+    #   skip          a person chose Don't bring over; allowed only for one
+    #                 with nothing open in QuickBooks (no open invoice, bill or
+    #                 credit), since open items need someone to belong to
     # A choice the person saved (config['list_choices']) wins over all of it.
     class ListMatcher
       KINDS = %w[customers vendors].freeze
@@ -43,9 +46,11 @@ module Accounting
         value.to_s.strip.downcase.presence
       end
 
-      def initialize(company, choices: {})
+      # open_counts: { 'customers' | 'vendors' => { external_id => open items } }
+      def initialize(company, choices: {}, open_counts: {})
         @company = company
         @choices = choices || {}
+        @open_counts = open_counts || {}
       end
 
       # [{ external_id, name, email, phone, company_name, status, match, candidates, reason }]
@@ -107,12 +112,15 @@ module Accounting
 
       def row(kind, q, found)
         chosen = @choices.dig(kind, q['external_id'].to_s)
+        open = @open_counts.dig(kind, q['external_id'].to_s).to_i
         out = {
           external_id: q['external_id'].to_s, name: display_name(q), email: q['email'], phone: q['phone'],
-          company_name: q['company_name'], candidates: found[:candidates] || []
+          company_name: q['company_name'], candidates: found[:candidates] || [], open_items: open
         }
         if chosen
-          if chosen['action'] == 'new'
+          if chosen['action'] == 'skip' && open.zero?
+            return out.merge(status: 'skip', reason: 'chosen', match: nil)
+          elsif chosen['action'] == 'new'
             return out.merge(status: 'new', reason: 'chosen', match: nil)
           end
 

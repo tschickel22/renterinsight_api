@@ -112,8 +112,13 @@ articles:
       - **Converts lead**: an open lead with the same email or phone. Posting converts it the way **Convert** does, so its history comes along.
       - **New customer** or **New vendor**: nobody matched; one is created.
       - **Possible matches**: two or more could be the one, or a lead has the same name only. Click **Pick** and choose. Posting waits until every one is decided.
+      - **Not brought over**: you chose to leave it out.
 
-      To change any row, click **Change**: pick a suggested match, search for another contact, lead or vendor, choose **Create new**, or **Let matching decide** to go back to the suggestion.
+      There is nothing to approve. Everyone comes over as shown when you post; only rows marked **Pick** need you.
+
+      To change a row, click **Change**: pick a suggested match, search for another contact, lead or vendor, choose **Create new**, **Don't bring over**, or **Let matching decide** to go back to the suggestion.
+
+      Old customers and vendors with nothing open in QuickBooks can be left out, one at a time with **Don't bring over**, or all the new ones at once with **Leave out the new with nothing open**. Anyone with an open invoice, bill or credit always comes over, since it needs someone to belong to.
 
       ## 5. Uncleared items
 

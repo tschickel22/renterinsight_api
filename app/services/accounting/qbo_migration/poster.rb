@@ -206,11 +206,16 @@ module Accounting
         created = 0
         matched = 0
         converted = 0
+        skipped = 0
         by_lead = {}
         location_id = @wizard.default_location_id
         rows = @wizard.list_rows('customers').index_by { |r| r[:external_id] }
         Array(@wizard.config.dig('lists', 'customers')).each do |c|
           row = rows[c['external_id'].to_s] || {}
+          if row[:status] == 'skip'
+            skipped += 1
+            next
+          end
           contact =
             case row[:status]
             when 'link'
@@ -233,7 +238,7 @@ module Accounting
           end
           out[c['external_id'].to_s] = contact
         end
-        @results[:customers] = { created: created, matched: matched, converted_leads: converted }
+        @results[:customers] = { created: created, matched: matched, converted_leads: converted, left_out: skipped }
         out
       end
 
@@ -273,9 +278,14 @@ module Accounting
         out = {}
         created = 0
         matched = 0
+        skipped = 0
         rows = @wizard.list_rows('vendors').index_by { |r| r[:external_id] }
         Array(@wizard.config.dig('lists', 'vendors')).each do |v|
           row = rows[v['external_id'].to_s] || {}
+          if row[:status] == 'skip'
+            skipped += 1
+            next
+          end
           raise Error, "Pick a match for QuickBooks vendor #{row[:name]} first" if row[:status] == 'needs_choice'
 
           vendor = row[:status] == 'link' ? @company.vendors.find_by(id: row.dig(:match, :id)) : nil
@@ -295,7 +305,7 @@ module Accounting
           end
           out[v['external_id'].to_s] = vendor
         end
-        @results[:vendors] = { created: created, matched: matched }
+        @results[:vendors] = { created: created, matched: matched, left_out: skipped }
         out
       end
 

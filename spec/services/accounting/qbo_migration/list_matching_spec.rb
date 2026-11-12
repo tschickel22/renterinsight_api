@@ -124,6 +124,59 @@ RSpec.describe Accounting::QboMigration::ListMatcher do
     end
   end
 
+  describe "Don't bring over" do
+    # Every fixture customer and vendor has something open; add one of each with nothing.
+    def add_idle(wizard)
+      wizard.config['lists']['customers'] << { 'external_id' => '901', 'name' => 'Old Customer', 'first_name' => 'Old', 'last_name' => 'Customer' }
+      wizard.config['lists']['vendors'] << { 'external_id' => '902', 'name' => 'Old Supplier' }
+      wizard.save!
+      Accounting::QboMigration::Wizard.new(wizard.import.reload)
+    end
+
+    it 'leaves out one with nothing open, refuses one with open items, and does it for every new one at once' do
+      wizard = add_idle(start)
+      # Every fixture vendor has an open bill; some customers have nothing open.
+      idle = wizard.list_rows('customers').find { |r| r[:open_items].zero? }
+      busy = wizard.list_rows('vendors').find { |r| r[:open_items].positive? }
+      expect(idle).to be_present
+      expect(busy).to be_present
+      expect(busy[:open_items]).to be_positive
+
+      wizard.update_list_choices!([{ 'kind' => 'customers', 'external_id' => idle[:external_id], 'action' => 'skip' }])
+      wizard = Accounting::QboMigration::Wizard.new(wizard.import.reload)
+      expect(row(wizard, 'customers', idle[:external_id])).to include(status: 'skip', reason: 'chosen')
+      expect { wizard.update_list_choices!([{ 'kind' => 'vendors', 'external_id' => busy[:external_id], 'action' => 'skip' }]) }
+        .to raise_error(Accounting::QboMigration::Error, /has to come over/)
+
+      wizard.update_list_choices!([{ 'kind' => 'customers', 'action' => 'skip_new' }])
+      wizard = Accounting::QboMigration::Wizard.new(wizard.import.reload)
+      customer_open = wizard.list_open_counts['customers']
+      rows = wizard.list_rows('customers')
+      expect(rows.select { |r| r[:status] == 'skip' }.map { |r| r[:external_id] })
+        .to match_array(rows.select { |r| customer_open[r[:external_id]].to_i.zero? }.map { |r| r[:external_id] })
+      expect(rows.none? { |r| r[:status] == 'skip' && r[:open_items].positive? }).to be(true)
+
+      wizard.update_list_choices!([{ 'kind' => 'customers', 'action' => 'bring_all' }])
+      wizard = Accounting::QboMigration::Wizard.new(wizard.import.reload)
+      expect(wizard.list_rows('customers').count { |r| r[:status] == 'skip' }).to eq(0)
+    end
+
+    it 'posts without the ones left out' do
+      wizard = add_idle(start)
+      wizard.update_list_choices!([{ 'kind' => 'vendors', 'action' => 'skip_new' }, { 'kind' => 'customers', 'action' => 'skip_new' }])
+      wizard = drive_to_ready(Accounting::QboMigration::Wizard.new(wizard.import.reload), books)
+      expect(wizard.list_rows('customers').select { |r| r[:status] == 'skip' }.map { |r| r[:external_id] }).to eq(['901'])
+      expect(wizard.list_rows('vendors').select { |r| r[:status] == 'skip' }.map { |r| r[:external_id] }).to eq(['902'])
+
+      results = Accounting::QboMigration::Poster.new(wizard, user).post!
+      expect(results[:customers][:left_out]).to eq(1)
+      expect(results[:vendors][:left_out]).to eq(1)
+      expect(company.contacts.where(quickbooks_id: '901')).to be_empty
+      expect(company.vendors.where(quickbooks_id: '902')).to be_empty
+      expect(company.invoices.where(accounting_import_id: wizard.import.id).count).to be_positive
+    end
+  end
+
   describe 'posting' do
     it 'links, converts the lead, creates only what is new, and turns the old QuickBooks sync off until rollback' do
       clayton = vendor('Clayton Supply Co.')
