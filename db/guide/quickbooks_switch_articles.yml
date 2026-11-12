@@ -5,7 +5,8 @@
 # {{brand}}; it is filled in when the article is shown. No em or en dashes.
 #
 # Screen names and button labels here were checked against the switch as of
-# 2026-11-12 (trial and go live, statement balances from bank feeds). Change the
+# 2026-11-12 (trial and go live, statement balances from bank feeds, customer and vendor
+# matching, the QuickBooks sync turned off at posting). Change the
 # text with the screen. The video "Switch from QuickBooks: trial, then go live"
 # shows the same flow.
 
@@ -30,7 +31,7 @@ articles:
       ## What comes over
 
       - Every account's balance on the cutover date, as one opening entry
-      - Customers and vendors
+      - Customers and vendors, linked to the ones already in {{brand}}. A QuickBooks customer who is an open lead here is converted, so the person stays one record.
       - Open invoices and bills, with what is still owed
       - Checks and deposits that had not cleared the bank, for your first reconciliation
 
@@ -48,6 +49,12 @@ articles:
       - **Go live now**: {{brand}} becomes your books from the day after the cutover.
 
       Not sure yet? Start with a trial. You can go live from it later without redoing the matching.
+
+      ## The QuickBooks sync is turned off
+
+      {{brand}} can also be set to sync records (customers, vendors, invoices, payments and more) with QuickBooks, under **Settings > Integrations > QuickBooks**. Posting the switch turns that sync off, trial or live, so nothing you record here is also sent to QuickBooks while you keep entering it there, and nothing comes back from QuickBooks twice. Rolling back turns it on again as it was.
+
+      Bank feeds are not affected: yours in {{brand}} keep running, and QuickBooks' own bank feeds stay in QuickBooks.
 
       ## Next
 
@@ -96,7 +103,16 @@ articles:
 
       ## 4. Customers and vendors
 
-      Nothing to do here unless the counts look wrong. Every QuickBooks customer and vendor comes over when you post. One already in {{brand}} with the same QuickBooks id, email or name is linked, not copied.
+      Every QuickBooks customer and vendor comes over when you post. Each one already in {{brand}} is linked, not copied. The switch looks for it by QuickBooks id, then email, then phone, then name (capitals, punctuation and endings like Inc, LLC and Co don't count). Customers are looked for among contacts, then open leads.
+
+      Each row shows what will happen and why:
+
+      - **Links to**: someone already here, with the reason (same QuickBooks id, email, phone or name).
+      - **Converts lead**: an open lead with the same email or phone. Posting converts it the way **Convert** does, so its history comes along.
+      - **New customer** or **New vendor**: nobody matched; one is created.
+      - **Possible matches**: two or more could be the one, or a lead has the same name only. Click **Pick** and choose. Posting waits until every one is decided.
+
+      To change any row, click **Change**: pick a suggested match, search for another contact, lead or vendor, choose **Create new**, or **Let matching decide** to go back to the suggestion.
 
       ## 5. Uncleared items
 
@@ -118,12 +134,13 @@ articles:
       - creates the new accounts you confirmed
       - posts one opening entry dated the cutover date
       - brings over open invoices and bills, without posting them again
-      - adds or links your customers and vendors
+      - links your customers and vendors, converts matching leads and adds the new ones
+      - turns off the QuickBooks sync, if it was on (see [Switch from QuickBooks Online](quickbooks-switch-overview))
       - saves the uncleared items for your first reconciliation
 
       ## Roll back
 
-      From the finished switch, **Roll back** voids the opening entry and removes the open invoices, bills and uncleared items it brought over. Customers, vendors and new accounts stay, and QuickBooks is not touched.
+      From the finished switch, **Roll back** voids the opening entry and removes the open invoices, bills and uncleared items it brought over. Customers, vendors, converted leads and new accounts stay, QuickBooks is not touched, and a QuickBooks sync the switch turned off goes back to how it was.
 
       Roll back works until an accounting period after the cutover date is closed, a payment is applied to an imported invoice or bill, or a bank is reconciled after the cutover.
 
