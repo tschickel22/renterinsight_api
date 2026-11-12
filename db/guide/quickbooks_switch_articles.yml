@@ -50,9 +50,9 @@ articles:
 
       Not sure yet? Start with a trial. You can go live from it later without redoing the matching.
 
-      ## The QuickBooks sync is turned off
+      ## The QuickBooks sync stays off
 
-      {{brand}} can also be set to sync records (customers, vendors, invoices, payments and more) with QuickBooks, under **Settings > Integrations > QuickBooks**. Posting the switch turns that sync off, trial or live, so nothing you record here is also sent to QuickBooks while you keep entering it there, and nothing comes back from QuickBooks twice. Rolling back turns it on again as it was.
+      {{brand}} can also be set to sync records (customers, vendors, invoices, payments and more) with QuickBooks, under **Settings > Integrations > QuickBooks**, for the company or for each location. Starting the switch turns that sync off for the company and every location, and it can't be turned back on while the switch is open: during a trial you keep entering everything in QuickBooks, so anything sent there from here would be in QuickBooks twice, and once {{brand}} is your books nothing should come back from QuickBooks. Rolling back the switch turns it on again as it was.
 
       Bank feeds are not affected: yours in {{brand}} keep running, and QuickBooks' own bank feeds stay in QuickBooks.
 
@@ -78,7 +78,7 @@ articles:
       1. Check that **QuickBooks Online connection** shows your QuickBooks company. If it is not connected, connect it under **Settings > Integrations > QuickBooks** and come back.
       2. Pick the **Cutover date**: a day that is over and fully entered in QuickBooks, usually the last day of a finished month.
       3. Choose **Try it first (trial)** or **Go live now**. See [Switch from QuickBooks Online](quickbooks-switch-overview).
-      4. Click **Start the trial** (or **Start the switch**).
+      4. Click **Start the trial** (or **Start the switch**). This turns off the QuickBooks record sync while the switch is open (see [Switch from QuickBooks Online](quickbooks-switch-overview)).
 
       Changing the date later reloads balances from QuickBooks and clears account suggestions made for the old date.
 
@@ -135,7 +135,6 @@ articles:
       - posts one opening entry dated the cutover date
       - brings over open invoices and bills, without posting them again
       - links your customers and vendors, converts matching leads and adds the new ones
-      - turns off the QuickBooks sync, if it was on (see [Switch from QuickBooks Online](quickbooks-switch-overview))
       - saves the uncleared items for your first reconciliation
 
       ## Roll back
@@ -199,6 +198,7 @@ articles:
       - Keep entering your books in QuickBooks. It is still the real set.
       - Look around {{brand}}: your accounts, bills and payments, bank transactions. Deals, invoices and payments post here as normal so you see it working.
       - **Don't reconcile a bank or close a month in {{brand}}.** Either one stops the trial from being rolled back, and going live needs that.
+      - The QuickBooks record sync stays off for the whole trial, so nothing you record here is sent to QuickBooks while you also enter it there. Bank feeds keep running.
 
       ## Go live or update the trial
 

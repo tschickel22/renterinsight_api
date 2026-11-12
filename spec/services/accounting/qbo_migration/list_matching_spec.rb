@@ -140,9 +140,11 @@ RSpec.describe Accounting::QboMigration::ListMatcher do
       wizard.update_list_choices!([{ 'kind' => 'customers', 'external_id' => '103', 'action' => 'new' }])
       wizard = drive_to_ready(Accounting::QboMigration::Wizard.new(wizard.import.reload), books)
 
+      # Starting the switch turned it off; the preview says what it turned off.
       sync = wizard.preview_json[:quickbooks_sync]
-      expect(sync[:on]).to be(true)
-      expect(sync[:places].map { |p| [p[:type], p[:entities]] }).to contain_exactly(['company', ['invoices']], ['location', ['payments']])
+      expect(sync[:on]).to be(false)
+      expect(sync[:locked]).to be(true)
+      expect(sync[:turned_off].map { |p| [p[:type], p[:entities]] }).to contain_exactly(['company', ['invoices']], ['location', ['payments']])
 
       vendors_before = company.vendors.count
       new_vendors = wizard.list_rows('vendors').count { |r| r[:status] == 'new' }

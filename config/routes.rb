@@ -1985,6 +1985,8 @@ Rails.application.routes.draw do
           get 'settings/accounts', to: 'quickbooks_settings#accounts'
           post 'settings/test', to: 'quickbooks_settings#test_connection'
           get 'settings/entity/:entity_type', to: 'quickbooks_settings#entity_settings'
+          get 'sync_overview', to: 'quickbooks_settings#sync_overview'
+          post 'sync_off', to: 'quickbooks_settings#sync_off'
           put 'settings/entity/:entity_type', to: 'quickbooks_settings#update_entity_settings'
           get 'settings/mappings', to: 'quickbooks_settings#field_mappings'
           post 'settings/mappings', to: 'quickbooks_settings#create_field_mapping'

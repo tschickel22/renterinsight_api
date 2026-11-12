@@ -38,9 +38,19 @@ class QuickbooksSyncService
   def self.connection
     ActiveRecord::Base.connection
   end
+
+  # A switch from QuickBooks keeps this sync off (Accounting::QboMigration::OldSync).
+  def switch_lock_message
+    company = @entity.is_a?(Location) ? @entity.company : @entity
+    Accounting::QboMigration::OldSync.lock_message(company)
+  end
   
   # Sync specific entity type (e.g., 'inventory', 'customers')
   def sync_entity_type(entity_type, direction: nil, entity_ids: nil)
+    if (locked = switch_lock_message)
+      return { success: false, message: locked, error: locked }
+    end
+
     # Get entity settings
     entity_config = @settings.dig(:entities, entity_type.to_sym) || {}
 
@@ -101,6 +111,10 @@ class QuickbooksSyncService
   # Incremental sync - only syncs changed/new records for enabled entities
   # This is the main method used by AutoSyncJob for scheduled syncs
   def incremental_sync(since: nil)
+    if (locked = switch_lock_message)
+      return { success: false, message: locked, error: locked }
+    end
+
     results = {}
     total_synced = 0
     total_errors = 0
