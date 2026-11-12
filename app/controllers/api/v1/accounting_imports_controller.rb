@@ -9,7 +9,7 @@ class Api::V1::AccountingImportsController < ApplicationController
   before_action :require_company_admin!, only: %i[
     create_migration migration update_migration accounts suggest_accounts update_accounts
     banks update_banks create_banks uncleared update_uncleared migration_preview post_migration rollback_migration
-    go_live bank_balances
+    go_live bank_balances lists update_lists search_lists
   ]
 
   def index
@@ -249,6 +249,36 @@ class Api::V1::AccountingImportsController < ApplicationController
 
     with_migration_errors { wizard.fetch_bank_balances! } or return
     render json: wizard.uncleared_json
+  end
+
+  # GET /api/v1/accounting_imports/:id/lists
+  # Each QuickBooks customer and vendor with the record it links to, the lead
+  # it converts, or Create new (Accounting::QboMigration::ListMatcher).
+  def lists
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: wizard.lists_json
+  end
+
+  # PUT /api/v1/accounting_imports/:id/lists
+  #   { choices: [{ kind, external_id, action: 'link' | 'new' | 'auto', type, id }] }
+  def update_lists
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    choices = Array(params.permit(choices: %i[kind external_id action type id])[:choices]).map { |c| c.to_h.stringify_keys }
+    with_migration_errors { wizard.update_list_choices!(choices) } or return
+    render json: wizard.lists_json
+  end
+
+  # GET /api/v1/accounting_imports/:id/lists/search?kind=customers&q=smith
+  def search_lists
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    kind = params[:kind].to_s == 'vendors' ? 'vendors' : 'customers'
+    render json: { results: wizard.list_matcher.search(kind, params[:q]) }
   end
 
   # GET /api/v1/accounting_imports/:id/preview

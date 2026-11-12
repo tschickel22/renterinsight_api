@@ -2730,6 +2730,9 @@ Rails.application.routes.draw do
           get   :uncleared
           put   :uncleared, action: :update_uncleared
           post  'uncleared/bank_balances', action: :bank_balances
+          get   :lists
+          put   :lists, action: :update_lists
+          get   'lists/search', action: :search_lists
           get   :preview, action: :migration_preview
           post  :post, action: :post_migration
           post  :rollback, action: :rollback_migration

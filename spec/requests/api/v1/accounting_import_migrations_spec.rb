@@ -37,7 +37,7 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
                            'rollback_available' => false)
       expect(m['steps']['connect']).to eq('done' => true)
       expect(m['steps']['banks']).to eq('done' => false, 'matched' => 0, 'problems' => 0, 'total' => 3)
-      expect(m['steps']['lists']).to eq('done' => true, 'customers' => 10, 'vendors' => 5)
+      expect(m['steps']['lists']).to eq('done' => true, 'customers' => 10, 'vendors' => 5, 'needs_choice' => 0)
       expect(m['steps']['accounts']).to include('done' => false, 'confirmed' => 0)
       expect(m['blockers']).to include(match(/accounts with a balance are not confirmed yet/), 'Chase Operating Checking is not matched to a bank account')
     end
@@ -477,6 +477,32 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       company.accounting_imports.find(id).update_columns(status: 'completed')
       post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
+  describe 'customers and vendors' do
+    it 'lists each match, saves a choice and searches' do
+      vendor = company.vendors.create!(name: 'Clayton Supply, Inc.', vendor_type: 'supplier', status: 'active')
+      other = company.vendors.create!(name: 'Some Other Supplier', vendor_type: 'supplier', status: 'active')
+      id = start_migration
+
+      get "#{base}/#{id}/lists", headers: headers
+      expect(response).to have_http_status(:ok)
+      clayton = json['vendors'].find { |r| r['external_id'] == '201' }
+      expect(clayton).to include('status' => 'link', 'reason' => 'name')
+      expect(clayton['match']).to include('type' => 'vendor', 'id' => vendor.id, 'name' => 'Clayton Supply, Inc.')
+      expect(json['counts']['vendors']).to include('link' => 1)
+
+      put "#{base}/#{id}/lists", params: { choices: [{ kind: 'vendors', external_id: '201', action: 'link', type: 'vendor', id: other.id }] },
+                                 headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(json['vendors'].find { |r| r['external_id'] == '201' }).to include('status' => 'link', 'reason' => 'chosen')
+
+      put "#{base}/#{id}/lists", params: { choices: [{ kind: 'vendors', external_id: 'nope', action: 'new' }] }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      get "#{base}/#{id}/lists/search", params: { kind: 'vendors', q: 'other' }, headers: headers
+      expect(json['results'].map { |r| r['id'] }).to eq([other.id])
     end
   end
 

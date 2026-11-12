@@ -20,6 +20,9 @@ module Accounting
     #                              bank_balance is what the bank feed says the statement balance was
     #                              (see #fetch_bank_balances!)
     #   lists                      { customers: [...], vendors: [...] }
+    #   list_choices               { 'customers' | 'vendors' => { qbo external_id => { action: 'link' | 'new',
+    #                                type: 'contact' | 'lead' | 'vendor', id } } }, what a person picked over
+    #                                ListMatcher's answer (see #update_list_choices!)
     #   open_invoices, customer_credits, open_bills, vendor_credits
     #   notes                      { suggest:, uncleared: } messages for the person
     #   preview_viewed_at, posted, rolled_back_at
@@ -793,6 +796,82 @@ module Accounting
           self.class.d(state.dig('bank_balance', 'amount')) == self.class.d(state['statement_balance'])
       end
 
+      # ── Customers and vendors ───────────────────────────────────
+
+      def list_matcher
+        @list_matcher ||= ListMatcher.new(@company, choices: config['list_choices'])
+      end
+
+      # Each QuickBooks customer or vendor with what the switch will do with it.
+      def list_rows(kind)
+        @list_rows ||= {}
+        @list_rows[kind] ||= list_matcher.rows(kind, config.dig('lists', kind))
+      end
+
+      def list_counts
+        ListMatcher::KINDS.index_with do |kind|
+          rows = list_rows(kind)
+          %w[link convert_lead new needs_choice].index_with { |st| rows.count { |r| r[:status] == st } }.symbolize_keys
+        end.symbolize_keys
+      end
+
+      def lists_json
+        { customers: list_rows('customers'), vendors: list_rows('vendors'), counts: list_counts,
+          posted: !draft? }
+      end
+
+      # choices: [{ kind, external_id, action: 'link' | 'new' | 'auto', type, id }]. 'auto' forgets a
+      # choice so matching decides again.
+      def update_list_choices!(choices)
+        ensure_draft!
+        saved = (config['list_choices'] ||= {})
+        Array(choices).each do |c|
+          kind = c['kind'].to_s
+          raise Error, 'Unknown list' unless ListMatcher::KINDS.include?(kind)
+
+          ext = c['external_id'].to_s
+          unless Array(config.dig('lists', kind)).any? { |q| q['external_id'].to_s == ext }
+            raise Error, "QuickBooks #{kind == 'customers' ? 'customer' : 'vendor'} #{ext} is not in this switch"
+          end
+
+          case c['action'].to_s
+          when 'auto'
+            saved[kind]&.delete(ext)
+          when 'new'
+            (saved[kind] ||= {})[ext] = { 'action' => 'new' }
+          when 'link'
+            type = c['type'].to_s
+            allowed = kind == 'customers' ? %w[contact lead] : %w[vendor]
+            raise Error, 'That kind of record cannot be matched here' unless allowed.include?(type)
+            raise Error, 'That record was not found' unless list_matcher.find_target(type, c['id'])
+
+            (saved[kind] ||= {})[ext] = { 'action' => 'link', 'type' => type, 'id' => c['id'].to_i }
+          else
+            raise Error, 'Pick a record or Create new'
+          end
+        end
+        @list_matcher = nil
+        @list_rows = nil
+        config.delete('preview_viewed_at')
+        save!
+      end
+
+      # The older QuickBooks sync (QuickbooksSyncService), per company and
+      # location: which record types it is set to sync. Posting a switch turns
+      # it off (Poster#turn_off_old_sync!), or DealerTide would keep sending
+      # invoices and payments to QuickBooks while they are typed there too.
+      def old_quickbooks_sync
+        places = ([@company] + @company.locations.to_a).filter_map do |rec|
+          settings = (rec.quickbooks_settings || {}).deep_stringify_keys
+          on = (settings['entities'] || {}).select { |_k, v| v.is_a?(Hash) && ActiveModel::Type::Boolean.new.cast(v['enabled']) }.keys
+          auto = ActiveModel::Type::Boolean.new.cast(settings['auto_sync']) ? true : false
+          next if on.empty? && !auto
+
+          { type: rec.is_a?(Location) ? 'location' : 'company', id: rec.id, name: rec.name, entities: on, auto_sync: auto }
+        end
+        { on: places.any?, places: places }
+      end
+
       # ── Preview ─────────────────────────────────────────────────
 
       # Every QuickBooks account with a balance lands in the entry, and the
@@ -877,7 +956,9 @@ module Accounting
           can_post: blockers.empty?,
           trial: trial?,
           settlement: settlement_json,
-          unconnected_banks: unconnected_banks
+          unconnected_banks: unconnected_banks,
+          quickbooks_sync: old_quickbooks_sync,
+          lists: list_counts
         }
       end
 
@@ -986,8 +1067,9 @@ module Accounting
             confirmed: rows.count { |r| r['confirmed'] }, total: rows.size,
             needs_attention: with_balance.count { |r| needs_attention?(r) }
           },
-          lists: { done: config['lists'].present?, customers: Array(lists['customers']).size,
-                   vendors: Array(lists['vendors']).size },
+          lists: { done: config['lists'].present? && list_counts.values.sum { |c| c[:needs_choice] }.zero?,
+                   customers: Array(lists['customers']).size, vendors: Array(lists['vendors']).size,
+                   needs_choice: list_counts.values.sum { |c| c[:needs_choice] } },
           # Not done before the banks are decided: with nothing matched yet,
           # all? on an empty list read as "ties out".
           uncleared: { done: bank_rows.all? { |b| b['match'].present? } &&
@@ -1078,6 +1160,14 @@ module Accounting
         end
 
         tag.call('accounts')
+        waiting = list_counts.values.sum { |c| c[:needs_choice] }
+        if waiting.positive?
+          out << "#{waiting} #{waiting == 1 ? 'customer or vendor has' : 'customers and vendors have'} more than one possible match. " \
+                 'Pick which one, or Create new'
+        end
+        about.call(nil)
+
+        tag.call('lists')
         closed = closed_period_on(cutover_date)
         out << "The cutover date is in a closed period (FY#{closed.fiscal_year} period #{closed.period_number})" if closed
 
