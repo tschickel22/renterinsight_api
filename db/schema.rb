@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_13_020000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_13_050500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6755,6 +6755,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_13_020000) do
     t.string "accepted_ip"
     t.string "accepted_via"
     t.string "accepted_by_name"
+    t.datetime "terms_agreed_at"
+    t.text "agreed_terms"
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"

@@ -75,7 +75,16 @@ module Api
 
         # accepted_at was never written, so the dealer had a status with no date
         # against it and the buyer's acceptance could not be evidenced.
-        @quote.accept!(ip: request.remote_ip, via: 'portal', by: @quote.contact&.full_name)
+        agreed = ActiveModel::Type::Boolean.new.cast(params[:agreed_to_terms])
+        if @quote.terms_required? && !agreed
+          return render json: {
+            ok: false,
+            error: 'Please read and agree to the terms and conditions before accepting.',
+            terms_required: true
+          }, status: :unprocessable_entity
+        end
+
+        @quote.accept!(ip: request.remote_ip, via: 'portal', by: @quote.contact&.full_name, terms_agreed: agreed)
 
         # Accept notes from client (multiple param names supported)
         notes = params[:notes] || params[:note] || params[:message]

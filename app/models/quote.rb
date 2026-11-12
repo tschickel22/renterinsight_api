@@ -112,16 +112,27 @@ class Quote < ApplicationRecord
   end
   
   # via: public_link and portal are the buyer; dealer is someone at the dealership.
-  def accept!(ip: nil, via: 'dealer', by: nil)
+  def accept!(ip: nil, via: 'dealer', by: nil, terms_agreed: false)
     return false unless %w[sent viewed].include?(status)
 
-    update!(
+    now = Time.current
+    attrs = {
       status: 'accepted',
-      accepted_at: Time.current,
+      accepted_at: now,
       accepted_ip: ip,
       accepted_via: via,
       accepted_by_name: by
-    )
+    }
+    # The wording is copied, not referenced: the dealer can edit terms later,
+    # and what matters is what the buyer saw when they ticked the box.
+    attrs.merge!(terms_agreed_at: now, agreed_terms: terms) if terms_agreed && terms_required?
+    update!(attrs)
+  end
+
+  # A buyer accepting from the portal or the emailed link must tick that they
+  # agree before the quote can be accepted, when the quote has any.
+  def terms_required?
+    terms.to_s.strip.present?
   end
   
   def reject!
@@ -203,6 +214,7 @@ class Quote < ApplicationRecord
       'accepted_ip' => accepted_ip,
       'accepted_via' => accepted_via,
       'accepted_by_name' => accepted_by_name,
+      'terms_agreed_at' => terms_agreed_at,
       'rejected_at' => rejected_at,
       
       # Handle items - convert keys from snake_case to camelCase for frontend
@@ -342,12 +354,14 @@ class Quote < ApplicationRecord
   # Totals only ('bundled'): each line without its price, credits summed as savings.
   PRICE_ITEM_KEY = /\A(unit_?price|total|line_?total|discount|discount_?type|tax|rate)\z/i
 
-  # One line for the printed quote: "Accepted by Jo Lee on Nov 5, 2026 at 3:12 PM MST from IP 1.2.3.4".
+  # One line for the printed quote: "Accepted by Jo Lee on Nov 5, 2026 at 3:12 PM MST from IP 1.2.3.4",
+  # plus ", agreeing to the terms and conditions" when they ticked the box.
   def acceptance_summary(zone = nil)
     who = accepted_via == 'dealer' ? "Marked accepted by #{accepted_by_name.presence || 'the dealership'}" : "Accepted by #{accepted_by_name.presence || 'the buyer'}"
     text = who
     text += " on #{accepted_at.in_time_zone(zone || 'UTC').strftime('%b %-d, %Y at %-I:%M %p %Z')}" if accepted_at
     text += " from IP #{accepted_ip}" if accepted_ip.present?
+    text += ', agreeing to the terms and conditions' if terms_agreed_at
     text
   end
 
