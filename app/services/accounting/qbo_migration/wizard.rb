@@ -29,7 +29,13 @@ module Accounting
 
       # Returns the company's draft migration, or starts one (fetching the
       # QuickBooks company as of the cutover date).
-      def self.start!(company:, user:, cutover_date:)
+      #
+      # trial: a trial switch (E101). QuickBooks stays the books; the dealer
+      # looks around, then updates the trial or goes live from it.
+      # from: the earlier switch this one replaces (a trial being updated or
+      # taken live). Its account choices and bank matches are carried over,
+      # so the second run is nearly done before it starts.
+      def self.start!(company:, user:, cutover_date:, trial: false, from: nil)
         existing = company.accounting_imports.migrations.find_by(status: 'draft')
         return existing if existing
 
@@ -39,11 +45,24 @@ module Accounting
           raise Error, 'QuickBooks Online is not connected. Connect it under Integrations, then start the switch again.'
         end
 
+        config = { 'mode' => 'migration', 'trial' => trial ? true : false }
+        if from
+          earlier = from.import_config || {}
+          config['from_import_id'] = from.id
+          # When the first trial was posted: trial activity is what DealerTide
+          # posted from then on, settled by date when the dealer goes live.
+          config['trial_started_at'] = earlier['trial_started_at'].presence ||
+                                       (earlier['trial'] ? earlier.dig('posted', 'posted_at') : nil)
+          config.merge!(carried_choices(company, earlier))
+        end
+
         import = company.accounting_imports.create!(
           user: user, source_type: 'quickbooks_online', status: 'draft', cutover_date: cutover_date,
-          started_at: Time.current, import_config: { 'mode' => 'migration' }
+          started_at: Time.current, import_config: config
         )
-        new(import).refresh!
+        wizard = new(import)
+        wizard.refresh!(date_changed: from.present?)
+        wizard.start_carried_feeds! if from
         import
       rescue StandardError
         import&.destroy if import&.persisted? && import.import_config['accounts'].nil?
@@ -62,6 +81,42 @@ module Accounting
         raise Error, "The cutover date can't be in the future. Pick a day that has already happened, usually the " \
                      'last day of a month you have finished in QuickBooks. To switch at the end of this month, ' \
                      'start the switch once the month is over.'
+      end
+
+      # Account choices and bank matches from an earlier switch, as the
+      # starting rows of a new one. A choice that created an account becomes a
+      # map to that account (it stays after a rollback, carrying the
+      # QuickBooks id). Only confirmed choices carry; refresh! keeps them and
+      # re-suggests the rest for the new date.
+      def self.carried_choices(company, earlier)
+        by_qbo = company.chart_of_accounts.where.not(qbo_account_id: [nil, '']).index_by { |a| a.qbo_account_id.to_s }
+        live_ids = company.chart_of_accounts.pluck(:id).to_set
+        accounts = Array(earlier['accounts']).filter_map do |row|
+          choice = row['choice']
+          next unless row['confirmed'] && choice.present?
+
+          if choice['action'] == 'create'
+            acct = by_qbo[row['qbo_account_id'].to_s]
+            next unless acct
+
+            choice = { 'action' => 'map', 'chart_of_account_id' => acct.id }
+          elsif choice['action'] == 'map'
+            next unless live_ids.include?(choice['chart_of_account_id'])
+          end
+          { 'qbo_account_id' => row['qbo_account_id'].to_s, 'choice' => choice, 'confirmed' => true,
+            'suggestion' => nil }
+        end
+
+        bank_ids = company.bank_accounts.where(is_deleted: [false, nil]).pluck(:id).to_set
+        banks = Array(earlier['banks']).filter_map do |bank|
+          match = bank['match']
+          next unless match.present?
+          next if match['bank_account_id'] && !bank_ids.include?(match['bank_account_id'])
+
+          { 'qbo_account_id' => bank['qbo_account_id'].to_s,
+            'match' => match.slice('bank_account_id', 'closed', 'previous_feed_start_date') }
+        end
+        { 'accounts' => accounts, 'banks' => banks }
       end
 
       def self.d(value)
@@ -157,6 +212,72 @@ module Accounting
         config['fetched_at'] = Time.current.iso8601
         save!
         self
+      end
+
+      # Matches carried from an earlier switch start their feeds the day after
+      # this cutover, as a match made by hand here would.
+      def start_carried_feeds!
+        bank_rows.each do |bank|
+          ba_id = bank.dig('match', 'bank_account_id')
+          next unless ba_id
+
+          @company.bank_accounts.find_by(id: ba_id)&.update_column(:feed_start_date, cutover_date + 1)
+        end
+      end
+
+      def trial?
+        config['trial'] ? true : false
+      end
+
+      # Going live from a trial: DealerTide activity since the trial started
+      # that QuickBooks also holds. The cutover date decides which system owns
+      # a transaction, so journal entries made since the trial started and
+      # dated on or before the cutover were recorded in QuickBooks too (the
+      # opening entry carries them) and are voided; feed lines on matched
+      # banks dated on or before the cutover are excluded. Later activity is
+      # DealerTide's and stays. Empty for a trial or a switch not from one.
+      def settlement
+        return { entries: [], bank_lines: [] } if trial? || config['trial_started_at'].blank?
+
+        since = Time.zone.parse(config['trial_started_at'])
+        # Never a switch's own entries (opening balances, and the reversal a
+        # trial's rollback made of them: voiding that would put the trial's
+        # balances back), and never any reversal, which only undoes another.
+        reversals = @company.journal_entries.where.not(reversed_by_id: nil).select(:reversed_by_id)
+        entries = @company.journal_entries.where(is_void: [false, nil])
+                          .where('journal_entries.created_at >= ? AND entry_date <= ?', since, cutover_date)
+                          .where('source_entity_type IS NULL OR source_entity_type <> ?', 'AccountingImport')
+                          .where.not(id: reversals).order(:entry_date, :id).to_a
+        bank_ids = matched_banks.map { |b| b.dig('match', 'bank_account_id') }
+        lines = BankTransaction.where(bank_account_id: bank_ids).where('transaction_date <= ?', cutover_date)
+                               .where.not(status: %w[excluded reconciled]).order(:transaction_date, :id).to_a
+        { entries: entries, bank_lines: lines }
+      end
+
+      def settlement_json
+        s = settlement
+        {
+          entries: s[:entries].map do |je|
+            { id: je.id, entry_number: je.entry_number, entry_date: je.entry_date&.iso8601, memo: je.memo,
+              source_type: je.source_type, amount: self.class.money(je_total(je)) }
+          end,
+          bank_lines: s[:bank_lines].map do |bt|
+            { id: bt.id, bank_account_id: bt.bank_account_id, date: bt.transaction_date&.iso8601,
+              description: bt.try(:description), amount: self.class.money(bt.try(:amount)) }
+          end
+        }
+      end
+
+      # Matched banks whose feed is not connected: nothing comes in after the
+      # cutover until it is, and a first pull reaches back about 90 days.
+      def unconnected_banks
+        matched_banks.filter_map do |bank|
+          ba = company_bank_accounts.find { |a| a.id == bank.dig('match', 'bank_account_id') }
+          next if ba.nil? || ba.feed_connected?
+
+          { qbo_account_id: bank['qbo_account_id'], name: bank['name'], bank_account_id: ba.id,
+            bank_account_name: ba.institution_name.presence || ba.bank_name }
+        end
       end
 
       def change_cutover!(new_date)
@@ -652,7 +773,10 @@ module Accounting
           differences: differences,
           blockers: blockers,
           blocker_items: blocker_list,
-          can_post: blockers.empty?
+          can_post: blockers.empty?,
+          trial: trial?,
+          settlement: settlement_json,
+          unconnected_banks: unconnected_banks
         }
       end
 
@@ -889,11 +1013,20 @@ module Accounting
           blockers: (items = blocker_items).map { |b| b[:message] },
           blocker_items: items,
           posted_at: config.dig('posted', 'posted_at'),
-          rollback_available: @import.status == 'posted' && Rollback.new(self).refusal.nil?
+          rollback_available: @import.status == 'posted' && Rollback.new(self).refusal.nil?,
+          rollback_refusal: @import.status == 'posted' ? Rollback.new(self).refusal : nil,
+          trial: trial?,
+          trial_started_at: config['trial_started_at'].presence || (trial? ? config.dig('posted', 'posted_at') : nil),
+          from_import_id: config['from_import_id'],
+          settled: config.dig('posted', 'settled')
         }
       end
 
       # ── Shared helpers ──────────────────────────────────────────
+
+      def je_total(entry)
+        entry.journal_entry_lines.sum(&:debit_amount)
+      end
 
       def company_bank_accounts
         @company_bank_accounts ||= @company.bank_accounts.where(is_deleted: [false, nil]).order(:id).to_a

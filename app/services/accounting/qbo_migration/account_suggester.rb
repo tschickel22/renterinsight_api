@@ -146,6 +146,11 @@ module Accounting
           return exact(ap, 'Payables control account: open bills post against it') if ap
         end
 
+        # An account that already carries this QuickBooks id was made or
+        # matched for it by an earlier switch (a trial, E101).
+        linked = chart.find { |a| a.qbo_account_id.to_s == row['qbo_account_id'].to_s && a.is_active && !a.is_header? }
+        return exact(linked, 'Matched to this QuickBooks account last time') if linked && linked.account_type == type
+
         number = row['qbo_number'].to_s.strip
         return nil if number.blank?
 

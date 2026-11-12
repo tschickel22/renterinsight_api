@@ -38,11 +38,18 @@ module Accounting
           save_invoices!(contacts)
           save_bills!(vendors, ids)
           save_reconciliations!(entry)
+          settled = settle_trial_activity!
 
           @wizard.config['posted'] = @created.merge(
             'posted_at' => Time.current.iso8601, 'posted_by_id' => @user&.id,
-            'journal_entry_id' => entry.id, 'results' => @results.deep_stringify_keys
+            'journal_entry_id' => entry.id, 'results' => @results.deep_stringify_keys,
+            'settled' => settled
           )
+          # The first trial's posting starts the trial: activity from then on
+          # is what going live settles.
+          if @wizard.trial? && @wizard.config['trial_started_at'].blank?
+            @wizard.config['trial_started_at'] = @wizard.config['posted']['posted_at']
+          end
           @import.status = 'posted'
           @import.completed_at = Time.current
           @import.results = @results.deep_stringify_keys
@@ -50,6 +57,21 @@ module Accounting
           @wizard.save!
         end
         @results
+      end
+
+      # Going live from a trial (Wizard#settlement): entries QuickBooks also
+      # holds are voided on their own date, so no month after the cutover
+      # moves, and feed lines up to the cutover are excluded with a reason.
+      # Nothing is deleted. Returns what was done, kept in posted.settled.
+      def settle_trial_activity!
+        s = @wizard.settlement
+        reason = "Recorded in QuickBooks: on or before the #{@wizard.cutover_date.iso8601} cutover"
+        s[:entries].each { |je| je.void!(@user, entry_date: je.entry_date) }
+        s[:bank_lines].each do |bt|
+          bt.exclude!(reason: reason)
+        end
+        @results[:settled] = { voided: s[:entries].size, excluded_bank_lines: s[:bank_lines].size }
+        { 'voided_entry_ids' => s[:entries].map(&:id), 'excluded_bank_line_ids' => s[:bank_lines].map(&:id) }
       end
 
       class BlockedError < Error

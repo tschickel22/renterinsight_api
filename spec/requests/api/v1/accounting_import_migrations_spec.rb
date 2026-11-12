@@ -426,6 +426,126 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
     end
   end
 
+  describe 'trial, then go live (E101)' do
+    let(:cash) { books[:chart]['1010'] }
+    let(:sales) { company.chart_of_accounts.find_by!(account_type: 'revenue', is_header: [false, nil]) }
+
+    def entry(date, memo)
+      Accounting::ManualPostingService.new(company).post_simple!(
+        debit_account: cash, credit_account: sales, amount: 100, memo: memo, entry_date: date
+      )
+    end
+
+    def bank_line(date, desc)
+      company.bank_transactions.create!(bank_account: books[:banks][:chase], transaction_date: date, amount: 50,
+                                        description: desc, status: 'unmatched')
+    end
+
+    def post_trial
+      post "#{base}/migrations", params: { cutover_date: '2026-09-30', trial: true }, headers: headers, as: :json
+      id = json.dig('migration', 'id')
+      expect(json['migration']['trial']).to be(true)
+      drive_to_ready(Accounting::QboMigration::Wizard.new(company.accounting_imports.find(id)), books)
+      post "#{base}/#{id}/post", headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(json['migration']).to include('trial' => true)
+      expect(json['migration']['trial_started_at']).to be_present
+      id
+    end
+
+    def finish_uncleared(id)
+      wizard = Accounting::QboMigration::Wizard.new(company.accounting_imports.find(id))
+      banks = wizard.uncleared_json[:banks].index_by { |b| b[:qbo_account_id] }
+      wizard.update_uncleared!([
+                                 { qbo_account_id: '1', statement_balance: '181300.25', items: banks['1'][:items] },
+                                 { qbo_account_id: '2', statement_balance: '24310.00', items: [] },
+                                 { qbo_account_id: '14', statement_balance: '6700.00', items: banks['14'][:items] }
+                               ])
+    end
+
+    it 'goes live from a trial with every match carried, settling trial activity by the cutover date' do
+      older = entry(Date.new(2026, 10, 10), 'Kept here before the trial')
+      older.update_column(:created_at, 2.days.ago)
+      trial_id = post_trial
+      before = entry(Date.new(2026, 10, 15), 'Deal approved during the trial')
+      after = entry(Date.new(2026, 11, 5), 'After the final cutover')
+      early_line = bank_line(Date.new(2026, 10, 20), 'Deposit in October')
+      late_line = bank_line(Date.new(2026, 11, 3), 'Deposit in November')
+
+      post "#{base}/#{trial_id}/go_live", params: { cutover_date: '2026-10-31' }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      live = json['migration']
+      expect(live).to include('status' => 'draft', 'trial' => false, 'from_import_id' => trial_id, 'cutover_date' => '2026-10-31')
+      expect(live['trial_started_at']).to be_present
+      expect(live['steps']['banks']).to include('done' => true, 'matched' => 3)
+      expect(live['steps']['accounts']['done']).to be(true)
+      expect(company.accounting_imports.find(trial_id).status).to eq('rolled_back')
+      expect(books[:banks][:chase].reload.feed_start_date).to eq(Date.new(2026, 11, 1))
+
+      finish_uncleared(live['id'])
+      get "#{base}/#{live['id']}/preview", headers: headers
+      expect(json['can_post']).to be(true)
+      expect(json['settlement']['entries'].map { |e| e['id'] }).to eq([before.id])
+      expect(json['settlement']['bank_lines'].map { |l| l['id'] }).to eq([early_line.id])
+      expect(json['unconnected_banks'].map { |b| b['qbo_account_id'] }).to match_array(%w[2 14])
+
+      post "#{base}/#{live['id']}/post", headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(json['migration']['settled']).to include('voided_entry_ids' => [before.id], 'excluded_bank_line_ids' => [early_line.id])
+      expect(before.reload.is_void).to be(true)
+      expect(after.reload.is_void).to be(false)
+      expect(older.reload.is_void).to be(false)
+      expect(early_line.reload).to have_attributes(status: 'excluded', excluded_reason: match(/Recorded in QuickBooks/))
+      expect(late_line.reload.status).to eq('unmatched')
+      # The trial's opening entry stays voided: its reversal is never settled.
+      trial_entry = company.journal_entries.find(company.accounting_imports.find(trial_id).import_config.dig('posted', 'journal_entry_id'))
+      expect(trial_entry.is_void).to be(true)
+      expect(trial_entry.reversed_by.is_void).to be(false)
+    end
+
+    it 'updates a trial to a newer date and stays a trial, settling nothing' do
+      trial_id = post_trial
+      during = entry(Date.new(2026, 10, 15), 'During the trial')
+      post "#{base}/#{trial_id}/go_live", params: { cutover_date: '2026-10-31', trial: true }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      expect(json['migration']).to include('trial' => true, 'from_import_id' => trial_id)
+      new_id = json['migration']['id']
+      finish_uncleared(new_id)
+      get "#{base}/#{new_id}/preview", headers: headers
+      expect(json['settlement']).to eq('entries' => [], 'bank_lines' => [])
+      post "#{base}/#{new_id}/post", headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(during.reload.is_void).to be(false)
+    end
+
+    it 'refuses a go-live date before the trial cutover, in the future, or from a switch that is not a posted trial' do
+      trial_id = post_trial
+      post "#{base}/#{trial_id}/go_live", params: { cutover_date: '2026-08-31' }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(json['error']).to match(/can't be before the trial/)
+      post "#{base}/#{trial_id}/go_live", params: { cutover_date: (company.today + 3).iso8601 }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(company.accounting_imports.find(trial_id).status).to eq('posted') # the rollback was undone with it
+
+      company.accounting_imports.find(trial_id).update!(status: 'rolled_back')
+      post "#{base}/migrations", params: { cutover_date: '2026-09-30' }, headers: headers, as: :json
+      live_id = json.dig('migration', 'id')
+      post "#{base}/#{live_id}/go_live", params: { cutover_date: '2026-10-31' }, headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(json['error']).to match(/Only a posted trial/)
+    end
+
+    it 'suggests an account that carries the QuickBooks id as an exact match' do
+      id = start_migration
+      row = company.accounting_imports.find(id).import_config['accounts'].find { |r| r['dt_account_type'] == 'expense' }
+      acct = company.chart_of_accounts.create!(account_number: '6999', name: 'Something else entirely', account_type: 'expense',
+                                               is_active: true, qbo_account_id: row['qbo_account_id'])
+      post "#{base}/#{id}/accounts/suggest", headers: headers, as: :json
+      got = json['accounts'].find { |r| r['qbo_account_id'] == row['qbo_account_id'] }
+      expect(got['suggestion']).to include('chart_of_account_id' => acct.id, 'source' => 'exact')
+    end
+  end
+
   describe 'tenant isolation' do
     it "cannot see or touch another company's migration" do
       id = start_migration
