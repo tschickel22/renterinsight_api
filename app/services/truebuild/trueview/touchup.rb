@@ -59,12 +59,44 @@ module Truebuild
         fixed = Layer.build(source_bytes, bytes, mask: outline, blocked: Trueview.blocked_image(mask, source_bytes))
         again = LayerCheck.judge(source_bytes, fixed[:bytes], surface: surface, value: value, **check_with)
         cost = again['cost_usd'].to_f
+        if !again['ok'] && how.include?('color_matched') && SHADE_SET.include?(Surfaces.category(surface))
+          again, more = shade_set(again, source_bytes, fixed[:bytes], surface: surface, value: value, check_with: check_with)
+          cost += more
+        end
         return [result, layer, verdict, cost] unless again['ok']
 
         [result.merge(bytes: bytes, mime: 'image/png'), fixed, again.merge('touched' => how, 'touched_hex' => hex).compact, cost]
       rescue Vips::Error => e
         Rails.logger.warn("[TrueView] touch-up skipped: #{e.message.first(200)}")
         as_was
+      end
+
+      # Surfaces whose shade the check cannot settle once ColorMatch has set it
+      # to the factory sample's measured color. On Jessup's floors (2026-11-12)
+      # it called a Texas Oak drawing too warm and golden, then the same floor
+      # moved to the sample's color too light and washed out; of 8 floors held
+      # for color and moved to it, all 8 looked right and it passed 1. Asked
+      # region by region, it found nothing else wrong on 6. So a floor set to
+      # its sample's color passes when nothing of the old floor is left,
+      # nothing spilled and nothing was added; the shade is not asked.
+      SHADE_SET = ['flooring'].freeze
+
+      # => [verdict, cost]
+      def shade_set(verdict, source_bytes, layer_bytes, surface:, value:, check_with:)
+        second = verdict['second'].presence
+        cost = 0.0
+        unless second
+          second = LayerCheck.look_again(source_bytes, layer_bytes, surface: surface, value: value, **check_with)
+          cost = second.delete('cost_usd').to_f
+        end
+        # A second look that could not run answers none of these: not clean.
+        ran = second.key?('old_finish_left')
+        clean = %w[old_finish_left spilled_onto added_or_changed].all? { |k| second[k].to_s.strip.match?(/\A(none\b|\z)/i) }
+        return [verdict, cost] unless ran && clean
+
+        [verdict.merge('ok' => true, 'shade_set' => true, 'second' => second.except('cost_usd'), 'held_note' => verdict['note'],
+                       'note' => "Set to the sample's measured color; nothing of the old #{surface.to_s.downcase} left, nothing spilled or added."),
+         cost]
       end
 
       def delta(original, drawn)
