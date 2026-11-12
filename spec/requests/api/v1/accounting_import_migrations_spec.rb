@@ -695,9 +695,9 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: u.id, company_id: rbac_company.id)}" }
     end
 
-    # Platform admins only until the switch has run on real QuickBooks
-    # companies (backlog E62). The accounting RBAC checks stay behind it.
-    it 'keeps the switch from dealer users, even with full accounting rights' do
+    # Company admins and platform admins. The accounting RBAC checks stay
+    # behind it.
+    it 'keeps the switch from staff who are not admins, even with full accounting rights' do
       dealer = rbac_user(%w[read create update delete])
       admin = User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'A', last_name: 'D',
                            password: 'Pass1234!', company_id: rbac_company.id, role: 'platform_admin')
@@ -724,6 +724,15 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       as_dealer = { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: dealer.id, company_id: company.id, impersonated_by: user.id)}" }
 
       post "#{base}/migrations", params: { cutover_date: '2026-09-30' }, headers: as_dealer, as: :json
+      expect(response).to have_http_status(:created)
+    end
+
+    it "lets the dealer's own company admin run it" do
+      dealer = company.users.create!(email: "ca-#{SecureRandom.hex(4)}@example.com", first_name: 'C', last_name: 'A',
+                                     password: 'Pass1234!', role: 'company_admin')
+      as_admin = { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: dealer.id, company_id: company.id)}" }
+
+      post "#{base}/migrations", params: { cutover_date: '2026-09-30' }, headers: as_admin, as: :json
       expect(response).to have_http_status(:created)
     end
 

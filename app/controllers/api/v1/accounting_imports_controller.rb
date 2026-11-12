@@ -2,10 +2,11 @@
 
 class Api::V1::AccountingImportsController < ApplicationController
   before_action :set_company_scope
-  # The QuickBooks switch is platform admins only until it has run against
-  # real QuickBooks companies (backlog E62). Remove this line to offer it to
-  # dealers; the frontend hides the entry for everyone else the same way.
-  before_action :require_platform_admin!, only: %i[
+  # The QuickBooks switch is for company admins (and platform admins, who may
+  # be impersonating one). Staff with accounting rights can't run it: it
+  # rewrites the whole set of books. The frontend hides the entry the same
+  # way (useQboSwitchAccess).
+  before_action :require_company_admin!, only: %i[
     create_migration migration update_migration accounts suggest_accounts update_accounts
     banks update_banks create_banks uncleared update_uncleared migration_preview post_migration rollback_migration
     go_live bank_balances

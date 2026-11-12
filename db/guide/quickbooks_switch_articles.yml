@@ -1,0 +1,215 @@
+# QuickBooks Online switch help articles (backlog E62, E101).
+#
+# Loaded into knowledge_articles by db/migrate/20261112180000_load_quickbooks_switch_help_articles.rb
+# (Guide::ArticleLoader). Each entry is matched by slug. Write the product name as
+# {{brand}}; it is filled in when the article is shown. No em or en dashes.
+#
+# Screen names and button labels here were checked against the switch as of
+# 2026-11-12 (trial and go live, statement balances from bank feeds). Change the
+# text with the screen. The video "Switch from QuickBooks: trial, then go live"
+# shows the same flow.
+
+articles:
+  - slug: quickbooks-switch-overview
+    module: accounting
+    title: Switch from QuickBooks Online
+    article_type: concept
+    position: 112
+    excerpt: Move your books from QuickBooks Online as of a cutover date, trying it first with a trial if you like.
+    content: |
+      The QuickBooks switch moves your books from QuickBooks Online to {{brand}} as of one day, the **cutover date**. It reads your QuickBooks company and never changes anything in it.
+
+      A company admin runs the switch (staff without the admin role don't see it). Have your bank and card statements for the cutover date at hand.
+
+      ## The cutover date
+
+      The cutover date is the last day your books live in QuickBooks, usually the last day of a month you have finished there. It can't be in the future.
+
+      **The cutover date decides which system owns a transaction.** Anything on or before it belongs to QuickBooks. Anything after it belongs to {{brand}}. Bank feeds start the day after the cutover, because the opening balances already hold everything before it.
+
+      ## What comes over
+
+      - Every account's balance on the cutover date, as one opening entry
+      - Customers and vendors
+      - Open invoices and bills, with what is still owed
+      - Checks and deposits that had not cleared the bank, for your first reconciliation
+
+      ## What stays in QuickBooks
+
+      - Past transactions and history. Keep QuickBooks for looking up past years.
+      - Paid invoices and bills
+      - Items, classes and locations
+
+      ## Trial or go live
+
+      When you start the switch you choose:
+
+      - **Try it first (trial)**: everything comes over and you can look around, while QuickBooks stays your books. When you are ready, go live from the finished trial. Every account and bank you matched carries over. See [Go live after a QuickBooks trial](quickbooks-trial-go-live).
+      - **Go live now**: {{brand}} becomes your books from the day after the cutover.
+
+      Not sure yet? Start with a trial. You can go live from it later without redoing the matching.
+
+      ## Next
+
+      - [Run the QuickBooks switch, step by step](quickbooks-switch-steps)
+      - [Statement balances from your bank feeds](quickbooks-switch-statement-balances)
+      - Watch **Switch from QuickBooks: trial, then go live** in Help, under Videos.
+
+  - slug: quickbooks-switch-steps
+    module: accounting
+    title: Run the QuickBooks switch, step by step
+    article_type: how_to
+    position: 113
+    excerpt: The six steps of the QuickBooks switch, from the cutover date to posting, and what each one asks of you.
+    content: |
+      Open **Accounting > Import Data** and choose **QuickBooks Online**. A switch already in progress opens where you left off.
+
+      Each step has a progress bar along the top. You can move between steps at any time; **Before you can post** lists anything still to do, with a button that takes you to it.
+
+      ## 1. Connect and cutover date
+
+      1. Check that **QuickBooks Online connection** shows your QuickBooks company. If it is not connected, connect it under **Settings > Integrations > QuickBooks** and come back.
+      2. Pick the **Cutover date**: a day that is over and fully entered in QuickBooks, usually the last day of a finished month.
+      3. Choose **Try it first (trial)** or **Go live now**. See [Switch from QuickBooks Online](quickbooks-switch-overview).
+      4. Click **Start the trial** (or **Start the switch**).
+
+      Changing the date later reloads balances from QuickBooks and clears account suggestions made for the old date.
+
+      ## 2. Banks and cards
+
+      Each QuickBooks bank and credit card account needs its match in {{brand}}.
+
+      - Pick the matching account from the list, or
+      - Click **Add all from QuickBooks** (or **Add the other ... from QuickBooks**) to make one for each that is left and match it.
+      - Choose **Closed, not moving it over** for an account you no longer use. Its balance still comes over, but no bank feed is needed.
+
+      Connect bank feeds now or later, under **Accounting > Bank Transactions**. Connecting fills in these same accounts by their last four digits. A bank shows **Feed connected** or **No bank feed**. Connect before the Uncleared items step and its statement balance fills in by itself.
+
+      ## 3. Chart of accounts
+
+      Suggestions start by themselves, each with the reason it was made: **Exact match**, **High confidence**, **Medium confidence** or **Low confidence**.
+
+      1. Click **Confirm all suggested**. It confirms exact matches and high confidence suggestions only.
+      2. Check what is left one by one. Pick an existing account, or **Create new**, then **Mark as confirmed**.
+
+      Bank and card accounts follow the bank they are matched to on the Banks step.
+
+      ## 4. Customers and vendors
+
+      Nothing to do here unless the counts look wrong. Every QuickBooks customer and vendor comes over when you post. One already in {{brand}} with the same QuickBooks id, email or name is linked, not copied.
+
+      ## 5. Uncleared items
+
+      For each bank and card, the switch compares the QuickBooks balance on the cutover date with the bank's statement balance. The checks and deposits that had not cleared yet make up the difference, and they are listed here from QuickBooks.
+
+      1. Check the **Bank statement balance** (for a card, **Card statement balance owed**). With a bank feed connected it fills in by itself. See [Statement balances from your bank feeds](quickbooks-switch-statement-balances).
+      2. Type the statement balance for any bank with no feed.
+      3. Add any check or deposit QuickBooks missed with **Add a check or deposit**.
+      4. Click **Save**.
+
+      When every **Difference** is zero, your first reconciliation in {{brand}} will balance.
+
+      ## 6. Preview and post
+
+      The preview puts the opening entry next to the **QuickBooks trial balance** for the same day, and checks that open invoices and bills match receivables and payables in QuickBooks. Anything that must be fixed first is listed under **Fix these before posting**.
+
+      Click **Post the trial** (or **Go live**). In one step it:
+
+      - creates the new accounts you confirmed
+      - posts one opening entry dated the cutover date
+      - brings over open invoices and bills, without posting them again
+      - adds or links your customers and vendors
+      - saves the uncleared items for your first reconciliation
+
+      ## Roll back
+
+      From the finished switch, **Roll back** voids the opening entry and removes the open invoices, bills and uncleared items it brought over. Customers, vendors and new accounts stay, and QuickBooks is not touched.
+
+      Roll back works until an accounting period after the cutover date is closed, a payment is applied to an imported invoice or bill, or a bank is reconciled after the cutover.
+
+  - slug: quickbooks-switch-statement-balances
+    module: accounting
+    title: Statement balances from your bank feeds
+    article_type: how_to
+    position: 114
+    excerpt: During the QuickBooks switch, each bank with a connected feed fills in its statement balance for the cutover date by itself.
+    content: |
+      On the **Uncleared items** step of the QuickBooks switch, every bank and card needs its statement balance for the cutover date. When the account has a bank feed connected, {{brand}} works it out from the bank and fills it in.
+
+      ## How it is worked out
+
+      The bank feed gives today's balance at the bank. {{brand}} takes that and subtracts every line the bank has posted since the cutover date. Lines still pending are left out.
+
+      Under the balance you see where it came from, for example:
+
+      > From the bank feed: $184,912.75 at the bank on Nov 12, less 7 lines posted since. Check it against your statement.
+
+      For a card both figures are what is **owed**.
+
+      **Always check it against your statement.** A line the bank posts late can make the two differ, and the **Difference** box shows it.
+
+      ## While it asks
+
+      The bank sometimes takes a few seconds to answer. The screen shows **Asking the bank...** and checks again by itself until the balance arrives. To ask again later, click **Get balances from the banks again**.
+
+      ## A balance you typed
+
+      A statement balance you typed is never replaced. If the bank's figure is different, it shows under yours with a button such as **Use $8,000.00**, so you can take it with one click.
+
+      A balance that was filled in from the bank is updated when you ask again, or when the cutover date changes (for example when you go live from a trial).
+
+      ## When it can't fill in
+
+      - **No bank feed connected. Connect one and this fills in by itself.** Type the statement balance, or connect the feed under **Accounting > Bank Transactions** and come back.
+      - **The cutover is more than 90 days back.** Banks often keep less history than that, so the figure is filled in with a warning. Compare it with your statement.
+      - **The feed is a different kind of account**, for example a card feed connected to a checking account. Nothing is filled in. Reconnect the feed to the right account, or type the balance.
+      - **The bank was connected without balance access**, or the connection is no longer active. Reconnect it under **Accounting > Bank Transactions**, or type the balance.
+      - **The bank did not send a balance**, or Stripe did not answer. Type the balance from your statement, or click **Get balances from the banks again** in a minute.
+
+      See also [Run the QuickBooks switch, step by step](quickbooks-switch-steps).
+
+  - slug: quickbooks-trial-go-live
+    module: accounting
+    title: Go live after a QuickBooks trial
+    article_type: how_to
+    position: 115
+    excerpt: What to do during a QuickBooks trial, how to go live at a month end, and what going live voids so nothing counts twice.
+    content: |
+      A trial switch brings your books over while QuickBooks stays your books. A banner across Accounting says so: **Trial switch from QuickBooks**, with the trial's cutover date.
+
+      ## During the trial
+
+      - Keep entering your books in QuickBooks. It is still the real set.
+      - Look around {{brand}}: your accounts, bills and payments, bank transactions. Deals, invoices and payments post here as normal so you see it working.
+      - **Don't reconcile a bank or close a month in {{brand}}.** Either one stops the trial from being rolled back, and going live needs that.
+
+      ## Go live or update the trial
+
+      1. Click **Go live or update** on the banner.
+      2. Pick the **New cutover date**: the last day QuickBooks is your books, usually the last day of the month you just finished there. It can't be before the trial's cutover.
+      3. Click **Go live**, or **Update the trial** to stay on a trial at a newer date.
+      4. Click **Continue to go live**.
+
+      Either way the trial is rolled back first and a new switch starts at the new date. It reads QuickBooks again, so everything entered there during the trial comes over. Every account and bank you matched carries over, and statement balances from bank feeds fill in again for the new date. Check each step, then post from the preview.
+
+      ## What going live settles
+
+      The rule is the cutover date: on or before it belongs to QuickBooks, after it belongs to {{brand}}.
+
+      The go-live preview lists **Trial activity QuickBooks already has**:
+
+      - Journal entries {{brand}} recorded since the trial started and dated on or before the new cutover. Going live voids them, each on its own date, so no later month changes.
+      - Bank feed lines dated on or before the cutover. Going live excludes them.
+
+      Nothing is deleted, and anything dated after the cutover stays. Entries that were already in {{brand}} before the trial are left alone.
+
+      The preview also warns about any bank with no feed connected. Transactions after the cutover won't come in until you connect it, so connect within about 90 days so nothing is missed.
+
+      Click **Go live**, and {{brand}} is your books from the day after the cutover.
+
+      ## After going live
+
+      - An invoice or bill created in {{brand}} during the trial and dated on or before the cutover is also in QuickBooks. Its journal entry is voided, but the document itself stays. Delete the duplicate by hand.
+      - Keep QuickBooks for looking up past years. Stop entering new transactions there.
+
+      See also [Run the QuickBooks switch, step by step](quickbooks-switch-steps).
