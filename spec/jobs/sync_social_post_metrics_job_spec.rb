@@ -17,7 +17,6 @@ RSpec.describe SyncSocialPostMetricsJob do
   end
 
   before do
-    allow(MetaAppReview).to receive(:awaiting).and_return([])
     allow(MetaGraphApi).to receive(:get_post_basic_metrics).and_return(
       'likes' => { 'summary' => { 'total_count' => 3 } },
       'comments' => { 'summary' => { 'total_count' => 2 } },

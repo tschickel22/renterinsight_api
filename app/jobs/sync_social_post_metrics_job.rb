@@ -49,16 +49,13 @@ class SyncSocialPostMetricsJob < ApplicationJob
     }
 
     # Clicks need read_insights; fail-soft so a permission error never breaks
-    # a whole sync run. Skipped outright while read_insights awaits review
-    # (temporary, see MetaAppReview).
-    if MetaAppReview.insights?(post.company)
-      begin
-        insights = MetaGraphApi.get_post_insights(post.external_post_id, integration.page_access_token)
-        updates[:link_clicks] = insight_value(Array(insights['data']), 'post_clicks')
-      rescue MetaGraphApi::Error => e
-        Rails.logger.warn "[SyncSocialPostMetricsJob] post=#{post.id} metric=post_clicks unavailable: " \
-                          "code=#{e.code.inspect} fbtrace_id=#{e.fbtrace_id.inspect} message=#{e.message}"
-      end
+    # a whole sync run.
+    begin
+      insights = MetaGraphApi.get_post_insights(post.external_post_id, integration.page_access_token)
+      updates[:link_clicks] = insight_value(Array(insights['data']), 'post_clicks')
+    rescue MetaGraphApi::Error => e
+      Rails.logger.warn "[SyncSocialPostMetricsJob] post=#{post.id} metric=post_clicks unavailable: " \
+                        "code=#{e.code.inspect} fbtrace_id=#{e.fbtrace_id.inspect} message=#{e.message}"
     end
 
     post.update!(updates.compact)
