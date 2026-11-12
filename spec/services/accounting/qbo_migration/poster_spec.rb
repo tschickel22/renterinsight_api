@@ -190,6 +190,29 @@ RSpec.describe Accounting::QboMigration::Poster do
       expect(wizard.import.reload.status).to eq('posted')
     end
 
+    it 'refuses once an imported invoice has a payment application, or an imported bill a payment' do
+      wizard = ready_wizard
+      described_class.new(wizard, user).post!
+      inv = company.invoices.find_by(quickbooks_id: '301')
+      now = Time.current
+      payment_id = Payment.insert_all!([{ company_id: company.id, payment_number: "T-#{SecureRandom.hex(3)}", payment_type: Payment::PAYMENT_TYPES.first,
+                                          status: Payment::STATUSES.first, amount: 10, payer_type: "Contact", payer_id: inv.contact_id || 0,
+                                          created_at: now, updated_at: now }]).rows.first.first
+      # Straight into the table, so no callback marks the invoice paid: the
+      # application alone has to be what refuses.
+      PaymentApplication.insert_all!([{ company_id: company.id, payment_id: payment_id, applicable_type: 'Invoice',
+                                        applicable_id: inv.id, amount: 10, applied_at: now, created_at: now, updated_at: now }])
+      rollback = Accounting::QboMigration::Rollback.new(Accounting::QboMigration::Wizard.new(wizard.import.reload))
+      expect(rollback.refusal).to match(/Invoice #{inv.invoice_number} has a payment or credit applied/)
+
+      PaymentApplication.where(applicable_id: inv.id).delete_all
+      bill = company.bills.where(accounting_import_id: wizard.import.id).first
+      BillPayment.insert_all!([{ company_id: company.id, bill_id: bill.id, amount: 5, payment_date: Date.current,
+                                 created_at: now, updated_at: now }])
+      rollback = Accounting::QboMigration::Rollback.new(Accounting::QboMigration::Wizard.new(wizard.import.reload))
+      expect(rollback.refusal).to match(/Bill .+ has a payment applied/)
+    end
+
     it 'refuses once a period after cutover is closed' do
       wizard = ready_wizard
       described_class.new(wizard, user).post!

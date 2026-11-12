@@ -29,17 +29,26 @@ module Accounting
                  'Reopen it to roll back.'
         end
 
-        invoices.each do |inv|
-          paid = inv.payment_applications.exists? || inv.credit_memo_applications.exists? ||
-                 CashReceiptApplication.where(invoice_id: inv.id).exists? || inv.amount_paid.to_d.positive?
-          return "Invoice #{inv.invoice_number} has a payment or credit applied since the switch" if paid
+        # A few set queries, not several per item: one per invoice, bill and
+        # memo took a posted switch's page 7.5 seconds and 8,781 queries on the
+        # staging sandbox company (2026-11-11).
+        inv_ids = invoices.map(&:id)
+        paid_ids = Set.new
+        if inv_ids.any?
+          paid_ids.merge(PaymentApplication.where(applicable_type: 'Invoice', applicable_id: inv_ids).distinct.pluck(:applicable_id))
+          paid_ids.merge(CreditMemoApplication.where(applicable_type: 'Invoice', applicable_id: inv_ids).distinct.pluck(:applicable_id))
+          paid_ids.merge(CashReceiptApplication.where(invoice_id: inv_ids).distinct.pluck(:invoice_id))
         end
-        bills.each do |bill|
-          return "Bill #{bill.reference_number || bill.bill_number} has a payment applied since the switch" if bill.bill_payments.exists?
-        end
-        credit_memos.each do |memo|
-          return "Credit memo #{memo.credit_memo_number} has been applied since the switch" if memo.credit_memo_applications.exists?
-        end
+        inv = invoices.find { |i| paid_ids.include?(i.id) || i.amount_paid.to_d.positive? }
+        return "Invoice #{inv.invoice_number} has a payment or credit applied since the switch" if inv
+
+        paid_bills = bills.any? ? BillPayment.where(bill_id: bills.map(&:id)).distinct.pluck(:bill_id).to_set : Set.new
+        bill = bills.find { |b| paid_bills.include?(b.id) }
+        return "Bill #{bill.reference_number || bill.bill_number} has a payment applied since the switch" if bill
+
+        applied = credit_memos.any? ? CreditMemoApplication.where(credit_memo_id: credit_memos.map(&:id)).distinct.pluck(:credit_memo_id).to_set : Set.new
+        memo = credit_memos.find { |m| applied.include?(m.id) }
+        return "Credit memo #{memo.credit_memo_number} has been applied since the switch" if memo
 
         reconciliations.each do |rec|
           later = rec.bank_account.bank_reconciliations.where.not(id: rec.id).where('statement_date > ?', rec.statement_date)
