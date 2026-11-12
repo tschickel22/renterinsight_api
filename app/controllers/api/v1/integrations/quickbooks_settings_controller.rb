@@ -42,6 +42,9 @@ class Api::V1::Integrations::QuickbooksSettingsController < ApplicationControlle
     return render json: { error: 'Entity not found' }, status: :not_found unless entity
     
     new_settings = params[:settings].permit!.to_h
+    if (locked = old_sync_locked) && Accounting::QboMigration::OldSync.enabling?(new_settings)
+      return render json: { error: locked }, status: :unprocessable_entity
+    end
     
     begin
       entity.update_quickbooks_settings!(new_settings)
@@ -72,6 +75,7 @@ class Api::V1::Integrations::QuickbooksSettingsController < ApplicationControlle
     render json: {
       entity_type: entity_type,
       settings: entity_config,
+      locked_reason: old_sync_locked,
       available_sync_directions: ['to_qb', 'from_qb', 'bidirectional'],
       available_frequencies: [
         { value: 15, label: '15 minutes' },
@@ -92,6 +96,9 @@ class Api::V1::Integrations::QuickbooksSettingsController < ApplicationControlle
     
     entity_type = params[:entity_type]
     new_entity_settings = params[:entity_settings].permit!.to_h
+    if (locked = old_sync_locked) && Accounting::QboMigration::OldSync.truthy?(new_entity_settings['enabled'] || new_entity_settings[:enabled])
+      return render json: { error: locked }, status: :unprocessable_entity
+    end
     
     # Get current settings and deep_dup to make it mutable
     current_settings = entity.resolved_quickbooks_settings.deep_dup
@@ -578,7 +585,47 @@ class Api::V1::Integrations::QuickbooksSettingsController < ApplicationControlle
     }
   end
   
+  # GET /api/v1/integrations/quickbooks/sync_overview
+  # Where the record sync is set (the company, or each location with its own
+  # QuickBooks connection), what each one syncs, and whether a switch from
+  # QuickBooks keeps it off.
+  def sync_overview
+    return unless authorize_action!('settings', 'read')
+
+    places = Accounting::QboMigration::OldSync.records(@company).filter_map do |rec|
+      connected = rec.quickbooks_realm_id.present?
+      settings = (rec.quickbooks_settings || {}).deep_stringify_keys
+      on = (settings['entities'] || {}).select { |_k, v| v.is_a?(Hash) && Accounting::QboMigration::OldSync.truthy?(v['enabled']) }.keys
+      auto = Accounting::QboMigration::OldSync.truthy?(settings['auto_sync'])
+      next unless connected || on.any? || auto
+
+      Accounting::QboMigration::OldSync.place_json(rec, on, auto).merge(connected: connected)
+    end
+    render json: { scope: @company.quickbooks_scope, places: places, locked_reason: old_sync_locked }
+  end
+
+  # POST /api/v1/integrations/quickbooks/sync_off { location_id }
+  # Turns every record type and automatic sync off for the company, or for
+  # one location. Bank feeds are not part of it.
+  def sync_off
+    return unless authorize_action!('settings', 'update')
+
+    rec = params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : @company
+    return render json: { error: 'Location not found' }, status: :not_found unless rec
+
+    Accounting::QboMigration::OldSync.turn_off_record!(rec)
+    render json: { success: true, place: Accounting::QboMigration::OldSync.place_json(rec, [], false) }
+  end
+
   private
+
+  # Why the record sync can't be turned on now (a switch from QuickBooks is
+  # open), or nil.
+  def old_sync_locked
+    return @old_sync_locked if defined?(@old_sync_locked)
+
+    @old_sync_locked = Accounting::QboMigration::OldSync.lock_message(@company)
+  end
   
   def determine_quickbooks_entity
     if params[:location_id].present?

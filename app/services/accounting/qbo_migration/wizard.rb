@@ -25,6 +25,8 @@ module Accounting
     #                                ListMatcher's answer (see #update_list_choices!)
     #   open_invoices, customer_credits, open_bills, vendor_credits
     #   notes                      { suggest:, uncleared: } messages for the person
+    #   quickbooks_sync_before     what the older QuickBooks sync held before this switch turned it off
+    #                              (OldSync.turn_off!); posted keeps the same list for Rollback
     #   preview_viewed_at, posted, rolled_back_at
     class Wizard
       BANK_TYPES = { 'Bank' => 'bank', 'Credit Card' => 'credit_card' }.freeze
@@ -69,6 +71,12 @@ module Accounting
         wizard = new(import)
         wizard.refresh!(date_changed: from.present?)
         wizard.start_carried_feeds! if from
+        # The older QuickBooks record sync is off from the start (OldSync).
+        before = OldSync.turn_off!(company)
+        if before.any?
+          wizard.config['quickbooks_sync_before'] = before
+          wizard.save!
+        end
         import
       rescue StandardError
         import&.destroy if import&.persisted? && import.import_config['accounts'].nil?
@@ -856,20 +864,15 @@ module Accounting
         save!
       end
 
-      # The older QuickBooks sync (QuickbooksSyncService), per company and
-      # location: which record types it is set to sync. Posting a switch turns
-      # it off (Poster#turn_off_old_sync!), or DealerTide would keep sending
-      # invoices and payments to QuickBooks while they are typed there too.
+      # The older QuickBooks record sync (OldSync): what is on now, and what
+      # this switch turned off when it started or posted.
       def old_quickbooks_sync
-        places = ([@company] + @company.locations.to_a).filter_map do |rec|
-          settings = (rec.quickbooks_settings || {}).deep_stringify_keys
-          on = (settings['entities'] || {}).select { |_k, v| v.is_a?(Hash) && ActiveModel::Type::Boolean.new.cast(v['enabled']) }.keys
-          auto = ActiveModel::Type::Boolean.new.cast(settings['auto_sync']) ? true : false
-          next if on.empty? && !auto
-
-          { type: rec.is_a?(Location) ? 'location' : 'company', id: rec.id, name: rec.name, entities: on, auto_sync: auto }
-        end
-        { on: places.any?, places: places }
+        OldSync.summary(@company).merge(
+          turned_off: Array(config['quickbooks_sync_before']).map do |p|
+            { type: p['type'], id: p['id'], name: p['name'], entities: Array(p['entities']), auto_sync: p['auto_sync'] ? true : false }
+          end,
+          locked: OldSync.lock(@company).present?
+        )
       end
 
       # ── Preview ─────────────────────────────────────────────────

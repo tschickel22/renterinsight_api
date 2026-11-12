@@ -293,33 +293,16 @@ module Accounting
         out
       end
 
-      # The older QuickBooks sync stops sending and fetching, for the company
-      # and every location, so nothing reaches QuickBooks twice or comes back
-      # from it. What it was is kept in posted, and Rollback puts it back.
+      # The older QuickBooks sync stays off (OldSync). Starting the switch
+      # turned it off; anything turned on since is turned off again. What it
+      # held before goes into posted for Rollback.
       def turn_off_old_sync!
-        before = []
-        ([@company] + @company.locations.to_a).each do |rec|
-          settings = (rec.quickbooks_settings || {}).deep_stringify_keys
-          entities = settings['entities'] || {}
-          on = entities.select { |_k, v| v.is_a?(Hash) && ActiveModel::Type::Boolean.new.cast(v['enabled']) }.keys
-          auto = ActiveModel::Type::Boolean.new.cast(settings['auto_sync'])
-          next if on.empty? && !auto
-
-          before << { 'type' => rec.is_a?(Location) ? 'location' : 'company', 'id' => rec.id, 'settings' => rec.quickbooks_settings }
-          on.each { |k| entities[k] = entities[k].merge('enabled' => false) }
-          settings['entities'] = entities if entities.any?
-          settings['auto_sync'] = false
-          rec.update_column(:quickbooks_settings, settings)
-        end
+        before = Array(@wizard.config['quickbooks_sync_before']) + OldSync.turn_off!(@company)
+        @wizard.config['quickbooks_sync_before'] = before
         @created['quickbooks_sync_before'] = before
         @results[:quickbooks_sync_turned_off] = before.size
       end
 
-      # Customer credits (credit memos, unapplied payments) come off the same
-      # customer's open invoices, oldest first, so each invoice carries what
-      # is really still owed. A credit no open invoice absorbs comes over as an
-      # issued credit memo, ready to apply to the customer's next invoice. The
-      # opening entry already holds AR net of all of it, so none of this posts.
       def save_invoices!(contacts)
         invoices = Array(@wizard.config['open_invoices']).sort_by { |i| [i['date'].to_s, i['external_id'].to_s] }
                                                           .map { |i| i.merge('carry' => d(i['balance']).round(2)) }
