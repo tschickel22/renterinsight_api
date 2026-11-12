@@ -276,7 +276,7 @@ module Accounting
           next if ba.nil? || ba.feed_connected?
 
           { qbo_account_id: bank['qbo_account_id'], name: bank['name'], bank_account_id: ba.id,
-            bank_account_name: ba.institution_name.presence || ba.bank_name }
+            bank_account_name: bank_display_name(ba) }
         end
       end
 
@@ -408,7 +408,7 @@ module Accounting
           end,
           bank_accounts: company_bank_accounts.map do |ba|
             {
-              id: ba.id, name: ba.institution_name.presence || ba.bank_name,
+              id: ba.id, name: bank_display_name(ba),
               mask: ba.account_mask.presence || ba.display_last_four, kind: ba.account_type,
               feed_connected: ba.feed_connected?, feed_start_date: ba.feed_start_date&.iso8601
             }
@@ -443,7 +443,7 @@ module Accounting
               other['qbo_account_id'] != bank['qbo_account_id'] && other.dig('match', 'bank_account_id') == ba.id
             end
             if taken
-              errors << "#{ba.institution_name.presence || ba.bank_name} is already matched to #{taken['name']}"
+              errors << "#{bank_display_name(ba)} is already matched to #{taken['name']}"
               next
             end
 
@@ -481,6 +481,10 @@ module Accounting
         ensure_draft!
         rows = account_rows.index_by { |r| r['qbo_account_id'] }
         taken = bank_rows.filter_map { |b| b.dig('match', 'bank_account_id') }
+        # Loaded before anything is created: loaded lazily after the first
+        # create, the list already held the new account and << added it twice
+        # ("VisaVisa" in the staging click-through, 2026-11-11).
+        company_bank_accounts
         matches = []
         created = 0
         existing = 0
@@ -533,7 +537,7 @@ module Accounting
         return [] unless ba
 
         card = bank['kind'] == 'credit_card'
-        name = ba.institution_name.presence || ba.bank_name || 'the matched account'
+        name = bank_display_name(ba).presence || 'the matched account'
         problems = []
         if card && ba.account_type != 'credit_card'
           problems << "it is a credit card in QuickBooks but #{name} is a #{ba.account_type.to_s.tr('_', ' ')} account"
@@ -1024,6 +1028,18 @@ module Accounting
 
       # ── Shared helpers ──────────────────────────────────────────
 
+      # The account's own name, then the institution when it adds something.
+      # Institution first read "StripeBank (ending 6789)" for both a checking
+      # and a savings account (staging click-through, 2026-11-11).
+      def bank_display_name(ba)
+        own = ba.bank_name.to_s.strip
+        inst = ba.institution_name.to_s.strip
+        return inst if own.empty?
+        return own if inst.empty? || own.downcase.include?(inst.downcase)
+
+        "#{own} (#{inst})"
+      end
+
       def je_total(entry)
         entry.journal_entry_lines.sum(&:debit_amount)
       end
@@ -1145,7 +1161,7 @@ module Accounting
 
           row['bank_match'] = true
           row['suggestion'] = { 'action' => 'map', 'chart_of_account_id' => gl.id, 'source' => 'exact', 'confidence' => 'high',
-                                'reason' => "The GL account of the matched bank account #{ba.institution_name.presence || ba.bank_name}" }
+                                'reason' => "The GL account of the matched bank account #{bank_display_name(ba)}" }
           row['choice'] = { 'action' => 'map', 'chart_of_account_id' => gl.id }
           row['confirmed'] = true
         end
