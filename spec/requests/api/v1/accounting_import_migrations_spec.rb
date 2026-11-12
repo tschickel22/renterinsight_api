@@ -290,7 +290,7 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(qbo['1']).to include('name' => 'Chase Operating Checking', 'kind' => 'bank', 'balance_at_cutover' => 182_450.25, 'match' => nil)
       expect(qbo['14']).to include('kind' => 'credit_card', 'balance_at_cutover' => 6842.17)
       chase = json['bank_accounts'].find { |b| b['id'] == books[:banks][:chase].id }
-      expect(chase).to include('name' => 'Chase Business Checking', 'mask' => '4421', 'kind' => 'checking',
+      expect(chase).to include('name' => 'Chase (Chase Business Checking)', 'mask' => '4421', 'kind' => 'checking',
                                'feed_connected' => true, 'feed_start_date' => nil)
     end
 
@@ -327,6 +327,8 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(qbo['1']['match']).to include('bank_account_id' => books[:banks][:chase].id)
       expect(json['qbo_bank_accounts']).to all(satisfy { |b| b['match'] && b['match']['bank_account_id'] })
 
+      # Each new account listed once (a lazily loaded list once held it twice).
+      expect(json['bank_accounts'].map { |b| b['id'] }).to eq(json['bank_accounts'].map { |b| b['id'] }.uniq)
       card = company.bank_accounts.find(qbo['14']['match']['bank_account_id'])
       expect(card).to have_attributes(bank_name: 'Amex Business Card', account_type: 'credit_card', account_purpose: 'sync_only',
                                       routing_number: nil, chart_of_account_id: nil)
