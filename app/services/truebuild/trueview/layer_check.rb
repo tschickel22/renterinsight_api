@@ -186,6 +186,15 @@ module Truebuild
       # The second look at a 4: skeptical, region by region. => { 'acceptable' =>,
       # 'defect' =>, ..., 'cost_usd' => }; acceptable nil when it could not run,
       # which leaves the first verdict standing.
+      # The second look on a cut layer, region by region (Touchup.shade_set).
+      def look_again(original_bytes, layer_bytes, surface:, value:, sample: nil, hex: nil)
+        photo = Surfaces.rgb(Vips::Image.new_from_buffer(original_bytes, ''))
+        layer = Vips::Image.new_from_buffer(layer_bytes, '')
+        layer = Layer.fit(layer, photo.width, photo.height) if layer.width != photo.width || layer.height != photo.height
+        composite = photo.composite2(layer, :over).extract_band(0, n: 3).cast(:uchar).copy(interpretation: :srgb)
+        second_look(photo, composite, surface: surface, value: value, sample: sample, hex: hex)
+      end
+
       def second_look(photo, composite, surface:, value:, sample:, hex:)
         result = Catalog::PriceBooks::ClaudeClient.call(
           system: 'You inspect renderings for a home configurator. Be specific and skeptical: buyers will compare this ' \
