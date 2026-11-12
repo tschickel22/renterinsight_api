@@ -45,7 +45,9 @@ module Truebuild
       MIN_PRESENT = 0.003 # share of the photo; less is not really in it
       # Thin surfaces are thin: Brighton's corner posts scored 5 on 0.09% of
       # the photo and were thrown out as not there.
-      MIN_PRESENT_BY_SURFACE = { 'corner posts' => 0.0003, 'shutters' => 0.001 }.freeze
+      # A floor is large: an outline of under 2% of the photo is a patch, not
+      # the floor (a bath's 0.7% strip by the door).
+      MIN_PRESENT_BY_SURFACE = { 'corner posts' => 0.0003, 'shutters' => 0.001, 'flooring' => 0.02 }.freeze
 
       def min_present(key)
         MIN_PRESENT_BY_SURFACE.fetch(key.to_s, MIN_PRESENT)
@@ -461,8 +463,18 @@ module Truebuild
         labels.maplut(Vips::Image.new_from_array([keep]).cast(:uchar))
       end
 
-      # Surfaces whose outline may leave a little out (strict_fit).
+      # Surfaces whose outline may leave a little out (asked in the check).
       SLIGHT_MISS_OK = ['flooring'].freeze
+
+      # Floors: Claude's word on what an outline misses is not used. Of the 67
+      # floor outlines it had turned down on production (2026-11-12), 42 of the
+      # 44 with no clear spill covered all the floor in view: it counted floor
+      # hidden under cabinets and islands as missed, and called a galley
+      # kitchen's complete floor "the vast majority of the floor is missing".
+      # Asked to judge only visible floor, or shown solid magenta, it passed
+      # 4 and 0 of them. Spill it judges well (a tub's front, a sofa), so a
+      # clear spill still turns a floor down, furniture included.
+      MISSES_UNTRUSTED = ['flooring'].freeze
 
       # A 4 allows a few stray pixels, not a neighbor: Aspire 082's bath accent
       # wall took three walls and the shower surround's edge and scored 4. But
@@ -471,6 +483,8 @@ module Truebuild
       def strict_fit(key, verdict)
         fit = verdict['fit'].to_i
         onto = verdict['spills_onto'].to_s
+        return spill_only_fit(key, fit, onto, verdict['spill_size']) if MISSES_UNTRUSTED.include?(key)
+
         # Furniture standing in front of a surface (stools at an island, a chair
         # by a wall) is inside any outline of it, and the drawing leaves it as
         # it is; the drawing's own check catches one that repaints it. Bay
@@ -479,10 +493,6 @@ module Truebuild
         harmless = onto.blank? || onto == 'none' || onto == 'furniture or decor' || outranks?(onto, key) ||
                    verdict['spill_size'] == 'slight'
         missed = verdict['misses'].present? && !verdict['misses'].to_s.strip.match?(/\Anone\.?\z/i)
-        # A floor is large and runs off behind everything: Cahaba's kitchen
-        # floor was turned down for a sliver by the dining table, and the
-        # buyer saw no flooring at all. A slight miss there is let through.
-        missed = false if missed && SLIGHT_MISS_OK.include?(key) && verdict['miss_size'] == 'slight'
         # Marked down for nothing but a slight or harmless spill: Brighton's
         # roof and Woodward's counter scored 3 for "slightly" touching trim.
         # A floor's slight miss likewise.
@@ -492,6 +502,15 @@ module Truebuild
         fit = [fit, MIN_FIT - 1].min if missed
         fit = [fit, 2].min if key == 'accent wall' && verdict['walls'].to_i > 1
         fit
+      end
+
+      # MISSES_UNTRUSTED: passed unless it is the wrong thing (1) or clearly
+      # spills onto something that does not outrank it.
+      def spill_only_fit(key, fit, onto, spill_size)
+        return fit if fit < 2
+
+        spilled = onto.present? && onto != 'none' && !outranks?(onto, key) && spill_size != 'slight'
+        spilled ? [fit, MIN_FIT - 1].min : [fit, MIN_FIT].max
       end
 
       def paint_prompt(description, correction = nil)
