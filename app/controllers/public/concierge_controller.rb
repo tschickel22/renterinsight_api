@@ -128,12 +128,13 @@ module Public
                            referrer: request.referrer }
       )
 
-      if result.status == 'created' && chat_conversation
-        Assistant::WebChat.link!(chat_conversation, company.leads.find_by(id: result.lead_id))
-      end
+      lead = result.status == 'created' ? company.leads.find_by(id: result.lead_id) : nil
+      Assistant::WebChat.link!(chat_conversation, lead) if lead && chat_conversation
 
-      render json: { status: result.status, message: result.message,
-                     form_path: result.form_path }.compact
+      # A lead made here counts on the page's ad pixel. Adding to the chat's
+      # own lead (above) does not: that person already counted.
+      render json: { status: result.status, message: result.message, form_path: result.form_path,
+                     events: lead ? [Assistant::Conversions.lead(lead)] : nil }.compact
     end
 
     def options
@@ -161,7 +162,9 @@ module Public
         # The single-answer shape older widgets read.
         text: last&.dig(:content), actions: last ? Array(last[:actions]) : [], listings: last ? last[:listings] : [], source: 'quinn',
         quick_actions: embed? ? quick_actions.reject { |a| a[:type] == 'form' } : quick_actions,
-        lead_capture: lead_capture_config, platform_brand: platform_brand
+        lead_capture: lead_capture_config, platform_brand: platform_brand,
+        # A lead or visit this message made, for the page's ad pixel (Assistant::Conversions).
+        events: reply.events || []
       }
     end
 

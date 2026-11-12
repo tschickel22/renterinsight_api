@@ -217,6 +217,23 @@ RSpec.describe 'Quinn AI books visits', type: :request do
     end
   end
 
+  it 'counts a visit booked in the website chat on the page\'s ad pixel, and not a move' do
+    travel_to(monday_8am) do
+      chat = company.conversations.create!(channel: 'web_chat', conversable: lead, location_id: location.id, status: 'active',
+                                           assistant_enabled: true, started_at: Time.current, visitor_token: SecureRandom.urlsafe_base64(24))
+      slots = Assistant::Booking.new(chat).slots
+      brain_says('Perfect.', book_slot: slots.first.id)
+      reply = Assistant::WebChat.new(chat).visitor_says!('The first one works')
+      visit = LeadActivity.where(lead_id: lead.id, activity_type: 'meeting').last
+      expect(reply.events).to eq([Assistant::Conversions.schedule(visit)])
+      expect(reply.events.first[:name]).to eq('Schedule')
+
+      brain_says('Done.', book_slot: Assistant::Booking.new(chat).slots.last.id)
+      expect(Assistant::WebChat.new(chat).visitor_says!('Actually the last one').events).to eq([])
+      expect(LeadActivity.where(lead_id: lead.id, activity_type: 'meeting').count).to eq(1)
+    end
+  end
+
   it 'asks the rep 30 minutes after a visit started whether the buyer came, once' do
     travel_to(monday_8am) do
       visit = LeadActivity.create!(lead_id: lead.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', subject: 'Visit',
