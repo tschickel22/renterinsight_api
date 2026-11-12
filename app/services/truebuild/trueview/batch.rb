@@ -80,6 +80,9 @@ module Truebuild
         return 0 if Credits.out? # each would fail at once
         rows = waiting(run).order(:id).limit(SIZE).to_a
         return 0 if rows.empty?
+        # Batch drawings skip the per-drawing check (FactoryRun.over_budget!),
+        # so the budget is checked here, before more are paid for.
+        return 0 if FactoryRun.stop_at_budget!(run)
 
         claim = SecureRandom.hex(8)
         by_model = Hash.new { |h, k| h[k] = [] }

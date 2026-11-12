@@ -53,6 +53,17 @@ RSpec.describe Truebuild::Trueview::Batch do
     allow(Truebuild::Trueview::Providers::Gemini).to receive(:resolve) { |m| m }
   end
 
+  it 'sends nothing more once the run has really spent its budget' do
+    run = run_api.start!([home], budget_usd: 1, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)
+    TruebuildFactoryRunJob.perform_now(run.id)
+    TruebuildSurfaceMask.create!(source_url: front, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION, status: 'done',
+                                 coverage: 0, mask_url: 'https://b/m.png', usage: { 'cost_usd' => 1.2 })
+    expect(Truebuild::Trueview::GeminiBatch).not_to receive(:submit)
+    expect(described_class.submit!(run.reload)).to eq(0)
+    expect(run.reload.status).to eq('budget_reached')
+    expect(run.renders.pluck(:status).uniq).to eq(['cancelled'])
+  end
+
   it 'sends a batch run its drawings by batch, at half price, and checks each as it comes back' do
     ActiveJob::Base.queue_adapter.enqueued_jobs.clear
     run = run_api.start!([home], budget_usd: 5, scope: { manufacturer_id: mfr.id }, by: admin, batch: true)

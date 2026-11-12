@@ -41,7 +41,9 @@ module Truebuild
       }.freeze
 
       # => [{ 'photo', 'surface', 'held', 'of', 'cause', 'summary', 'action' }]
-      def review!(run)
+      # room_usd: what the run may still spend. Each outline redone costs
+      # about an outline (outline_usd); none is started past it.
+      def review!(run, room_usd: Float::INFINITY, outline_usd: 0)
         rows = run.renders.where(status: %w[rejected done]).to_a.select { |r| r.usage['mask_version'].to_i >= Layer::VERSION }
         groups = rows.group_by { |r| [r.source_url, Surfaces.category(r.selection.first&.dig('surface'))] }
         found = groups.filter_map do |(photo, key), rs|
@@ -51,7 +53,9 @@ module Truebuild
           mask = TruebuildSurfaceMask.find_by(source_url: photo, surface: key, version: Surfaces::VERSION)
           next unless mask&.present?
           next if mask.usage['pattern_redo'] # its outline was already redone for a pattern once
+          next if room_usd < outline_usd
 
+          room_usd -= outline_usd
           diagnose!(mask, held).merge('photo' => photo, 'surface' => key, 'held' => held.size, 'of' => rs.size)
         rescue StandardError => e
           Rails.logger.warn("TrueView patterns #{photo} #{key}: #{e.message}")
@@ -81,7 +85,7 @@ module Truebuild
         )
         input = result[:input]
         action = if input['cause'] == 'outline' && input['outline_note'].present?
-                   redo!(mask, input['outline_note'])
+                   redo!(mask, input['outline_note'], held.first&.usage&.dig('factory_run_id'))
                    'outlined again; its drawings are cut again'
                  else
                    'left for review'
@@ -92,11 +96,11 @@ module Truebuild
 
       # Outlined again in the background, told what was wrong; Surfaces.redo!
       # then cuts the surface's drawings again, held-back ones included.
-      def redo!(mask, note)
+      def redo!(mask, note, run_id = nil)
         # redo_pending: its held-back drawings wait for the redo to cut them
         # again, rather than being redrawn meanwhile (Buyer.held_before_escalation).
         mask.update_columns(usage: mask.usage.merge('pattern_redo' => true, 'redo_pending' => true), updated_at: Time.current)
-        TruebuildOutlineRedoJob.perform_later(mask.id, note)
+        TruebuildOutlineRedoJob.perform_later(mask.id, note, run_id)
       end
     end
   end

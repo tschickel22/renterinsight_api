@@ -57,7 +57,7 @@ RSpec.describe Truebuild::Trueview::Patterns do
   it 'redoes an outline several colors failed the same way on, and cuts those drawings again instead of redrawing them' do
     claude_says('cause' => 'outline', 'outline_note' => 'Include the porch wall under the overhang.', 'summary' => 'The outline misses the porch wall.')
     expect { Truebuild::Trueview::FactoryRun.repair!(run.reload) }.to have_enqueued_job(TruebuildOutlineRedoJob)
-      .with(mask.id, 'Include the porch wall under the overhang.')
+      .with(mask.id, 'Include the porch wall under the overhang.', run.id)
     expect(mask.reload.usage['pattern_redo']).to be(true)
     expect(run.reload.progress['patterns'].sole).to include('surface' => 'siding', 'held' => 3, 'of' => 4, 'cause' => 'outline')
     # Held back on that outline: cut again after the redo, not redrawn now.

@@ -190,12 +190,21 @@ module Truebuild
         TruebuildRender.where(source_url: mask.source_url, purpose: 'layer', status: %w[done rejected]).where.not(image_url: nil)
                        .select { |r| category(r.selection.first&.dig('surface')) == mask.surface }.each do |old|
           old.update!(status: 'superseded')
+          # Cut on its own job, not sent with a batch: a cut needs no image
+          # model, and a batch run that had ended never sent the ones it
+          # claimed (Jessup run 15 left 15). inherited_usd: the drawing's own
+          # cost, carried in cost_usd but already counted on the old row.
           TruebuildRender.create!(old.attributes.except('id', 'created_at', 'updated_at', 'layer_url', 'mask_coverage', 'lab_run')
-                                     .merge('status' => 'queued', 'usage' => old.usage.merge('recut_from' => old.id).except('mask_version')))
+                                     .merge('status' => 'queued',
+                                            'usage' => old.usage.except('mask_version', *RECUT_DROPS)
+                                                         .merge('recut_from' => old.id, 'inherited_usd' => old.cost_usd.to_f)))
                          .tap { |r| TruebuildRenderJob.set(queue: :low).perform_later(r.id) }
         end
         fresh
       end
+
+      # A batch drawing's bookkeeping, not carried onto its re-cut.
+      RECUT_DROPS = %w[batch batch_claim batch_name batch_box batch_model batch_drawn awaiting_check job_id inherited_usd].freeze
 
       OUTLINE_TRIES = 3 # outlines Claude rejects before a surface is left undrawn on a photo
 
@@ -504,10 +513,18 @@ module Truebuild
         # cabinet color was ever drawn there.
         harmless = onto.blank? || onto == 'none' || onto == 'furniture or decor' || outranks?(onto, key) ||
                    verdict['spill_size'] == 'slight'
-        missed = verdict['misses'].present? && !verdict['misses'].to_s.strip.match?(/\Anone\.?\z/i)
+        # A slight miss ("a small or distant part a buyer would hardly
+        # notice") is let through on every surface, as it was for floors. Of
+        # the 14 production outlines turned down for nothing but a slight
+        # spill and a slight miss (2026-11-12), all 14 were right: Murphy's
+        # counters short of the island's front lip, Wilson's cabinets with
+        # one lower door patchy. The drawing's own check still catches an
+        # old finish left showing.
+        missed = verdict['misses'].present? && !verdict['misses'].to_s.strip.match?(/\Anone\.?\z/i) &&
+                 verdict['miss_size'] != 'slight'
         # Marked down for nothing but a slight or harmless spill: Brighton's
         # roof and Woodward's counter scored 3 for "slightly" touching trim.
-        # A floor's slight miss likewise.
+        # A slight miss likewise.
         fit = MIN_FIT if harmless && !missed && fit == MIN_FIT - 1 && (verdict['spill_size'].present? || verdict['miss_size'] == 'slight')
         fit = [fit, MIN_FIT - 1].min unless harmless
         # Woodward's kitchen cabinets left out the one above the microwave.

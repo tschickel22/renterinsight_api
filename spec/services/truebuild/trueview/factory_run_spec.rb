@@ -253,6 +253,40 @@ RSpec.describe Truebuild::Trueview::FactoryRun do
       expect(Truebuild::Trueview::Surfaces.retry_due?(mask.reload)).to be(true)
     end
 
+    it 'outlines again only what the budget leaves room for' do
+      masks = 2.times.map do |i|
+        TruebuildSurfaceMask.create!(source_url: front, surface: %w[shutters siding][i], version: Truebuild::Trueview::Surfaces::VERSION,
+                                     status: 'done', coverage: 0, mask_url: 'https://b/m.png', error: 'Took the windows.',
+                                     usage: { 'attempts' => [{ 'present' => true, 'fit' => 2 }], 'cost_usd' => 0.3 })
+      end
+      outline = described_class.rates(batch: run.batch?)[:outline]
+      run.update!(budget_usd: run.spent_usd + outline * 1.5)
+      described_class.repair!(run.reload)
+      expect(masks.count { |m| Truebuild::Trueview::Surfaces.retry_due?(m.reload) }).to eq(1)
+    end
+
+    it 'does not finish while an outline is being redone for it' do
+      TruebuildSurfaceMask.create!(source_url: front, surface: 'siding', version: Truebuild::Trueview::Surfaces::VERSION, status: 'done',
+                                   coverage: 0.4, mask_url: 'https://b/m.png', usage: { 'pattern_redo' => true, 'redo_pending' => true })
+      run.update_columns(progress: run.reload.progress.merge('repair_queued' => 2, 'repair_rounds' => 2))
+      described_class.drawing_finished!(run.reload)
+      expect(run.reload.status).to eq('running')
+      expect(described_class.progress(run)[:phase]).to eq('repairing')
+
+      TruebuildSurfaceMask.update_all(usage: {})
+      described_class.drawing_finished!(run.reload)
+      expect(run.reload.status).to eq('finished')
+    end
+
+    it 'counts a re-cut only for its own check, not the drawing it was cut from' do
+      old = run.renders.first
+      old.update_columns(cost_usd: 0.2)
+      before = run.spent_usd
+      TruebuildRender.create!(old.attributes.except('id', 'created_at', 'updated_at')
+                                 .merge('cost_usd' => 0.21, 'usage' => old.usage.merge('recut_from' => old.id, 'inherited_usd' => 0.2)))
+      expect(run.spent_usd).to be_within(0.0001).of(before + 0.01)
+    end
+
     it 'starts again a repair round a deploy dropped' do
       run.update_columns(progress: run.reload.progress.merge('repair_queued' => 1, 'repair_rounds' => 0), updated_at: 1.hour.ago)
       expect { described_class.progress(run.reload) }.to have_enqueued_job(TruebuildFactoryRunRepairJob).with(run.id)

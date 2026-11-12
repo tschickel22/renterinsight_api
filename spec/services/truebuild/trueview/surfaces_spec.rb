@@ -41,8 +41,15 @@ RSpec.describe Truebuild::Trueview::Surfaces do
       expect(described_class.min_present('flooring')).to eq(0.02)
     end
 
-    it 'allows no miss on any other surface' do
-      expect(described_class.strict_fit('cabinets', slight_miss.merge('fit' => 4))).to eq(3)
+    it 'lets a slight miss through on every surface, and turns a clear one down' do
+      expect(described_class.strict_fit('cabinets', slight_miss.merge('fit' => 4))).to eq(4)
+      # Murphy's counters: a slight spill on the sink and the island's front lip slightly short.
+      murphy = { 'fit' => 3, 'spills_onto' => 'sink or faucet', 'spill_size' => 'slight',
+                 'misses' => "the narrow front edge of the island countertop", 'miss_size' => 'slight' }
+      expect(described_class.strict_fit('countertop', murphy)).to eq(described_class::MIN_FIT)
+      expect(described_class.strict_fit('countertop', murphy.merge('miss_size' => 'clear'))).to eq(3)
+      expect(described_class.strict_fit('countertop', murphy.merge('spill_size' => 'clear'))).to eq(3)
+      expect(described_class.strict_fit('cabinets', slight_miss.merge('fit' => 4, 'miss_size' => nil))).to eq(3)
     end
   end
 
