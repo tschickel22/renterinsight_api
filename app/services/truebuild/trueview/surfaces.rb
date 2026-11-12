@@ -273,8 +273,7 @@ module Truebuild
         # A wrong outline would paint the wrong thing in every color: no
         # layer for that surface is better. An absent surface is no layer too.
         coverage = verdict['present'] && verdict['fit'].to_i >= MIN_FIT ? (mask.avg / 255.0).round(4) : 0
-        url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png',
-                                   "truebuild/trueview/masks/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{(record_as || key).parameterize}-v#{VERSION}.png")
+        url = Trueview.store_bytes(mask.pngsave_buffer(compression: 9), 'image/png', mask_key(source_url, record_as || key))
         TruebuildSurfaceMask.create!(source_url: source_url, surface: record_as || key, version: VERSION, mask_url: url, coverage: coverage,
                                      model: result[:model], error: verdict['note'].presence,
                                      usage: { 'cost_usd' => spent.round(4), 'attempts' => attempts.map { |a| a.except('cost_usd') },
@@ -299,6 +298,19 @@ module Truebuild
       # where the painter cannot see an edge, so the order decides, not it.
       PRECEDENCE = ['countertop', 'backsplash', 'refrigerator', 'appliances', 'cabinets', 'flooring', 'accent wall',
                     'shutters', 'corner posts', 'shingles', 'siding'].freeze
+
+      # Staging and production write to the same bucket and outline the same
+      # catalog photos. One path for both let either side overwrite the
+      # other's outline for a shared photo, so each side gets its own folder.
+      def mask_key(source_url, surface)
+        "truebuild/trueview/masks/#{deploy_env}/#{Digest::SHA256.hexdigest(source_url)[0, 16]}-#{surface.parameterize}-v#{VERSION}.png"
+      end
+
+      def deploy_env
+        return 'staging' if Rails.env.staging? || ENV['RENDER_SERVICE_NAME'].to_s.include?('staging')
+
+        Rails.env.to_s
+      end
 
       def outranks?(key, other)
         (PRECEDENCE.index(key) || PRECEDENCE.size) < (PRECEDENCE.index(other) || PRECEDENCE.size)

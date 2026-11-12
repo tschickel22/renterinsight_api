@@ -82,4 +82,20 @@ RSpec.describe Truebuild::Trueview::Surfaces do
       expect(described_class.describe('Cabinets')).to include('cabinet doors, drawer fronts')
     end
   end
+
+  describe '.mask_key' do
+    it 'keeps staging and production outlines apart' do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('RENDER_SERVICE_NAME').and_return('renterinsight-api-staging')
+      staging = described_class.mask_key('https://x/photo.jpg', 'cabinets')
+      allow(ENV).to receive(:[]).with('RENDER_SERVICE_NAME').and_return('renterinsight-jobs-prod')
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new('production'))
+      production = described_class.mask_key('https://x/photo.jpg', 'cabinets')
+
+      expect(staging).to start_with('truebuild/trueview/masks/staging/')
+      expect(production).to start_with('truebuild/trueview/masks/production/')
+      expect(staging.delete_prefix('truebuild/trueview/masks/staging/'))
+        .to eq(production.delete_prefix('truebuild/trueview/masks/production/'))
+    end
+  end
 end
