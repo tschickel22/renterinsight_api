@@ -262,6 +262,9 @@ module SiteProfiles
           statistics, or claims — a fabricated review on a real dealer's site is
           a serious problem.
         - Omit a section entirely rather than padding it with filler.
+        - At most #{MAX_ITEMS_PER_SECTION} items in any copy section (anything past
+          that is discarded), at most 24 gallery images and 6 hero images. On a
+          large site pick the strongest ones; do not list every home or page.
         - Preserve the dealer's own voice and phrasing; do not rewrite in
           generic marketing language.
         - Absolute URLs only.

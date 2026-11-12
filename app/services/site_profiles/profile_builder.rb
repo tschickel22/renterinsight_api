@@ -14,7 +14,11 @@ module SiteProfiles
     class GenerationError < StandardError; end
 
     CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages'
-    MAX_TOKENS = 8_000
+    # A large dealer site (bestbuymh.com, 2026-11-12) ran past the old 8,000
+    # and the JSON ended mid-string at line ~586, on the first call and again
+    # on the retry. The prompt now states the per-section caps (the model was
+    # writing items ProfileSchema throws away anyway), and this leaves room.
+    MAX_TOKENS = 16_000
     FEATURE = 'site_content_profile'
 
     # The model sees image URLs and alt text, not the pixels, so it cannot judge
@@ -81,6 +85,9 @@ module SiteProfiles
       raw = begin
         parse_json(response[:text])
       rescue GenerationError => e
+        # Cut off at the token ceiling is a different failure from a stray
+        # quote, and asking for "valid JSON" again just truncates again.
+        note = response[:stop_reason] == 'max_tokens' ? TRUNCATION_NOTE : JSON_REPAIR_NOTE
         # One retry, saying what was wrong with the last answer.
         #
         # A scan is minutes of crawling, rendering and reading before the model
@@ -90,7 +97,7 @@ module SiteProfiles
         # wrong trade when asking again costs one more call.
         Rails.logger.warn("[SiteProfiles::ProfileBuilder] #{e.message}; asking once more")
         response = call_claude(
-          system_prompt: "#{system}\n\n#{JSON_REPAIR_NOTE}",
+          system_prompt: "#{system}\n\n#{note}",
           user_message: message, model: model, max_tokens: MAX_TOKENS
         )
         parse_json(response[:text])
@@ -288,6 +295,13 @@ module SiteProfiles
       itself is the usual cause.
     TEXT
 
+    TRUNCATION_NOTE = <<~TEXT
+      Your previous reply was cut off before the JSON object was finished
+      because it was too long. Return a SHORTER answer: at most 6 items in any
+      copy section, at most 12 gallery images, and keep every body and
+      description to two or three sentences. Return ONLY the JSON object.
+    TEXT
+
     def parse_json(text)
       cleaned = text.to_s.strip
       cleaned = cleaned.gsub(/\A```(?:json)?\s*/, '').gsub(/\s*```\z/, '')
@@ -314,7 +328,7 @@ module SiteProfiles
       uri = URI(CLAUDE_API_URL)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
-      http.read_timeout = 180
+      http.read_timeout = 300
       http.open_timeout = 30
 
       request = Net::HTTP::Post.new(uri)
@@ -343,6 +357,7 @@ module SiteProfiles
       {
         text: result['content']&.find { |c| c['type'] == 'text' }&.fetch('text', ''),
         model_version: result['model'],
+        stop_reason: result['stop_reason'],
         input_tokens: result.dig('usage', 'input_tokens'),
         output_tokens: result.dig('usage', 'output_tokens')
       }
