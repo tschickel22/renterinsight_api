@@ -775,6 +775,21 @@ class ApplicationController < ActionController::API
     true
   end
 
+  # A company admin of this company, or a platform admin (impersonating
+  # counts, so it reads original_user first). For features a dealer's admin
+  # runs but their staff should not, such as the QuickBooks switch and
+  # connecting a bank.
+  #
+  # @return [Boolean] true if authorized, renders error and returns false if not
+  def require_company_admin!
+    return true if original_user&.platform_admin? || original_user&.super_admin?
+    return true if current_user&.effective_admin?
+
+    Rails.logger.warn("[Authorization] User #{current_user&.id} denied company admin access")
+    render json: { error: 'Forbidden - Company admin access required' }, status: :forbidden
+    false
+  end
+
   # Get visible field keys from active page layout for a module
   # Used to validate only fields that are actually in the user's form
   #

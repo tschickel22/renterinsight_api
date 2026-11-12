@@ -43,11 +43,23 @@ RSpec.describe 'Api::V1 bank feeds (connect a bank)', type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
-  it 'is platform admins only for now' do
-    expect(StripeBankFeedService).not_to receive(:new)
+  it "lets the dealer's own company admin connect a bank" do
+    service = instance_double(StripeBankFeedService)
+    allow(StripeBankFeedService).to receive(:new).with(company).and_return(service)
+    allow(service).to receive(:create_company_session).and_return(client_secret: 'secret', session_id: 'fcsess_1')
+
     post '/api/v1/bank_feeds/session', headers: dealer_headers
+    expect(response).to have_http_status(:ok)
+  end
+
+  it 'keeps it from staff who are not admins' do
+    staff = User.create!(email: "st-#{SecureRandom.hex(4)}@example.com", first_name: 'S', last_name: 'T',
+                         password: 'Pass1234!', company_id: company.id, role: 'user')
+    staff_headers = { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: staff.id, company_id: company.id)}" }
+    expect(StripeBankFeedService).not_to receive(:new)
+    post '/api/v1/bank_feeds/session', headers: staff_headers
     expect(response).to have_http_status(:forbidden)
-    post '/api/v1/bank_feeds/connect', params: { session_id: 'fcsess_1' }, headers: dealer_headers, as: :json
+    post '/api/v1/bank_feeds/connect', params: { session_id: 'fcsess_1' }, headers: staff_headers, as: :json
     expect(response).to have_http_status(:forbidden)
   end
 end
