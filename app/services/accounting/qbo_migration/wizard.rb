@@ -15,7 +15,10 @@ module Accounting
     #   accounts                   [row] (see #account_row)
     #   banks                      [{ qbo_account_id, name, kind, match: { bank_account_id, closed,
     #                                 previous_feed_start_date } }]
-    #   uncleared                  { qbo_account_id => { statement_balance, items: [...] } }
+    #   uncleared                  { qbo_account_id => { statement_balance, statement_source ('bank' | 'typed'),
+    #                                bank_balance: { status, amount, current, lines_after, as_of, ... }, items: [...] } }
+    #                              bank_balance is what the bank feed says the statement balance was
+    #                              (see #fetch_bank_balances!)
     #   lists                      { customers: [...], vendors: [...] }
     #   open_invoices, customer_credits, open_bills, vendor_credits
     #   notes                      { suggest:, uncleared: } messages for the person
@@ -607,6 +610,8 @@ module Accounting
           bank_account_id: bank.dig('match', 'bank_account_id'),
           balance_at_cutover: self.class.money(row['balance_at_cutover']),
           statement_balance: self.class.money(state['statement_balance']),
+          statement_from_bank: statement_from_bank?(state),
+          bank_balance: bank_balance_json(state['bank_balance']),
           items: Array(state['items']).map do |i|
             { id: i['id'], date: i['date'], kind: i['kind'], payee: i['payee'], reference: i['reference'],
               amount: self.class.money(i['amount']), from_quickbooks: i['from_quickbooks'] ? true : false }
@@ -663,8 +668,12 @@ module Accounting
             raw = entry['statement_balance']
             if raw.blank?
               state['statement_balance'] = nil
+              state.delete('statement_source')
             elsif numeric?(raw)
               state['statement_balance'] = self.class.d(raw).round(2).to_s('F')
+              from_bank = state.dig('bank_balance', 'status') == 'ready' &&
+                          self.class.d(state.dig('bank_balance', 'amount')) == self.class.d(state['statement_balance'])
+              state['statement_source'] = from_bank ? 'bank' : 'typed'
             else
               errors << "#{bank['name']}: the statement balance must be a number"
             end
@@ -702,6 +711,86 @@ module Accounting
 
         config.delete('preview_viewed_at')
         save!
+      end
+
+      # ── Statement balances from the bank feed ───────────────────
+
+      # Asks each matched bank with a connected feed for its balance at the
+      # end of the cutover day (StripeBankFeedService#balance_on) and keeps
+      # the answer on the bank's uncleared state. A blank statement balance,
+      # or one filled from the bank earlier, takes the bank's figure; one the
+      # person typed is never overwritten. Stripe answers 'pending' while it
+      # fetches; the screen asks again until every bank is ready.
+      def fetch_bank_balances!(service: nil)
+        ensure_draft!
+        config['uncleared'] ||= {}
+        zone = ActiveSupport::TimeZone[@company.time_zone] || Time.zone
+        accounts = @company.bank_accounts.where(id: matched_banks.map { |b| b.dig('match', 'bank_account_id') }).index_by(&:id)
+        changed = false
+
+        matched_banks.each do |bank|
+          state = config['uncleared'][bank['qbo_account_id']] ||= { 'statement_balance' => nil, 'items' => [] }
+          ba = accounts[bank.dig('match', 'bank_account_id').to_i]
+          result =
+            if ba.nil?
+              { status: 'unavailable', reason: 'The matched bank account was not found' }
+            elsif ba.stripe_fc_account_id.blank? || ba.stripe_fc_status != 'active'
+              { status: 'not_connected' }
+            else
+              begin
+                (service ||= StripeBankFeedService.new(@company)).balance_on(ba, cutover_date, zone: zone)
+              rescue StandardError => e
+                Rails.logger.warn("[QboMigration] bank balance for bank account #{ba.id}: #{e.message}")
+                { status: 'unavailable', reason: 'Bank balances are not available right now' }
+              end
+            end
+          state['bank_balance'] = bank_balance_state(bank, result)
+          next unless result[:status] == 'ready'
+
+          amount = state['bank_balance']['amount']
+          fill = state['statement_balance'].nil? || state['statement_source'] == 'bank'
+          next unless fill && state['statement_balance'] != amount
+
+          state['statement_balance'] = amount
+          state['statement_source'] = 'bank'
+          changed = true
+        end
+
+        config.delete('preview_viewed_at') if changed
+        save!
+      end
+
+      # Money in the statement's own terms: what the bank holds, or for a
+      # card what is owed (Stripe signs a card's debt negative).
+      def bank_balance_state(bank, result)
+        out = { 'status' => result[:status].to_s, 'checked_at' => Time.current.iso8601 }
+        out['reason'] = result[:reason] if result[:reason]
+        return out unless result[:status] == 'ready'
+
+        sign = bank['kind'] == 'credit_card' ? -1 : 1
+        out.merge(
+          'amount' => (result[:balance] * sign).round(2).to_s('F'),
+          'current' => (result[:current] * sign).round(2).to_s('F'),
+          'lines_after' => result[:lines_after],
+          'as_of' => result[:as_of].iso8601,
+          'old_date' => result[:old_date] ? true : false
+        )
+      end
+
+      def bank_balance_json(bb)
+        return nil if bb.blank?
+
+        {
+          status: bb['status'], reason: bb['reason'], amount: self.class.money(bb['amount']),
+          current: self.class.money(bb['current']), lines_after: bb['lines_after'], as_of: bb['as_of'],
+          old_date: bb['old_date'] ? true : false, checked_at: bb['checked_at']
+        }
+      end
+
+      def statement_from_bank?(state)
+        state['statement_source'] == 'bank' && state['statement_balance'].present? &&
+          state.dig('bank_balance', 'status') == 'ready' &&
+          self.class.d(state.dig('bank_balance', 'amount')) == self.class.d(state['statement_balance'])
       end
 
       # ── Preview ─────────────────────────────────────────────────

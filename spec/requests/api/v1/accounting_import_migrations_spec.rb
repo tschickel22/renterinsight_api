@@ -390,6 +390,96 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
     end
   end
 
+  describe 'statement balances from the bank feed' do
+    let(:service) { instance_double(StripeBankFeedService) }
+    let(:ready) do
+      ->(balance) { { status: 'ready', balance: BigDecimal(balance), current: BigDecimal('190000'), lines_after: 4,
+                      as_of: Time.utc(2026, 11, 12, 15), old_date: false } }
+    end
+
+    before do
+      books[:banks][:chase].update!(stripe_fc_account_id: 'fca_chase', stripe_fc_status: 'active')
+      books[:banks][:amex].update!(stripe_fc_account_id: 'fca_amex', stripe_fc_status: 'active')
+      allow(StripeBankFeedService).to receive(:new).and_return(service)
+    end
+
+    def match_all(id)
+      patch "#{base}/#{id}/banks", params: { matches: [
+        { qbo_account_id: '1', bank_account_id: books[:banks][:chase].id },
+        { qbo_account_id: '2', bank_account_id: books[:banks][:wells].id },
+        { qbo_account_id: '14', bank_account_id: books[:banks][:amex].id }
+      ] }, headers: headers, as: :json
+    end
+
+    it 'fills blank statement balances from the bank and ties, a card as what was owed' do
+      allow(service).to receive(:balance_on) do |ba, date, zone:|
+        expect(date).to eq(Date.new(2026, 9, 30))
+        expect(zone.name).to eq(ActiveSupport::TimeZone[company.time_zone].name)
+        ba.account_type == 'credit_card' ? ready.call('-6842.17') : ready.call('181300.25')
+      end
+      id = start_migration
+      match_all(id)
+
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      banks = json['banks'].index_by { |b| b['qbo_account_id'] }
+      expect(banks['1']).to include('statement_balance' => 181_300.25, 'statement_from_bank' => true, 'difference' => 0.0)
+      expect(banks['1']['bank_balance']).to include('status' => 'ready', 'amount' => 181_300.25, 'lines_after' => 4,
+                                                    'as_of' => '2026-11-12T15:00:00Z')
+      expect(banks['14']).to include('statement_balance' => 6842.17, 'statement_from_bank' => true)
+      expect(banks['14']['bank_balance']['current']).to eq(-190_000.0)
+      # Wells Fargo has no feed: left for the person to type.
+      expect(banks['2']).to include('statement_balance' => nil, 'statement_from_bank' => false)
+      expect(banks['2']['bank_balance']).to include('status' => 'not_connected')
+      expect(service).to have_received(:balance_on).twice
+
+      get "#{base}/#{id}/migration", headers: headers
+      expect(json.dig('migration', 'steps', 'uncleared', 'done')).to be(false) # Wells still blank
+    end
+
+    it 'never overwrites a balance the person typed, but updates one it filled itself' do
+      amounts = { 'checking' => '181300.25' }
+      allow(service).to receive(:balance_on) { |ba, *_| ba.account_type == 'credit_card' ? { status: 'pending' } : ready.call(amounts['checking']) }
+      id = start_migration
+      match_all(id)
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(json['banks'].find { |b| b['qbo_account_id'] == '14' }).to include('statement_balance' => nil)
+      expect(json['banks'].find { |b| b['qbo_account_id'] == '14' }['bank_balance']).to include('status' => 'pending')
+
+      amounts['checking'] = '181290.25'
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(json['banks'].first).to include('statement_balance' => 181_290.25, 'statement_from_bank' => true)
+
+      put "#{base}/#{id}/uncleared", params: { banks: [{ qbo_account_id: '1', statement_balance: 181_000 }] }, headers: headers, as: :json
+      expect(json['banks'].first).to include('statement_balance' => 181_000.0, 'statement_from_bank' => false)
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(json['banks'].first).to include('statement_balance' => 181_000.0, 'statement_from_bank' => false)
+      expect(json['banks'].first['bank_balance']['amount']).to eq(181_290.25)
+
+      # Typing the bank's own figure counts as from the bank again.
+      put "#{base}/#{id}/uncleared", params: { banks: [{ qbo_account_id: '1', statement_balance: '181290.25' }] }, headers: headers, as: :json
+      expect(json['banks'].first['statement_from_bank']).to be(true)
+    end
+
+    it 'keeps going when bank balances are not set up at all' do
+      allow(StripeBankFeedService).to receive(:new).and_raise('Stripe secret key not configured')
+      id = start_migration
+      match_all(id)
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(json['banks'].first['bank_balance']).to include('status' => 'unavailable')
+      expect(json['banks'].first['statement_balance']).to be_nil
+    end
+
+    it 'refuses once the switch is posted' do
+      allow(service).to receive(:balance_on).and_return(ready.call('1'))
+      id = start_migration
+      company.accounting_imports.find(id).update_columns(status: 'completed')
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
   describe 'preview, post and rollback' do
     it 'refuses to post with the blockers, then posts and rolls back' do
       id = start_migration
