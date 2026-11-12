@@ -2726,6 +2726,7 @@ Rails.application.routes.draw do
           get   :banks
           patch :banks, action: :update_banks
           post  'banks/create', action: :create_banks
+          post  :go_live
           get   :uncleared
           put   :uncleared, action: :update_uncleared
           get   :preview, action: :migration_preview

@@ -8,6 +8,7 @@ class Api::V1::AccountingImportsController < ApplicationController
   before_action :require_platform_admin!, only: %i[
     create_migration migration update_migration accounts suggest_accounts update_accounts
     banks update_banks create_banks uncleared update_uncleared migration_preview post_migration rollback_migration
+    go_live
   ]
 
   def index
@@ -17,7 +18,9 @@ class Api::V1::AccountingImportsController < ApplicationController
     # QuickBooks company (accounts, lists, open items). migration marks the
     # rows the switch wizard opens.
     imports = @company.accounting_imports.recent
-    render json: { items: imports.map { |i| i.as_json(except: :import_config).merge('migration' => i.migration?) } }
+    render json: { items: imports.map do |i|
+      i.as_json(except: :import_config).merge('migration' => i.migration?, 'trial' => i.migration? && i.import_config&.dig('trial') ? true : false)
+    end }
   end
 
   def show
@@ -119,7 +122,8 @@ class Api::V1::AccountingImportsController < ApplicationController
     date = parse_cutover(params[:cutover_date])
     return render(json: { error: 'Choose a cutover date' }, status: :unprocessable_entity) unless date
 
-    import = Accounting::QboMigration::Wizard.start!(company: @company, user: current_user, cutover_date: date)
+    trial = ActiveModel::Type::Boolean.new.cast(params[:trial]) || false
+    import = Accounting::QboMigration::Wizard.start!(company: @company, user: current_user, cutover_date: date, trial: trial)
     render json: { migration: wizard_for(import).migration_json }, status: :created
   rescue Accounting::QboMigration::Error, QuickbooksApiError, QuickbooksAuthError => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -253,6 +257,36 @@ class Api::V1::AccountingImportsController < ApplicationController
   rescue Accounting::QboMigration::Poster::BlockedError => e
     render json: { error: 'This switch cannot post yet', blockers: e.blockers }, status: :unprocessable_entity
   rescue Accounting::QboMigration::Error, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/accounting_imports/:id/go_live { cutover_date, trial }
+  # From a posted trial (E101): rolls the trial back and starts a new switch
+  # at the new cutover with every account and bank match carried over, in one
+  # transaction. trial: true updates the trial to a newer date instead.
+  def go_live
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    date = parse_cutover(params[:cutover_date])
+    return render(json: { error: 'Choose a cutover date' }, status: :unprocessable_entity) unless date
+    unless wizard.import.status == 'posted' && wizard.trial?
+      return render(json: { error: 'Only a posted trial switch can be updated or taken live' }, status: :unprocessable_entity)
+    end
+    if date < wizard.cutover_date
+      return render(json: { error: "The new cutover can't be before the trial's (#{wizard.cutover_date.iso8601})" },
+                    status: :unprocessable_entity)
+    end
+
+    trial = ActiveModel::Type::Boolean.new.cast(params[:trial]) || false
+    import = nil
+    ActiveRecord::Base.transaction do
+      Accounting::QboMigration::Rollback.new(wizard).run!(current_user)
+      import = Accounting::QboMigration::Wizard.start!(company: @company, user: current_user, cutover_date: date,
+                                                       trial: trial, from: wizard.import.reload)
+    end
+    render json: { migration: wizard_for(import).migration_json }, status: :created
+  rescue Accounting::QboMigration::Error, QuickbooksApiError, QuickbooksAuthError, ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
