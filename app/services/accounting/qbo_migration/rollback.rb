@@ -88,6 +88,13 @@ module Accounting
             ba.update_column(:feed_start_date, prior && Date.iso8601(prior))
           end
 
+          # The older QuickBooks sync, turned off by posting, goes back to how
+          # it was. Contacts, vendors and converted leads stay.
+          Array(@wizard.config.dig('posted', 'quickbooks_sync_before')).each do |place|
+            rec = place['type'] == 'location' ? @company.locations.find_by(id: place['id']) : @company
+            rec&.update_column(:quickbooks_settings, place['settings'])
+          end
+
           @wizard.config['rolled_back_at'] = Time.current.iso8601
           @wizard.config['rolled_back_by_id'] = user&.id
           @import.status = 'rolled_back'

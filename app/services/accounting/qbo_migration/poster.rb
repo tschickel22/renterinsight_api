@@ -20,7 +20,7 @@ module Accounting
         @import = wizard.import
         @company = wizard.company
         @user = user
-        @created = { 'accounts' => [], 'contacts' => [], 'vendors' => [], 'bank_gl_links' => [] }
+        @created = { 'accounts' => [], 'contacts' => [], 'vendors' => [], 'bank_gl_links' => [], 'converted_leads' => [] }
         @results = {}
       end
 
@@ -39,6 +39,7 @@ module Accounting
           save_bills!(vendors, ids)
           save_reconciliations!(entry)
           settled = settle_trial_activity!
+          turn_off_old_sync!
 
           @wizard.config['posted'] = @created.merge(
             'posted_at' => Time.current.iso8601, 'posted_by_id' => @user&.id,
@@ -190,60 +191,88 @@ module Accounting
         end
       end
 
-      # { qbo customer id => contact }. Matched by QuickBooks id, then email,
-      # then name; created otherwise. The QuickBooks id is kept either way.
+      # { qbo customer id => contact }. Each one links to the contact it
+      # already is, converts the open lead it already is, or is created
+      # (ListMatcher, plus any choice made on the Customers and vendors step).
+      # The QuickBooks id is kept on the contact either way.
       def link_customers!
         out = {}
         created = 0
         matched = 0
+        converted = 0
+        by_lead = {}
         location_id = @wizard.default_location_id
+        rows = @wizard.list_rows('customers').index_by { |r| r[:external_id] }
         Array(@wizard.config.dig('lists', 'customers')).each do |c|
-          contact = @company.contacts.find_by(quickbooks_id: c['external_id'])
-          contact ||= @company.contacts.where('LOWER(email) = ?', c['email'].downcase).first if c['email'].present?
-          contact ||= find_contact_by_name(c)
-          if contact
-            contact.update_columns(quickbooks_id: c['external_id'], quickbooks_synced_at: Time.current) if contact.quickbooks_id.blank?
-            matched += 1
-          else
-            first, last =
-              if c['first_name'].present? then [c['first_name'], c['last_name']]
-              elsif c['company_name'].present? then [c['company_name'], nil]
-              else
-                parts = c['name'].to_s.split(' ', 2)
-                [parts.first.presence || 'Customer', parts.second]
+          row = rows[c['external_id'].to_s] || {}
+          contact =
+            case row[:status]
+            when 'link'
+              @company.contacts.find_by(id: row.dig(:match, :id))
+            when 'convert_lead'
+              lead_id = row.dig(:match, :id)
+              by_lead[lead_id] ||= begin
+                converted += 1
+                convert_lead!(lead_id, c, location_id)
               end
-            contact = @company.contacts.create!(
-              first_name: first, last_name: last, email: valid_email(c['email']), phone: valid_phone(c['phone']),
-              company_name: c['company_name'], street: c['street'], city: c['city'], state: c['state'], zip: c['zip'],
-              location_id: location_id, quickbooks_id: c['external_id'], quickbooks_synced_at: Time.current
-            )
-            @created['contacts'] << contact.id
+            when 'needs_choice'
+              raise Error, "Pick a match for QuickBooks customer #{row[:name]} first"
+            end
+          if contact
+            matched += 1 if row[:status] == 'link'
+            contact.update_columns(quickbooks_id: c['external_id'], quickbooks_synced_at: Time.current) if contact.quickbooks_id.blank?
+          else
+            contact = create_contact!(c, location_id)
             created += 1
           end
           out[c['external_id'].to_s] = contact
         end
-        @results[:customers] = { created: created, matched: matched }
+        @results[:customers] = { created: created, matched: matched, converted_leads: converted }
         out
       end
 
-      def find_contact_by_name(c)
-        if c['first_name'].present?
-          @company.contacts.where('LOWER(first_name) = ? AND LOWER(COALESCE(last_name, \'\')) = ?',
-                                  c['first_name'].downcase, c['last_name'].to_s.downcase).first
-        elsif c['company_name'].present?
-          @company.contacts.where('LOWER(company_name) = ?', c['company_name'].downcase).first
-        end
+      # The open lead this QuickBooks customer already is, converted the way
+      # Convert does it (Leads::Converter), so the person is one record with
+      # their history. Returns the contact the invoices go to.
+      def convert_lead!(lead_id, c, location_id)
+        lead = @company.leads.find(lead_id)
+        result = Leads::Converter.new(lead, company: @company, user: @user).call(create_contact_param: true)
+        @created['converted_leads'] << lead.id
+        contact = result.contact
+        # A lead without a first name gives no contact; make it from QuickBooks
+        # on the converted account.
+        contact ||= create_contact!(c, location_id, account_id: result.account&.id)
+        contact.update_columns(quickbooks_id: c['external_id'], quickbooks_synced_at: Time.current) if contact.quickbooks_id.blank?
+        contact
+      end
+
+      def create_contact!(c, location_id, account_id: nil)
+        first, last =
+          if c['first_name'].present? then [c['first_name'], c['last_name']]
+          elsif c['company_name'].present? then [c['company_name'], nil]
+          else
+            parts = c['name'].to_s.split(' ', 2)
+            [parts.first.presence || 'Customer', parts.second]
+          end
+        contact = @company.contacts.create!(
+          first_name: first, last_name: last, email: valid_email(c['email']), phone: valid_phone(c['phone']),
+          company_name: c['company_name'], street: c['street'], city: c['city'], state: c['state'], zip: c['zip'],
+          location_id: location_id, account_id: account_id, quickbooks_id: c['external_id'], quickbooks_synced_at: Time.current
+        )
+        @created['contacts'] << contact.id
+        contact
       end
 
       def link_vendors!
         out = {}
         created = 0
         matched = 0
-        vendors = @company.vendors.where(is_deleted: [false, nil])
+        rows = @wizard.list_rows('vendors').index_by { |r| r[:external_id] }
         Array(@wizard.config.dig('lists', 'vendors')).each do |v|
-          vendor = vendors.find_by(quickbooks_id: v['external_id']) || vendors.find_by(qb_vendor_id: v['external_id'])
-          vendor ||= vendors.where('LOWER(email) = ?', v['email'].downcase).first if v['email'].present?
-          vendor ||= vendors.where('LOWER(name) = ?', v['name'].to_s.downcase).first
+          row = rows[v['external_id'].to_s] || {}
+          raise Error, "Pick a match for QuickBooks vendor #{row[:name]} first" if row[:status] == 'needs_choice'
+
+          vendor = row[:status] == 'link' ? @company.vendors.find_by(id: row.dig(:match, :id)) : nil
           if vendor
             vendor.update_columns(quickbooks_id: v['external_id'], quickbooks_synced_at: Time.current) if vendor.quickbooks_id.blank?
             matched += 1
@@ -262,6 +291,28 @@ module Accounting
         end
         @results[:vendors] = { created: created, matched: matched }
         out
+      end
+
+      # The older QuickBooks sync stops sending and fetching, for the company
+      # and every location, so nothing reaches QuickBooks twice or comes back
+      # from it. What it was is kept in posted, and Rollback puts it back.
+      def turn_off_old_sync!
+        before = []
+        ([@company] + @company.locations.to_a).each do |rec|
+          settings = (rec.quickbooks_settings || {}).deep_stringify_keys
+          entities = settings['entities'] || {}
+          on = entities.select { |_k, v| v.is_a?(Hash) && ActiveModel::Type::Boolean.new.cast(v['enabled']) }.keys
+          auto = ActiveModel::Type::Boolean.new.cast(settings['auto_sync'])
+          next if on.empty? && !auto
+
+          before << { 'type' => rec.is_a?(Location) ? 'location' : 'company', 'id' => rec.id, 'settings' => rec.quickbooks_settings }
+          on.each { |k| entities[k] = entities[k].merge('enabled' => false) }
+          settings['entities'] = entities if entities.any?
+          settings['auto_sync'] = false
+          rec.update_column(:quickbooks_settings, settings)
+        end
+        @created['quickbooks_sync_before'] = before
+        @results[:quickbooks_sync_turned_off] = before.size
       end
 
       # Customer credits (credit memos, unapplied payments) come off the same
