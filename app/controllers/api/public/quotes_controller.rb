@@ -59,8 +59,15 @@ module Api
           return
         end
         
+        agreed = ActiveModel::Type::Boolean.new.cast(params[:agreed_to_terms])
+        if @quote.terms_required? && !agreed
+          render json: { error: 'Please read and agree to the terms and conditions before accepting.', terms_required: true },
+                 status: :unprocessable_entity
+          return
+        end
+
         # Update quote status
-        @quote.accept!(ip: request.remote_ip, via: 'public_link', by: @quote.contact&.full_name)
+        @quote.accept!(ip: request.remote_ip, via: 'public_link', by: @quote.contact&.full_name, terms_agreed: agreed)
         
         # Create note if provided
         notes = params[:notes]
