@@ -22,9 +22,23 @@ RSpec.describe Truebuild::Trueview::Surfaces do
       expect(described_class.strict_fit('flooring', slight_miss)).to eq(described_class::MIN_FIT)
     end
 
-    it 'still turns down a floor outline that clearly misses part of the floor' do
-      expect(described_class.strict_fit('flooring', slight_miss.merge('miss_size' => 'clear'))).to eq(3)
-      expect(described_class.strict_fit('flooring', slight_miss.merge('fit' => 2))).to eq(2)
+    it 'does not turn a floor down for what Claude says it misses' do
+      expect(described_class.strict_fit('flooring', slight_miss.merge('miss_size' => 'clear'))).to eq(described_class::MIN_FIT)
+      expect(described_class.strict_fit('flooring', slight_miss.merge('fit' => 2, 'miss_size' => 'clear'))).to eq(described_class::MIN_FIT)
+      expect(described_class.strict_fit('flooring', slight_miss.merge('fit' => 5))).to eq(5)
+    end
+
+    it 'turns a floor down for a clear spill, furniture included, or for the wrong thing' do
+      expect(described_class.strict_fit('flooring', slight_miss.merge('spills_onto' => 'tub or shower surround', 'spill_size' => 'clear'))).to eq(3)
+      expect(described_class.strict_fit('flooring', slight_miss.merge('spills_onto' => 'furniture or decor', 'spill_size' => 'clear'))).to eq(3)
+      expect(described_class.strict_fit('flooring', slight_miss.merge('spills_onto' => 'another wall', 'spill_size' => 'slight'))).to eq(described_class::MIN_FIT)
+      # The cabinets outrank the floor: the cut keeps an island's side theirs.
+      expect(described_class.strict_fit('flooring', slight_miss.merge('spills_onto' => 'cabinets', 'spill_size' => 'clear'))).to eq(described_class::MIN_FIT)
+      expect(described_class.strict_fit('flooring', slight_miss.merge('fit' => 1))).to eq(1)
+    end
+
+    it 'takes a floor outline under 2% of the photo as not there' do
+      expect(described_class.min_present('flooring')).to eq(0.02)
     end
 
     it 'allows no miss on any other surface' do
