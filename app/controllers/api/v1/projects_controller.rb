@@ -104,7 +104,7 @@ module Api
                      started_at estimated_completion_date actual_completion_date
                      owner_id deal_id vehicle_id location_id current_phase_id project_template_id
                      budget_amount actual_cost labor_cost materials_cost subcontractor_cost other_cost land_parcel_id
-                     client_visible client_access_token custom_field_values created_at updated_at
+                     client_visible share_media_with_client client_access_token custom_field_values created_at updated_at
                      assigned_vendor_id assigned_to_id assignment_issues],
             methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display],
             include: {
@@ -117,6 +117,7 @@ module Api
                      started_at completed_at estimated_start_date estimated_completion_date estimated_days
                      estimated_budget actual_cost
                      visible_to_client notify_client_on_start notify_client_on_complete client_notified_complete
+                     share_media_with_client
                      notes client_notes icon color completed_by_id created_at updated_at
                      assigned_vendor_id assigned_to_id],
             methods: [:status_display, :overdue?, :duration_days, :task_progress_percent, :tasks_summary,
@@ -904,7 +905,7 @@ module Api
           :customer_name, :customer_email, :customer_phone,
           :home_make, :home_model, :home_serial_number, :vehicle_id,
           :delivery_street, :delivery_city, :delivery_state, :delivery_zip,
-          :estimated_completion_date, :client_visible,
+          :estimated_completion_date, :client_visible, :share_media_with_client,
           :budget_amount, :land_parcel_id,
           custom_field_values: {}
           # NEVER permit: :company_id (Section 16)

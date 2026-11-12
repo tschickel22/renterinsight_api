@@ -117,6 +117,8 @@ module Api
           summary: params[:completion_summary],
           photos: photos
         )
+        # Their completion photos sit on the project with the dealer's (E102).
+        ProjectMedia.record_contractor_files!(@assignment, photos)
 
         AssignmentWorkLog.create!(
           contractor_assignment: @assignment,
@@ -190,6 +192,7 @@ module Api
         )
 
         if log.save
+          ProjectMedia.record_contractor_files!(assignment, attachments, work_log: log) if attachments.any?
           render json: work_log_json(log), status: :created
         else
           render json: { errors: log.errors.full_messages }, status: :unprocessable_entity
@@ -279,6 +282,8 @@ module Api
             status: phase&.status,
             position: phase&.position
           }
+          # Photos and files the dealer shared on this task or its phase (E102).
+          json[:project_files] = ProjectMedia.contractor_files_for_task(task)
         end
 
         json.compact

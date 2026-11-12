@@ -6000,8 +6000,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_13_050500) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "client_visible"
+    t.boolean "contractor_visible"
+    t.string "source", default: "dealer", null: false
+    t.bigint "vendor_id"
+    t.bigint "contractor_assignment_id"
     t.index ["category"], name: "index_project_documents_on_category"
     t.index ["company_id"], name: "index_project_documents_on_company_id"
+    t.index ["contractor_assignment_id"], name: "index_project_documents_on_contractor_assignment_id"
     t.index ["documentable_type", "documentable_id"], name: "index_project_documents_on_documentable"
     t.index ["project_id"], name: "index_project_documents_on_project_id"
     t.index ["uploaded_by_id"], name: "index_project_documents_on_uploaded_by_id"
@@ -6206,6 +6212,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_13_050500) do
     t.decimal "actual_cost", precision: 12, scale: 2, default: "0.0"
     t.bigint "assigned_vendor_id"
     t.bigint "assigned_to_id"
+    t.boolean "share_media_with_client"
     t.index ["assigned_to_id"], name: "index_project_phases_on_assigned_to_id"
     t.index ["assigned_vendor_id"], name: "index_project_phases_on_assigned_vendor_id"
     t.index ["company_id", "status"], name: "idx_project_phases_company_status"
@@ -6392,6 +6399,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_13_050500) do
     t.bigint "assigned_vendor_id"
     t.bigint "assigned_to_id"
     t.jsonb "assignment_issues", default: [], null: false
+    t.boolean "share_media_with_client", default: false, null: false
     t.index ["assigned_to_id"], name: "index_projects_on_assigned_to_id"
     t.index ["assigned_vendor_id"], name: "index_projects_on_assigned_vendor_id"
     t.index ["client_access_token"], name: "idx_projects_client_token", unique: true

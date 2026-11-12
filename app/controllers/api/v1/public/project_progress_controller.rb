@@ -24,6 +24,8 @@ class Api::V1::Public::ProjectProgressController < ApplicationController
     # all client-visible phase tasks, so the public page can render an "approve /
     # request changes / reject" panel inline on the relevant task.
     pending_client_reviews = client_pending_reviews_by_task(phases)
+    # Photos, videos and files the dealer shares, by phase (E102).
+    media = ProjectMedia.client_files_by_phase(@project, phases.map(&:id))
 
     render json: {
       project: {
@@ -42,6 +44,7 @@ class Api::V1::Public::ProjectProgressController < ApplicationController
       },
       # Surfaced so the frontend can decide whether to show the approval UI at all.
       client_approval_enabled: client_approval_enabled?(company),
+      media: media[nil],
       phases: phases.map do |phase|
         {
           id: phase.id,
@@ -58,6 +61,7 @@ class Api::V1::Public::ProjectProgressController < ApplicationController
           color: phase.color,
           is_current: phase.id == @project.current_phase_id,
           overdue: phase.overdue?,
+          media: media[phase.id],
           # Tasks awaiting this customer's approval, if any.
           pending_reviews: phase.project_phase_tasks.client_visible.ordered.filter_map do |task|
             review = pending_client_reviews[task.id]

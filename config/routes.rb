@@ -908,7 +908,10 @@ Rails.application.routes.draw do
           end
         end
 
-        resources :documents, controller: 'project_documents'
+        resources :documents, controller: 'project_documents' do
+          # Email the buyer that new photos are on their project (E102)
+          post :notify_client, on: :collection
+        end
       end
 
       # Phase 2A: Offline sync

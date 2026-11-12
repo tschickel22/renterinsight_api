@@ -87,7 +87,8 @@ module Api
           :estimated_days, :estimated_start_date, :estimated_completion_date,
           :estimated_budget,
           :notes, :client_notes, :description, :name,
-          :visible_to_client, :notify_client_on_start, :notify_client_on_complete
+          :visible_to_client, :notify_client_on_start, :notify_client_on_complete,
+          :share_media_with_client
         )
       end
     end

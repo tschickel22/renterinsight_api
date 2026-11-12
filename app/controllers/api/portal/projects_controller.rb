@@ -93,11 +93,14 @@ module Api
 
         phases = project.project_phases.where(visible_to_client: true).order(:position)
         pending_by_task = pending_reviews_by_task(phases)   # task_id => ContractorAssignment
+        # Photos, videos and files the dealer shares, by phase (E102).
+        media = ProjectMedia.client_files_by_phase(project, phases.map(&:id))
 
         render json: {
           success: true,
           data: serialize_project(project),
-          phases: phases.map { |phase| serialize_phase(phase, project, pending_by_task) }
+          media: media[nil],
+          phases: phases.map { |phase| serialize_phase(phase, project, pending_by_task).merge(media: media[phase.id]) }
         }
       end
 
