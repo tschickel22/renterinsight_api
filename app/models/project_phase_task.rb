@@ -15,6 +15,9 @@ class ProjectPhaseTask < ApplicationRecord
 
   # Polymorphic contractor assignments (Phase 2B)
   has_many :contractor_assignments, as: :assignable, dependent: :destroy
+  # Photos, videos and files added to this sub-task (E102). Removing the task
+  # keeps them on the project.
+  has_many :project_documents, as: :documentable, dependent: :nullify
 
   validates :name, presence: true
   validates :status, inclusion: { in: STATUSES }

@@ -72,6 +72,27 @@ class ProjectNotificationService
     end
   end
 
+  # "There are 6 photos from this stage" when the buyer can see some (E102).
+  def self.phase_media_line(project, phase)
+    task_ids = phase.project_phase_tasks.pluck(:id)
+    scope = project.project_documents.not_deleted
+    docs = scope.where(documentable_type: 'ProjectPhase', documentable_id: phase.id)
+                .or(scope.where(documentable_type: 'ProjectPhaseTask', documentable_id: task_ids))
+                .includes(documentable: :project_phase).to_a
+    shown = docs.select { |d| d.media? && d.shown_to_client?(project_setting: project.share_media_with_client) }
+    return '' if shown.empty?
+
+    photos = shown.count(&:image?)
+    videos = shown.size - photos
+    what = [
+      (photos.positive? ? "#{photos} #{'photo'.pluralize(photos)}" : nil),
+      (videos.positive? ? "#{videos} #{'video'.pluralize(videos)}" : nil)
+    ].compact.to_sentence
+    "<p>There #{shown.size == 1 ? 'is' : 'are'} #{what} from this stage on your project page.</p>"
+  rescue StandardError
+    ''
+  end
+
   def self.send_phase_change_to_client_fallback(project, phase, event)
     return unless client_should_hear?(project, phase, event)
 
@@ -116,7 +137,7 @@ class ProjectNotificationService
                end
 
     portal_link = if project.client_access_token.present?
-      url = "#{frontend_base_url}/p/#{project.client_access_token}"
+      url = "#{frontend_base_url}/project/#{project.client_access_token}"
       <<~CTA
         <div style="text-align: center; margin: 28px 0;">
           <a href="#{url}"
@@ -135,9 +156,12 @@ class ProjectNotificationService
       ''
     end
 
+    media_line = phase_media_line(project, phase)
+
     body = <<~HTML
       <p>Hi #{client_name},</p>
       #{headline}
+      #{media_line}
       <p><strong>Overall Progress:</strong> #{completion}% complete</p>
       #{portal_link}
       <p>Thank you,<br>#{company.name}</p>
@@ -158,6 +182,74 @@ class ProjectNotificationService
     Rails.logger.info("[ProjectNotificationService] phase fallback email sent to client #{client_email} for project #{project.id}")
   rescue => e
     Rails.logger.error("[ProjectNotificationService] phase fallback error: #{e.class}: #{e.message}")
+  end
+
+  # The dealer sent new photos to the buyer (E102): "Foundation poured, here
+  # it is." docs are files the buyer can already see. Returns
+  # { sent: true, to: } or { sent: false, error: }.
+  def self.notify_client_media_added(project, docs, sender: nil, note: nil)
+    client_email = resolve_client_email(project)
+    return { sent: false, error: 'This project has no buyer email to send to.' } if client_email.blank?
+
+    company = project.company
+    h = ->(v) { ERB::Util.html_escape(v.to_s) }
+    home_name = project.name.presence || 'your home'
+    client_name = resolve_client_name(project) || 'there'
+    photos = docs.count(&:image?)
+    videos = docs.count(&:video?)
+    files = docs.size - photos - videos
+    what = [
+      (photos.positive? ? "#{photos} new #{'photo'.pluralize(photos)}" : nil),
+      (videos.positive? ? "#{videos} new #{'video'.pluralize(videos)}" : nil),
+      (files.positive? ? "#{files} new #{'file'.pluralize(files)}" : nil)
+    ].compact.to_sentence
+    phase_names = docs.filter_map { |d| d.phase&.name }.uniq
+    where = phase_names.any? ? " from #{phase_names.map { |n| "<strong>#{h.(n)}</strong>" }.to_sentence}" : ''
+
+    subject = "#{home_name}: #{what.sub(/\A./, &:upcase)}"
+    portal_link = if project.client_access_token.present?
+      url = "#{frontend_base_url}/project/#{project.client_access_token}"
+      <<~CTA
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="#{url}"
+             style="display: inline-block; background-color: #2563eb; color: #ffffff !important;
+                    text-decoration: none; font-weight: 600; padding: 12px 28px; border-radius: 6px;
+                    font-size: 14px;">
+            See the photos
+          </a>
+        </div>
+      CTA
+    else
+      '<p>Sign in to your buyer portal to see them.</p>'
+    end
+
+    body = <<~HTML
+      <p>Hi #{h.(client_name)},</p>
+      <p>There #{docs.size == 1 ? 'is' : 'are'} #{what}#{where} on your project.</p>
+      #{note.present? ? "<p style=\"white-space: pre-wrap;\">#{h.(note)}</p>" : ''}
+      #{portal_link}
+      <p>Thank you,<br>#{h.(sender&.full_name.presence || company.name)}<br>#{h.(company.name)}</p>
+    HTML
+
+    result = CommunicationService.send_email(
+      company: company,
+      to: client_email,
+      subject: subject,
+      body: wrap_html_minimal(body, subject),
+      category: 'project_notification',
+      communicable: project
+    )
+    if result.respond_to?(:status) && result.status.to_s == 'failed'
+      return { sent: false, error: 'The email could not be sent. Please try again.' }
+    end
+
+    docs.each do |d|
+      d.update_columns(metadata: (d.metadata || {}).merge('client_notified_at' => Time.current.iso8601))
+    end
+    { sent: true, to: client_email }
+  rescue StandardError => e
+    Rails.logger.error("[ProjectNotificationService] media email error: #{e.class}: #{e.message}")
+    { sent: false, error: 'The email could not be sent. Please try again.' }
   end
 
   # Called when a task is completed
@@ -894,7 +986,7 @@ class ProjectNotificationService
     subject = "#{project.name}: Please review completed work: #{task_name}"
 
     portal_link = if project.client_access_token.present?
-      url = "#{frontend_base_url}/p/#{project.client_access_token}"
+      url = "#{frontend_base_url}/project/#{project.client_access_token}"
       <<~CTA
         <div style="text-align: center; margin: 28px 0;">
           <a href="#{url}"
@@ -1582,7 +1674,7 @@ class ProjectNotificationService
 
     def public_link_section(project)
       if project.client_access_token.present?
-        url = "#{Rails.application.credentials.dig(:app, :frontend_url)}/p/#{project.client_access_token}"
+        url = "#{Rails.application.credentials.dig(:app, :frontend_url)}/project/#{project.client_access_token}"
         "<p><a href='#{url}'>View your project progress online</a></p>"
       else
         ""
