@@ -8,7 +8,7 @@ class Api::V1::AccountingImportsController < ApplicationController
   before_action :require_platform_admin!, only: %i[
     create_migration migration update_migration accounts suggest_accounts update_accounts
     banks update_banks create_banks uncleared update_uncleared migration_preview post_migration rollback_migration
-    go_live
+    go_live bank_balances
   ]
 
   def index
@@ -236,6 +236,17 @@ class Api::V1::AccountingImportsController < ApplicationController
       bank
     end
     with_migration_errors { wizard.update_uncleared!(banks) } or return
+    render json: wizard.uncleared_json
+  end
+
+  # POST /api/v1/accounting_imports/:id/uncleared/bank_balances
+  # Statement balances on the cutover day from each connected bank feed.
+  # Blank ones are filled in; banks still fetching come back 'pending'.
+  def bank_balances
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    with_migration_errors { wizard.fetch_bank_balances! } or return
     render json: wizard.uncleared_json
   end
 

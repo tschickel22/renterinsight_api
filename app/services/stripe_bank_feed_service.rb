@@ -81,7 +81,7 @@ class StripeBankFeedService
     return { error: 'Account disconnected' } unless bank_account.stripe_fc_status == 'active'
 
     begin
-      Stripe::FinancialConnections::Account.refresh(
+      Stripe::FinancialConnections::Account.refresh_account(
         bank_account.stripe_fc_account_id,
         { features: ['transactions'] }
       )
@@ -153,6 +153,82 @@ class StripeBankFeedService
     end
 
     { imported: imported, skipped: skipped }
+  end
+
+  # How long a balance from the bank counts as today's.
+  BALANCE_FRESH_FOR = 6.hours
+  # Card lines can post a few weeks after the purchase, so the look back
+  # starts this far before the date to catch every line posted after it.
+  POSTING_LAG = 45.days
+  # Banks hand over roughly this much history; past it the answer may miss lines.
+  HISTORY_DAYS = 90
+
+  # The bank's posted balance at the end of `date` (a day in `zone`), worked
+  # back from today's posted balance minus every line posted after that day:
+  #   balance on date = current balance - sum(posted lines dated after it, up to the balance's as_of)
+  # Stripe signs balances the same way for banks and cards: positive is
+  # money the account holder has, negative is money they owe. Pending and
+  # voided lines are not in the posted balance, so they are left out.
+  #
+  # Stripe fetches balances in the background. A balance older than
+  # BALANCE_FRESH_FOR (or older than the last transaction fetch) starts a
+  # fresh fetch and answers pending; ask again a few seconds later.
+  #
+  # Returns one of
+  #   { status: 'ready', balance: BigDecimal, as_of: Time, current: BigDecimal,
+  #     posted_after: BigDecimal, lines_after: Integer, old_date: Boolean }
+  #   { status: 'pending' }
+  #   { status: 'unavailable', reason: String }
+  def balance_on(bank_account, date, zone: Time.zone)
+    return unavailable('Its bank feed is not connected') unless bank_account.stripe_fc_account_id.present? && bank_account.stripe_fc_status == 'active'
+
+    fc = Stripe::FinancialConnections::Account.retrieve(bank_account.stripe_fc_account_id)
+    return unavailable('The bank connection is no longer active. Reconnect it under Bank Transactions') unless fc.try(:status) == 'active'
+    unless Array(fc.try(:permissions)).include?('balances')
+      return unavailable('The bank was connected without balance access. Reconnect it to fill this in')
+    end
+
+    fc_card = fc.try(:category).to_s == 'credit'
+    if fc_card != (bank_account.account_type == 'credit_card')
+      return unavailable("Its bank feed is a #{fc_card ? 'credit card' : 'bank account'} at the bank, so it may be connected to the wrong account")
+    end
+
+    balance = fc.try(:balance)
+    refreshes = [fc.try(:balance_refresh), fc.try(:transaction_refresh)].compact
+    return { status: 'pending' } if refreshes.any? { |r| r.status == 'pending' }
+
+    if needs_balance_refresh?(fc, balance)
+      begin
+        Stripe::FinancialConnections::Account.refresh_account(fc.id, { features: %w[balance transactions] })
+        return { status: 'pending' }
+      rescue Stripe::StripeError => e
+        # Too soon to ask again, or the bank refused: use what Stripe has.
+        Rails.logger.warn("[StripeBankFeed] Balance refresh failed for bank account #{bank_account.id}: #{e.message}")
+        return unavailable('The bank did not send a balance. Try again later or type it from your statement') if balance.nil?
+      end
+    end
+    if fc.try(:balance_refresh)&.status == 'failed' && balance.nil?
+      return unavailable('The bank did not send a balance. Type it from your statement')
+    end
+
+    current_cents = balance.current.to_h.with_indifferent_access[:usd]
+    return unavailable('The bank sent no balance in dollars') if current_cents.nil?
+
+    as_of = Time.at(balance.as_of)
+    after = posted_lines_after(fc.id, date, zone, as_of)
+    after_cents = after.sum(&:amount)
+    {
+      status: 'ready',
+      balance: BigDecimal(current_cents - after_cents) / 100,
+      current: BigDecimal(current_cents) / 100,
+      posted_after: BigDecimal(after_cents) / 100,
+      lines_after: after.size,
+      as_of: as_of,
+      old_date: date < Time.current.in_time_zone(zone).to_date - HISTORY_DAYS
+    }
+  rescue Stripe::StripeError => e
+    Rails.logger.warn("[StripeBankFeed] Balance unavailable for bank account #{bank_account.id}: #{e.message}")
+    unavailable('Stripe did not answer. Try again in a minute')
   end
 
   def disconnect(bank_account)
@@ -286,6 +362,47 @@ class StripeBankFeedService
 
   def fc_name(fc)
     [fc.try(:institution_name).presence, fc.try(:display_name).presence].compact.uniq.join(' ').presence || 'Bank account'
+  end
+
+  def unavailable(reason)
+    { status: 'unavailable', reason: reason }
+  end
+
+  # Fetch again when there is no balance, it is stale, or the transactions
+  # were last fetched before it (lines posted in between would be missing).
+  def needs_balance_refresh?(fc, balance)
+    return true if balance.nil?
+    return true if Time.at(balance.as_of) < BALANCE_FRESH_FOR.ago
+
+    # Both fetches started together stamp a second or so apart, hence the slack.
+    txn_at = fc.try(:transaction_refresh)&.last_attempted_at
+    txn_at.nil? || txn_at < balance.as_of - 300
+  end
+
+  # Posted lines that posted after the end of `date` and by `as_of`. The
+  # posting date decides, as on a bank statement; a line without one uses
+  # its transaction date.
+  def posted_lines_after(fc_id, date, zone, as_of)
+    lines = []
+    starting_after = nil
+    loop do
+      params = { account: fc_id, transacted_at: { gte: (date - POSTING_LAG).in_time_zone(zone).beginning_of_day.to_i }, limit: 100 }
+      params[:starting_after] = starting_after if starting_after
+      page = Stripe::FinancialConnections::Transaction.list(params)
+      page.data.each do |txn|
+        next unless txn.status == 'posted'
+
+        posted_ts = txn.try(:status_transitions)&.try(:posted_at) || txn.transacted_at
+        next if posted_ts > as_of.to_i
+        next unless Time.at(posted_ts).in_time_zone(zone).to_date > date
+
+        lines << txn
+      end
+      break unless page.has_more && page.data.any?
+
+      starting_after = page.data.last.id
+    end
+    lines
   end
 
   def handle_stripe_error(bank_account, error)
