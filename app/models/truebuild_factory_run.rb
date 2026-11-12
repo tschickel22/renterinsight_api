@@ -37,8 +37,10 @@ class TruebuildFactoryRun < ApplicationRecord
   # Everything the run has cost: its drawings and checks, and the outlines
   # made for its photos while it ran. Outlines were left out until run 4
   # (34 of them, $3.17), so a run reported $6.84 and spent about $10.
+  # A re-cut carries its drawing's cost (inherited_usd), already counted on
+  # the drawing it was cut from: counted twice, run 15 read $31 for $22.
   def spent_usd
-    renders.sum(:cost_usd).to_f + outline_usd
+    renders.sum(:cost_usd).to_f - renders.sum(Arel.sql("COALESCE((usage->>'inherited_usd')::numeric, 0)")).to_f + outline_usd
   end
 
   def outline_usd

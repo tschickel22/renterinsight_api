@@ -142,6 +142,7 @@ module Truebuild
       def drawing_finished!(run)
         return unless run.status == 'running' && run.models_queued >= run.variant_ids.size
         return if run.renders.where(status: %w[queued running]).exists?
+        return if redos_pending?(run)
 
         run.with_lock do
           round = run.progress['repair_rounds'].to_i
@@ -165,11 +166,19 @@ module Truebuild
         # outlined again inside the drawing jobs queued below (Surfaces.mask_for),
         # in parallel. Outlining them all in this job took many minutes, and a
         # worker restart ran it twice over the same outlines.
-        failed_outlines(photos).each { |mask| Surfaces.make_due!(mask) }
+        # Each within the budget: outlined again they cost about an outline
+        # each, and uncounted they took Jessup run 15 from $13 to $22.
+        failed_outlines(photos).each do |mask|
+          break if spent + rates[:outline] > run.budget_usd.to_f
+
+          Surfaces.make_due!(mask)
+          spent += rates[:outline]
+        end
         # Once, before redrawing anything: an outline behind several held-back
         # colors is redone and its drawings cut again, not each one redrawn.
-        recutting = (round == 1 ? Patterns.review!(run) : []).select { |p| p['cause'] == 'outline' }
-                                                             .to_set { |p| [p['photo'], p['surface']] }
+        found = round == 1 ? Patterns.review!(run, room_usd: run.budget_usd.to_f - spent, outline_usd: rates[:outline]) : []
+        spent += found.count { |p| p['cause'] == 'outline' } * rates[:outline]
+        recutting = found.select { |p| p['cause'] == 'outline' }.to_set { |p| [p['photo'], p['surface']] }
         # Outlines a drawing's touch-up found at fault are being redone, and their redo cuts these again.
         recutting += TruebuildSurfaceMask.where(source_url: photos, version: Surfaces::VERSION).where("usage ? 'redo_pending'")
                                          .pluck(:source_url, :surface)
@@ -215,8 +224,17 @@ module Truebuild
 
         run.update!(progress: run.progress.merge('repair_rounds' => queued.zero? ? REPAIR_ROUNDS : round,
                                                  'repaired' => run.progress['repaired'].to_i + queued))
-        finish!(run) if queued.zero?
+        finish!(run) if queued.zero? && !redos_pending?(run)
         queued
+      end
+
+      # An outline being redone for this run (Patterns.redo!) still has
+      # drawings to cut again. Finished before them, a run left its re-cuts
+      # waiting for a batch it no longer sent. A redo an hour old has failed.
+      def redos_pending?(run)
+        photos = run.renders.distinct.pluck(:source_url)
+        photos.any? && TruebuildSurfaceMask.where(source_url: photos, version: Surfaces::VERSION)
+                                           .where("usage->>'redo_pending' = 'true'").where(updated_at: 1.hour.ago..).exists?
       end
 
       # Outlines worth another try: one that errored (not on framing, which
@@ -249,6 +267,16 @@ module Truebuild
         return false if run.spent_usd < run.budget_usd.to_f
 
         render.update!(status: 'cancelled')
+        stop_at_budget!(run)
+        true
+      end
+
+      # Stopped, and what waits cancelled, once the run has really spent its
+      # budget. A batch run is checked before each batch is sent (Batch.submit!).
+      # => true when it is at its budget.
+      def stop_at_budget!(run)
+        return false if run.status != 'running' || run.spent_usd < run.budget_usd.to_f
+
         run.with_lock do
           next unless run.status == 'running'
 
@@ -306,7 +334,7 @@ module Truebuild
                 elsif at_google then 'waiting_on_google'
                 elsif awaiting.positive? && open == awaiting then 'waiting_on_claude_code'
                 elsif open.positive? then repair_queued.positive? ? 'repairing' : 'drawing'
-                elsif repair_queued > run.progress['repair_rounds'].to_i then 'repairing'
+                elsif repair_queued > run.progress['repair_rounds'].to_i || redos_pending?(run) then 'repairing'
                 else 'finished'
                 end
         # Nothing left to draw or repair: the run is over. Until this, a run
