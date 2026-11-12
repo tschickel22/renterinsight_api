@@ -40,4 +40,40 @@ RSpec.describe SiteProfiles::ProfileBuilder do
         .to raise_error(described_class::GenerationError)
     end
   end
+
+  # bestbuymh.com, 2026-11-12: a large site ran past the token ceiling twice
+  # and the JSON ended mid-string. The retry has to ask for a shorter answer,
+  # not repeat the escaping advice that cannot help.
+  describe 'retrying a reply that was cut off' do
+    let(:truncated) { { text: '{"brand":{"name":"Best Buy', stop_reason: 'max_tokens' } }
+    let(:complete) { { text: '{"brand":{"name":"Best Buy Homes"}}', stop_reason: 'end_turn' } }
+
+    it 'asks for a shorter answer, and keeps the second one' do
+      prompts = []
+      allow(builder).to receive(:call_claude) do |**kw|
+        prompts << kw[:system_prompt]
+        prompts.size == 1 ? truncated : complete
+      end
+      allow(builder).to receive(:log_usage)
+
+      profile, = builder.call(digests: [], source_url: 'https://bestbuymh.com/')
+
+      expect(profile.dig('brand', 'name')).to eq('Best Buy Homes')
+      expect(prompts.last).to include('cut off')
+      expect(prompts.last).not_to include('Escape every double quote')
+    end
+
+    it 'still gives the escaping advice when the reply simply was not JSON' do
+      prompts = []
+      allow(builder).to receive(:call_claude) do |**kw|
+        prompts << kw[:system_prompt]
+        prompts.size == 1 ? { text: 'not json', stop_reason: 'end_turn' } : complete
+      end
+      allow(builder).to receive(:log_usage)
+
+      builder.call(digests: [], source_url: 'https://bestbuymh.com/')
+
+      expect(prompts.last).to include('Escape every double quote')
+    end
+  end
 end
