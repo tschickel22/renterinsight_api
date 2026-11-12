@@ -248,9 +248,17 @@ module Accounting
                           .where('journal_entries.created_at >= ? AND entry_date <= ?', since, cutover_date)
                           .where('source_entity_type IS NULL OR source_entity_type <> ?', 'AccountingImport')
                           .where.not(id: reversals).order(:entry_date, :id).to_a
+        # Feed lines up to the cutover that nobody booked yet (the opening
+        # balances hold them), and lines booked by an entry voided here. A line
+        # matched to an entry that stays (booked before the trial) is left
+        # alone: excluding it would cut that entry off from reconciliation.
+        # The film company's 50 older matched lines showed this (2026-11-11).
         bank_ids = matched_banks.map { |b| b.dig('match', 'bank_account_id') }
+        voided = entries.map(&:id)
         lines = BankTransaction.where(bank_account_id: bank_ids).where('transaction_date <= ?', cutover_date)
-                               .where.not(status: %w[excluded reconciled]).order(:transaction_date, :id).to_a
+                               .where.not(status: %w[excluded reconciled])
+                               .where('status = ? OR matched_journal_entry_id IN (?)', 'unmatched', voided.presence || [0])
+                               .order(:transaction_date, :id).to_a
         { entries: entries, bank_lines: lines }
       end
 
