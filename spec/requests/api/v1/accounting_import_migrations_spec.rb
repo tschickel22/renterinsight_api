@@ -468,10 +468,16 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
     it 'goes live from a trial with every match carried, settling trial activity by the cutover date' do
       older = entry(Date.new(2026, 10, 10), 'Kept here before the trial')
       older.update_column(:created_at, 2.days.ago)
+      # A line booked before the trial, by an entry that stays: left alone.
+      booked_before = bank_line(Date.new(2026, 10, 10), 'Booked before the trial')
+      booked_before.update_columns(status: 'matched', matched_journal_entry_id: older.id)
       trial_id = post_trial
       before = entry(Date.new(2026, 10, 15), 'Deal approved during the trial')
       after = entry(Date.new(2026, 11, 5), 'After the final cutover')
       early_line = bank_line(Date.new(2026, 10, 20), 'Deposit in October')
+      # A line categorized during the trial, by an entry going live voids: excluded with it.
+      booked_in_trial = bank_line(Date.new(2026, 10, 15), 'Categorized during the trial')
+      booked_in_trial.update_columns(status: 'matched', matched_journal_entry_id: before.id)
       late_line = bank_line(Date.new(2026, 11, 3), 'Deposit in November')
 
       post "#{base}/#{trial_id}/go_live", params: { cutover_date: '2026-10-31' }, headers: headers, as: :json
@@ -488,12 +494,14 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       get "#{base}/#{live['id']}/preview", headers: headers
       expect(json['can_post']).to be(true)
       expect(json['settlement']['entries'].map { |e| e['id'] }).to eq([before.id])
-      expect(json['settlement']['bank_lines'].map { |l| l['id'] }).to eq([early_line.id])
+      expect(json['settlement']['bank_lines'].map { |l| l['id'] }).to eq([booked_in_trial.id, early_line.id])
       expect(json['unconnected_banks'].map { |b| b['qbo_account_id'] }).to match_array(%w[2 14])
 
       post "#{base}/#{live['id']}/post", headers: headers, as: :json
       expect(response).to have_http_status(:ok)
-      expect(json['migration']['settled']).to include('voided_entry_ids' => [before.id], 'excluded_bank_line_ids' => [early_line.id])
+      expect(json['migration']['settled']).to include('voided_entry_ids' => [before.id],
+                                                      'excluded_bank_line_ids' => [booked_in_trial.id, early_line.id])
+      expect(booked_before.reload.status).to eq('matched')
       expect(before.reload.is_void).to be(true)
       expect(after.reload.is_void).to be(false)
       expect(older.reload.is_void).to be(false)
