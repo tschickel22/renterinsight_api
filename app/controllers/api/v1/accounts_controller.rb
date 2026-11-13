@@ -117,9 +117,9 @@ module Api
         # Email/phone duplicates stay soft warnings (check_duplicates).
         dup_name = account_params['name'].to_s.strip
         if dup_name.present? && !allow_duplicate_name?
-          matches, hidden_count = account_name_matches(dup_name)
-          if matches.any? || hidden_count.positive?
-            body = account_name_in_use_json(dup_name, matches, hidden_count: hidden_count)
+          matches = account_name_matches(dup_name)
+          if matches.any?
+            body = account_name_in_use_json(dup_name, matches)
             # Older clients read `duplicate`.
             body[:duplicate] = body[:existingAccount].slice(:id, :name, :email, :phone, :accountType, :status).merge(field: 'name') if body[:existingAccount]
             render json: body, status: :conflict

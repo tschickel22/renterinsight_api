@@ -6,7 +6,9 @@
 # or make a new one with the same name.
 #
 # The question lists only accounts the rep can open. Same-name accounts in
-# locations they cannot see are counted (hiddenCount) but never described.
+# locations they cannot see are never mentioned, not even as a count (Tom,
+# 2026-11-13): if those are the only matches, there is no question and a new
+# account is made.
 #
 # Needs FollowedRecords (or_followed) and ApplicationController's
 # permission_service; both CRM controllers that use it include it.
@@ -30,17 +32,14 @@ module AccountNameMatches
     or_followed(scope, scope.where('accounts.location_id IN (?) OR accounts.location_id IS NULL', location_ids))
   end
 
-  # [visible matches (up to limit), count of same-name accounts the user
-  # cannot open].
+  # The same-name accounts the user can open (up to limit).
   def account_name_matches(account_name, limit: 10)
-    all = Leads::Converter.accounts_named(@company, account_name)
-    visible = accounts_user_can_open(all)
-    [visible.limit(limit).to_a, all.count - visible.count]
+    accounts_user_can_open(Leads::Converter.accounts_named(@company, account_name)).limit(limit).to_a
   end
 
   # The 409 body: the visible accounts with that name, so the screen can ask
   # whether to join / open one of them or make a new one.
-  def account_name_in_use_json(account_name, matches, hidden_count: 0)
+  def account_name_in_use_json(account_name, matches)
     contact_counts = @company.contacts.where(account_id: matches.map(&:id), is_deleted: [false, nil])
                              .group(:account_id).count
     accounts = matches.map do |a|
@@ -62,8 +61,7 @@ module AccountNameMatches
       code: 'account_name_in_use',
       accountName: account_name,
       existingAccount: accounts.first,
-      accounts: accounts,
-      hiddenCount: hidden_count
+      accounts: accounts
     }
   end
 end
