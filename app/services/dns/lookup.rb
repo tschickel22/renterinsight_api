@@ -21,16 +21,18 @@ module Dns
 
     module_function
 
-    def txt(name, timeout: DEFAULT_TIMEOUT)
-      resolve(name, Resolv::DNS::Resource::IN::TXT, timeout: timeout) { |r| r.strings.join }
+    # Pass zone: (the registrable domain, e.g. cbhms.com) to ask that zone's own name
+    # server instead of the container's recursive resolver. See #fresh for why.
+    def txt(name, timeout: DEFAULT_TIMEOUT, zone: nil)
+      fresh(name, Resolv::DNS::Resource::IN::TXT, zone: zone, timeout: timeout) { |r| r.strings.join }
     end
 
-    def cname(name, timeout: DEFAULT_TIMEOUT)
-      resolve(name, Resolv::DNS::Resource::IN::CNAME, timeout: timeout) { |r| r.name.to_s }
+    def cname(name, timeout: DEFAULT_TIMEOUT, zone: nil)
+      fresh(name, Resolv::DNS::Resource::IN::CNAME, zone: zone, timeout: timeout) { |r| r.name.to_s }
     end
 
-    def mx(name, timeout: DEFAULT_TIMEOUT)
-      resolve(name, Resolv::DNS::Resource::IN::MX, timeout: timeout) { |r| r.exchange.to_s }
+    def mx(name, timeout: DEFAULT_TIMEOUT, zone: nil)
+      fresh(name, Resolv::DNS::Resource::IN::MX, zone: zone, timeout: timeout) { |r| r.exchange.to_s }
     end
 
     def ns(name, timeout: DEFAULT_TIMEOUT)
@@ -61,13 +63,44 @@ module Dns
     # resolver reports whatever is left on its cached copy, which can read as a few seconds
     # for a record that is really held for a week.
     def authoritative_ttl(name, type, zone:, timeout: DEFAULT_TIMEOUT)
-      server = ns(zone, timeout: timeout).first
-      return nil if server.blank?
-
-      ip = a(server, timeout: timeout).first
+      ip = authoritative_server(zone, timeout: timeout)
       return nil if ip.blank?
 
       resolve(name, type, timeout: timeout, nameserver: ip, &:ttl).max
+    end
+
+    # The answer as the zone publishes it right now.
+    #
+    # The container's resolver keeps an answer for the record's TTL. A dealer who fixes a
+    # CNAME at GoDaddy (which saves it with a 3600 TTL) was told by Check DNS that it still
+    # pointed at the old host for up to an hour, while every public resolver had the new
+    # value: the www.cbhms.com setup on 2026-11-13. A verification check wants the uncached
+    # answer, so ask the zone's own name server.
+    #
+    # Falls back to the ordinary lookup when there is no zone, the name server cannot be
+    # found or reached, or it has nothing (a subdomain delegated elsewhere answers there).
+    def fresh(name, type, zone:, timeout: DEFAULT_TIMEOUT, &block)
+      if zone.present?
+        ip = authoritative_server(zone, timeout: timeout)
+        if ip.present?
+          begin
+            values = resolve!(name, type, timeout: timeout, nameserver: ip, &block)
+            return values if values.any?
+          rescue StandardError => e
+            Rails.logger.warn("[Dns::Lookup] authoritative lookup failed for #{name} at #{ip}: #{e.message}")
+          end
+        end
+      end
+
+      resolve(name, type, timeout: timeout, &block)
+    end
+
+    # An address for one of the zone's own name servers, or nil.
+    def authoritative_server(zone, timeout: DEFAULT_TIMEOUT)
+      server = ns(zone, timeout: timeout).first
+      return nil if server.blank?
+
+      a(server, timeout: timeout).first.presence
     end
 
     # Returns [] on any resolution failure. Callers that must distinguish "no records" from
