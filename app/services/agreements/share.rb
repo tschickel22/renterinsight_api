@@ -15,7 +15,9 @@ module Agreements
 
     def self.link(agreement)
       token = agreement.signed_id(purpose: PURPOSE, expires_in: LINK_DAYS.days)
-      "#{(ENV['RAILS_API_URL'].presence || 'https://localhost:3001').chomp('/')}/agreement_files/#{token}"
+      # Customer-facing API links share one address switch (DMS_API_URL), so a
+      # move to api.dealertide.com moves these with the email tracking links.
+      "#{Messaging::TrackingUrl.base}/agreement_files/#{token}"
     end
 
     def self.find_by_token(token)
