@@ -20,7 +20,7 @@ module McpTools
       'deal' => { resource: 'deals', path: '/deals/%d', label: 'Deal' },
       'unit' => { resource: 'inventory', path: '/inventory/%d', label: 'Inventory unit' },
       'ticket' => { resource: 'service', path: '/service/%d', label: 'Service ticket' },
-      'quote' => { resource: 'finance', path: '/quotes/%d', label: 'Quote' }
+      'quote' => { resource: 'quotes', path: '/quotes/%d', label: 'Quote' }
     }.freeze
 
     QUOTE_ITEM_FIELDS = %w[name description quantity unit_price total].freeze

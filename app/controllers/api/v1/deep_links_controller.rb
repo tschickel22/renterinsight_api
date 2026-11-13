@@ -27,13 +27,13 @@ module Api
       # controller that serves the record already checks, because a key with no
       # row in `resources` denies every RBAC user and the feature would simply
       # stop working for them with no visible error. Contacts and accounts sit
-      # under 'crm', quotes and payments under 'finance', tickets under
+      # under 'crm', quotes under 'quotes', payments under 'finance', tickets under
       # 'service'. Verify against the owning controller before adding a type.
       RESOLVABLE_TYPES = {
         'lead'    => { model: 'Lead',          resource: 'leads' },
         'contact' => { model: 'Contact',       resource: 'crm' },
         'account' => { model: 'Account',       resource: 'crm' },
-        'quote'   => { model: 'Quote',         resource: 'finance' },
+        'quote'   => { model: 'Quote',         resource: 'quotes' },
         'deal'    => { model: 'Deal',          resource: 'deals' },
         'invoice' => { model: 'Invoice',       resource: 'invoices' },
         'payment' => { model: 'Payment',       resource: 'finance' },

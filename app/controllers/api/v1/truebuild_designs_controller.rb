@@ -22,7 +22,7 @@ class Api::V1::TruebuildDesignsController < ApplicationController
   # buyer was shown when prices are shown, else today's. Needs the lead
   # converted first, since quotes belong to a contact and account.
   def create_quote
-    return unless authorize_action!('finance', 'create')
+    return unless authorize_action!('quotes', 'create')
 
     design = @company.truebuild_designs.find(params[:id])
     return render json: { error: 'Convert this lead first. A quote belongs to a contact and account.' }, status: :unprocessable_entity unless design.contact_id

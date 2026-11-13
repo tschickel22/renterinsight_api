@@ -666,7 +666,7 @@ class Role < ApplicationRecord
     # Full CRUD (company-wide) on finance + the ENTIRE Accounting module. This was the big gap:
     # finance staff previously had zero access to Accounting even though it's their core job.
     %w[
-      finance payments invoices loans
+      finance quotes payments invoices loans
       accounting chart_of_accounts journal_entries bank_accounts_accounting
       bank_reconciliation bills financial_reports budgets
       commissions commission_plans commission_components commission_payments
@@ -688,7 +688,7 @@ class Role < ApplicationRecord
     # Read-only (company-wide): finance needs to SEE the sales/CRM side + cost details +
     # reporting/dashboards, but not edit them.
     %w[
-      crm contacts accounts deals quotes
+      crm contacts accounts deals
       inventory inventory_cost_details deals_cost_details
       reports dashboard dashboard_finance dashboard_company_wide
       documents tasks

@@ -231,33 +231,27 @@ module Api
       end
 
       # GET /api/v1/users/assignable
-      # Returns users filtered by assignment context (service, sales, finance, etc.)
+      # The people a record can be assigned to (deal owner, lead owner, service
+      # tech). Any signed-in user of the company may call it: a sales rep without
+      # users:read still has to pick who owns a deal. So it returns only what a
+      # picker shows (name, role label, avatar), never email or phone, and only
+      # active users of this company. Not location filtered: Tom wants every
+      # active user offered, with typing to narrow the list.
+      # params[:context] narrows by department when the company turns on
+      # filter_assignments_by_role.
       def assignable
-        return unless authorize_action!('users', 'read')
-        
         context = params[:context] || 'general'
-        
-        # Base query: all active users in company
-        users = current_company.users.where(deleted_at: nil, status: 'active')
-        
-        # Apply RBAC location filtering for non-admins
-        if current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          if location_ids.any?
-            users = users.joins(:user_locations)
-                        .where(user_locations: { location_id: location_ids, active: true })
-                        .distinct
-          end
-        end
-        
-        # Smart filtering based on company setting
+
+        users = current_company.users
+                               .where(deleted_at: nil, status: 'active')
+                               .where('users.role IS NULL OR users.role <> ?', 'client')
+
         if current_company.filter_assignments_by_role?
           users = filter_by_context(users, context)
         end
-        
-        # Order by name
-        users = users.order(:first_name, :last_name)
-        
+
+        users = users.includes(user_role_assignments: :role).order(:first_name, :last_name)
+
         render json: {
           users: users.map { |u| assignable_user_json(u) }
         }
@@ -678,33 +672,22 @@ module Api
       
       # JSON serialization for assignable users
       def assignable_user_json(user)
-        # Get role display name
-        role_display = if current_company.use_rbac_system && user.user_role_assignments.any?
-          primary_assignment = user.user_role_assignments
-            .where(company_id: current_company.id)
-            .joins(:role)
-            .order('roles.tier DESC, roles.created_at ASC')
-            .first
-          primary_assignment&.role&.name || user.role&.titleize || 'User'
+        role_display = if current_company.use_rbac_system
+          primary = user.user_role_assignments
+                        .select { |a| a.company_id == current_company.id && a.role }
+                        .max_by { |a| [a.role.tier.to_s, -(a.role.created_at || Time.at(0)).to_f] }
+          primary&.role&.name || user.role&.titleize || 'User'
         else
           user.role&.titleize || 'User'
         end
-        
+
         {
           id: user.id,
           firstName: user.first_name,
           lastName: user.last_name,
           fullName: user.name,
-          email: user.email,
-          role: user.role,
           displayRole: role_display,
-          avatarUrl: user.try(:avatar_url),
-          locations: user.user_locations.includes(:location).where(active: true).map do |ul|
-            {
-              id: ul.location_id,
-              name: ul.location.name
-            }
-          end
+          avatarUrl: user.try(:avatar_url)
         }
       end
     end

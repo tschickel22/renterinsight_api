@@ -8,7 +8,7 @@ class Api::V1::SearchController < ApplicationController
   # a rep limited to one location, or without a module, found everything.
   SEARCH_RESOURCES = {
     leads: 'leads', contacts: 'crm', accounts: 'crm', deals: 'deals', vehicles: 'inventory',
-    service_tickets: 'service', quotes: 'finance', invoices: 'finance', cash_receipts: 'accounting',
+    service_tickets: 'service', quotes: 'quotes', invoices: 'finance', cash_receipts: 'accounting',
     parts: 'inventory', purchase_orders: 'inventory', suppliers: 'inventory', agreements: 'agreements',
     contractors: 'contractors', workflow_rules: 'workflow_automation'
   }.freeze
