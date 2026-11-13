@@ -19,15 +19,21 @@ module Api
         # DEFAULT VIEW SCOPING: Sales reps see only their own deals unless explicitly requesting broader view
         # Admins and users with 'read_all' permission can expand to see all deals
         view_scope = params[:view] # 'my', 'team', 'all'
-        
-        unless current_user.effective_admin? || view_scope == 'all'
+
+        # One account's or contact's own Deals tab lists every deal on that
+        # record, whoever owns it: "My Deals" there hid a buyer's deals from
+        # everyone but the owner (and anyone on a copied admin role).
+        # Location access above still applies.
+        record_page = params[:account_id].present? || params[:contact_id].present?
+
+        unless current_user.effective_admin? || view_scope == 'all' || record_page
           # Default to "My Deals" for non-admin users
           # Deals they follow count as theirs too (backlog E86).
           deals = deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?',
                               current_user.id, current_user.id, current_user.email)
                        .or(deals.followed_by(current_user.id))
         end
-        
+
         deals = deals.includes(:account, :contact, :co_applicant_contact, :territory, :user, :location, :deal_products, :commission_plan, :followers)
         deals = apply_sort(deals)
 
