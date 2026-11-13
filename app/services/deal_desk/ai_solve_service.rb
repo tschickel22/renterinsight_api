@@ -133,8 +133,10 @@ module DealDesk
     end
 
     # Distinct rates from the company's active lender tiers → one option each (capped).
+    # Seeded sample programs are skipped: their rates are placeholders under real lender
+    # names, and the workspace hides them from the program picker for the same reason.
     def rate_candidate_options(_target)
-      rates = @company.lender_programs.active.includes(:tiers)
+      rates = @company.lender_programs.active.where(is_seeded: false).includes(:tiers)
                       .flat_map { |p| p.tiers.map(&:rate) }.compact.map(&:to_f).uniq.sort.first(4)
       rates.map { |rate| engine_option('rate', @base.merge(apr: rate), rate: rate) }
     end
