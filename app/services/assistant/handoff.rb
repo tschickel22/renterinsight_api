@@ -61,10 +61,23 @@ module Assistant
       chosen = users.find_by(id: settings['handoff_user_id']) if settings['handoff_mode'] == 'user'
       chosen ||= users.find_by(id: conversation.conversable.try(:owner_id))
       chosen ||= users.find_by(id: conversation.assigned_user_id)
-      # A website visitor with no lead yet has no owner: the company's first
-      # admin takes it, so a handoff always reaches someone.
+      # A website chat whose lead has no owner (or, after an error, no lead):
+      # the next rep in the rotation of the form chat leads go through, as a
+      # lead from that form would get (Tom, 2026-11-12). Not the company's
+      # first admin, which sent every such chat to one person.
+      chosen ||= rotation_user(conversation) if conversation.web_chat?
+      # Last resort, only for a company with no usable form: someone must see it.
       chosen ||= users.active.select(&:effective_admin?).reject(&:platform_admin?).min_by(&:id) if conversation.web_chat?
       chosen
+    end
+
+    def rotation_user(conversation)
+      form = Concierge::LeadCapture.new(company: conversation.company).form
+      id = form&.next_owner_id
+      id && conversation.company.users.active.find_by(id: id)
+    rescue StandardError => e
+      Rails.logger.warn("[Assistant::Handoff] rotation failed for conversation #{conversation.id}: #{e.message}")
+      nil
     end
 
     def default_buyer_text(user, conversation = nil)
