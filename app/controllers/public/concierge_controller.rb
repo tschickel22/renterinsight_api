@@ -266,14 +266,14 @@ module Public
       if software?
         "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me how #{company.name} can help your dealership, or set up a #{settings.visit_minutes} minute demo."
       else
-        # No "prices": dealers mostly do not quote prices in a chat, and Quinn
-        # greeting with an offer it then hands to a person reads as a dodge.
-        "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about our homes, financing or a visit."
+        # No prices or financing: dealers mostly do not quote either in a chat,
+        # and Quinn greeting with an offer it then hands to a person reads as a dodge.
+        "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about a home, our process or setting an appointment."
       end
     end
 
     def chat_placeholder
-      software? ? 'Ask about our products or a demo…' : 'Ask about homes, financing, a visit…'
+      software? ? 'Ask about our products or a demo…' : 'Ask about a home, our process or an appointment…'
     end
 
     # Permitted before it travels, so nothing downstream has to reason about
