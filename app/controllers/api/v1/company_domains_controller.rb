@@ -509,9 +509,11 @@ class Api::V1::CompanyDomainsController < ApplicationController
 
     found_values =
       case type
-      when 'TXT'   then Dns::Lookup.txt(name)
-      when 'CNAME' then Dns::Lookup.cname(name)
-      when 'MX'    then Dns::Lookup.mx(name)
+      # Asked of the domain's own name server: the container's cached answer told a
+      # dealer a fixed CNAME was still wrong for up to an hour.
+      when 'TXT'   then Dns::Lookup.txt(name, zone: @domain.domain_root)
+      when 'CNAME' then Dns::Lookup.cname(name, zone: @domain.domain_root)
+      when 'MX'    then Dns::Lookup.mx(name, zone: @domain.domain_root)
       else []
       end
 

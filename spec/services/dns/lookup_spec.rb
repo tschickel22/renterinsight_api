@@ -92,4 +92,46 @@ RSpec.describe Dns::Lookup do
 
     expect(described_class.txt('')).to eq([])
   end
+
+  # www.cbhms.com, 2026-11-13: the CNAME had been fixed at GoDaddy and every public
+  # resolver had it, but Check DNS kept reading the container's cached old value for up to
+  # an hour. With a zone, the record is asked of that zone's own name server.
+  describe 'fresh answers from the zone\'s own name server' do
+    let(:cname_type) { Resolv::DNS::Resource::IN::CNAME }
+
+    before do
+      allow(described_class).to receive(:ns).with('cbhms.com', timeout: 3).and_return(['ns35.domaincontrol.com'])
+      allow(described_class).to receive(:a).with('ns35.domaincontrol.com', timeout: 3).and_return(['97.74.100.18'])
+    end
+
+    it 'asks the authoritative server when given a zone' do
+      expect(described_class).to receive(:resolve!)
+        .with('www.cbhms.com', cname_type, timeout: 3, nameserver: '97.74.100.18')
+        .and_return(['origin.mydealertide.com'])
+      expect(described_class).not_to receive(:resolve)
+
+      expect(described_class.cname('www.cbhms.com', zone: 'cbhms.com')).to eq(['origin.mydealertide.com'])
+    end
+
+    it 'falls back to the ordinary lookup when the authoritative server has nothing' do
+      allow(described_class).to receive(:resolve!).with('www.cbhms.com', cname_type, timeout: 3, nameserver: '97.74.100.18').and_return([])
+      expect(described_class).to receive(:resolve).with('www.cbhms.com', cname_type, timeout: 3).and_return(['cbhms.com'])
+
+      expect(described_class.cname('www.cbhms.com', zone: 'cbhms.com')).to eq(['cbhms.com'])
+    end
+
+    it 'falls back when the authoritative server cannot be reached' do
+      allow(described_class).to receive(:resolve!).with('www.cbhms.com', cname_type, timeout: 3, nameserver: '97.74.100.18').and_raise(Resolv::ResolvError)
+      expect(described_class).to receive(:resolve).with('www.cbhms.com', cname_type, timeout: 3).and_return(['origin.mydealertide.com'])
+
+      expect(described_class.cname('www.cbhms.com', zone: 'cbhms.com')).to eq(['origin.mydealertide.com'])
+    end
+
+    it 'uses the ordinary lookup without a zone' do
+      expect(described_class).not_to receive(:ns)
+      expect(described_class).to receive(:resolve).with('www.cbhms.com', cname_type, timeout: 3).and_return([])
+
+      described_class.cname('www.cbhms.com')
+    end
+  end
 end
