@@ -314,7 +314,8 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       Assistant::Settings.for(company).update!('chat_sites' => ['summitparkhomes.com'], 'visit_minutes' => 30)
       get "/concierge/#{token}/config", params: { site: 'summitparkhomes.com' }
       dealer = JSON.parse(response.body)
-      expect(dealer['greeting']).to include('homes, prices or a visit')
+      expect(dealer['greeting']).to include('our homes, financing or a visit')
+      expect(dealer['greeting']).not_to include('price')
       expect(dealer['placeholder']).to include('homes')
       expect(dealer['quick_actions']).to include(hash_including('type' => 'ask', 'label' => 'Book a visit'))
 

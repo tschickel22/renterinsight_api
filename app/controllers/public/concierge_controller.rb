@@ -266,7 +266,9 @@ module Public
       if software?
         "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me how #{company.name} can help your dealership, or set up a #{settings.visit_minutes} minute demo."
       else
-        "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about homes, prices or a visit."
+        # No "prices": dealers mostly do not quote prices in a chat, and Quinn
+        # greeting with an offer it then hands to a person reads as a dodge.
+        "Hi, I'm #{settings.assistant_name} with #{company.name}. Ask me about our homes, financing or a visit."
       end
     end
 
