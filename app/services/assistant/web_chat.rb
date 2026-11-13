@@ -101,7 +101,13 @@ module Assistant
       brain_answer!(matches)
     end
 
+    # Quinn asks for this when a visitor wants a person before giving any way
+    # to reach them.
+    ASK_CONTACT = 'So someone from the team can follow up, what is your name and a good email or mobile number?'
+
     def brain_answer!(matches = [])
+      # A handoff waiting for the visitor's name and contact (see hold_handoff!).
+      held = conversation.handoff_reason.presence if conversation.conversable.blank?
       history = conversation.history(Assistant::Brain::HISTORY)
       showing = matches.map { |m| m[:name] }
       # A visitor with a lead can book in the chat (phase 2).
@@ -135,6 +141,20 @@ module Assistant
       end
 
       events << Assistant::Conversions.lead(lead_from_chat!(result.contact))
+      if conversation.conversable.blank?
+        # Nobody can follow up with a visitor we cannot reach, and a lead needs
+        # a name and an email or phone (Tom, 2026-11-12). Quinn keeps the chat,
+        # asks for them, and hands off once the lead is made.
+        if problem || reason
+          hold_handoff!(reason || 'rule_check')
+          reply = problem || reply.blank? ? ASK_CONTACT : with_contact_ask(reply)
+          problem = nil
+          reason = nil
+        end
+      elsif held && conversation.assistant_answering?
+        # This message made the lead: the waiting handoff goes ahead now.
+        reason ||= held
+      end
       Assistant::Learn.record_question(conversation, result, reason, problem)
       listings = (home_card(result.photo_home_id) + matches).uniq { |l| l[:id] }.first(4)
       # A training video that shows what they asked about (software company).
@@ -159,6 +179,18 @@ module Assistant
       Reply.new(messages: [])
     end
 
+    # Kept on the conversation while it stays active, so the Inbox still shows
+    # it as Quinn's. hand_back! and taken_over! replace it.
+    def hold_handoff!(reason)
+      conversation.update!(handoff_reason: reason)
+    end
+
+    def with_contact_ask(reply)
+      return reply if reply.match?(/\bname\b/i) && reply.match?(/e-?mail|phone|number/i)
+
+      "#{reply} #{ASK_CONTACT}"
+    end
+
     def video_shown?(video)
       page = video[:url].to_s.split('?').first
       conversation.chat_messages.where(direction: 'outbound').where.not(actions: [nil, []]).any? do |m|
@@ -180,17 +212,22 @@ module Assistant
       result = capture.call(visitor: { name: name, email: email }, intent: 'contact', transcript: transcript,
                             consented: false, request_context: @request_context)
       lead = @company.leads.find_by(id: result.lead_id) if result.status == 'created'
-      self.class.link!(conversation, lead) if lead
+      # brain_answer! hands off any held handoff itself, with Quinn's reply.
+      self.class.link!(conversation, lead, release_held: false) if lead
       lead
     end
 
     # A conversation and the lead made from it, one record from then on.
-    def self.link!(conversation, lead)
+    # A handoff Quinn held for want of a way to reach the visitor goes to the
+    # lead's owner (the form's rotation) now that there is one.
+    def self.link!(conversation, lead, release_held: true)
       return unless lead
 
       conversation.update!(conversable: lead, assigned_user_id: conversation.assigned_user_id || lead.try(:owner_id),
                            location_id: conversation.location_id || lead.location_id)
       Assistant::Learn.copy_fields(lead, conversation.qualification)
+      held = conversation.handoff_reason.presence
+      Assistant::Handoff.perform!(conversation, reason: held) if release_held && held && conversation.assistant_answering?
     end
 
     def transcript
