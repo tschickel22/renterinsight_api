@@ -53,4 +53,11 @@ RSpec.describe 'GET /api/v1/websites/by_token/:token', type: :request do
 
     expect(json['lead_form_id']).to eq(56)
   end
+
+  it 'carries the platform credit for the footer' do
+    get "/api/v1/websites/by_token/#{website.preview_token}"
+
+    expect(json['platform_brand']['name']).to be_present
+    expect(json['platform_brand']['url']).to be_present
+  end
 end

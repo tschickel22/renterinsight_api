@@ -467,6 +467,9 @@ class Api::V1::WebsitesController < ApplicationController
     # the published site (PublicPayload). Without it the preview showed a
     # contact page with no form on it.
     website_json['lead_form_id'] = Websites::DefaultLeadForm.for(@website.company)&.id
+    # The footer's "Powered by DealerTide" credit and the header's sign-in
+    # address, as the published site gets them.
+    website_json['platform_brand'] = preview_platform_brand(@website.company)
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound
@@ -717,6 +720,15 @@ class Api::V1::WebsitesController < ApplicationController
   # Now one implementation in Websites::CalculatorSettings, because three other
   # surfaces needed the identical hash and each was missing it. Kept as a
   # delegating method so existing call sites in this controller are unchanged.
+  # Same shape as Websites::PublicPayload#platform_brand.
+  def preview_platform_brand(company)
+    brand = Brand.current(company: company)
+    { name: brand.name, url: brand.website_url, favicon_url: brand.favicon_url,
+      login_url: Brand.login_url(company: company) }
+  rescue StandardError
+    {}
+  end
+
   def build_calculator_settings(company)
     Websites::CalculatorSettings.for(company)
   end
