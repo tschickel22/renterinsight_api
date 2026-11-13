@@ -41,7 +41,9 @@ class DealDeskScenario < ApplicationRecord
   def engine_inputs
     {
       price: unit_price_snapshot,
-      unit_cost: unit_cost_snapshot,
+      # A zero cost means none is on record (older snapshots stored 0.0). nil tells the
+      # engine gross is unknown instead of reporting the whole price as profit.
+      unit_cost: (unit_cost_snapshot if unit_cost_snapshot.to_f.positive?),
       pack_amount: (company&.respond_to?(:default_pack_amount) ? company.default_pack_amount : 0),
       trade_allowance: trade_allowance, trade_payoff: trade_payoff,
       cash_down: cash_down, rebates: rebates,
@@ -544,9 +546,12 @@ class DealDeskScenario < ApplicationRecord
   end
 
   # Display names for the fees JSONB keys when merged as fee line items.
+  # Keys the desk used before fees were named by their template (FeeTemplate::FEE_TYPES plus
+  # the old deal fee columns). Any other key is the fee's own name and is used as typed.
   FEE_LINE_NAMES = {
     'doc' => 'Doc Fee', 'delivery' => 'Delivery Fee', 'setup' => 'Setup Fee',
-    'skirting' => 'Skirting Fee', 'accessories' => 'Accessories'
+    'skirting' => 'Skirting Fee', 'accessories' => 'Accessories',
+    'title' => 'Title Fee', 'license' => 'License Fee', 'prep' => 'Prep Fee'
   }.freeze
 
   # Flatten this scenario's add-ons into a uniform {name, price, cost, quantity, notes} list:
@@ -580,13 +585,16 @@ class DealDeskScenario < ApplicationRecord
       amount = value.to_f
       next if amount <= 0
 
-      # Only emit known fee keys. The fees JSONB can carry UI artifacts (e.g. a key named
-      # after the amount, "50"=>50); skipping unknown keys keeps junk out of deal_products.
-      name = FEE_LINE_NAMES[key.to_s]
+      # A fee counted in the desk's payment must reach the deal, so a named fee (from a
+      # template or typed by the rep) becomes a line under its own name. Only keys with no
+      # letters are skipped: the fees JSONB can carry UI artifacts (e.g. a key named after
+      # the amount, "50"=>50) that must stay out of deal_products.
+      raw = key.to_s.strip
+      name = FEE_LINE_NAMES[raw.downcase] || (raw if raw.match?(/[[:alpha:]]/))
       if name.nil?
         Rails.logger.warn(
           "[DealDeskScenario] fee_addon_entries: skipping unknown fee key #{key.inspect} " \
-          "(scenario #{id || 'new'}, deal #{deal_id}); not a recognized fee."
+          "(scenario #{id || 'new'}, deal #{deal_id}); the key has no name."
         )
         next
       end
