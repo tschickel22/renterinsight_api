@@ -106,6 +106,43 @@ RSpec.describe 'Settings pipeline stages', type: :request do
     end
   end
 
+  describe 'PATCH and the stored deal probabilities' do
+    include ActiveJob::TestHelper
+
+    let(:location) { company.locations.first || company.locations.create!(name: 'Main') }
+    let(:account) { company.accounts.create!(name: 'Buyer') }
+
+    it 'resyncs deals when a stage % changes' do
+      d = company.deals.create!(name: 'D', location: location, account: account, stage: 'proposal')
+      stages = default_payload
+      stages.find { |s| s['key'] == 'proposal' }['probability'] = 45
+
+      expect { patch_stages(stages) }.to have_enqueued_job(DealProbabilitySyncJob).with(company.id)
+      expect(response).to have_http_status(:ok)
+
+      perform_enqueued_jobs
+      expect(d.reload.probability).to eq(45)
+    end
+
+    it 'resyncs deals moved by a remap' do
+      d = company.deals.create!(name: 'D', location: location, account: account, stage: 'needs_analysis')
+      stages = default_payload.reject { |s| s['key'] == 'needs_analysis' }
+      patch '/api/settings/pipeline_stages',
+            params: { stages: stages, stage_remap: { 'needs_analysis' => 'proposal' } }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+
+      perform_enqueued_jobs
+      expect(d.reload.stage).to eq('proposal')
+      expect(d.probability).to eq(60)
+    end
+
+    it 'enqueues nothing when no % changed' do
+      stages = default_payload
+      stages.find { |s| s['key'] == 'proposal' }['color'] = '#000000'
+      expect { patch_stages(stages) }.not_to have_enqueued_job(DealProbabilitySyncJob)
+    end
+  end
+
   describe 'who can save' do
     let(:company) { create(:company, use_rbac_system: true) }
     let(:user) do
