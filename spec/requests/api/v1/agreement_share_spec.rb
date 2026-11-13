@@ -44,6 +44,16 @@ RSpec.describe 'Agreement view and share', type: :request do
     expect(body['link']).to include('/agreement_files/')
   end
 
+  it 'lists a signer who is also the contact once' do
+    agreement.agreement_signers.create!(name: 'Alex Franco', email: 'ALEX@example.com', role: 'signer')
+    agreement.agreement_signers.create!(name: 'Co Buyer', email: 'co@example.com', role: 'signer')
+
+    get "/api/v1/agreements/#{agreement.id}/share_options", headers: headers
+
+    names = JSON.parse(response.body)['recipients'].map { |r| r['name'] }
+    expect(names).to eq(['Alex Franco', 'Co Buyer'])
+  end
+
   it 'sends by email and text through CommunicationService on the contact' do
     expect(CommunicationService).to receive(:send_email)
       .with(hash_including(communicable: contact, to: 'alex@example.com', category: 'agreements'))
