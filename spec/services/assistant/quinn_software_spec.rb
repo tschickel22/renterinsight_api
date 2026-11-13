@@ -73,6 +73,42 @@ RSpec.describe 'Quinn for a software company', type: :request do
     expect(prompt).not_to match(/—|–/)
   end
 
+  it 'puts what it learns on the lead: Company, the company\'s own fields with their choices, and one note' do
+    company.custom_fields.create!(module: 'leads', name: 'Number of Dealership Locations', label: 'Number of Dealership Locations',
+                                  field_key: 'number_of_dealership_locations', field_type: 'number', is_active: true)
+    company.custom_fields.create!(module: 'leads', name: 'Category', label: 'Category', field_key: 'category', field_type: 'select',
+                                  options: ['MH Retailer', 'Community'], is_active: true)
+    company.custom_fields.create!(module: 'leads', name: 'Products Interested In', label: 'Products Interested In',
+                                  field_key: 'products_interested_in', field_type: 'multiselect', options: %w[CRM Websites Accounting], is_active: true)
+    company.custom_fields.create!(module: 'leads', name: 'Old Notes 1', label: 'Old Notes 1', field_key: 'old_notes_1',
+                                  field_type: 'text', is_active: true)
+    lead.update_columns(custom_field_values: { 'products_interested_in' => ['Accounting'] })
+
+    prompt = Assistant::Brain.new(conversation: conversation, settings: Assistant::Settings.for(company), history: []).system_prompt
+    expect(prompt).to include('CRM FIELDS', 'category (Category): one of: MH Retailer | Community',
+                              'number_of_dealership_locations (Number of Dealership Locations): a number')
+    expect(prompt).not_to include('old_notes_1')
+
+    brain_says('Thanks!', qualification: { 'business_name' => 'Sunny Acres Homes', 'locations' => '3', 'demo_focus' => 'CRM and websites' },
+                          crm_fields: { 'number_of_dealership_locations' => '3 lots', 'category' => 'mh retailer',
+                                        'products_interested_in' => %w[CRM Websites Payroll], 'old_notes_1' => 'x', 'nope' => 'y' })
+    Assistant::WebChat.new(conversation).visitor_says!('Sunny Acres Homes, 3 lots, want to see the CRM and websites')
+
+    lead.reload
+    expect(lead.company_name).to eq('Sunny Acres Homes')
+    expect(lead.custom_field_values).to eq('number_of_dealership_locations' => '3', 'category' => 'MH Retailer',
+                                           'products_interested_in' => %w[Accounting CRM Websites])
+    note = Note.find_by(entity_type: 'lead', entity_id: lead.id.to_s)
+    expect(note.content).to include("Quinn AI learned (conversation #{conversation.id})", 'Business: Sunny Acres Homes', 'Locations: 3')
+
+    # Never overwrites; the note is rewritten, not repeated.
+    brain_says('Got it.', qualification: { 'team_size' => '6' }, crm_fields: { 'category' => 'Community' })
+    Assistant::WebChat.new(conversation).visitor_says!('6 salespeople')
+    expect(lead.reload.custom_field_values['category']).to eq('MH Retailer')
+    expect(Note.where(entity_type: 'lead', entity_id: lead.id.to_s).count).to eq(1)
+    expect(Note.find_by(entity_type: 'lead', entity_id: lead.id.to_s).content).to include('Salespeople: 6')
+  end
+
   it 'keeps the home dealer prompt for everyone else' do
     company.update!(industry: 'manufactured_housing')
     prompt = Assistant::Brain.new(conversation: conversation, settings: Assistant::Settings.for(company), history: []).system_prompt

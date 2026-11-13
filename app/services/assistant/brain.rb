@@ -34,7 +34,7 @@ module Assistant
 
     Result = Struct.new(:reply, :qualification, :contact, :resend_invite, :photo_home_id, :question, :question_answered,
                         :question_topic, :handoff, :handoff_reason, :summary, :usage, :subject, :book_slot, :cancel_visit,
-                        :video, keyword_init: true)
+                        :video, :crm_fields, keyword_init: true)
 
     # opener: write the first text to a new lead (Quinn starts it, E96).
     # showing: names of homes the website chat shows as cards under this reply.
@@ -92,6 +92,8 @@ module Assistant
         book_slot: booking? ? input['book_slot'].to_s.strip.upcase.presence : nil,
         cancel_visit: booking? && input['cancel_visit'] == true,
         video: videos.detect { |v| "V#{v[:id]}" == input['video_id'].to_s.strip.upcase },
+        # Checked against the field's choices when written (Assistant::CrmFields).
+        crm_fields: software? ? input['crm_fields'].to_h : {},
         usage: { model: response['model'], input_tokens: response.dig('usage', 'input_tokens'),
                  output_tokens: response.dig('usage', 'output_tokens') }
       )
@@ -221,6 +223,7 @@ module Assistant
 
         VIDEOS (short training videos that show it on screen)
         #{video_lines.presence || 'None match.'}
+        #{crm_field_lines.present? ? "\nCRM FIELDS (fill crm_fields with everything they have told you in this conversation that fits one of these; use only the listed choices, leave out anything they did not say)\n#{crm_field_lines}" : ''}
 
         THIS PERSON
         Name on file: #{name_on_file}
@@ -544,7 +547,8 @@ module Assistant
             subject: { type: 'string', description: 'Only for an email follow-up: the subject line, under 60 characters.' },
             book_slot: { type: 'string', description: 'The [id] from OPEN TIMES they clearly accepted, to book (or move their visit to). Omit otherwise.' },
             cancel_visit: { type: 'boolean', description: 'True only when they clearly asked to cancel their booked visit.' }
-          }.merge(software? ? { video_id: { type: 'string', description: 'The [V number] of one video from VIDEOS to show under your reply, when it shows what they asked about. Omit otherwise.' } } : {}),
+          }.merge(software? ? { video_id: { type: 'string', description: 'The [V number] of one video from VIDEOS to show under your reply, when it shows what they asked about. Omit otherwise.' } } : {})
+           .merge(software? && crm_field_lines.present? ? { crm_fields: { type: 'object', description: 'Values for CRM FIELDS from what they said.', properties: Assistant::CrmFields.schema(@company) } } : {}),
           required: %w[reply handoff summary]
         }
       }
@@ -681,6 +685,12 @@ module Assistant
       Time.current.in_time_zone(zone).strftime('%A, %B %-d, %Y, %-I:%M %p %Z')
     rescue StandardError
       Time.current.utc.strftime('%A, %B %-d, %Y, %-I:%M %p UTC')
+    end
+
+    def crm_field_lines
+      return '' unless software?
+
+      @crm_field_lines ||= Assistant::CrmFields.prompt_lines(@company)
     end
 
     def appointment_lines
