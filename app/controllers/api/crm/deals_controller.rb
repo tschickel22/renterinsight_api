@@ -1128,7 +1128,9 @@ module Api
         {
           id: sh.id,
           stage: sh.stage,
+          stageName: @company.pipeline_stage_name(sh.stage),
           previousStage: sh.previous_stage,
+          previousStageName: @company.pipeline_stage_name(sh.previous_stage),
           changedById: sh.changed_by_id,
           changedByName: sh.changed_by&.name,
           duration: sh.duration,
