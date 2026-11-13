@@ -4,8 +4,8 @@ require 'rails_helper'
 
 # Account names are not unique. New Account and Convert Lead both answer 409
 # (account_name_in_use) when the name is taken, listing only the same-name
-# accounts the rep can open. Accounts in locations they cannot see are counted
-# (hiddenCount) but never described, and never joined.
+# accounts the rep can open. Accounts in locations they cannot see are never
+# mentioned (not even as a count) and never joined.
 RSpec.describe 'Account name in use', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
   let(:here) { company.locations.create!(name: 'Denver', timezone: 'UTC') }
@@ -51,24 +51,22 @@ RSpec.describe 'Account name in use', type: :request do
       expect(response).to have_http_status(:conflict)
       expect(json['code']).to eq('account_name_in_use')
       expect(json['accounts'].map { |a| a['id'] }).to contain_exactly(visible.id, unassigned.id)
-      expect(json['hiddenCount']).to eq(1)
+      expect(json).not_to have_key('hiddenCount')
       expect(response.body).not_to include('secret@example.com')
       expect(response.body).not_to include('Aurora')
       expect(json['duplicate']).to include('field' => 'name', 'id' => visible.id)
     end
 
-    it 'still asks (without details) when the only same-name account is hidden' do
+    it 'creates without asking when the only same-name account is hidden' do
       restrict_to_here!
       visible.destroy
       unassigned.destroy
 
       post '/api/v1/accounts', params: { account: { name: 'Smith' } }.to_json, headers: headers_for(rep)
 
-      expect(response).to have_http_status(:conflict)
-      expect(json['accounts']).to eq([])
-      expect(json['existingAccount']).to be_nil
-      expect(json['hiddenCount']).to eq(1)
+      expect(response).to have_http_status(:created), response.body
       expect(response.body).not_to include('secret@example.com')
+      expect(company.accounts.where('LOWER(TRIM(name)) = ?', 'smith').count).to eq(2)
     end
 
     it 'lists every same-name account for an admin' do
@@ -76,7 +74,7 @@ RSpec.describe 'Account name in use', type: :request do
 
       expect(response).to have_http_status(:conflict)
       expect(json['accounts'].map { |a| a['id'] }).to eq([hidden.id, visible.id, unassigned.id])
-      expect(json['hiddenCount']).to eq(0)
+      expect(json).not_to have_key('hiddenCount')
     end
 
     it 'with allow_duplicate_name creates a second account with the same name' do
@@ -117,23 +115,17 @@ RSpec.describe 'Account name in use', type: :request do
 
       expect(response).to have_http_status(:conflict)
       expect(json['accounts'].map { |a| a['id'] }).to contain_exactly(visible.id, unassigned.id)
-      expect(json['hiddenCount']).to eq(1)
+      expect(json).not_to have_key('hiddenCount')
       expect(response.body).not_to include('secret@example.com')
       expect(lead.reload.is_converted).to be_falsey
     end
 
-    it 'still asks when the only same-name account is hidden, and new makes a separate account' do
+    it 'makes a new account without asking when the only same-name account is hidden' do
       restrict_to_here!
       visible.destroy
       unassigned.destroy
 
       post "/api/crm/leads/#{lead.id}/convert", params: { account_name: 'Smith' }.to_json, headers: headers_for(rep)
-      expect(response).to have_http_status(:conflict)
-      expect(json['accounts']).to eq([])
-      expect(json['hiddenCount']).to eq(1)
-
-      post "/api/crm/leads/#{lead.id}/convert", params: { account_name: 'Smith', account_mode: 'new' }.to_json,
-                                                headers: headers_for(rep)
       expect(response).to have_http_status(:ok), response.body
       expect(json.dig('account', 'id')).not_to eq(hidden.id)
       expect(hidden.reload.contacts.count).to eq(0)
@@ -159,7 +151,7 @@ RSpec.describe 'Account name in use', type: :request do
       expect([visible.id, unassigned.id]).to include(json.dig('account', 'id'))
     end
 
-    it 'existing without an id refuses when every same-name account is hidden' do
+    it 'existing without an id makes a new account when every same-name account is hidden' do
       restrict_to_here!
       visible.destroy
       unassigned.destroy
@@ -167,8 +159,9 @@ RSpec.describe 'Account name in use', type: :request do
       post "/api/crm/leads/#{lead.id}/convert", params: { account_name: 'Smith', account_mode: 'existing' }.to_json,
                                                 headers: headers_for(rep)
 
-      expect(response).to have_http_status(:not_found)
-      expect(lead.reload.is_converted).to be_falsey
+      expect(response).to have_http_status(:ok), response.body
+      expect(json.dig('account', 'id')).not_to eq(hidden.id)
+      expect(hidden.reload.contacts.count).to eq(0)
     end
 
     it 'joins a visible account by id' do

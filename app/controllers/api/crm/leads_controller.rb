@@ -711,20 +711,18 @@ module Api
           # (two families named Smith). Ask before converting anything.
           if account_mode != 'new' && account_id.nil?
             account_name = converter.account_name_for(params[:account_name])
-            matches, hidden_count = account_name_matches(account_name)
-            if account_mode.nil? && (matches.any? || hidden_count.positive?)
-              render json: account_name_in_use_json(account_name, matches, hidden_count: hidden_count), status: :conflict
+            matches = account_name_matches(account_name)
+            if account_mode.nil? && matches.any?
+              render json: account_name_in_use_json(account_name, matches), status: :conflict
               return
             end
             # 'existing' with no id joins the first same-name account the rep
-            # can open (never a hidden one).
-            if account_mode == 'existing'
-              if matches.any?
-                account_id = matches.first.id
-              elsif hidden_count.positive?
-                render json: { error: 'You cannot open any account with that name. Make a new account instead.' }, status: :not_found
-                return
-              end
+            # can open. With none they can open, the lead gets a new account:
+            # never join, or mention, an account in a location they cannot see.
+            if matches.any?
+              account_id = matches.first.id if account_mode == 'existing'
+            else
+              account_mode = 'new'
             end
           end
 
