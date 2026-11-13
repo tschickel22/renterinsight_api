@@ -95,7 +95,11 @@ class Account < ApplicationRecord
   end
   
   # Validations
-  validates :name, presence: true, uniqueness: { scope: :company_id }
+  # Names are NOT unique: two families named Smith are two accounts. Convert
+  # Lead asks the rep whether to join a same-name account or make a new one
+  # (Leads::Converter.accounts_named); New Account still blocks an exact match
+  # (AccountsController#create). There was never a unique index.
+  validates :name, presence: true
   validates :email, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
   validates :status, inclusion: { in: STATUSES }, allow_blank: true, allow_nil: true  # Many existing accounts don't have status set
   validates :account_type, inclusion: { in: ACCOUNT_TYPES }, allow_blank: true

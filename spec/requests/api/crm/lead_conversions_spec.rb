@@ -8,6 +8,8 @@ require 'rails_helper'
 #      null). Conversion must now succeed and migrate the activity.
 #   2. Converting a lead into a PRE-EXISTING account (matched by name) must
 #      backfill the account's missing phone/email/address from the lead.
+# Plus: a name already in use is a question (409) until the rep picks join
+# ('existing') or a separate account ('new'); two families can share a name.
 RSpec.describe 'Api::Crm::Leads conversion', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
   let(:user) do
@@ -70,10 +72,79 @@ RSpec.describe 'Api::Crm::Leads conversion', type: :request do
       )
     end
 
-    it 'reuses the account and backfills its missing phone/email' do
+    it 'asks first: 409 with the account in use, and converts nothing' do
+      Contact.create!(company_id: company.id, account_id: existing_account.id, first_name: 'Earl', last_name: 'Hughes')
+
       expect {
         post "/api/crm/leads/#{lead.id}/convert",
-             params: { account_name: 'Dorothy Hughes' }.to_json,
+             params: { account_name: ' dorothy hughes ' }.to_json,
+             headers: auth_headers
+      }.not_to change(Account, :count)
+
+      expect(response).to have_http_status(:conflict)
+      body = JSON.parse(response.body)
+      expect(body['code']).to eq('account_name_in_use')
+      expect(body['existingAccount']).to include('id' => existing_account.id, 'name' => 'Dorothy Hughes', 'contactsCount' => 1)
+      expect(body['accounts'].map { |a| a['id'] }).to eq([existing_account.id])
+      expect(lead.reload.is_converted).to be_falsey
+    end
+
+    it 'with account_mode new, makes a second account with the same name' do
+      expect {
+        post "/api/crm/leads/#{lead.id}/convert",
+             params: { account_name: 'Dorothy Hughes', account_mode: 'new' }.to_json,
+             headers: auth_headers
+      }.to change(Account, :count).by(1)
+
+      expect(response).to have_http_status(:ok), response.body
+      new_id = JSON.parse(response.body).dig('account', 'id')
+      expect(new_id).not_to eq(existing_account.id)
+      expect(company.accounts.where(name: 'Dorothy Hughes').count).to eq(2)
+      expect(Account.find(new_id).phone).to be_present
+      expect(Contact.find_by(company_id: company.id, email: 'dhughes@example.com').account_id).to eq(new_id)
+      # The other family's account is untouched.
+      expect(existing_account.reload.email).to be_blank
+      expect(lead.reload.converted_account_id).to eq(new_id)
+    end
+
+    it 'with account_id, joins that one of several same-name accounts' do
+      second = Account.create!(company_id: company.id, name: 'Dorothy Hughes', status: 'active')
+
+      post "/api/crm/leads/#{lead.id}/convert",
+           params: { account_name: 'Dorothy Hughes', account_mode: 'existing', account_id: second.id }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(JSON.parse(response.body).dig('account', 'id')).to eq(second.id)
+      expect(existing_account.reload.email).to be_blank
+    end
+
+    it 'refuses an account_id from another company' do
+      other = Account.create!(company_id: Company.create!(name: "Other-#{SecureRandom.hex(4)}").id, name: 'Dorothy Hughes')
+
+      post "/api/crm/leads/#{lead.id}/convert",
+           params: { account_name: 'Dorothy Hughes', account_mode: 'existing', account_id: other.id }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:not_found)
+      expect(lead.reload.is_converted).to be_falsey
+    end
+
+    it 'does not ask about a deleted account with that name' do
+      existing_account.update_columns(is_deleted: true)
+
+      post "/api/crm/leads/#{lead.id}/convert",
+           params: { account_name: 'Dorothy Hughes' }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(JSON.parse(response.body).dig('account', 'id')).not_to eq(existing_account.id)
+    end
+
+    it 'with account_mode existing, reuses the account and backfills its missing phone/email' do
+      expect {
+        post "/api/crm/leads/#{lead.id}/convert",
+             params: { account_name: 'Dorothy Hughes', account_mode: 'existing' }.to_json,
              headers: auth_headers
       }.not_to change(Account, :count) # matched, not duplicated
 
