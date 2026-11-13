@@ -20,13 +20,18 @@ module Api
             search_term, search_term, search_term
           ).pluck(:id)
           documents = documents.where(
-            'portal_documents.document_name ILIKE ? OR portal_documents.description ILIKE ? OR portal_documents.category ILIKE ? OR owner_id IN (?)',
+            "portal_documents.document_name ILIKE ? OR portal_documents.description ILIKE ? OR portal_documents.category ILIKE ? OR (portal_documents.owner_type = 'Contact' AND portal_documents.owner_id IN (?))",
             search_term, search_term, search_term, contact_ids
           )
         end
         
         documents = documents.where(category: params[:category]) if params[:category].present?
-        documents = documents.where(owner_id: params[:buyer_id]) if params[:buyer_id].present?
+        documents = documents.where(owner_type: 'Contact', owner_id: params[:buyer_id]) if params[:buyer_id].present?
+        # Files filed on the account or lead itself (GoHighLevel imports put
+        # deal files there). Staff only: the buyer portal reads Contact-owned
+        # documents, so these never reach a customer.
+        documents = documents.where(owner_type: 'Account', owner_id: params[:account_id]) if params[:account_id].present?
+        documents = documents.where(owner_type: 'Lead', owner_id: params[:lead_id]) if params[:lead_id].present?
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -138,9 +143,11 @@ module Api
       end
 
       def company_scoped_documents
-        # Query for Contact-owned documents (new architecture)
-        contact_ids = @company.contacts.pluck(:id)
-        PortalDocument.where(owner_type: 'Contact', owner_id: contact_ids)
+        # Contact-owned documents (shared with the buyer through the portal),
+        # plus staff-only documents filed on an account or a lead.
+        PortalDocument.where(owner_type: 'Contact', owner_id: @company.contacts.select(:id))
+                      .or(PortalDocument.where(owner_type: 'Account', owner_id: @company.accounts.select(:id)))
+                      .or(PortalDocument.where(owner_type: 'Lead', owner_id: @company.leads.select(:id)))
       end
 
       def update_params
@@ -148,6 +155,8 @@ module Api
       end
 
       def document_json(doc)
+        return record_document_json(doc) if %w[Account Lead].include?(doc.owner_type)
+
         # For Contact-owned documents
         if doc.owner_type == 'Contact'
           contact = doc.owner
@@ -202,6 +211,41 @@ module Api
           uploaded_by: doc.uploaded_by || 'System',
           uploaded_at: doc.uploaded_at || doc.created_at,
           is_buyer_uploaded: is_buyer_uploaded,
+          status: 'active'
+        }
+      end
+
+      # A document filed on an account or lead. buyer_* carry the record's name
+      # so the Documents list reads the same; owner_* say what it belongs to.
+      def record_document_json(doc)
+        owner = doc.owner
+        return nil unless owner
+
+        name = if owner.is_a?(Account)
+                 owner.name
+               else
+                 [owner.first_name, owner.last_name].compact.join(' ').presence || owner.email
+               end
+        {
+          id: doc.id,
+          buyer_id: nil,
+          buyer_name: name,
+          buyer_email: owner.try(:email),
+          owner_type: doc.owner_type,
+          owner_id: doc.owner_id,
+          title: doc.document_name.presence || (doc.file.attached? ? doc.file.filename.to_s : (doc.description || 'Untitled')),
+          document_name: doc.document_name,
+          description: doc.description,
+          notes: doc.notes,
+          admin_notes: doc.admin_notes,
+          category: doc.category || 'other',
+          file_name: doc.file.attached? ? doc.file.filename.to_s : '',
+          file_size: doc.file.attached? ? doc.file.byte_size : 0,
+          content_type: doc.file.attached? ? doc.file.content_type : '',
+          uploaded_by: doc.uploaded_by || 'System',
+          uploaded_at: doc.uploaded_at || doc.created_at,
+          is_buyer_uploaded: false,
+          staff_only: true,
           status: 'active'
         }
       end
