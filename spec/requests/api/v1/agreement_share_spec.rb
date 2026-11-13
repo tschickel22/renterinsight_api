@@ -41,7 +41,7 @@ RSpec.describe 'Agreement view and share', type: :request do
     body = JSON.parse(response.body)
     expect(body['recipients']).to include(include('name' => 'Alex Franco', 'email' => 'alex@example.com',
                                                   'phone' => '352-555-0100', 'contact_id' => contact.id))
-    expect(body['link']).to include('/agreement_files/')
+    expect(body['link']).to start_with("#{Messaging::TrackingUrl.base}/agreement_files/")
   end
 
   it 'lists a signer who is also the contact once' do
