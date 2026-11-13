@@ -177,11 +177,59 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       expect(message['listings'].map { |l| l['name'] }).to include('2026 Champion Shoal Creek')
     end
 
-    it 'hands off into the chat, then the rep answers from the Inbox and the visitor gets it' do
-      brain_says(reply: '', handoff: true, reason: 'asked_for_person')
-      post "/concierge/#{token}", params: { message: 'Can I talk to a person?' }.to_json, headers: { 'Content-Type' => 'application/json' }
+    it 'holds a handoff until the visitor leaves a name and contact, then hands it to the lead\'s owner' do
+      owner = User.create!(email: "owner-#{SecureRandom.hex(4)}@example.com", first_name: 'Casey', last_name: 'Owner',
+                           password: 'Pass1234!', company_id: company.id, role: 'sales_rep', status: 'active')
+      brain_says(reply: 'Happy to set that up.', handoff: true, reason: 'appointment')
+      post "/concierge/#{token}", params: { message: "I'd like to book a visit." }.to_json, headers: { 'Content-Type' => 'application/json' }
       body = JSON.parse(response.body)
       conversation = Conversation.find_by(visitor_token: body['chat_key'])
+      # No way to reach them yet: Quinn keeps it and asks, nobody is told.
+      expect(conversation).to have_attributes(status: 'active', handoff_reason: 'appointment', assigned_user_id: nil)
+      expect(body['messages'].last['content']).to eq("Happy to set that up. #{Assistant::WebChat::ASK_CONTACT}")
+      expect(Notification.where(notification_type: 'assistant_handoff')).not_to exist
+      get '/api/crm/conversations', headers: headers
+      row = JSON.parse(response.body)['items'].detect { |r| r['id'] == conversation.id }
+      expect(row).to include('state' => 'Assistant', 'handoff_label' => nil)
+
+      # The lead the form makes belongs to the form's rotation pick, who gets it.
+      lead = company.leads.create!(first_name: 'Tia', last_name: 'May', email: 'tia@example.com', owner_id: owner.id)
+      allow_any_instance_of(Concierge::LeadCapture).to receive(:call).and_return(Concierge::LeadCapture::Result.new(status: 'created', lead_id: lead.id))
+      brain_says(reply: 'Thanks Tia, the team will reach out about a time.',
+                 contact: { 'first_name' => 'Tia', 'last_name' => 'May', 'email' => 'tia@example.com' })
+      post "/concierge/#{token}", params: { message: 'Tia May, tia@example.com', chat_key: body['chat_key'] }.to_json,
+                                  headers: { 'Content-Type' => 'application/json' }
+      expect(conversation.reload).to have_attributes(status: 'handed_off', handoff_reason: 'appointment',
+                                                     handed_off_to_user_id: owner.id, assigned_user_id: owner.id)
+      expect(JSON.parse(response.body)['messages'].last['content']).to start_with('Thanks Tia')
+      expect(Notification.where(notification_type: 'assistant_handoff', recipient: owner).count).to eq(1)
+      expect(Notification.where(notification_type: 'assistant_handoff', recipient: rep)).not_to exist
+    end
+
+    it 'hands a held chat off when a typed number makes the lead' do
+      brain_says(reply: '', handoff: true, reason: 'asked_for_person')
+      post "/concierge/#{token}", params: { message: 'Can I talk to a person?' }.to_json, headers: { 'Content-Type' => 'application/json' }
+      key = JSON.parse(response.body)['chat_key']
+      conversation = Conversation.find_by(visitor_token: key)
+      expect(JSON.parse(response.body)['messages'].last['content']).to eq(Assistant::WebChat::ASK_CONTACT)
+      expect(conversation.status).to eq('active')
+
+      lead = company.leads.create!(first_name: 'Tia', phone: '(303) 555-0144', owner_id: rep.id)
+      allow_any_instance_of(Concierge::LeadCapture).to receive(:call).and_return(Concierge::LeadCapture::Result.new(status: 'created', lead_id: lead.id))
+      post "/concierge/#{token}/lead", params: { chat_key: key, consented: true, visitor: { name: 'Tia', phone: '(303) 555-0144' } }.to_json,
+                                       headers: { 'Content-Type' => 'application/json' }
+      expect(conversation.reload).to have_attributes(status: 'handed_off', handoff_reason: 'asked_for_person', handed_off_to_user_id: rep.id)
+      expect(conversation.chat_messages.order(:id).last.body).to include('to join this chat')
+    end
+
+    it 'hands off into the chat, then the rep answers from the Inbox and the visitor gets it' do
+      lead = company.leads.create!(first_name: 'Tia', email: 'tia@example.com', owner_id: rep.id)
+      chat = Assistant::WebChat.after_form!(lead: lead)
+      brain_says(reply: '', handoff: true, reason: 'asked_for_person')
+      post "/concierge/#{token}", params: { message: 'Can I talk to a person?', chat_key: chat.visitor_token }.to_json,
+                                  headers: { 'Content-Type' => 'application/json' }
+      body = JSON.parse(response.body).merge('chat_key' => chat.visitor_token)
+      conversation = chat.reload
       expect(conversation.status).to eq('handed_off')
       expect(body['messages'].last['content']).to include('to join this chat')
       expect(Notification.where(notification_type: 'assistant_handoff', recipient: rep)).to exist
@@ -201,7 +249,8 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       expect(conversation.reload.visitor_on_page?).to be(true)
 
       get "/api/crm/conversations/#{conversation.id}/chat_messages", headers: headers
-      expect(JSON.parse(response.body)['messages'].size).to eq(4)
+      # Quinn's greeting after the form, the question, the handoff line, the rep.
+      expect(JSON.parse(response.body)['messages'].size).to eq(5)
     end
 
     it 'puts the number and the yes to texts on the chat\'s lead' do

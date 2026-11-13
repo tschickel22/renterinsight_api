@@ -321,7 +321,9 @@ module Assistant
               'the size of home and bedrooms, their timeline, their budget, how they would pay (cash, financing, or not sure), ' \
               'and a good time to visit.'
       contact = @web ? 'If they want to visit, be contacted or have details sent, ask for their name and an email address or mobile number ' \
-                       '(the chat itself asks whether texting is OK, so do not ask that).' :
+                       '(the chat itself asks whether texting is OK, so do not ask that).' +
+                       (@lead ? '' : ' Nobody can follow up until you have their name and an email or mobile number, so ask for ' \
+                                     'those before you hand off for any reason.') :
                        'If they want to visit or want details sent and you do not have their full name or email address, ask for it.'
       case booking_mode
       when :book

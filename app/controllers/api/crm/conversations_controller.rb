@@ -312,8 +312,10 @@ module Api
           buyer_phone: c.buyer_phone,
           assigned_user: c.assigned_user && { id: c.assigned_user.id, name: c.assigned_user.try(:full_name).presence || c.assigned_user.email },
           handed_off_to: c.handed_off_to_user && { id: c.handed_off_to_user.id, name: c.handed_off_to_user.try(:full_name).presence || c.handed_off_to_user.email },
-          handoff_reason: c.handoff_reason,
-          handoff_label: c.handoff_reason && Assistant::Handoff::REASON_LABELS[c.handoff_reason],
+          # An active chat can carry a reason Quinn is holding until the
+          # visitor leaves a name and contact; it is not handed off yet.
+          handoff_reason: (c.handoff_reason unless c.status == 'active'),
+          handoff_label: (c.handoff_reason && c.status != 'active' ? Assistant::Handoff::REASON_LABELS[c.handoff_reason] : nil),
           qualification: c.qualification || {},
           last_message_at: c.last_message_at,
           last_message_preview: c.last_message_preview,
