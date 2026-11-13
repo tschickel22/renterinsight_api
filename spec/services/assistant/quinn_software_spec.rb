@@ -21,7 +21,8 @@ RSpec.describe 'Quinn for a software company', type: :request do
                  company_id: company.id, role: 'company_admin', status: 'active')
   end
   let(:lead) do
-    company.leads.create!(first_name: 'Tia', last_name: 'May', email: 'tia@example.com', owner_id: rep.id, location_id: location.id)
+    company.leads.create!(first_name: 'Tia', last_name: 'May', email: 'tia@example.com', phone: '(303) 555-0144', owner_id: rep.id,
+                          location_id: location.id)
   end
   let(:conversation) do
     company.conversations.create!(channel: 'web_chat', status: 'active', assistant_enabled: true, conversable: lead,
@@ -163,6 +164,26 @@ RSpec.describe 'Quinn for a software company', type: :request do
       expect(Appointments::BookingText.body(demo, customer, tom, 'booked'))
         .to include('by video call (the link to join is in your email invite)')
       expect(Appointments::BookingText.body(demo, customer, tom, 'booked')).not_to include('https://')
+    end
+  end
+
+  it 'books nothing until it has their phone number, and keeps a number they type' do
+    lead.update_columns(phone: nil)
+    travel_to(Time.find_zone('America/Denver').local(2026, 11, 9, 8, 0)) do
+      slot = Assistant::Booking.new(conversation).slots.first
+      brain_says('Great.', book_slot: slot.id)
+      Assistant::WebChat.new(conversation).visitor_says!('The first one works')
+      expect(LeadActivity.where(lead_id: lead.id, activity_type: 'meeting')).not_to exist
+      expect(conversation.chat_messages.where(direction: 'outbound').last.body).to eq(Assistant::Booking::NEED_PHONE)
+
+      brain_says('Thanks!', contact: { 'phone' => '(303) 555-0199' })
+      Assistant::WebChat.new(conversation).visitor_says!('303 555 0199')
+      expect(lead.reload.phone.gsub(/\D/, '')).to eq('3035550199')
+      expect(lead.may_text_about_inquiry).to be_falsey
+
+      brain_says('Great.', book_slot: Assistant::Booking.new(conversation.reload).slots.first.id)
+      Assistant::WebChat.new(conversation).visitor_says!('The first one works')
+      expect(LeadActivity.where(lead_id: lead.id, activity_type: 'meeting')).to exist
     end
   end
 

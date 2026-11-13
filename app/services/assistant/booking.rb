@@ -74,7 +74,12 @@ module Assistant
       book!(result.book_slot)
     end
 
+    # A visit or demo needs a phone number to reach them on (Tom, 2026-11-13).
+    NEED_PHONE = 'To set that up I just need a good phone number for you. If you would rather not get texts, we will only call.'
+
     def book!(slot_id)
+      return Outcome.new(ok: false, text: NEED_PHONE) if !current_visit && @record.try(:phone).to_s.gsub(/\D/, '').length < 10
+
       slot = slots.find { |s| s.id == slot_id.to_s.strip.upcase }
       return taken_outcome unless slot
       return taken_outcome unless availability.open?(slot.starts_at, ignore: current_visit)

@@ -196,7 +196,8 @@ module Public
       phone = visitor_details['phone'].to_s.strip
       consented = ActiveModel::Type::Boolean.new.cast(params[:consented]) == true
       changes = {}
-      changes[:phone] = phone if phone.present? && consented && lead.phone.blank?
+      # Kept for calls even on "Call me, no texts"; consent only on yes.
+      changes[:phone] = phone if phone.present? && lead.phone.blank?
       if consented && phone.present? && (lead.phone.blank? || Conversation.normalize_phone(lead.phone) == Conversation.normalize_phone(phone))
         changes[:sms_inquiry_consent] = true
         changes[:sms_inquiry_consent_at] = Time.current

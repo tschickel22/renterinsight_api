@@ -265,8 +265,8 @@ module Assistant
               'question, then stop asking and thank them.'
       contact = if @web
                   'To set up a demo, ask for their name, email address and mobile number together in one message (the ' \
-                    'invite goes to the email). The chat itself asks whether texting is OK, so do not ask that. Book once ' \
-                    'you have their name and email and they have given a mobile number or said they would rather not.'
+                    'invite goes to the email). The chat itself asks whether texting is OK, so do not ask that. A demo needs ' \
+                    'their name, email and phone number; if they would rather not be texted, a number for a call is fine.'
                 else
                   'To set up a demo and you do not have their full name, email address or phone number, ask for what is missing.'
                 end
@@ -294,7 +294,8 @@ module Assistant
         'time and how to join is sent for you, so your reply must be empty or a few warm words that do not repeat the ' \
         'time (for example "Great, talk then."). To move a booked demo, offer times and set book_slot for the new one. ' \
         'If they ask to cancel, set cancel_visit. Never say a demo is booked unless you set book_slot. If there are no ' \
-        'open times, hand off (reason appointment). You need their name and email before booking.'
+        'open times, hand off (reason appointment). You need their name, email and phone number before booking (see THIS ' \
+        'PERSON); ask for what is missing first.'
     end
 
     def software_links_rule
@@ -336,8 +337,9 @@ module Assistant
       learn = 'Learn, one question at a time and only when it fits: whether they own land or need land or a community, ' \
               'the size of home and bedrooms, their timeline, their budget, how they would pay (cash, financing, or not sure), ' \
               'and a good time to visit.'
-      contact = @web ? 'If they want to visit, be contacted or have details sent, ask for their name and an email address or mobile number ' \
-                       '(the chat itself asks whether texting is OK, so do not ask that).' +
+      contact = @web ? 'If they want to visit, be contacted or have details sent, ask for their name, mobile number and email address ' \
+                       'together in one message (the chat itself asks whether texting is OK, so do not ask that). A visit needs ' \
+                       'their phone number; if they would rather not be texted, a number for a call is fine.' +
                        (@lead ? '' : ' Nobody can follow up until you have their name and an email or mobile number, so ask for ' \
                                      'those before you hand off for any reason.') :
                        'If they want to visit or want details sent and you do not have their full name or email address, ask for it.'
@@ -346,7 +348,7 @@ module Assistant
         "Your goal is a visit to see homes in person. Answer their questions, learn what they need, and invite them to come see " \
           "homes that fit. #{learn} #{contact} " +
           (booking? ? 'When they are open to a visit, offer two open times and book the one they pick (see VISITS).' :
-            'Once they give a day and time to visit and you have their name and a way to reach them, hand off with reason ' \
+            'Once they give a day and time to visit and you have their name, phone number and email, hand off with reason ' \
             'visit_time, saying the team will confirm that time. Never say a time is booked.')
       when :rep_now
         'The dealership is open right now and the team can help straight away. Learn their name and, in one or two questions, ' \
@@ -487,7 +489,8 @@ module Assistant
                'few warm words that do not repeat the time (for example "Perfect, see you then."). If they ' \
                'want a time that is not listed, offer the closest listed ones. To move a booked visit, offer times and set ' \
                'book_slot for the new one. If they ask to cancel, set cancel_visit. Never say a visit is booked unless you set ' \
-               'book_slot. If there are no open times, hand off (reason appointment).'
+               'book_slot. Before booking you need their name, phone number and email (see THIS BUYER); ask for what is ' \
+               'missing first. If there are no open times, hand off (reason appointment).'
       end
 
       if booking_mode == :book

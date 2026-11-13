@@ -38,10 +38,11 @@ module Assistant
       Assistant::CrmFields.note!(conversation)
     end
 
-    # Name, email and address the buyer typed, onto the lead's own fields, as
-    # the lead form would. Fills what is blank (or a placeholder name); never
-    # overwrites what a rep or a form already put there. Never the phone: a
-    # number is used for texts only with the consent the form or chat asks for.
+    # Name, email, phone and address the buyer typed, onto the lead's own
+    # fields, as the lead form would. Fills what is blank (or a placeholder
+    # name); never overwrites what a rep or a form already put there. A phone
+    # is kept for calls; texting it still needs the consent the chat asks for
+    # (Lead#may_text_about_inquiry), as a form's phone field does (2026-11-13).
     def copy_contact(lead, contact)
       return if lead.nil? || contact.blank?
 
@@ -55,6 +56,9 @@ module Assistant
       end
       email = contact['email'].to_s.downcase
       changes['email'] = email if email.match?(EMAIL) && lead.has_attribute?(:email) && lead.email.blank?
+      phone = contact['phone'].to_s.gsub(/\D/, '')
+      phone = phone[1..] if phone.length == 11 && phone.start_with?('1')
+      changes['phone'] = contact['phone'].to_s.strip.truncate(30) if phone.length == 10 && lead.has_attribute?(:phone) && lead.phone.blank?
       %w[street city state zip].each do |field|
         changes[field] = contact[field].truncate(120) if contact[field].present? && lead.has_attribute?(field) && lead[field].blank?
       end
