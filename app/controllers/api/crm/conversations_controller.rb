@@ -10,7 +10,9 @@ module Api
       before_action :set_company_scope
       before_action :set_conversation, except: %i[index for_record]
 
-      VIEWS = %w[all needs_you mine unassigned done].freeze
+      # with_quinn: what Quinn AI is answering right now, each with why it has
+      # not gone to a person yet (Tom, 2026-11-12).
+      VIEWS = %w[all needs_you mine unassigned with_quinn done].freeze
       PER_PAGE = 50
 
       def index
@@ -238,6 +240,7 @@ module Api
           scope.where(status: Conversation::OPEN_STATUSES)
                .where('conversations.assigned_user_id = :id OR conversations.handed_off_to_user_id = :id', id: current_user.id)
         when 'unassigned' then scope.where(status: Conversation::OPEN_STATUSES, assigned_user_id: nil)
+        when 'with_quinn' then scope.where(status: 'active', assistant_enabled: true)
         when 'done' then scope.where(status: 'closed')
         else scope.where(status: Conversation::OPEN_STATUSES)
         end
@@ -247,7 +250,8 @@ module Api
         {
           needs_you: apply_view(base, 'needs_you').count,
           mine: apply_view(base, 'mine').count,
-          unassigned: apply_view(base, 'unassigned').count
+          unassigned: apply_view(base, 'unassigned').count,
+          with_quinn: apply_view(base, 'with_quinn').count
         }
       end
 
@@ -294,6 +298,37 @@ module Api
         'Waiting on buyer'
       end
 
+      # Why a conversation Quinn is answering has not gone to a person, and
+      # what moves it on. Shown as the banner on the thread and a line on the
+      # row. nil once a person has it.
+      def quinn_note(c, record)
+        return nil unless c.assistant_answering?
+
+        ai = "#{assistant_name} AI"
+        owner = c.assigned_user.try(:full_name).presence || c.assigned_user.try(:email)
+        no_contact = record.nil? || (record.try(:email).blank? && record.try(:phone).blank?)
+        later = 'Once they do, the lead is made, assigned by your form\'s rotation, and handed to that person.'
+        if c.web_chat? && no_contact && c.handoff_reason.present?
+          label = Assistant::Handoff::REASON_LABELS.fetch(c.handoff_reason, 'needs a person')
+          { held: true, short: 'Waiting for their name and contact',
+            title: "Waiting for a way to reach them",
+            detail: "This visitor #{label}. #{ai} asked for their name and an email or mobile number before handing off. #{later}" }
+        elsif no_contact
+          { held: false, short: 'No lead yet',
+            title: "#{ai} is answering. No lead yet",
+            detail: "Nobody is assigned until they give a name and an email or mobile number. #{later}" }
+        else
+          { held: false, short: owner ? "For #{owner}" : 'Not assigned yet',
+            title: "#{ai} is answering",
+            detail: "#{owner ? "Assigned to #{owner}." : 'Not assigned yet.'} #{ai} hands it #{owner ? 'to them' : 'to your team'} " \
+                    'when they ask for a person, want a visit, or ask something it cannot answer. Use I\'ll take it to answer yourself.' }
+        end
+      end
+
+      def assistant_name
+        @assistant_name ||= Assistant::Settings.for(@company).assistant_name
+      end
+
       def row_json(c, last_read_at)
         record = c.conversable
         name = [record.try(:first_name), record.try(:last_name)].compact_blank.join(' ').presence ||
@@ -316,6 +351,7 @@ module Api
           # visitor leaves a name and contact; it is not handed off yet.
           handoff_reason: (c.handoff_reason unless c.status == 'active'),
           handoff_label: (c.handoff_reason && c.status != 'active' ? Assistant::Handoff::REASON_LABELS[c.handoff_reason] : nil),
+          quinn_note: quinn_note(c, record),
           qualification: c.qualification || {},
           last_message_at: c.last_message_at,
           last_message_preview: c.last_message_preview,

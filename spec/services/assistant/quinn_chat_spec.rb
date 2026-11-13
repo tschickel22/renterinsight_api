@@ -191,6 +191,13 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
       get '/api/crm/conversations', headers: headers
       row = JSON.parse(response.body)['items'].detect { |r| r['id'] == conversation.id }
       expect(row).to include('state' => 'Assistant', 'handoff_label' => nil)
+      # The Quinn view lists it with why it is still with Quinn.
+      get '/api/crm/conversations', params: { view: 'with_quinn' }, headers: headers
+      quinn = JSON.parse(response.body)
+      expect(quinn['meta']['counts']['with_quinn']).to eq(1)
+      note = quinn['items'].first['quinn_note']
+      expect(note).to include('held' => true, 'short' => 'Waiting for their name and contact')
+      expect(note['detail']).to start_with('This visitor wants to set a time to visit. Quinn AI asked')
 
       # The lead the form makes belongs to the form's rotation pick, who gets it.
       lead = company.leads.create!(first_name: 'Tia', last_name: 'May', email: 'tia@example.com', owner_id: owner.id)
@@ -203,6 +210,24 @@ RSpec.describe 'Quinn starts, goals and website chat', type: :request do
                                                      handed_off_to_user_id: owner.id, assigned_user_id: owner.id)
       expect(JSON.parse(response.body)['messages'].last['content']).to start_with('Thanks Tia')
       expect(Notification.where(notification_type: 'assistant_handoff', recipient: owner).count).to eq(1)
+      expect(Notification.where(notification_type: 'assistant_handoff', recipient: rep)).not_to exist
+      get '/api/crm/conversations', params: { view: 'with_quinn' }, headers: headers
+      expect(JSON.parse(response.body)['items']).to eq([])
+    end
+
+    it 'hands a chat whose lead has no owner to the form\'s rotation, not the first admin' do
+      picked = User.create!(email: "rot-#{SecureRandom.hex(4)}@example.com", first_name: 'Robin', last_name: 'Rota',
+                            password: 'Pass1234!', company_id: company.id, role: 'sales_rep', status: 'active')
+      list = RoundRobinAssignmentList.create!(company_id: company.id, name: 'Chat rotation', user_ids: [picked.id], active: true)
+      form = company.intake_forms.create!(name: 'Website Contact', assignment_mode: 'round_robin', round_robin_list: list,
+                                          notified_user_id: rep.id, auto_create_lead: true, is_active: true)
+      allow_any_instance_of(Concierge::LeadCapture).to receive(:form).and_return(form)
+      lead = company.leads.create!(first_name: 'Tia', email: 'tia@example.com')
+      chat = Assistant::WebChat.after_form!(lead: lead)
+      brain_says(reply: '', handoff: true, reason: 'asked_for_person')
+      post "/concierge/#{token}", params: { message: 'Can I talk to a person?', chat_key: chat.visitor_token }.to_json,
+                                  headers: { 'Content-Type' => 'application/json' }
+      expect(chat.reload).to have_attributes(status: 'handed_off', handed_off_to_user_id: picked.id, assigned_user_id: picked.id)
       expect(Notification.where(notification_type: 'assistant_handoff', recipient: rep)).not_to exist
     end
 
