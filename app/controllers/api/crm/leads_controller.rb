@@ -689,9 +689,36 @@ module Api
             return
           end
           
+          converter = Leads::Converter.new(@lead, company: @company, user: current_user)
+          account_mode = params[:account_mode].to_s.presence
+          if account_mode && !Leads::Converter::ACCOUNT_MODES.include?(account_mode)
+            render json: { error: "account_mode must be 'existing' or 'new'" }, status: :unprocessable_entity
+            return
+          end
+
+          if account_mode == 'existing' && params[:account_id].present? &&
+             !@company.accounts.where(is_deleted: [false, nil]).exists?(id: params[:account_id])
+            render json: { error: 'That account was not found. It may have been deleted or merged.' }, status: :not_found
+            return
+          end
+
+          # Account names are not unique, so a name already in use is a
+          # question for the rep: join that account, or make a separate one
+          # (two families named Smith). Ask before converting anything.
+          if account_mode.nil? && params[:account_id].blank?
+            account_name = converter.account_name_for(params[:account_name])
+            matches = Leads::Converter.accounts_named(@company, account_name).limit(10).to_a
+            if matches.any?
+              render json: account_name_in_use_json(account_name, matches), status: :conflict
+              return
+            end
+          end
+
           ActiveRecord::Base.transaction do
-            result = Leads::Converter.new(@lead, company: @company, user: current_user).call(
+            result = converter.call(
               account_name: params[:account_name],
+              account_mode: account_mode,
+              account_id: params[:account_id].presence,
               create_contact_param: params[:create_contact],
               deal_params: (params[:create_deal] if params[:create_deal].present? && params[:create_deal].is_a?(ActionController::Parameters))
             )
@@ -810,6 +837,33 @@ module Api
       end
 
       private
+
+      # The 409 body Convert Lead returns when the account name is in use: the
+      # accounts with that name, so the dialog can ask whether to join one or
+      # make a new one.
+      def account_name_in_use_json(account_name, matches)
+        contact_counts = @company.contacts.where(account_id: matches.map(&:id), is_deleted: [false, nil])
+                                 .group(:account_id).count
+        accounts = matches.map do |a|
+          {
+            id: a.id,
+            name: a.name,
+            email: a.email,
+            phone: a.phone,
+            city: a.billing_city,
+            state: a.billing_state,
+            contactsCount: contact_counts[a.id] || 0,
+            createdAt: a.created_at&.iso8601
+          }
+        end
+        {
+          error: "An account named #{account_name} already exists.",
+          code: 'account_name_in_use',
+          accountName: account_name,
+          existingAccount: accounts.first,
+          accounts: accounts
+        }
+      end
 
       # Per-tenant list of status keys flagged as dead-end (is_excluded=true on
       # lead_statuses). Admins manage this via the Lead Statuses tab — adding a

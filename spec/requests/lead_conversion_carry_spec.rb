@@ -16,8 +16,8 @@ RSpec.describe 'What a converted lead brings to its account', type: :request do
   end
   let(:account) { company.accounts.find_by!(name: 'Megan Holloway') }
 
-  def convert(name = 'Megan Holloway')
-    post "/api/crm/leads/#{lead.id}/convert", params: { account_name: name },
+  def convert(name = 'Megan Holloway', mode: nil)
+    post "/api/crm/leads/#{lead.id}/convert", params: { account_name: name, account_mode: mode }.compact,
                                               headers: { 'Authorization' => "Bearer #{JsonWebToken.generate_access_token(admin)}", 'X-Company-ID' => company.id.to_s }
     expect(response).to have_http_status(:ok), response.body
   end
@@ -48,7 +48,7 @@ RSpec.describe 'What a converted lead brings to its account', type: :request do
   it 'keeps the lead notes field when it joins an account that already exists' do
     existing = company.accounts.create!(name: 'Holloway Family', notes: 'Bought in 2019')
 
-    convert('Holloway Family')
+    convert('Holloway Family', mode: 'existing')
 
     expect(existing.reload.notes).to eq('Bought in 2019')
     expect(Note.for_entity('account', existing.id.to_s).pluck(:content)).to include('Family land near Greeley')

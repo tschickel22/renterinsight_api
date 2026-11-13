@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Leads
-  # Converting a lead: its account (found by name or created), its contact and
+  # Converting a lead: its account (joined or created), its contact and
   # co-applicant, an optional deal, its activities, tags, notes, open
   # follow-ups, custom fields, marketing consent, TrueBuild designs and
   # followers, then the lead marked converted. Moved here from
@@ -18,14 +18,43 @@ module Leads
       @user = user
     end
 
-    # account_name: the account to find or create (default: the lead's company
-    #   name, else the person's name).
+    ACCOUNT_MODES = %w[existing new].freeze
+
+    # Open accounts in the company whose name matches, ignoring case and
+    # surrounding spaces. Account names are not unique (two families can both
+    # be "Smith"), so this can return more than one.
+    def self.accounts_named(company, name)
+      key = name.to_s.strip.downcase
+      return Account.none if key.blank?
+
+      company.accounts.where(is_deleted: [false, nil]).where('LOWER(TRIM(accounts.name)) = ?', key).order(:id)
+    end
+
+    # The name the account gets: the explicit one, else the lead's company
+    # name, else the person's name.
+    def account_name_for(account_name = nil)
+      name = account_name.to_s.strip.presence ||
+             @lead.try(:company_name).to_s.strip.presence ||
+             "#{@lead.first_name} #{@lead.last_name}".strip
+      name.presence || "Converted Lead #{@lead.id}"
+    end
+
+    # account_name: the account's name (default: account_name_for).
+    # account_mode: 'existing' joins an account with that name (account_id
+    #   picks which one when several share it), 'new' always makes a separate
+    #   account even when the name is in use. nil joins a same-name account if
+    #   there is one, else makes one (the QuickBooks switch relies on this).
+    # account_id: with 'existing' (or nil), the account to join. It must be an
+    #   open account in this company.
     # create_contact_param: true or false; nil means "when the lead has a first
     #   and last name".
     # deal_params: { name, stage, close_date or expected_close, description }
     #   to open a deal as well.
-    def call(account_name: nil, create_contact_param: nil, deal_params: nil)
+    def call(account_name: nil, account_mode: nil, account_id: nil, create_contact_param: nil, deal_params: nil)
       raise ArgumentError, 'Lead has already been converted' if @lead.is_converted
+
+      account_mode = account_mode.to_s.presence
+      raise ArgumentError, "Unknown account_mode #{account_mode}" if account_mode && !ACCOUNT_MODES.include?(account_mode)
 
           # Inherit location from lead, fall back to current location selector
           location_id = @lead.location_id || Current.location_id
@@ -36,14 +65,18 @@ module Leads
 
           # 1. FIND OR CREATE ACCOUNT
           # Priority: explicit param > lead.company_name > person name fallback.
-          account_name = account_name.presence ||
-                         @lead.try(:company_name).presence ||
-                         "#{@lead.first_name} #{@lead.last_name}".strip
-          account_name = "Converted Lead #{@lead.id}" if account_name.blank?
+          account_name = account_name_for(account_name)
 
-          Rails.logger.info "✅ [ConvertLead] Finding or creating account: #{account_name}"
+          Rails.logger.info "✅ [ConvertLead] Account #{account_name} (mode #{account_mode || 'default'})"
 
-          account = Account.find_or_create_by!(name: account_name, company_id: @lead.company_id) do |a|
+          account =
+            if account_mode != 'new' && account_id.present?
+              @company.accounts.where(is_deleted: [false, nil]).find(account_id)
+            elsif account_mode != 'new'
+              self.class.accounts_named(@company, account_name).first
+            end
+
+          account ||= Account.create!(name: account_name, company_id: @lead.company_id) do |a|
             a.status = 'active'
             a.email = @lead.email
             a.phone = @lead.phone
@@ -65,8 +98,8 @@ module Leads
           Rails.logger.info "✅ [ConvertLead] Account #{account.previously_new_record? ? 'created' : 'reused'}: #{account.id}"
 
           # 1b. BACKFILL EXISTING ACCOUNT
-          # find_or_create_by! only sets email/phone/address on CREATE. When we
-          # match a pre-existing account (e.g. an imported one), fill in any
+          # The create block only sets email/phone/address on CREATE. When we
+          # join a pre-existing account (e.g. an imported one), fill in any
           # contact fields it's missing from the lead — without overwriting data
           # the account already has.
           unless account.previously_new_record?
