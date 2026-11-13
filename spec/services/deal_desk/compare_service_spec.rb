@@ -104,10 +104,10 @@ RSpec.describe DealDesk::CompareService do
     end
   end
 
-  it 'raises when the deal has no anchor unit' do
+  it 'raises NoInventoryHome (the controller answers 422) when the deal has no anchor unit' do
     dealless = company.deals.build(location_id: home_loc.id)
     expect { described_class.new(company: company, deal: dealless).call }
-      .to raise_error(ArgumentError, /no anchor unit/)
+      .to raise_error(DealDesk::CompareService::NoInventoryHome, /custom or factory order/)
   end
 
   describe 'price resolution (msrp vs sale_price)' do

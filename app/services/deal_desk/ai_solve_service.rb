@@ -21,9 +21,10 @@ module DealDesk
     MODEL = AiModel.for(:analysis)
     LEVERS = %w[term cash_down price rate].freeze
 
-    def initialize(company:, deal:, base_structure:, prompt:, can_view_costs: false, api_key: nil, user: nil)
+    def initialize(company:, deal:, base_structure:, prompt:, can_view_costs: false, api_key: nil, user: nil, scenario: nil)
       @company = company
       @deal = deal
+      @scenario = scenario
       @base = (base_structure || {}).symbolize_keys
       @prompt = prompt.to_s
       @can_view_costs = can_view_costs
@@ -159,7 +160,7 @@ module DealDesk
       return [] unless @deal.vehicle
 
       result = CompareService.new(
-        company: @company, deal: @deal, base_structure: @base, target_payment: target,
+        company: @company, deal: @deal, scenario: @scenario, base_structure: @base, target_payment: target,
         include_other_locations: intent[:include_other_locations]
       ).call
 

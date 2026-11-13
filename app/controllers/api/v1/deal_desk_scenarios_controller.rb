@@ -194,7 +194,10 @@ module Api
 
       # POST /api/v1/deal_desk/scenarios/solve
       # Reverse-solve a lever for a target payment. Stateless calculation (Phase 1 solver).
-      # Body: { deal_id, base_structure: {...}, lever: term|cash_down|price|rate, target_payment, ...opts }
+      # Body: { deal_id, scenario_id?, base_structure?, lever: term|cash_down|price|rate, target_payment, ...opts }
+      # With scenario_id the solve runs on that scenario's engine_inputs, the exact structure
+      # its Recap is computed from (add-on lines included), so an applied answer lands on the
+      # payment it promised.
       def solve
         return unless authorize_action!(RESOURCE, 'read')
 
@@ -216,6 +219,8 @@ module Api
           end
 
         render json: { solve: result }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Scenario not found' }, status: :not_found
       rescue ArgumentError => e
         render json: { error: e.message }, status: :unprocessable_entity
       end
@@ -229,9 +234,10 @@ module Api
 
         deal = @company.deals.find(params[:deal_id])
         api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
+        scenario = params[:scenario_id].present? ? deal.deal_desk_scenarios.find(params[:scenario_id]) : nil
         result = DealDesk::AiSolveService.new(
-          company: @company, deal: deal,
-          base_structure: ai_base_structure(deal),
+          company: @company, deal: deal, scenario: scenario,
+          base_structure: scenario ? scenario.engine_inputs : ai_base_structure(deal),
           prompt: params[:prompt].to_s,
           can_view_costs: can_view_costs?,
           api_key: api_key,
@@ -245,13 +251,17 @@ module Api
 
       # POST /api/v1/deal_desk/scenarios/compare
       # Comparable-unit matching + ranking. Cross-location inclusion is visibility-only.
-      # Body: { deal_id, base_structure, target_payment, include_orderable, include_other_locations, weights }
+      # Body: { deal_id, scenario_id?, base_structure?, target_payment, include_orderable, include_other_locations, weights }
+      # With scenario_id every home is priced on that scenario's structure (term, rate, down,
+      # fees, F&I, add-on lines, rebates, trade, tax), swapping only the home, its price and its
+      # own packages, so the row for the scenario's home equals its Recap.
       def compare
         return unless authorize_action!(RESOURCE, 'read')
 
         deal = @company.deals.find(params[:deal_id])
+        scenario = params[:scenario_id].present? ? deal.deal_desk_scenarios.find(params[:scenario_id]) : nil
         result = DealDesk::CompareService.new(
-          company: @company, deal: deal,
+          company: @company, deal: deal, scenario: scenario,
           base_structure: to_h_safe(params[:base_structure]),
           target_payment: params[:target_payment],
           include_orderable: ActiveModel::Type::Boolean.new.cast(params[:include_orderable]),
@@ -260,15 +270,19 @@ module Api
         ).call
 
         render json: { compare: strip_compare_gross(result) }
+      rescue DealDesk::CompareService::NoInventoryHome => e
+        render json: { error: e.message, code: 'no_inventory_home' }, status: :unprocessable_entity
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Deal not found' }, status: :not_found
+        render json: { error: 'Deal or scenario not found' }, status: :not_found
       end
 
       # POST /api/v1/deal_desk/scenarios/grid
       # Payment matrix (the "four-square" grid): every cell is computed by the SAME engine
       # solve/compare use — one Engine.compute per (term_months, cash_down) pair. No new math,
       # no LLM. dealer_gross is attached per cell only for cost-viewers.
-      # Body: { deal_id, base_structure?, terms: [number], cash_downs: [number] }
+      # Body: { deal_id, scenario_id?, base_structure?, terms: [number], cash_downs: [number] }
+      # With scenario_id every cell is that scenario's engine_inputs with only term and down
+      # swapped, so the cell at the scenario's own term and down equals its Recap.
       MAX_GRID_CELLS = 64
 
       def grid
@@ -396,11 +410,18 @@ module Api
         #   - A different (swapped) unit -> the deal's selling_price belongs to the OLD home,
         #     so it must NOT be used. Snapshot the swapped unit's own sale_price instead, or
         #     the recap/grid would keep computing off the original home's price.
+        #     DealDesk::UnitPrice.home_price is the home without its included packages (those
+        #     ride as 'home' line items), the same price Compare shows for that unit, so the
+        #     Recap after "Use this unit" matches the Compare row. Raw sale_price is blank on
+        #     most list-priced homes, so it is only the last fallback.
         is_deal_home  = scenario.deal&.vehicle_id.present? && scenario.vehicle_id == scenario.deal.vehicle_id
         deal_selling  = scenario.deal&.selling_price
+        home_price    = DealDesk::UnitPrice.home_price(unit)
         scenario.unit_price_snapshot =
           if is_deal_home && deal_selling.present? && deal_selling.to_f.positive?
             deal_selling
+          elsif home_price.positive?
+            home_price
           else
             unit.sale_price
           end
@@ -453,8 +474,14 @@ module Api
         end
       end
 
+      # Order of precedence: a saved scenario (its engine_inputs, the Recap's own structure),
+      # then the deal's defaults when no structure is sent, then a raw base_structure.
       def build_base_structure(p)
-        if p[:deal_id].present? && p[:base_structure].blank?
+        if p[:scenario_id].present?
+          scenarios = @company.deal_desk_scenarios
+          scenarios = scenarios.where(deal_id: p[:deal_id]) if p[:deal_id].present?
+          scenarios.find(p[:scenario_id]).engine_inputs
+        elsif p[:deal_id].present? && p[:base_structure].blank?
           deal = @company.deals.find(p[:deal_id])
           DealDesk::CompareService.new(company: @company, deal: deal).send(:default_base_structure)
             .merge(price: deal.vehicle&.sale_price.to_f, unit_cost: (deal.vehicle&.cost || deal.vehicle&.dealer_cost).to_f)
