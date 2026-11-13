@@ -8,7 +8,7 @@ module Api
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
         :calculate, :vision_scan, :upload_signed_document,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
-        :validate_formula_field
+        :validate_formula_field, :share_options, :share
       ]
 
       # GET /api/v1/agreements
@@ -528,7 +528,37 @@ module Api
 
         AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_DOWNLOADED, performed_by: current_user)
         filename = "#{@agreement.agreement_number}.pdf"
-        render json: { url: PrivateFiles.url(url, filename: filename, disposition: 'attachment'), filename: filename }
+        # inline: View opens the PDF in a browser tab; the default saves it.
+        disposition = params[:disposition] == 'inline' ? 'inline' : 'attachment'
+        render json: { url: PrivateFiles.url(url, filename: filename, disposition: disposition), filename: filename }
+      end
+
+      # GET /api/v1/agreements/:id/share_options
+      # Who the Share dialog suggests (the agreement's contact, its signers, the
+      # account's contacts) and the link that would be sent.
+      def share_options
+        return unless authorize_action!('agreements', 'read')
+        return unless shareable!
+
+        render json: { recipients: Agreements::Share.recipients(@agreement), link: Agreements::Share.link(@agreement),
+                       expires_in_days: Agreements::Share::LINK_DAYS }
+      end
+
+      # POST /api/v1/agreements/:id/share
+      # Sends the signed agreement as a link by email and/or text. Goes through
+      # CommunicationService, so opt-outs are honoured and the message lands on
+      # the contact's (or account's) history.
+      def share
+        return unless authorize_action!('agreements', 'read')
+        return unless shareable!
+
+        p = params.permit(:to_email, :to_phone, :message, :contact_id, channels: [])
+        contact = p[:contact_id].present? ? @company.contacts.find_by(id: p[:contact_id]) : nil
+        result = Agreements::Share.new(@agreement, user: current_user, contact: contact)
+                                  .deliver(channels: Array(p[:channels]), to_email: p[:to_email], to_phone: p[:to_phone],
+                                           message: p[:message])
+        status = result[:sent].any? ? :ok : :unprocessable_entity
+        render json: { success: result[:sent].any?, sent: result[:sent], errors: result[:errors] }, status: status
       end
 
       # GET /api/v1/agreements/:id/certificate
@@ -1217,6 +1247,13 @@ module Api
           resets_at: month_end.strftime('%B %d, %Y'),
           month: Time.current.strftime('%B %Y'),
         }
+      end
+
+      def shareable!
+        return true if Agreements::Share.shareable?(@agreement)
+
+        render json: { error: 'Only a completed agreement with its signed document can be shared.' }, status: :unprocessable_entity
+        false
       end
 
       def set_agreement
