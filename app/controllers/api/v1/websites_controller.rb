@@ -398,17 +398,24 @@ class Api::V1::WebsitesController < ApplicationController
   # GET /api/v1/websites/by_token/:token
   def by_token
     @website = Website.find_by!(preview_token: params[:token])
-    
+
+    # show_in_nav / show_in_footer are listed for the same reason as in
+    # by_slug_public: without them the renderer reads every page as a header
+    # page, and a preview link put Terms, Privacy and Sign In in the top nav.
     website_json = @website.as_json(
       include: {
         website_pages: {
-          only: [:id, :title, :slug, :path, :is_visible, :order, :blocks],
+          only: [:id, :title, :slug, :path, :is_visible, :order, :blocks, :show_in_nav, :show_in_footer, :page_order],
           methods: [:full_path]
         }
       },
       methods: [:full_theme]
     )
-    
+    # The association serves deleted pages too, so a page removed in the
+    # editor stayed in the preview's nav. The live site drops them (PublicPayload).
+    deleted_ids = @website.website_pages.where(is_deleted: true).pluck(:id)
+    website_json['website_pages'] = Array(website_json['website_pages']).reject { |p| deleted_ids.include?(p['id']) }
+
     # Include recent published blog posts for blogList blocks
     published_posts = @website.blog_posts
                               .where(is_deleted: [false, nil])
@@ -456,6 +463,10 @@ class Api::V1::WebsitesController < ApplicationController
       end
     website_json['concierge_name'] = @website.concierge_display_name
     website_json['promo_popup'] = Websites::PromoPopup.public_payload(@website)
+    # The contact block falls back to this when it names no form, as it does on
+    # the published site (PublicPayload). Without it the preview showed a
+    # contact page with no form on it.
+    website_json['lead_form_id'] = Websites::DefaultLeadForm.for(@website.company)&.id
 
     render json: website_json
   rescue ActiveRecord::RecordNotFound

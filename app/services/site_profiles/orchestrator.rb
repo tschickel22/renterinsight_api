@@ -77,6 +77,10 @@ module SiteProfiles
 
       @warnings.concat(schema_warnings)
 
+      # The dealer's own Terms and Privacy, kept whole. Absent means the site
+      # built from this scan keeps the design's standard legal pages.
+      profile['legal'] = read_legal_pages(digests)
+
       @record.update!(
         status: 'ready',
         profile: profile,
@@ -111,6 +115,15 @@ module SiteProfiles
     end
 
     private
+
+    # Never fails a scan: a dealer with no policy pages, or ones we cannot
+    # read, simply keeps our standard text.
+    def read_legal_pages(digests)
+      LegalPages.new(digests, base_url: @record.source_url, fetcher: @fetcher).call
+    rescue StandardError => e
+      @warnings << "Could not read the site's legal pages: #{e.message.truncate(120)}"
+      {}
+    end
 
     # Words below which a page is a shell, not a site.
     #
