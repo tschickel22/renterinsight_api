@@ -392,9 +392,13 @@ module Api
         return
       end
 
+      probabilities_before = stage_probability_map
+      moved_deals = false
+
       ActiveRecord::Base.transaction do
         remap.each do |old_key, new_key|
           next if old_key.to_s == new_key.to_s
+          moved_deals = true
           @company.deals.where(stage: old_key.to_s)
                   .update_all(stage: new_key.to_s, updated_at: Time.current)
         end
@@ -405,6 +409,14 @@ module Api
         # doesn't touch the company, so without this the cached payload keeps the
         # old stages for up to 5 minutes. Touch to invalidate immediately.
         @company.touch
+      end
+
+      # Each deal stores its stage's % (Deal#sync_probability_from_stage), and
+      # the forecast and the probability sort read that column. A changed % or
+      # a remap (update_all above skips the callback) leaves it stale, so
+      # rewrite it in the background. Unchanged saves enqueue nothing.
+      if moved_deals || stage_probability_map != probabilities_before
+        DealProbabilitySyncJob.perform_later(@company.id)
       end
 
       render json: { stages: stages, deal_counts: deal_counts_by_stage, message: 'Pipeline stages saved successfully' }
@@ -546,6 +558,11 @@ module Api
     end
 
     private
+
+    # { stage_key => probability } as the deals resolve it right now.
+    def stage_probability_map
+      @company.pipeline_stage_keys.index_with { |key| @company.pipeline_stage_probability(key) }
+    end
 
     # Strip OneSignal REST keys out of a `push` settings hash before it leaves
     # the server, keeping the app ids (which are public and useful to see) and
