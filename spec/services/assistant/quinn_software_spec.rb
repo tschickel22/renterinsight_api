@@ -66,6 +66,8 @@ RSpec.describe 'Quinn for a software company', type: :request do
 
     expect(prompt).to include('a software company', 'PRODUCT', 'Lead Prospecting', 'Send a text campaign',
                               "[V#{shared_video.id}] Text campaigns", 'Never state a price', '30 minute demo by video call', 'DEMOS: you book demos yourself', 'with Tom')
+    expect(prompt).to include('ask for their name, email address and mobile number together', 'do not ask about their business')
+    expect(prompt).to match(/RIGHT NOW: \w+day, \w+ \d{1,2}, \d{4}/)
     expect(prompt).not_to include("[V#{private_video.id}]")
     expect(prompt).not_to include('HOMES (the only homes')
     expect(prompt).not_to match(/—|–/)
@@ -107,6 +109,19 @@ RSpec.describe 'Quinn for a software company', type: :request do
       expect(demo.description).to include('Join the video call: https://zoom.us/j/123456')
       reply = conversation.chat_messages.where(direction: 'outbound').last.body
       expect(reply).to include('on a video call: https://zoom.us/j/123456', 'with Tom')
+      # Then asks about the business, in Tom's words.
+      expect(reply).to end_with(Assistant::Booking::DEMO_DETAILS_ASK)
+
+      # What they say goes on the demo's notes for the call.
+      brain_says('Thanks, that helps!', qualification: { 'business_name' => 'Sunny Acres Homes', 'locations' => '3',
+                                                         'demo_focus' => 'Text campaigns' })
+      Assistant::WebChat.new(conversation).visitor_says!('Sunny Acres Homes, 3 lots, want to see text campaigns')
+      expect(demo.reload.description).to include('Join the video call', "About them:\nBusiness: Sunny Acres Homes\nLocations: 3",
+                                                 'Wants covered on the demo: Text campaigns')
+      brain_says('Got it.', qualification: { 'team_size' => '6' })
+      Assistant::WebChat.new(conversation).visitor_says!('6 salespeople')
+      expect(demo.reload.description.scan('About them:').size).to eq(1)
+      expect(demo.description).to include('Salespeople: 6')
 
       customer = Appointments::Customer.for(demo)
       expect(Appointments::BookingText.body(demo, customer, tom, 'booked'))

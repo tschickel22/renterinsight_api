@@ -20,7 +20,7 @@ module Assistant
     QUALIFICATION_FIELDS = %w[
       budget monthly_target timeline credit_self_rating land_status home_type
       bedrooms delivery_area trade_in best_time
-      business_type locations team_size current_system
+      business_type locations team_size current_system business_name demo_focus
     ].freeze
 
     HANDOFF_REASONS = %w[
@@ -157,6 +157,8 @@ module Assistant
         What they first asked: #{first_request || 'nothing recorded'}
         Known so far: #{@conversation.qualification.presence&.to_json || 'nothing yet'}
 
+        RIGHT NOW: #{now_text} (read "today", "tomorrow" and weekdays from this)
+
         THEIR APPOINTMENTS
         #{appointment_lines.presence || 'None booked.'}
         #{booking? ? "\nOPEN TIMES (the only times you may offer or book, with #{@booking.rep&.first_name.presence || 'the team'})\n#{@booking.prompt_lines}" : ''}
@@ -228,6 +230,8 @@ module Assistant
         What they first asked: #{first_request || 'nothing recorded'}
         Known so far: #{@conversation.qualification.presence&.to_json || 'nothing yet'}
 
+        RIGHT NOW: #{now_text} (read "today", "tomorrow" and weekdays from this)
+
         THEIR APPOINTMENTS
         #{appointment_lines.presence || 'None booked.'}
         #{booking? ? "\nOPEN TIMES (the only times you may offer or book, with #{@booking.rep&.first_name.presence || 'the team'})\n#{@booking.prompt_lines}" : ''}
@@ -247,13 +251,22 @@ module Assistant
           .gsub('visit', 'demo')
     end
 
+    # Tom, 2026-11-13: book first with name, email and phone; learn about the
+    # business after the demo is set (the confirmation asks for it).
     def software_goal_text
-      learn = 'Learn, one question at a time and only when it fits: their business name, what kind of business it is ' \
-              '(manufactured home dealer, RV dealer, community or other), how many locations and salespeople they have, ' \
-              'what they use today, and what they most want to fix.'
-      contact = @web ? 'To set up a demo, ask for their name and an email address (the invite goes there). The chat itself asks ' \
-                       'whether texting is OK, so do not ask that.' :
-                       'To set up a demo and you do not have their full name or email address, ask for it.'
+      learn = 'Before a demo is booked, do not ask about their business unless they bring it up: answer, and get the demo set. ' \
+              'Once THEIR APPOINTMENTS shows a demo, record what they tell you about their business: business_name, ' \
+              'business_type (manufactured home dealer, RV dealer, community or other), locations (how many), team_size ' \
+              '(salespeople), current_system (what they use today) and demo_focus (what they want covered on the demo). ' \
+              'If they answer without their business name or how many locations they have, ask for those in one short ' \
+              'question, then stop asking and thank them.'
+      contact = if @web
+                  'To set up a demo, ask for their name, email address and mobile number together in one message (the ' \
+                    'invite goes to the email). The chat itself asks whether texting is OK, so do not ask that. Book once ' \
+                    'you have their name and email and they have given a mobile number or said they would rather not.'
+                else
+                  'To set up a demo and you do not have their full name, email address or phone number, ask for what is missing.'
+                end
       case @settings.goal
       when 'answer_only'
         'Your job is to answer their questions. Do not ask them qualifying questions. When they ask for a person, ' \
@@ -262,7 +275,7 @@ module Assistant
         "Your goal is a #{@settings.visit_minutes} minute demo by video call. Answer their questions, learn what they need, " \
           "and when it fits, invite them to see it on a demo. #{learn} #{contact} " +
           (booking? ? 'When they are open to a demo, offer two open times and book the one they pick (see DEMOS).' :
-            'Once they give a day and time for a demo and you have their name and email, hand off with reason ' \
+            'Once they give a day and time for a demo and you have their name, email and phone, hand off with reason ' \
             'appointment, saying the team will confirm that time. Never say a time is booked.')
       end
     end
@@ -659,6 +672,15 @@ module Assistant
     # answered rather than handed off.
     def upcoming_appointments
       Assistant::Appointments.upcoming_for(@lead)
+    end
+
+    # Without the date Quinn read "tomorrow at 10am" as today (Tom's test,
+    # 2026-11-13).
+    def now_text
+      zone = Assistant::Hours.zone_for(@company, @conversation.location || @lead.try(:location))
+      Time.current.in_time_zone(zone).strftime('%A, %B %-d, %Y, %-I:%M %p %Z')
+    rescue StandardError
+      Time.current.utc.strftime('%A, %B %-d, %Y, %-I:%M %p UTC')
     end
 
     def appointment_lines

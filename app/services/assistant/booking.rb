@@ -156,10 +156,43 @@ module Assistant
       [place.try(:address_line1), place.try(:city), place.try(:state)].compact_blank.join(', ').presence
     end
 
+    # After a software demo is booked: what the team wants to know before the
+    # call (Tom's wording, 2026-11-13).
+    DEMO_DETAILS_ASK = 'Please tell us about your business and if there is a specific feature you want us to discuss on the demo.'
+
+    # What Quinn learned about them, kept on the booked visit's notes so the
+    # rep reads it before the call. Called after each answer while the visit
+    # is still ahead.
+    DETAIL_LABELS = {
+      'business_name' => 'Business', 'business_type' => 'Kind of business', 'locations' => 'Locations',
+      'team_size' => 'Salespeople', 'current_system' => 'Uses today', 'demo_focus' => 'Wants covered on the demo'
+    }.freeze
+
+    def self.note_details!(conversation)
+      record = conversation.conversable
+      return unless record
+
+      details = (conversation.qualification || {}).slice(*DETAIL_LABELS.keys).compact_blank
+      return if details.empty?
+
+      model, key = Assistant::Appointments::MODELS[record.class.name]
+      visit = model&.where(key => record.id, activity_type: 'meeting', status: 'pending')
+                   &.where('start_time >= ?', Time.current)
+                   &.where("metadata->>'conversation_id' = ?", conversation.id.to_s)&.order(:start_time)&.first
+      return unless visit
+
+      base = visit.description.to_s.split("\n\nAbout them:").first.to_s
+      about = details.map { |k, v| "#{DETAIL_LABELS[k]}: #{v.to_s.truncate(300)}" }.join("\n")
+      visit.update_columns(description: "#{base}\n\nAbout them:\n#{about}")
+    rescue StandardError => e
+      Rails.logger.warn("[Assistant::Booking] could not note details for conversation #{conversation.id}: #{e.message}")
+    end
+
     def outcome(visit, kind)
       customer = ::Appointments::Customer.for(visit)
       # The chat is a web page: the video link can be shown there.
       text = ::Appointments::BookingText.body(visit, customer, visit.assigned_to || visit.user, kind, links: conversation.web_chat?)
+      text = "#{text} #{DEMO_DETAILS_ASK}" if kind == 'booked' && Assistant::Software.for?(@company)
       notify_rep(visit, kind)
       Outcome.new(ok: true, kind: kind, activity: visit, text: text)
     end

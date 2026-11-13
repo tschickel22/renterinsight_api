@@ -141,6 +141,7 @@ module Assistant
       end
 
       events << Assistant::Conversions.lead(lead_from_chat!(result.contact))
+      Assistant::Booking.note_details!(conversation) if result.qualification.present?
       if conversation.conversable.blank?
         # Nobody can follow up with a visitor we cannot reach, and a lead needs
         # a name and an email or phone (Tom, 2026-11-12). Quinn keeps the chat,
