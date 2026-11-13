@@ -114,4 +114,19 @@ RSpec.describe SiteProfiles::AssetImporter do
       expect(uploader).not_to have_received(:upload)
     end
   end
+
+  describe 'floor plans' do
+    it 'leaves line drawings out of the hero and the gallery, but never touches the logo' do
+      img = (Vips::Image.black(400, 300) + 255).cast(:uchar).draw_rect(0, 20, 20, 360, 4, fill: true)
+      plan = img.bandjoin([img, img]).copy(interpretation: :srgb).pngsave_buffer
+      stub_image('https://dealer.example/img/hero.jpg', content_type: 'image/png', body: plan)
+
+      result = described_class.new(record, uploader: uploader).call
+
+      expect(result.profile.dig('media', 'hero_images')).to eq([])
+      expect(result.profile.dig('media', 'gallery')).to eq([])
+      expect(result.profile.dig('media', 'logo')).to start_with('https://ourbucket.s3.amazonaws.com/')
+      expect(result.warnings.join).to match(/floor plan/)
+    end
+  end
 end

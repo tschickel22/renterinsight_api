@@ -41,6 +41,7 @@ module SiteProfiles
       @map = {}
       @warnings = []
       @skipped = 0
+      @drawings = 0
     end
 
     # Rewrites media.* and any block image URLs in place on the profile.
@@ -55,9 +56,13 @@ module SiteProfiles
         media[key] = rehosted if rehosted
       end
 
+      # Photographs only: a floor plan is a line drawing, and in a hero or a
+      # gallery of the dealer's homes it reads as a mistake. Logos are left
+      # alone, since plenty of them are mostly white too.
       %w[hero_images gallery].each do |key|
-        media[key] = Array(media[key]).filter_map { |url| import(url) || nil }
+        media[key] = Array(media[key]).filter_map { |url| import(url, photos_only: true) || nil }
       end
+      @warnings << "Left out #{@drawings} floor plan drawing#{'s' unless @drawings == 1} from the photos." if @drawings.positive?
 
       profile['media'] = media
       profile['brand'] = rehost_brand(profile['brand'].to_h)
@@ -85,7 +90,7 @@ module SiteProfiles
     # Returns our URL, or nil when the image could not be brought across. Nil
     # means "drop it": a broken image on a client's preview is worse than one
     # fewer photo.
-    def import(url)
+    def import(url, photos_only: false)
       return @map[url] if @map.key?(url)
       return url if already_ours?(url)
       # An inline SVG logo arrives as a data: URI. It depends on nobody's host
@@ -105,6 +110,11 @@ module SiteProfiles
       downloaded = download(url) if downloaded.nil? && full != url
       if downloaded.nil?
         @skipped += 1
+        return @map[url] = nil
+      end
+
+      if photos_only && LineDrawing.line_drawing?(downloaded.body)
+        @drawings += 1
         return @map[url] = nil
       end
 
