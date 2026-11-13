@@ -67,6 +67,32 @@ class DealDeskScenario < ApplicationRecord
     DealDesk::Engine.compute(engine_inputs)
   end
 
+  # This scenario's structure with a DIFFERENT home in the unit slot: same trade, down,
+  # rebates, fees, F&I, deal add-ons, tax, rate and term; only the home's price, cost and its
+  # own included packages change. Compare uses it so every candidate is priced on the deal
+  # that is on the desk. For the scenario's own unit it returns engine_inputs unchanged, so
+  # that row always equals the Recap.
+  def engine_inputs_for_unit(unit, price:, unit_cost:)
+    return engine_inputs if unit && vehicle_id.present? && unit.id == vehicle_id
+
+    non_home = Array(line_items).reject { |li| li.symbolize_keys[:source].to_s == 'home' }
+    lines = non_home + home_lines_for_unit(unit)
+    engine_inputs.merge(price: price, unit_cost: unit_cost, line_items: deduped_line_items_for_engine(lines))
+  end
+
+  # The home-bound package lines a unit brings onto the desk, the same way a scenario is
+  # built: the deal's own home uses the deal's package lines (the rep may have edited them),
+  # falling back to its inventory packages; any other unit uses its inventory packages.
+  def home_lines_for_unit(unit)
+    return [] if unit.nil?
+
+    if deal && unit.id == deal.vehicle_id
+      tagged = deal_home_package_entries(deal)
+      return tagged if tagged.any?
+    end
+    home_package_entries(unit)
+  end
+
   # Has the price moved since this scenario was quoted? (snapshot vs. live). The snapshot is
   # now sourced from the deal (snapshot_unit!), so compare against the deal's current
   # selling_price — NOT vehicle.sale_price, which can legitimately differ from the quoted price.
@@ -571,13 +597,13 @@ class DealDeskScenario < ApplicationRecord
 
   # Engine-bound line items with quantity folded in, minus any entry that collides
   # (normalized name + price) with an fni_products entry. See engine_inputs for the rationale.
-  def deduped_line_items_for_engine
+  def deduped_line_items_for_engine(items = line_items)
     fni_keys = Array(fni_products).map do |p|
       p = p.symbolize_keys
       [normalize_name(p[:name]), p[:price].to_f]
     end.to_set
 
-    Array(line_items).reject do |li|
+    Array(items).reject do |li|
       li = li.symbolize_keys
       fni_keys.include?([normalize_name(li[:description]), li[:price].to_f])
     end.map do |li|
@@ -692,7 +718,9 @@ class DealDeskScenario < ApplicationRecord
     unit = vehicle_id.present? ? vehicle : nil
     return unless unit
 
-    self.unit_price_snapshot = unit.sale_price
+    # Same home-only price the controller snapshot and Compare use (packages ride as lines).
+    home_price = DealDesk::UnitPrice.home_price(unit)
+    self.unit_price_snapshot = home_price.positive? ? home_price : unit.sale_price
     self.unit_cost_snapshot  = unit.cost || unit.try(:dealer_cost) || unit.try(:total_cost)
     self.unit_location_id     = unit.location_id
     save! if changed?

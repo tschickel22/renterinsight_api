@@ -20,7 +20,23 @@ module DealDesk
   #
   # Dealer gross in the output is INTERNAL ONLY — the Phase 4 controller strips it for
   # users without cost-view permission and for every customer-facing surface.
+  #
+  # STRUCTURE: pass the open `scenario:` and every home is priced on that scenario's own
+  # structure (DealDeskScenario#engine_inputs_for_unit): its term, rate, down, trade, rebates,
+  # fees, F&I and deal add-on lines, with only the home, its price, its cost and its own
+  # included packages swapped. The row for the scenario's current home is its engine_inputs
+  # unchanged, so it equals the Recap. Without a scenario (legacy callers) the base_structure /
+  # deal defaults below are used.
   class CompareService
+    # The deal's home is not an inventory unit (a TrueBuild or factory order), so there is no
+    # bedroom/bathroom anchor to match. The controller answers 422 with this message.
+    class NoInventoryHome < StandardError
+      def initialize(msg = 'Compare units needs a home from inventory on this deal. ' \
+                           'This deal is for a custom or factory order home, so there are no units to match it against.')
+        super
+      end
+    end
+
     DEFAULT_WEIGHTS = { fit: 0.5, gross: 0.3, aged: 0.2 }.freeze
     DEFAULT_TERM_MONTHS = 180
     # How far a payment may exceed the target before its fit hits zero (fraction of target).
@@ -29,11 +45,12 @@ module DealDesk
     MISS_TOLERANCE = 0.10
 
     def initialize(company:, deal:, base_structure: {}, target_payment: nil,
-                   include_orderable: false, include_other_locations: false, weights: {})
+                   include_orderable: false, include_other_locations: false, weights: {}, scenario: nil)
       @company = company
       @deal = deal
+      @scenario = scenario
       @anchor = deal.vehicle
-      @base = default_base_structure.merge(symbolize(base_structure))
+      @base = scenario ? scenario.engine_inputs : default_base_structure.merge(symbolize(base_structure))
       @target = target_payment.nil? ? nil : target_payment.to_f
       @include_orderable = include_orderable
       @include_other_locations = include_other_locations
@@ -43,7 +60,7 @@ module DealDesk
     end
 
     def call
-      raise ArgumentError, 'deal has no anchor unit to compare against' if @anchor.nil?
+      raise NoInventoryHome if @anchor.nil?
 
       rows = decorate_and_solve(candidate_units)
       {
@@ -106,6 +123,8 @@ module DealDesk
 
     # --- Solve + decorate -------------------------------------------------------
     def decorate_and_solve(units)
+      return units.map { |v| decorate(v, scenario_solve(v)) } if @scenario
+
       inputs = units.map do |v|
         { vehicle_id: v.id, price: resolved_price(v), unit_cost: unit_cost_for(v), pack_amount: pack_amount }
       end
@@ -114,6 +133,20 @@ module DealDesk
       units.each_with_index.map do |v, i|
         decorate(v, solved[i])
       end
+    end
+
+    # One candidate on the scenario's structure. The home line is priced without its packages
+    # (UnitPrice.home_price) because the packages ride as that unit's own add-on lines, exactly
+    # as the scenario carries them after "Use this unit". Same row shape as batch_solve.
+    def scenario_solve(vehicle)
+      inputs = @scenario.engine_inputs_for_unit(
+        vehicle, price: UnitPrice.home_price(vehicle), unit_cost: unit_cost_for(vehicle)
+      )
+      r = Engine.compute(inputs)
+      row = { monthly_payment: r.monthly_payment, amount_financed: r.amount_financed,
+              out_the_door: r.out_the_door, gross: r.gross }
+      row[:met] = r.monthly_payment <= @target + 0.01 unless @target.nil?
+      row
     end
 
     # Candidate price = the resolved list price the rest of the app shows
@@ -169,8 +202,7 @@ module DealDesk
     end
 
     def anchor_row
-      r = Engine.compute(@base.merge(price: resolved_anchor_price,
-                                     unit_cost: resolved_anchor_cost, pack_amount: pack_amount))
+      r = Engine.compute(anchor_inputs)
       days = days_on_lot(@anchor)
       tier = aged_tier(days)
       {
@@ -182,8 +214,20 @@ module DealDesk
         location_id: @anchor.location_id, location_name: location_name(@anchor.location_id),
         days_on_lot: days, aged_tier: tier, is_aged: !tier.nil?, is_cross_location: false,
         monthly_payment: r.monthly_payment, amount_financed: r.amount_financed,
-        out_the_door: r.out_the_door, dealer_gross: r.gross&.total
+        out_the_door: r.out_the_door, dealer_gross: r.gross&.total,
+        meets_target: @target.nil? ? nil : r.monthly_payment <= @target + 0.01
       }
+    end
+
+    # The deal's own home. On the scenario path this is the scenario's engine_inputs when the
+    # scenario is structured on that home (so it equals the Recap), otherwise the deal's
+    # negotiated price and package lines on the scenario's structure.
+    def anchor_inputs
+      if @scenario
+        @scenario.engine_inputs_for_unit(@anchor, price: resolved_anchor_price, unit_cost: resolved_anchor_cost)
+      else
+        @base.merge(price: resolved_anchor_price, unit_cost: resolved_anchor_cost, pack_amount: pack_amount)
+      end
     end
 
     # Anchor PRICE = the deal's NEGOTIATED home price, not raw inventory. The anchor is
