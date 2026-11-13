@@ -667,6 +667,17 @@ class Company < ApplicationRecord
     'proposal' => 60, 'negotiation' => 80, 'closed_won' => 100, 'closed_lost' => 0
   }.freeze
 
+  # Display name for a stage key from the saved pipeline ("negotiation" ->
+  # "Negotiation"). Deals and their stage history store the key; screens show
+  # the name. A key no longer in the pipeline falls back to a readable form.
+  def pipeline_stage_name(stage_key)
+    return nil if stage_key.blank?
+    key = stage_key.to_s.downcase
+    stage = pipeline_stages.find { |s| (s['key'] || s[:key]).to_s.downcase == key }
+    name = stage && (stage['name'] || stage[:name]).presence
+    name || key.split('_').map(&:capitalize).join(' ')
+  end
+
   # Configured win-probability for a stage key, or nil if it can't be resolved.
   # Probability is derived from the stage (never user-entered), so Deal mirrors
   # this whenever its stage changes.
