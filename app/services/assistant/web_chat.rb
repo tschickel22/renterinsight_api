@@ -227,6 +227,7 @@ module Assistant
       conversation.update!(conversable: lead, assigned_user_id: conversation.assigned_user_id || lead.try(:owner_id),
                            location_id: conversation.location_id || lead.location_id)
       Assistant::Learn.copy_fields(lead, conversation.qualification)
+      Assistant::CrmFields.note!(conversation) if Assistant::Software.for?(conversation.company)
       held = conversation.handoff_reason.presence
       Assistant::Handoff.perform!(conversation, reason: held) if release_held && held && conversation.assistant_answering?
     end

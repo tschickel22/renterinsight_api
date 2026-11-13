@@ -9,7 +9,8 @@ module Assistant
     # What the buyer told the assistant, on the lead where the lead has a place
     # for it. Only blank fields are filled, so nothing a rep typed is overwritten.
     LEAD_FIELDS = { 'bedrooms' => :preferred_bedrooms, 'budget' => :budget_range,
-                    'timeline' => :purchase_timeframe, 'home_type' => :preferred_home_type }.freeze
+                    'timeline' => :purchase_timeframe, 'home_type' => :preferred_home_type,
+                    'business_name' => :company_name }.freeze
 
     EMAIL = /\A[^@\s]+@[^@\s]+\.[a-z]{2,}\z/i
     # Names the system gave a lead before anyone knew it ("Text from (303) ...").
@@ -31,6 +32,10 @@ module Assistant
       conversation.merge_qualification!(result.qualification) if result.qualification.present?
       copy_fields(conversation.conversable, result.qualification)
       copy_contact(conversation.conversable, result.contact)
+      return unless Assistant::Software.for?(conversation.company)
+
+      Assistant::CrmFields.apply!(conversation.conversable, result.crm_fields)
+      Assistant::CrmFields.note!(conversation)
     end
 
     # Name, email and address the buyer typed, onto the lead's own fields, as
