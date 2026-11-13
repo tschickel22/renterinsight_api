@@ -122,7 +122,10 @@ module DealDesk
         'term_months'     => scenario.term_months,
         'tax_mode'        => scenario.tax_mode,
         'tax_rate'        => scenario.tax_rate&.to_f,
-        'unit_price_snapshot' => scenario.unit_price_snapshot&.to_f,
+        # The price the buyer pays for the home (a desk discount included); list_price is the
+        # home's price before it, so the package can show the discount.
+        'unit_price_snapshot' => scenario.effective_selling_price&.to_f,
+        'list_price'          => scenario.unit_price_snapshot&.to_f,
         'amount_financed'     => scenario.amount_financed&.to_f,
         'monthly_payment'     => scenario.monthly_payment&.to_f,
         'out_the_door'        => scenario.out_the_door&.to_f

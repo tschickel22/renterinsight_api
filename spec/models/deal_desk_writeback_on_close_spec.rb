@@ -119,6 +119,22 @@ RSpec.describe 'Deal Desk configurable write-back timing', type: :model do
       expect(rev_line.credit_amount.to_f).to eq(65_000.0) # GL posts the DESKED figure
     end
 
+    it 'puts a desk selling price on the home line at close, so the price, value and gross agree' do
+      deal.deal_products.create!(product_name: '2024 Fleetwood Aspire', unit_price: 70_000, cost: 50_000, quantity: 1,
+                                 discount: 0, discount_type: 'fixed', notes: 'category:home')
+      deal.deal_products.create!(product_name: 'Delivery', unit_price: 3_000, cost: 2_000, quantity: 1,
+                                 discount: 0, discount_type: 'fixed', notes: 'category:service')
+      selected_scenario(unit_price_snapshot: 70_000, selling_price_override: 66_500)
+
+      deal.reload.update!(stage: 'closed_won')
+
+      deal.reload
+      expect(deal.home_line_item.unit_price.to_f).to eq(66_500.0)
+      expect(deal.selling_price.to_f).to eq(66_500.0)
+      expect(deal.value.to_f).to eq(69_500.0)
+      expect(deal.front_gross).to eq((66_500 - deal.landed_cost + 1_000).round(2))
+    end
+
     it 'uses the assignment path (no nested save / re-entrancy)' do
       selected_scenario
       expect_any_instance_of(DealDeskScenario)

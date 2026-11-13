@@ -33,14 +33,32 @@ class DealDeskScenario < ApplicationRecord
   scope :offerable, -> { active.where('valid_through IS NULL OR valid_through >= ?', Date.current) }
   scope :recent,    -> { order(created_at: :desc) }
 
+  validates :selling_price_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+
   before_validation :set_validity_window, on: :create
   before_save :stringify_jsonb
+
+  # The home's selling price on THIS scenario: the rep's override when one is set (a
+  # discount, or a higher price), else the home's price (unit_price_snapshot). Every
+  # calculation reads this, so the Recap, Solve, the payment grid and Compare's row for this
+  # home all price the same deal, and Apply writes this price to the deal's home line.
+  def effective_selling_price
+    selling_price_override.nil? ? unit_price_snapshot : selling_price_override
+  end
+
+  # List price less selling price (positive = a discount, negative = priced above list).
+  # nil when no override is set.
+  def price_discount
+    return nil if selling_price_override.nil? || unit_price_snapshot.nil?
+
+    (unit_price_snapshot.to_d - selling_price_override.to_d).round(2)
+  end
 
   # Engine inputs assembled from this scenario's snapshot + working structure. Shared by
   # the controller (recompute on autosave) and the PDF generator so they never diverge.
   def engine_inputs
     {
-      price: unit_price_snapshot,
+      price: effective_selling_price,
       # A zero cost means none is on record (older snapshots stored 0.0). nil tells the
       # engine gross is unknown instead of reporting the whole price as profit.
       unit_cost: (unit_cost_snapshot if unit_cost_snapshot.to_f.positive?),
@@ -98,11 +116,15 @@ class DealDeskScenario < ApplicationRecord
   # Has the price moved since this scenario was quoted? (snapshot vs. live). The snapshot is
   # now sourced from the deal (snapshot_unit!), so compare against the deal's current
   # selling_price — NOT vehicle.sale_price, which can legitimately differ from the quoted price.
+  # A deal already carrying this scenario's own selling price (it was applied) has not moved.
   def price_changed?
     return false if deal.nil? || unit_price_snapshot.nil?
 
     current = deal.selling_price
-    current.present? && current.to_d != unit_price_snapshot.to_d
+    return false if current.blank?
+    return false if selling_price_override.present? && current.to_d == selling_price_override.to_d
+
+    current.to_d != unit_price_snapshot.to_d
   end
 
   # Past its window and not locked in as the selected/closed structure.
@@ -129,9 +151,14 @@ class DealDeskScenario < ApplicationRecord
   #                                  save re-entrancy.
   # Writes ONLY the structured economic fields — never the close/GL/commission state.
   def write_back_to_deal!(deal = self.deal, assign_only: false)
+    # A selling price set on the desk goes onto the deal's home line first: selling_price
+    # mirrors the home line (Deal#mirror_selling_price_from_home_line), so writing only the
+    # column would be undone by the next save.
+    write_selling_price_to_home_line!(deal, assign_only: assign_only) unless selling_price_override.nil?
+
     attrs = {
       vehicle_id: vehicle_id,
-      selling_price: unit_price_snapshot,
+      selling_price: effective_selling_price,
       # Server-populated snapshot of the unit's real cost (snapshot_unit!), never view-gated.
       # Written to BOTH cost columns: unit_cost (deal-level gross helper) and home_cost — the
       # canonical accounting cost the GL COGS line actually reads (DealAccountingService), per
@@ -328,10 +355,10 @@ class DealDeskScenario < ApplicationRecord
       # already present and leaves them alone (it only fills blanks). We pass values from this
       # scenario's snapshot (authoritative for the swapped unit).
       deal.assign_attributes(
-        selling_price: unit_price_snapshot,
+        selling_price: effective_selling_price,
         unit_cost: unit_cost_snapshot,
         home_cost: unit_cost_snapshot,
-        value: unit_price_snapshot,
+        value: effective_selling_price,
         vehicle_id: vehicle_id
       )
       deal.save!
@@ -413,6 +440,9 @@ class DealDeskScenario < ApplicationRecord
       # swapped-in unit with empty/stale line_items even though the deal is correct.
       deal.association(:vehicle).reset # deal.vehicle_id just changed; drop the stale cache
       self.vehicle_id = original_vehicle_id
+      # A desk selling price belonged to the swapped-in home; the original home is back at
+      # its own price.
+      self.selling_price_override = nil
       snapshot_for_swap!
       resync_line_items_for_unit!
       save!
@@ -423,6 +453,62 @@ class DealDeskScenario < ApplicationRecord
 
       { reverted: true, restored_vehicle_id: original_vehicle_id, released_vehicle_id: swapped_in_vehicle&.id }
     end
+  end
+
+  # Put this scenario's selling price on the deal's home line, the deal's authoritative home
+  # price (Deal#home_line_item; selling_price and front gross read it, and the line total
+  # feeds the deal value). The line keeps its quantity and discount; its unit price is set
+  # so the line nets to the selling price. Returns { from:, to: } when the price moved, nil
+  # when it was already there.
+  #
+  # assign_only (the on_close write-back, inside the deal's own save): the line is written
+  # with update_columns so its after_save does not re-save the deal mid-save, and the deal's
+  # value is assigned from the line totals so it lands in the same UPDATE.
+  #
+  # A deal with no home line (older deals keep the home price on the column) gets
+  # selling_price and value moved by the same amount instead.
+  def write_selling_price_to_home_line!(deal = self.deal, assign_only: false)
+    target = selling_price_override.to_d.round(2)
+    line = deal.home_line_item
+
+    if line.nil?
+      from = deal.selling_price.to_d.round(2)
+      return nil if from == target
+
+      new_value = (deal.value.to_d + (target - from)).round(2)
+      new_value = 0 if new_value.negative?
+      attrs = { selling_price: target, value: new_value }
+      assign_only ? deal.assign_attributes(attrs) : deal.update!(attrs)
+      return { from: from.to_f, to: target.to_f }
+    end
+
+    from = deal.home_line_item_price.to_d.round(2)
+    return nil if from == target
+
+    qty = [line.quantity.to_i, 1].max
+    discount = line.discount.to_d
+    unit_price =
+      if line.discount_type == 'percentage'
+        keep = 1 - (discount / 100)
+        keep.positive? ? target / (qty * keep) : target / qty
+      else
+        (target + discount) / qty
+      end
+    unit_price = unit_price.round(2)
+
+    if assign_only
+      line.unit_price = unit_price
+      subtotal = line.quantity.to_d * unit_price
+      off = line.discount_type == 'percentage' ? subtotal * (discount / 100) : discount
+      line.update_columns(unit_price: unit_price, total: (subtotal - off + line.tax.to_d).round(2), updated_at: Time.current)
+      deal.value = deal.deal_products.sum(:total)
+      deal.selling_price = target
+    else
+      line.update!(unit_price: unit_price) # after_save re-totals the deal (value, selling_price)
+      deal.reload
+    end
+
+    { from: from.to_f, to: target.to_f }
   end
 
   # Expire unless permanently kept (selected). Used by the expiry sweep.
@@ -772,13 +858,13 @@ class DealDeskScenario < ApplicationRecord
   end
 
   # Build the deal_product attrs for a unit's home line: VEHICLE-<id> SKU + source_type 'home'
-  # so identify_home_line keeps recognizing it. Price = the scenario's snapshot (the quoted
-  # price for the swapped unit); cost = the snapshot cost.
+  # so identify_home_line keeps recognizing it. Price = the scenario's selling price for the
+  # swapped unit (a desk override when set, else its snapshot); cost = the snapshot cost.
   def home_line_attrs_for_unit(unit)
     {
       product_name: vehicle_display_name(unit).presence || "Unit #{unit.id}",
       product_sku: "VEHICLE-#{unit.id}",
-      unit_price: unit_price_snapshot.to_f,
+      unit_price: effective_selling_price.to_f,
       cost: unit_cost_snapshot.to_f,
       quantity: 1,
       discount: 0,

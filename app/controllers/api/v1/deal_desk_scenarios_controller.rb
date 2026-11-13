@@ -87,6 +87,9 @@ module Api
         @scenario.assign_attributes(scenario_params)
 
         if @scenario.vehicle_id_changed?
+          # A desk selling price was for the home that was on the scenario; a different home
+          # starts at its own price unless this same request sets one.
+          @scenario.selling_price_override = nil unless @scenario.selling_price_override_changed?
           snapshot_unit!(@scenario)
           # Unit swap: drop the old home's packages, pull the new unit's (deal add-ons +
           # fees + F&I persist). Display + payment math only — nothing pushed to the deal
@@ -131,15 +134,29 @@ module Api
       # pre-close, but it is always the explicit mutate-the-deal action — never auto-run.
       def apply
         return unless authorize_action!(RESOURCE, 'write')
-        return unless sheet_open!(@scenario.deal)
+        deal = @scenario.deal
+        return unless sheet_open!(deal)
+
+        # A selling price set on the desk changes the deal's home price, so only someone who
+        # can update the deal may apply it.
+        price_from = deal.home_line_item_price || deal.selling_price
+        price_moves = !@scenario.selling_price_override.nil? &&
+                      price_from.to_d.round(2) != @scenario.selling_price_override.to_d.round(2)
+        if price_moves && !can?('deals', 'update')
+          return render json: { error: 'Changing the home price on the deal needs permission to update deals.',
+                                required_permission: 'deals:update:all' }, status: :forbidden
+        end
 
         @scenario.write_back_to_deal!
+        price_change = price_moves ? { from: price_from.to_f, to: @scenario.selling_price_override.to_f } : nil
+        record_price_change(deal, price_change) if price_change
         # Add-only merge of the scenario's line items + F&I onto the deal as deal_products, so
         # the edit-deal and approval forms reflect what was sold. Never touches the home line.
         changes = @scenario.merge_line_items_and_fni_to_deal!
         render json: {
           scenario: scenario_json(@scenario),
           applied: true,
+          price_change: price_change,
           added_count: changes[:added].size,
           updated_count: changes[:updated_qty].size,
           skipped_count: changes[:skipped],
@@ -217,6 +234,7 @@ module Api
             opts[:min_price] = params[:min_price].to_f if params[:min_price].present?
             DealDesk::Solver.solve_for_payment(base, lever: lever, target_payment: target, **opts)
           end
+        result = with_list_price(result) if lever == 'price'
 
         render json: { solve: result }
       rescue ActiveRecord::RecordNotFound
@@ -362,6 +380,36 @@ module Api
 
       def posted_deal = @scenario&.deal
 
+      # The deal's history records a home price set from the Deal Desk in words, beside the
+      # automatic field-change entry the deal's own save writes.
+      def record_price_change(deal, change)
+        ActivityLogService.log(
+          company: @company, user: current_user, trackable: deal,
+          action: 'updated', module_name: 'crm',
+          description: "Home selling price changed from #{money(change[:from])} to #{money(change[:to])} " \
+                       "from Deal Desk scenario #{@scenario.label.presence || "##{@scenario.id}"}",
+          changes_made: { 'Home selling price' => [money(change[:from]), money(change[:to])] },
+          metadata: { source: 'deal_desk_apply', deal_desk_scenario_id: @scenario.id,
+                      list_price: @scenario.unit_price_snapshot&.to_f }
+        )
+      end
+
+      def money(amount)
+        ActiveSupport::NumberHelper.number_to_currency(amount.to_f)
+      end
+
+      # A price solve on a saved scenario reports the discount from the home's list price
+      # (unit_price_snapshot), not from a price the rep already set on the desk, so the
+      # option reads the same way the Recap does.
+      def with_list_price(result)
+        return result unless params[:scenario_id].present? && result.is_a?(Hash) && result[:price]
+
+        list = @company.deal_desk_scenarios.find(params[:scenario_id]).unit_price_snapshot
+        return result if list.nil?
+
+        result.merge(list_price: list.to_f, discount: (list.to_d - result[:price].to_d).round(2).to_f)
+      end
+
       # A signed Deal Sheet (or one out for signature) owns the deal's lines:
       # they change only by a change order on the sheet.
       def sheet_open!(deal)
@@ -384,6 +432,7 @@ module Api
           :deal_id, :vehicle_id, :label, :valid_through,
           :trade_allowance, :trade_payoff, :cash_down, :rebates,
           :lender_program_id, :lender_tier, :apr, :apr_override, :term_months, :tax_mode, :tax_rate,
+          :selling_price_override,
           fees: {}, fni_products: [%i[name type price cost]]
         )
       end
@@ -532,7 +581,7 @@ module Api
 
       # Customer-safe line items — NO gross/cost.
       def quote_items_from(scenario)
-        items = [{ 'description' => 'Selling Price', 'quantity' => 1, 'unit_price' => scenario.unit_price_snapshot.to_f }]
+        items = [{ 'description' => 'Selling Price', 'quantity' => 1, 'unit_price' => scenario.effective_selling_price.to_f }]
         (scenario.fees || {}).each do |k, v|
           items << { 'description' => "#{k.to_s.titleize} Fee", 'quantity' => 1, 'unit_price' => v.to_f } if v.to_f.positive?
         end
@@ -563,6 +612,11 @@ module Api
           rate_source: scenario.rate_source, term_months: scenario.term_months,
           tax_mode: scenario.tax_mode, tax_rate: scenario.tax_rate&.to_f,
           unit_price_snapshot: scenario.unit_price_snapshot&.to_f, price_changed: scenario.price_changed?,
+          # The home's selling price on this scenario: list (unit_price_snapshot) unless the rep
+          # set one on the desk. price_discount = list less selling (negative = above list).
+          selling_price_override: scenario.selling_price_override&.to_f,
+          selling_price: scenario.effective_selling_price&.to_f,
+          price_discount: scenario.price_discount&.to_f,
           amount_financed: scenario.amount_financed&.to_f, monthly_payment: scenario.monthly_payment&.to_f,
           out_the_door: scenario.out_the_door&.to_f,
           unit_location_id: scenario.unit_location_id, unit_days_on_lot: scenario.unit_days_on_lot,

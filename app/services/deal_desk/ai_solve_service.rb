@@ -114,7 +114,9 @@ module DealDesk
       when 'term', 'cash_down', 'price'
         solved = solver.solve_for_payment(lever: lever, target_payment: target)
         merged = @base.merge(lever_key(lever) => solved[lever_field(lever)])
-        [engine_option(lever, merged)]
+        # A price option carries its price so Apply can set it as the scenario's selling price.
+        extra = lever == 'price' ? { price: solved[:price], discount: price_discount(solved[:price]) } : {}
+        [engine_option(lever, merged, extra)]
       when 'rate'
         rate_candidate_options(target)
       else
@@ -122,6 +124,15 @@ module DealDesk
       end
     rescue ArgumentError
       []
+    end
+
+    # Discount from the home's list price (the scenario's unit_price_snapshot when there is a
+    # scenario, else the base structure's price).
+    def price_discount(price)
+      list = @scenario&.unit_price_snapshot || @base[:price]
+      return nil if list.nil? || price.nil?
+
+      (list.to_d - price.to_d).round(2).to_f
     end
 
     def lever_key(lever)
@@ -151,7 +162,9 @@ module DealDesk
         cash_down: merged[:cash_down]&.to_f,
         amount_financed: res.amount_financed,
         monthly_payment: res.monthly_payment,
-        out_the_door: res.out_the_door
+        out_the_door: res.out_the_door,
+        price: extra[:price],
+        discount: extra[:discount]
       }
       opt[:dealer_gross] = res.gross&.total if @can_view_costs && res.gross
       opt.compact

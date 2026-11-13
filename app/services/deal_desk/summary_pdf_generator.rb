@@ -135,10 +135,17 @@ module DealDesk
 
     def add_price_breakdown(pdf)
       r = @scenario.engine_result.customer_h # gross-free projection
-      price = @scenario.unit_price_snapshot.to_f
+      price = @scenario.effective_selling_price.to_f
+      list = @scenario.unit_price_snapshot.to_f
       trade_net = r[:trade_equity].to_f
 
       rows = [['Price Breakdown', '']]
+      # A discount set on the desk shows as list price less the discount, so the buyer sees
+      # what came off. A price above list shows only the selling price.
+      if list.positive? && price < list
+        rows << ['List Price', usd(list)]
+        rows << ['Discount', "-#{usd(list - price)}"]
+      end
       # Only render "Selling Price" when a positive unit price was captured. When
       # the snapshot is 0 (deal had no sale_price at snapshot time, or the home
       # is being sold entirely as a line item) rendering a $0.00 row next to a
