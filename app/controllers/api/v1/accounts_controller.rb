@@ -7,6 +7,7 @@ module Api
       # concern so all three CRM entities behave identically.
       include MergeableRecords
       include FollowedRecords
+      include AccountNameMatches
       before_action :set_company_scope
       before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals contacts insights score communications_rollup]
 
@@ -109,27 +110,19 @@ module Api
       def create
         return unless authorize_action!('crm', 'create')
         
-        # HARD BLOCK on exact duplicate name (create only). Email/phone
-        # duplicates are soft warnings surfaced by the frontend, not blocked.
+        # A name already in use is a question, not a block: account names are
+        # not unique (two families named Smith). Without allow_duplicate_name
+        # the form gets 409 with the same-name accounts the rep can open, and
+        # offers to open one of them or create a new account with that name.
+        # Email/phone duplicates stay soft warnings (check_duplicates).
         dup_name = account_params['name'].to_s.strip
-        if dup_name.present?
-          existing = @company.accounts
-                             .where(is_deleted: [false, nil])
-                             .where('LOWER(name) = ?', dup_name.downcase)
-                             .first
-          if existing
-            render json: {
-              error: 'An account with this name already exists.',
-              duplicate: {
-                field: 'name',
-                id: existing.id,
-                name: existing.name,
-                email: existing.email,
-                phone: existing.phone,
-                accountType: existing.account_type,
-                status: existing.status
-              }
-            }, status: :conflict
+        if dup_name.present? && !allow_duplicate_name?
+          matches, hidden_count = account_name_matches(dup_name)
+          if matches.any? || hidden_count.positive?
+            body = account_name_in_use_json(dup_name, matches, hidden_count: hidden_count)
+            # Older clients read `duplicate`.
+            body[:duplicate] = body[:existingAccount].slice(:id, :name, :email, :phone, :accountType, :status).merge(field: 'name') if body[:existingAccount]
+            render json: body, status: :conflict
             return
           end
         end
@@ -819,13 +812,14 @@ module Api
           return
         end
 
-        # STRICT TENANT ISOLATION: only this company's (non-deleted) accounts.
-        scope = @company.accounts.where(is_deleted: [false, nil])
+        # STRICT TENANT ISOLATION: only this company's (non-deleted) accounts,
+        # and only ones the rep can open (no details from hidden locations).
+        scope = accounts_user_can_open
 
         conditions = []
         values     = []
         if name.present?
-          conditions << 'LOWER(name) = ?'
+          conditions << 'LOWER(TRIM(name)) = ?'
           values << name.downcase
         end
         if email.present?
@@ -841,7 +835,7 @@ module Api
 
         same_type = matches.map { |a|
           acct_phone = a.phone.to_s.gsub(/[^0-9]/, '')
-          matched = if name.present? && a.name.to_s.downcase == name.downcase
+          matched = if name.present? && a.name.to_s.strip.downcase == name.downcase
                       'name'
                     elsif email.present? && a.email.to_s.downcase == email
                       'email'
@@ -938,6 +932,18 @@ module Api
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Account not found or access denied' }, status: :not_found
         return
+      end
+
+      # The rep chose "Create a new account named ..." after the 409. Read at
+      # the top level or inside the wrapped account hash, either case.
+      def allow_duplicate_name?
+        raw = params[:allow_duplicate_name]
+        raw = params[:allowDuplicateName] if raw.nil?
+        if raw.nil? && params[:account].respond_to?(:key?)
+          raw = params[:account][:allow_duplicate_name]
+          raw = params[:account][:allowDuplicateName] if raw.nil?
+        end
+        ActiveModel::Type::Boolean.new.cast(raw) == true
       end
 
       def account_params

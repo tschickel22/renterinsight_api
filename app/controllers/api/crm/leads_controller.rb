@@ -6,6 +6,7 @@ module Api
       include MergeableRecords
       include PersonNameSearch
       include FollowedRecords
+      include AccountNameMatches
 
       before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent]
@@ -696,8 +697,11 @@ module Api
             return
           end
 
-          if account_mode == 'existing' && params[:account_id].present? &&
-             !@company.accounts.where(is_deleted: [false, nil]).exists?(id: params[:account_id])
+          # Joining an account needs one the rep can open. Same-name accounts
+          # in locations they cannot see are never joined (or shown); making a
+          # new account is always allowed.
+          account_id = params[:account_id].presence
+          if account_mode != 'new' && account_id && !accounts_user_can_open.exists?(id: account_id)
             render json: { error: 'That account was not found. It may have been deleted or merged.' }, status: :not_found
             return
           end
@@ -705,12 +709,22 @@ module Api
           # Account names are not unique, so a name already in use is a
           # question for the rep: join that account, or make a separate one
           # (two families named Smith). Ask before converting anything.
-          if account_mode.nil? && params[:account_id].blank?
+          if account_mode != 'new' && account_id.nil?
             account_name = converter.account_name_for(params[:account_name])
-            matches = Leads::Converter.accounts_named(@company, account_name).limit(10).to_a
-            if matches.any?
-              render json: account_name_in_use_json(account_name, matches), status: :conflict
+            matches, hidden_count = account_name_matches(account_name)
+            if account_mode.nil? && (matches.any? || hidden_count.positive?)
+              render json: account_name_in_use_json(account_name, matches, hidden_count: hidden_count), status: :conflict
               return
+            end
+            # 'existing' with no id joins the first same-name account the rep
+            # can open (never a hidden one).
+            if account_mode == 'existing'
+              if matches.any?
+                account_id = matches.first.id
+              elsif hidden_count.positive?
+                render json: { error: 'You cannot open any account with that name. Make a new account instead.' }, status: :not_found
+                return
+              end
             end
           end
 
@@ -718,7 +732,7 @@ module Api
             result = converter.call(
               account_name: params[:account_name],
               account_mode: account_mode,
-              account_id: params[:account_id].presence,
+              account_id: account_id,
               create_contact_param: params[:create_contact],
               deal_params: (params[:create_deal] if params[:create_deal].present? && params[:create_deal].is_a?(ActionController::Parameters))
             )
@@ -837,33 +851,6 @@ module Api
       end
 
       private
-
-      # The 409 body Convert Lead returns when the account name is in use: the
-      # accounts with that name, so the dialog can ask whether to join one or
-      # make a new one.
-      def account_name_in_use_json(account_name, matches)
-        contact_counts = @company.contacts.where(account_id: matches.map(&:id), is_deleted: [false, nil])
-                                 .group(:account_id).count
-        accounts = matches.map do |a|
-          {
-            id: a.id,
-            name: a.name,
-            email: a.email,
-            phone: a.phone,
-            city: a.billing_city,
-            state: a.billing_state,
-            contactsCount: contact_counts[a.id] || 0,
-            createdAt: a.created_at&.iso8601
-          }
-        end
-        {
-          error: "An account named #{account_name} already exists.",
-          code: 'account_name_in_use',
-          accountName: account_name,
-          existingAccount: accounts.first,
-          accounts: accounts
-        }
-      end
 
       # Per-tenant list of status keys flagged as dead-end (is_excluded=true on
       # lead_statuses). Admins manage this via the Lead Statuses tab — adding a

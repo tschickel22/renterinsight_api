@@ -97,8 +97,9 @@ class Account < ApplicationRecord
   # Validations
   # Names are NOT unique: two families named Smith are two accounts. Convert
   # Lead asks the rep whether to join a same-name account or make a new one
-  # (Leads::Converter.accounts_named); New Account still blocks an exact match
-  # (AccountsController#create). There was never a unique index.
+  # (Leads::Converter.accounts_named); New Account asks the same question
+  # (AccountsController#create, allow_duplicate_name). There was never a
+  # unique index.
   validates :name, presence: true
   validates :email, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
   validates :status, inclusion: { in: STATUSES }, allow_blank: true, allow_nil: true  # Many existing accounts don't have status set
