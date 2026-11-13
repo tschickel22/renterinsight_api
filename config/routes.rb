@@ -127,6 +127,8 @@ Rails.application.routes.draw do
   post 'sign/:token/sign',    to: 'public/agreement_signing#sign'
   post 'sign/:token/decline', to: 'public/agreement_signing#decline'
   get  'sign/:token/download', to: 'public/agreement_signing#download'
+  # A signed agreement shared by email or text (Agreements::Share), 30-day token.
+  get  'agreement_files/:token', to: 'public/agreement_files#show', constraints: { token: %r{[^/]+} }, format: false
 
   # Inbound workflow triggers (no auth — token-based)
   namespace :api do
@@ -2301,6 +2303,8 @@ Rails.application.routes.draw do
           post :save_as_template
           get :audit_log
           get :download
+          get :share_options
+          post :share
           get :certificate
           post :prepare_signature
           put :preparer_sign
