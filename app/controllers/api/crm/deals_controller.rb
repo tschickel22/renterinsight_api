@@ -65,7 +65,7 @@ module Api
         # Filter by status
         case params[:status]
         when 'open'
-          deals = deals.open
+          deals = deals.open_for(@company)
         when 'won'
           deals = deals.won(@company)
         when 'lost'
@@ -173,7 +173,7 @@ module Api
         return unless authorize_action!('deals', 'read')
         
         # STRICT TENANT ISOLATION: Only metrics for current company
-        company_deals = @company.deals
+        company_deals = @company.deals.active
 
         # Location filter (param overrides header; legacy = strict header narrowing)
         company_deals = filter_deals_by_location(company_deals) do |scope|
@@ -195,8 +195,8 @@ module Api
         company_deals = apply_follower_filters(company_deals)
 
         # Overall metrics
-        total_value = company_deals.open.sum(:value)
-        total_count = company_deals.open.count
+        total_value = company_deals.open_for(@company).sum(:value)
+        total_count = company_deals.open_for(@company).count
         won_value = company_deals.won(@company).sum(:value)
         won_count = company_deals.won(@company).count
         lost_count = company_deals.lost(@company).count
@@ -209,8 +209,8 @@ module Api
         avg_deal_value = total_count > 0 ? (total_value / total_count).round(2) : 0
         
         # By stage - using lowercase normalized stages
-        by_stage = company_deals.open.group(:stage).count
-        value_by_stage = company_deals.open.group(:stage).sum(:value)
+        by_stage = company_deals.open_for(@company).group(:stage).count
+        value_by_stage = company_deals.open_for(@company).group(:stage).sum(:value)
         
         # Recent activity
         recent_created = company_deals.where('created_at >= ?', 30.days.ago).count
@@ -258,9 +258,11 @@ module Api
           '1 month'
         end
         
-        forecast_deals = @company.deals
+        # Every open deal in this company's own pipeline (not a fixed list of
+        # stage names, which custom pipelines never matched), skipping any
+        # soft-deleted deal.
+        forecast_deals = @company.deals.active.open_for(@company)
                             .where('expected_close_date <= ?', date_field.to_s.split.first.to_i.send(date_field.split.last).from_now)
-                            .where(stage: ['proposal', 'negotiation', 'closing'])
         
         # Location filter (param overrides header; legacy = strict header narrowing)
         forecast_deals = filter_deals_by_location(forecast_deals) do |scope|

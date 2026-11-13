@@ -282,6 +282,10 @@ class Deal < ApplicationRecord
 
   # Scopes
   scope :open, -> { where(stage: %w[prospecting qualification needs_analysis proposal negotiation closing]) }
+  # Open = any stage that is not won or lost in this company's pipeline. The
+  # fixed list above misses dealers' own stages (e.g. 'toured'), so their
+  # deals dropped out of the pipeline totals and the forecast.
+  scope :open_for, ->(company) { where.not(stage: company.closed_deal_stage_keys) }
   # Tenant-aware: pass the company so custom pipeline keys (e.g. 'won'/'lost'
   # at Evangeline) resolve correctly. Callers always have the company in scope.
   scope :won,  ->(company) { where(stage: company.won_stage_keys) }
