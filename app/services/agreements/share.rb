@@ -26,11 +26,26 @@ module Agreements
     # account's contacts, one row per person, only those with an email or phone.
     def self.recipients(agreement)
       rows = []
+      digits = ->(p) { p.to_s.gsub(/\D/, '').last(10).presence }
+      # A signer is usually also the contact: match on contact, email or phone
+      # and fill in what the first row lacked instead of listing them twice.
       add = lambda do |name:, email:, phone:, contact_id: nil|
-        next if email.blank? && phone.blank?
+        email = email.presence
+        phone = phone.presence
+        next if email.nil? && phone.nil?
 
-        rows << { name: name.to_s.strip.presence || email || phone, email: email.presence, phone: phone.presence,
-                  contact_id: contact_id }
+        same = rows.find do |r|
+          (contact_id && r[:contact_id] == contact_id) ||
+            (email && r[:email]&.casecmp?(email)) ||
+            (phone && digits.call(r[:phone]) == digits.call(phone))
+        end
+        if same
+          same[:email] ||= email
+          same[:phone] ||= phone
+          same[:contact_id] ||= contact_id
+        else
+          rows << { name: name.to_s.strip.presence || email || phone, email: email, phone: phone, contact_id: contact_id }
+        end
       end
       contact_row = ->(c) { add.call(name: "#{c.first_name} #{c.last_name}", email: c.email, phone: c.try(:phone).presence || c.try(:mobile_phone), contact_id: c.id) }
 
@@ -40,7 +55,7 @@ module Agreements
       end
       agreement.account&.contacts&.limit(25)&.each { |c| contact_row.call(c) }
 
-      rows.uniq { |r| r[:contact_id] || [r[:email]&.downcase, r[:phone]] }
+      rows
     end
 
     def initialize(agreement, user:, contact: nil)
