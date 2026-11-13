@@ -102,6 +102,9 @@ public
       { key: 'documents', name: 'Documents', category: 'operations', description: 'Manage client documents and file uploads', position: 110 },
       { key: 'invoices', name: 'Invoices', category: 'operations', description: 'Manage invoices and billing', position: 111 },
       { key: 'loans', name: 'Loans', category: 'operations', description: 'Manage loans and financing', position: 112 },
+      # Quotes used to sit behind 'finance', so a sales rep who could build a deal
+      # could not open its Quotes tab. Payments and invoices stay on 'finance'.
+      { key: 'quotes', name: 'Quotes', category: 'operations', description: 'Create, send and manage customer quotes', position: 113 },
       { key: 'deal_desk', name: 'Deal Desk', category: 'operations', description: 'Structure deals at point of sale: solve for payment, compare units, present a pencil', position: 114 },
       
       # Commissions (position 120-125)

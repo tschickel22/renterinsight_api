@@ -118,7 +118,7 @@ puts "📋 Company Manager"
 config = {
   # Operations - Full control
   'inventory' => CRUD_MANAGE, 'crm' => CRUD_MANAGE, 'leads' => CRUD_MANAGE, 'deals' => CRUD_MANAGE,
-  'service' => CRUD_MANAGE, 'finance' => CRUD_MANAGE, 'communications' => CRUD_MANAGE,
+  'service' => CRUD_MANAGE, 'finance' => CRUD_MANAGE, 'quotes' => CRUD_MANAGE, 'communications' => CRUD_MANAGE,
   'listings' => CRUD_MANAGE, 'products' => CRUD_MANAGE, 'tasks' => CRUD_MANAGE, 'documents' => CRUD_MANAGE,
   'invoices' => CRUD_EXPORT, 'loans' => CRUD_EXPORT,
   
@@ -151,7 +151,7 @@ config = {
   'inventory' => CRUD, 'crm' => CRUD, 'leads' => CRUD, 'deals' => CRUD, 'service' => CRUD,
   'communications' => CRUD, 'listings' => CRUD, 'products' => CRUD, 'tasks' => CRUD, 'documents' => CRUD,
   'parts' => CRUD, 'suppliers' => ['read', 'update'], 'warranty_claims' => CRUD,
-  'invoices' => ['read', 'update'], 'finance' => ['read', 'update'],
+  'invoices' => ['read', 'update'], 'finance' => ['read', 'update'], 'quotes' => ['read', 'update'],
   
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY, 'branding' => READ_ONLY,
   'purchase_orders' => READ_ONLY, 'bins' => READ_ONLY, 'part_categories' => READ_ONLY,
@@ -164,7 +164,7 @@ grant_permissions(Role.find_by(key: 'company_staff'), resources, actions, scopes
 puts "📋 Location Administrator"
 config = {
   'inventory' => CRUD_MANAGE, 'crm' => CRUD_MANAGE, 'leads' => CRUD_MANAGE, 'deals' => CRUD_MANAGE,
-  'service' => CRUD_MANAGE, 'finance' => CRUD_MANAGE, 'communications' => CRUD_MANAGE,
+  'service' => CRUD_MANAGE, 'finance' => CRUD_MANAGE, 'quotes' => CRUD_MANAGE, 'communications' => CRUD_MANAGE,
   'listings' => CRUD_MANAGE, 'products' => CRUD_MANAGE, 'tasks' => CRUD_MANAGE, 'documents' => CRUD_MANAGE,
   'invoices' => CRUD_EXPORT, 'loans' => CRUD_EXPORT,
   
@@ -192,7 +192,7 @@ config = {
   'invoices' => ['read', 'update'],
   
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY, 'branding' => READ_ONLY,
-  'finance' => READ_ONLY, 'bins' => READ_ONLY, 'part_categories' => READ_ONLY, 'purchase_orders' => READ_ONLY,
+  'finance' => READ_ONLY, 'quotes' => READ_ONLY, 'bins' => READ_ONLY, 'part_categories' => READ_ONLY, 'purchase_orders' => READ_ONLY,
   
   'calendar' => CALENDAR_OWN_AND_TEAM, 'reports' => READ_EXPORT, 'portal' => CRUD, 'dashboard' => READ_ONLY
 }
@@ -208,7 +208,7 @@ config = {
   'warranty_claims' => ['create', 'read', 'update'],
   
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY, 'branding' => READ_ONLY,
-  'finance' => READ_ONLY, 'invoices' => READ_ONLY, 'communications' => READ_ONLY,
+  'finance' => READ_ONLY, 'quotes' => READ_ONLY, 'invoices' => READ_ONLY, 'communications' => READ_ONLY,
   'listings' => READ_ONLY, 'products' => READ_ONLY, 'suppliers' => READ_ONLY,
   'bins' => READ_ONLY, 'part_categories' => READ_ONLY, 'purchase_orders' => READ_ONLY,
   
@@ -279,7 +279,7 @@ grant_permissions(Role.find_by(key: 'inventory_manager'), resources, actions, sc
 # ===== FINANCE STAFF =====
 puts "📋 Finance Staff"
 config = {
-  'finance' => CRUD_MANAGE + ['approve'], 'invoices' => CRUD_MANAGE + ['approve'],
+  'finance' => CRUD_MANAGE + ['approve'], 'quotes' => CRUD_MANAGE, 'invoices' => CRUD_MANAGE + ['approve'],
   'loans' => CRUD_MANAGE + ['approve'], 'commissions' => CRUD_MANAGE,
   'commission_payments' => CRUD_MANAGE + ['approve'],
   

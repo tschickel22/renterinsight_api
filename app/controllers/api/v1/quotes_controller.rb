@@ -10,7 +10,7 @@ module Api
 
       # GET /api/v1/quotes
       def index
-        return unless authorize_action!('finance', 'read')
+        return unless authorize_action!('quotes', 'read')
         
         # STRICT TENANT ISOLATION: Only return quotes from current user's company
         # RBAC: Location-tier users only see their assigned locations
@@ -72,14 +72,14 @@ module Api
 
       # GET /api/v1/quotes/:id
       def show
-        return unless authorize_action!('finance', 'read')
+        return unless authorize_action!('quotes', 'read')
         
         render json: @quote.as_json(include_account: true, include_contact: true, include_inventory: true, include_deal: true)
       end
 
       # POST /api/v1/quotes
       def create
-        return unless authorize_action!('finance', 'create')
+        return unless authorize_action!('quotes', 'create')
         
         # Get quote params and convert to hash
         quote_params_hash = params.require(:quote).to_unsafe_h
@@ -157,7 +157,7 @@ module Api
 
       # PATCH/PUT /api/v1/quotes/:id
       def update
-        return unless authorize_action!('finance', 'update')
+        return unless authorize_action!('quotes', 'update')
         
         # Get quote params and convert to hash
         quote_params_hash = params.require(:quote).to_unsafe_h
@@ -220,7 +220,7 @@ module Api
 
       # DELETE /api/v1/quotes/:id
       def destroy
-        return unless authorize_action!('finance', 'delete')
+        return unless authorize_action!('quotes', 'delete')
         
         @quote.soft_delete!
         head :no_content
@@ -228,7 +228,7 @@ module Api
 
       # POST /api/v1/quotes/:id/send
       def send_quote
-        return unless authorize_action!('finance', 'update')
+        return unless authorize_action!('quotes', 'update')
         
         # Extract send parameters
         send_params = params.permit(
@@ -296,7 +296,7 @@ module Api
 
       # GET /api/v1/quotes/stats
       def stats
-        return unless authorize_action!('finance', 'read')
+        return unless authorize_action!('quotes', 'read')
         
         # STRICT TENANT ISOLATION: Only stats from current user's company
         quotes = @company.quotes.active
@@ -317,7 +317,7 @@ module Api
 
       # POST /api/v1/quotes/:id/accept
       def accept
-        return unless authorize_action!('finance', 'update')
+        return unless authorize_action!('quotes', 'update')
         
         set_quote
         if @quote.accept!(ip: request.remote_ip, via: 'dealer', by: current_user&.full_name)
@@ -329,7 +329,7 @@ module Api
 
       # POST /api/v1/quotes/:id/reject
       def reject
-        return unless authorize_action!('finance', 'update')
+        return unless authorize_action!('quotes', 'update')
         
         set_quote
         if @quote.reject!
@@ -341,7 +341,7 @@ module Api
 
       # GET /api/v1/quotes/:id/pdf
       def pdf
-        return unless authorize_action!('finance', 'read')
+        return unless authorize_action!('quotes', 'read')
         
         pdf_content = QuotePdfGenerator.new(@quote).generate
         
@@ -357,7 +357,7 @@ module Api
 
       # GET /api/v1/quotes/:id/tags
       def tags
-        return unless authorize_action!('finance', 'read')
+        return unless authorize_action!('quotes', 'read')
         
         # Get tags through the association
         tags = @quote.tags.map do |tag|
@@ -382,7 +382,7 @@ module Api
 
       # POST /api/v1/quotes/:id/tags
       def add_tags
-        return unless authorize_action!('finance', 'update')
+        return unless authorize_action!('quotes', 'update')
         
         tag_names = params[:tags] || []
         tag_names = tag_names.split(',') if tag_names.is_a?(String)
@@ -414,7 +414,7 @@ module Api
 
       # DELETE /api/v1/quotes/:id/tags/:tag_name
       def remove_tag
-        return unless authorize_action!('finance', 'update')
+        return unless authorize_action!('quotes', 'update')
         
         # Find tag within company scope
         tag = @company.tags.find_by(name: params[:tag_name])
@@ -504,7 +504,7 @@ module Api
 
       # GET /api/v1/quotes/export
       def export
-        return unless authorize_action!('finance', 'export')
+        return unless authorize_action!('quotes', 'export')
         
         # STRICT TENANT ISOLATION: Only export quotes from current user's company
         quotes = @company.quotes.active.includes(:account, :contact)

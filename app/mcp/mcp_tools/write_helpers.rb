@@ -38,7 +38,7 @@ module McpTools
 
     def entity_resource(type)
       { 'lead' => 'leads', 'contact' => 'crm', 'account' => 'crm', 'deal' => 'deals',
-        'unit' => 'inventory', 'ticket' => 'service', 'quote' => 'finance' }.fetch(type)
+        'unit' => 'inventory', 'ticket' => 'service', 'quote' => 'quotes' }.fetch(type)
     end
 
     # Note.entity_type uses the app's own names.

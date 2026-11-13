@@ -81,7 +81,7 @@ module Api
       end
 
       LOCATION_RESOURCES = { 'lead' => 'leads', 'vehicle' => 'inventory', 'deal' => 'deals',
-                             'service_ticket' => 'service', 'quote' => 'finance' }.freeze
+                             'service_ticket' => 'service', 'quote' => 'quotes' }.freeze
 
       def entity_location_visible?(entity_type, entity_id)
         type = entity_type.to_s.downcase
