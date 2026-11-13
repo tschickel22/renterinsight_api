@@ -142,4 +142,52 @@ RSpec.describe 'Deal front-end add-on classification', type: :model do
       expect(deal.reload.addon_gross).to eq(50.0)
     end
   end
+
+  # Title and license fees are government pass-throughs like the doc fee: no commission.
+  describe 'title and license fees, whatever the line is called' do
+    # 'Title' / 'License' are the names Deal Desk template fees carry; 'Title Fee' /
+    # 'License Fee' the names of its keyed fees (FEE_LINE_NAMES); the rest are typed names.
+    ['Title', 'License', 'Title Fee', 'License Fee', 'Title & License', 'Title and Registration',
+     'Registration', 'Registration fee', 'Tag and title', 'License plates', 'DMV fees',
+     'State title transfer fee', 'Licence fee'].each do |name|
+      it "keeps #{name} out of add-on gross" do
+        add_line(category: 'fee', name: name, price: 185, cost: 0)
+        add_line(category: 'fee', name: 'Delivery Fee', price: 1_000, cost: 0)
+        expect(deal.reload.addon_gross).to eq(1_000.0)
+      end
+    end
+
+    it 'keeps a typed title line with no fee category out too' do
+      deal.deal_products.create!(product_name: 'Title', unit_price: 120, cost: 0, quantity: 1)
+      add_line(category: 'service', name: 'Trim Out', price: 900, cost: 300)
+      expect(deal.reload.addon_gross).to eq(900.0)
+    end
+
+    it 'excludes doc, title and license together and nothing else' do
+      add_line(category: 'fee', name: 'Doc Fee', price: 599, cost: 0)
+      add_line(category: 'fee', name: 'Title', price: 150, cost: 0)
+      add_line(category: 'fee', name: 'License', price: 75, cost: 0)
+      add_line(category: 'fee', name: 'Setup Fee', price: 2_000, cost: 0)
+      add_line(category: 'service', name: 'Skirting', price: 1_400, cost: 600)
+      expect(deal.reload.addon_gross).to eq(3_400.0)
+    end
+
+    ['Transfer fee', 'Licensed electrician hookup', 'Title insurance policy', 'Admin fee'].each do |name|
+      it "leaves #{name} commissionable" do
+        add_line(category: 'fee', name: name, price: 300, cost: 0)
+        expect(deal.reload.addon_gross).to eq(300.0)
+      end
+    end
+
+    it 'pays add-on commission on the remaining add-ons only' do
+      add_line(category: 'fee', name: 'Title Fee', price: 200, cost: 0)
+      add_line(category: 'fee', name: 'License Fee', price: 100, cost: 0)
+      add_line(category: 'fee', name: 'Delivery Fee', price: 3_000, cost: 0)
+      deal.reload
+      # Both commission services pay add-on commission as rate x Deal#addon_gross.
+      component = Struct.new(:rate).new(0.1)
+      result = CommissionCalculationService.new(deal).send(:calculate_addon_commission, component)
+      expect(result).to eq(300.0)
+    end
+  end
 end

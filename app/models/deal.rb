@@ -698,6 +698,31 @@ class Deal < ApplicationRecord
     name.to_s.downcase.gsub(/[^a-z]+/, ' ').strip.match?(DOC_FEE_NAME)
   end
 
+  # A title or license fee line, whatever the rep or template called it: "Title", "Title
+  # Fee", "License Fee", "Title & License", "Title and Registration", "Tag and Title",
+  # "Registration", "License plates", "DMV fees". Every word must be one of these, and at
+  # least one must name title, license or registration, so "Licensed electrician" or a
+  # "Transfer fee" alone are not caught. Like the doc fee these are government pass-throughs
+  # and carry no commission.
+  TITLE_LICENSE_CORE_WORDS = %w[title titles titling license licenses licence licences licensing
+                                registration registrations register tag tags plate plates dmv].freeze
+  TITLE_LICENSE_EXTRA_WORDS = %w[fee fees charge charges and state transfer].freeze
+
+  def self.title_license_fee_name?(name)
+    words = name.to_s.downcase.gsub(/[^a-z]+/, ' ').split
+    return false if words.empty?
+    return false unless words.all? { |w| TITLE_LICENSE_CORE_WORDS.include?(w) || TITLE_LICENSE_EXTRA_WORDS.include?(w) }
+
+    words.any? { |w| TITLE_LICENSE_CORE_WORDS.include?(w) }
+  end
+
+  # Fee lines that carry no commission: the doc fee (a fee-tagged line) and title or license
+  # fees (by name, whatever category the line was typed under, since a typed "Title" line
+  # may have none). Used by addon_gross, the add-on commission basis.
+  def self.non_commission_fee_name?(name, fee_line: true)
+    (fee_line && doc_fee_name?(name)) || title_license_fee_name?(name)
+  end
+
   # Does this deal carry any fee/accessory line items? Determines whether to read
   # line items (Phase 3) or fall back to the deprecated columns (legacy/API deals).
   def has_fee_line_items?
@@ -753,8 +778,9 @@ class Deal < ApplicationRecord
 
   # ADD-ON GROSS — total revenue (price × qty − discount) charged to the customer for
   # every front-end add-on line: fees, accessories, services (allowance items — Trim
-  # Out, AC, Skirting, Delivery & Set), land, and custom "other" lines. Doc fee is
-  # deliberately excluded (it's a pass-through, not commissionable add-on revenue).
+  # Out, AC, Skirting, Delivery & Set), land, and custom "other" lines. Doc, title and
+  # license fees are deliberately excluded (pass-throughs, not commissionable add-on
+  # revenue; see non_commission_fee_name?).
   #
   # Sourced from `deal_products` when the deal has any add-on lines at all; falls back
   # to the deprecated columns (delivery_fee + setup_fee + skirting_fee + accessories_
@@ -767,8 +793,9 @@ class Deal < ApplicationRecord
     if has_addon_line_items?
       deal_products.sum do |dp|
         next 0.0 unless front_end_addon_line_item?(dp)
-        # Doc fee is excluded from add-on gross (commission-wise it's a pass-through).
-        next 0.0 if fee_line_item?(dp) && self.class.doc_fee_name?(dp.product_name)
+        # Doc, title and license fees are excluded from add-on gross (commission-wise
+        # they're pass-throughs).
+        next 0.0 if self.class.non_commission_fee_name?(dp.product_name, fee_line: fee_line_item?(dp))
         line_item_price(dp)
       end.round(2)
     else
@@ -1016,11 +1043,11 @@ class Deal < ApplicationRecord
 
     # Divergence guard: the deal was hand-edited after the scenario was selected. The
     # scenario is the source of truth at close, but make the silent overwrite visible.
-    if selling_price.present? && scenario.unit_price_snapshot.present? &&
-       selling_price.to_d != scenario.unit_price_snapshot.to_d
+    if selling_price.present? && scenario.effective_selling_price.present? &&
+       selling_price.to_d != scenario.effective_selling_price.to_d
       Rails.logger.warn(
         "[DealDesk] Deal #{id} selling_price=#{selling_price} diverges from selected scenario " \
-        "#{scenario.id} snapshot=#{scenario.unit_price_snapshot}; applying scenario (source of truth at close)."
+        "#{scenario.id} price=#{scenario.effective_selling_price}; applying scenario (source of truth at close)."
       )
     end
 

@@ -185,7 +185,7 @@ module DealDesk
         name: [vehicle.year, vehicle.make, vehicle.model].compact.join(' '),
         bedrooms: vehicle.bedrooms,
         bathrooms: vehicle.bathrooms.to_f,
-        sale_price: resolved_price(vehicle),
+        sale_price: scenario_selling_price_for(vehicle) || resolved_price(vehicle),
         status: vehicle.status,
         location_id: vehicle.location_id,
         location_name: location_name(vehicle.location_id),
@@ -210,7 +210,7 @@ module DealDesk
         stock_number: @anchor.stock_number, inventory_id: @anchor.inventory_id,
         name: [@anchor.year, @anchor.make, @anchor.model].compact.join(' '),
         bedrooms: @anchor.bedrooms, bathrooms: @anchor.bathrooms.to_f,
-        sale_price: resolved_anchor_price, status: @anchor.status,
+        sale_price: scenario_selling_price_for(@anchor) || resolved_anchor_price, status: @anchor.status,
         location_id: @anchor.location_id, location_name: location_name(@anchor.location_id),
         days_on_lot: days, aged_tier: tier, is_aged: !tier.nil?, is_cross_location: false,
         monthly_payment: r.monthly_payment, amount_financed: r.amount_financed,
@@ -228,6 +228,17 @@ module DealDesk
       else
         @base.merge(price: resolved_anchor_price, unit_cost: resolved_anchor_cost, pack_amount: pack_amount)
       end
+    end
+
+    # The home the open scenario is structured on is priced at the scenario's own selling
+    # price (DealDeskScenario#effective_selling_price, which a desk override can change), and
+    # its row's payment comes from engine_inputs, so show that price on the row too. nil for
+    # any other home.
+    def scenario_selling_price_for(vehicle)
+      return nil unless @scenario && vehicle && @scenario.vehicle_id == vehicle.id
+
+      price = @scenario.effective_selling_price.to_f
+      price.positive? ? price : nil
     end
 
     # Anchor PRICE = the deal's NEGOTIATED home price, not raw inventory. The anchor is
