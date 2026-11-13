@@ -26,7 +26,7 @@ module Websites
 
       # Reading alone triggers nothing on Cloudflare's side, so a tenant who just published
       # a record would otherwise wait on Cloudflare's own schedule with no way to ask again.
-      service.revalidate_custom_hostname(id)
+      service.revalidate_custom_hostname(id, ssl_method: ('http' if switch_to_http?))
       parsed = service.parse_custom_hostname_response(service.check_custom_hostname_status(id))
 
       @domain.update!(
@@ -49,6 +49,28 @@ module Websites
     end
 
     private
+
+    # TXT validation is chosen when a domain is added while the dealer's old site still
+    # answers on it, so the certificate can issue before anyone is moved. Once the CNAME
+    # points at us that reason is gone, and HTTP validation passes with no records at all.
+    # Staying on TXT left www.cbhms.com without a certificate (2026-11-13) because nobody
+    # had published the two challenge records: the site was pointed at us and unreachable.
+    #
+    # Only once the CNAME really points here, read from the zone's own name server. Moving
+    # a hostname to HTTP before that is the www.easyhomesource.com bug: it can never pass.
+    def switch_to_http?
+      return false if @domain.ssl_active?
+      return false if @domain.certificate_records.blank?
+
+      target = @domain.cname_target.to_s.chomp('.')
+      return false if target.blank?
+
+      Dns::Lookup.cname(@domain.hostname, zone: @domain.domain_root)
+                 .any? { |value| value.to_s.chomp('.').casecmp?(target) }
+    rescue StandardError => e
+      Rails.logger.warn("[CloudflareStatusRefresher] CNAME check failed for #{@domain.hostname}: #{e.message}")
+      false
+    end
 
     def id
       @domain.cloudflare_custom_hostname_id
