@@ -3,7 +3,11 @@ on: [push, pull_request]
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: on 2026-11-13 latest became 26.04, which only
+    # has the newest patch of each Ruby series prebuilt, so setup-ruby could not
+    # find 3.2.6 and every run failed in 18 seconds before any step ran. Moving
+    # to 26.04 means bumping .ruby-version (and production) first.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
