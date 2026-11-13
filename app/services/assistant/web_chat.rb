@@ -210,7 +210,9 @@ module Assistant
       return if name.blank? || !email.match?(Assistant::Learn::EMAIL)
 
       capture = Concierge::LeadCapture.new(company: @company, website: @website)
-      result = capture.call(visitor: { name: name, email: email }, intent: 'contact', transcript: transcript,
+      # The phone too, for calls; texting it waits for the chat's consent.
+      result = capture.call(visitor: { name: name, email: email, phone: contact['phone'].to_s.strip.presence }.compact,
+                            intent: 'contact', transcript: transcript,
                             consented: false, request_context: @request_context)
       lead = @company.leads.find_by(id: result.lead_id) if result.status == 'created'
       # brain_answer! hands off any held handoff itself, with Quinn's reply.

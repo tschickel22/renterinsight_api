@@ -112,10 +112,16 @@ RSpec.describe 'Public::Concierge', type: :request do
 
     # The exposure here is the dealer's, and nothing else in the product asks
     # for this consent.
-    it 'refuses to keep a phone number that was never consented to' do
+    # Kept for calls, as a form's phone field is (a visit needs a phone,
+    # Tom 2026-11-13); texting it still needs the yes.
+    it 'keeps a number given without the yes to texts, with no texting consent on it' do
       file(visitor: { name: 'Jane Doe', email: 'jane@example.com', phone: '555-1234' }, consented: false)
 
-      expect(Lead.last.phone).to be_blank
+      lead = Lead.last
+      expect(lead.phone).to eq('555-1234')
+      expect(lead.sms_inquiry_consent).to be_falsey
+      expect(lead.opt_in_sms).to be_falsey
+      expect(lead.may_text_about_inquiry).to be_falsey
     end
 
     it 'keeps it when the visitor agreed' do

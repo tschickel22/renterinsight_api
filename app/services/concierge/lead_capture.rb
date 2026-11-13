@@ -88,9 +88,9 @@ module Concierge
       phone = details[:phone].to_s.strip
 
       return Result.new(status: 'incomplete') if name.blank? || (email.blank? && phone.blank?)
-      # A number without the consent line having been accepted is not a number
-      # we are allowed to have. Keep the lead, drop the phone.
-      phone = '' if phone.present? && !consented
+      # A number is kept for calls either way, as a form's phone field is; the
+      # consent columns below (and so any text about the inquiry) only on yes
+      # (Tom, 2026-11-13: a visit needs a phone).
       return Result.new(status: 'form_required', form_path: form_path) unless available?
 
       submission = form.intake_submissions.build(
