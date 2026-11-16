@@ -80,6 +80,7 @@ module Agreements
       'deal.co_buyer_name'              => { section: 'deal_customer', field_id: 'co_applicant', path: ['Deal', 'Customer', 'Co-Buyer'] },
       'deal.co_buyer_email'             => { section: 'deal_customer', field_id: 'co_applicant', path: ['Deal', 'Customer', 'Co-Buyer Email'] },
       'deal.co_buyer_phone'             => { section: 'deal_customer', field_id: 'co_applicant', path: ['Deal', 'Customer', 'Co-Buyer Phone'] },
+      'deal.buyer_names'                => { section: 'deal_customer', field_id: 'customer', path: ['Deal', 'Customer', 'All Buyer Names'] },
 
       # ── Deal → Economics ───────────────────────────────────────────────────
       'deal.amount'                     => { section: 'deal_economics', field_id: 'amount', path: ['Deal', 'Economics', 'Deal Amount'] },

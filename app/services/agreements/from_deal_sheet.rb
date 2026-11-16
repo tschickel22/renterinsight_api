@@ -40,7 +40,8 @@ module Agreements
       blocking << package_missing if templates.empty?
       open = DealSaleDetails.new(@deal).missing.map { |m| "Deal Sheet: #{m}" }
       open += Truebuild::AgreementSheets.new(@deal.home_build).open_items if @deal.home_build
-      [[@deal.contact, 'The buyer'], [@deal.co_applicant_contact, 'Buyer 2']].each do |person, who|
+      buyers = @deal.agreement_buyers
+      [[buyers[0], 'The buyer'], [buyers[1], 'Buyer 2']].each do |person, who|
         open << "#{who} has no email: add one to sign online, or sign on paper and upload the signed copy" if person && person.email.blank?
       end
       { blocking: blocking, open: open }
@@ -93,8 +94,8 @@ module Agreements
 
     def person_for(key, manager)
       case key
-      when 'buyer_1' then @deal.contact
-      when 'buyer_2' then @deal.co_applicant_contact
+      when 'buyer_1' then @deal.agreement_buyers[0]
+      when 'buyer_2' then @deal.agreement_buyers[1]
       when 'rep' then @deal.owner || @user
       when 'manager' then manager
       end

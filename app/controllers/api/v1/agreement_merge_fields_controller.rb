@@ -176,10 +176,11 @@ module Api
               { key: 'deal.probability', label: 'Probability', type: 'text', value: @deal.respond_to?(:probability) ? @deal.probability : nil },
               { key: 'deal.owner_name', label: 'Sales Person', type: 'text', value: @deal ? (@deal.respond_to?(:owner) ? [@deal.owner&.first_name, @deal.owner&.last_name].compact.join(' ').presence : @deal.try(:assigned_to_name)) : nil },
               { key: 'deal.customer_name', label: 'Customer Name', type: 'text', value: @deal&.customer_name },
-              # Buyer 2 on two-buyer forms: the deal's co-applicant contact.
+              # Buyer 2 on two-buyer forms: the co-applicant, else the Buyers card.
               { key: 'deal.co_buyer_name', label: 'Co-Buyer Name', type: 'text', value: co_buyer&.full_name.presence },
               { key: 'deal.co_buyer_email', label: 'Co-Buyer Email', type: 'text', value: co_buyer&.email },
               { key: 'deal.co_buyer_phone', label: 'Co-Buyer Phone', type: 'text', value: (co_buyer&.phone.presence || co_buyer&.try(:mobile_phone)) },
+              { key: 'deal.buyer_names', label: 'All Buyer Names', type: 'text', value: buyer_names },
               { key: 'deal.delivery_street', label: 'Delivery Address', type: 'text', value: @deal&.delivery_street },
               { key: 'deal.delivery_city', label: 'Delivery City', type: 'text', value: @deal&.delivery_city },
               { key: 'deal.delivery_state', label: 'Delivery State', type: 'text', value: @deal&.delivery_state },
@@ -471,10 +472,17 @@ module Api
         counts.to_h { |k, c| ["history.#{k}", c.sort_by { |v, n| [-n, v] }.first(HISTORY_LIMIT).map(&:first)] }
       end
 
+      def buyer_names
+        return nil unless @deal.respond_to?(:agreement_buyers)
+
+        @deal.agreement_buyers.map { |p| p.full_name.presence }.compact.to_sentence(two_words_connector: ' and ', last_word_connector: ' and ').presence
+      end
+
       def co_buyer
         return @co_buyer if defined?(@co_buyer)
 
-        @co_buyer = @deal&.co_applicant_contact_id && @company.contacts.find_by(id: @deal.co_applicant_contact_id)
+        # Buyer 2: the co-applicant, else the first other person on the Buyers card.
+        @co_buyer = @deal.respond_to?(:agreement_buyers) ? @deal.agreement_buyers[1] : nil
       end
 
       # Selling price minus every discount column the deal exposes.
