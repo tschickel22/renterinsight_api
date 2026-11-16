@@ -16,7 +16,7 @@ module ImportExport
       # dedicated vehicle importer which already supports image uploads.
       'parts'           => { model: 'Part',          scope: :parts,           match_fields: %w[sku barcode],           label: 'Parts',           supports_images: true, read_resource: 'inventory' },
       'service_tickets' => { model: 'ServiceTicket', scope: :service_tickets, match_fields: %w[ticket_number],         label: 'Service Tickets', supports_images: true, read_resource: 'service' },
-      'quotes'          => { model: 'Quote',         scope: :quotes,          match_fields: %w[quote_number],          label: 'Quotes',          supports_images: false, read_resource: 'finance' },
+      'quotes'          => { model: 'Quote',         scope: :quotes,          match_fields: %w[quote_number],          label: 'Quotes',          supports_images: false, read_resource: 'quotes' },
       'invoices'        => { model: 'Invoice',       scope: :invoices,        match_fields: %w[invoice_number],        label: 'Invoices',        supports_images: false, read_resource: 'finance' },
       'budget_lines'    => { model: 'BudgetLine',    scope: :budget_lines,    match_fields: %w[account_number],        label: 'Budget Lines',    supports_images: false,
                              requires_context: true, context_params: %w[budget_id], read_resource: 'budgets' }
