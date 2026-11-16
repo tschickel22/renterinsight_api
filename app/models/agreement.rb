@@ -31,6 +31,10 @@ class Agreement < ApplicationRecord
   encrypts :sensitive_values
   SENSITIVE_SHARE_DAYS = 30
 
+  # A rep can mark any agreement sensitive; one made from a sensitive template
+  # always is, whatever the builder sends.
+  before_validation { self.sensitive = true if agreement_template&.sensitive? }
+
   def sensitive_answers
     sensitive_values.present? ? JSON.parse(sensitive_values) : {}
   rescue JSON::ParserError

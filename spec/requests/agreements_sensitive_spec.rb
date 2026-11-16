@@ -123,6 +123,25 @@ RSpec.describe 'Sensitive agreements', type: :request do
     expect(draft.reload).to have_attributes(agreement_template_id: template.id, sensitive: true)
   end
 
+  it 'lets a rep mark an agreement sensitive but not unmark one from a sensitive template' do
+    plain = company.agreement_templates.create!(name: 'Notice', template_type: 'upload', status: 'active')
+    secret = company.agreement_templates.create!(name: 'App for Financing', template_type: 'upload', status: 'active',
+                                                 sensitive: true)
+    headers = headers_for.call(admin)
+
+    post '/api/v1/agreements', params: { agreement: { title: 'Upload', agreement_template_id: plain.id, sensitive: true } }, headers: headers
+    expect(Agreement.order(:id).last.sensitive).to be(true)
+
+    post '/api/v1/agreements', params: { agreement: { title: 'App', agreement_template_id: secret.id, sensitive: false } }, headers: headers
+    app = Agreement.order(:id).last
+    expect(app.sensitive).to be(true)
+    patch "/api/v1/agreements/#{app.id}", params: { agreement: { sensitive: false } }, headers: headers
+    expect(app.reload.sensitive).to be(true)
+
+    patch "/api/v1/agreement_templates/#{plain.id}", params: { agreement_template: { sensitive: true } }, headers: headers
+    expect(JSON.parse(response.body)['sensitive']).to be(true)
+  end
+
   it 'locks a PDF with a password (qpdf)', if: system('which qpdf > /dev/null 2>&1') do
     pdf = Prawn::Document.new.tap { |d| d.text 'hello' }.render
     locked = Agreements::LockedCopy.lock(pdf, 'ABCD-EFGH-JKMN')
