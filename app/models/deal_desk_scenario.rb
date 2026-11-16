@@ -33,7 +33,7 @@ class DealDeskScenario < ApplicationRecord
   scope :offerable, -> { active.where('valid_through IS NULL OR valid_through >= ?', Date.current) }
   scope :recent,    -> { order(created_at: :desc) }
 
-  validates :selling_price_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :selling_price_override, numericality: { greater_than: 0 }, allow_nil: true
 
   before_validation :set_validity_window, on: :create
   before_save :stringify_jsonb
@@ -154,7 +154,7 @@ class DealDeskScenario < ApplicationRecord
     # A selling price set on the desk goes onto the deal's home line first: selling_price
     # mirrors the home line (Deal#mirror_selling_price_from_home_line), so writing only the
     # column would be undone by the next save.
-    write_selling_price_to_home_line!(deal, assign_only: assign_only) unless selling_price_override.nil?
+    write_close_selling_price!(deal, assign_only) unless selling_price_override.nil?
 
     attrs = {
       vehicle_id: vehicle_id,
@@ -455,6 +455,36 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
+  # The price step of write_back_to_deal!. Apply (the controller) has already checked the
+  # sheet lock and deals:update and logs the change itself. The on_close write-back runs
+  # inside the deal's own save with neither, so there a signed Deal Sheet (or one out for
+  # signature) keeps its price, and a price that does move is written to the deal's history.
+  def write_close_selling_price!(deal, assign_only)
+    return write_selling_price_to_home_line!(deal) unless assign_only
+
+    if deal.home_build && Agreements::DealSheetLock.edit_problem(deal.home_build)
+      Rails.logger.info("[DealDesk] Deal #{deal.id} closing: Deal Sheet is signed, so scenario #{id}'s price is not written.")
+      return nil
+    end
+
+    change = write_selling_price_to_home_line!(deal, assign_only: true)
+    if change
+      money = ->(v) { ActiveSupport::NumberHelper.number_to_currency(v) }
+      ActivityLogService.log(
+        company: deal.company, user: Current.user, trackable: deal, action: 'updated', module_name: 'crm',
+        description: "Home selling price changed from #{money.(change[:from])} to #{money.(change[:to])} " \
+                     "from Deal Desk scenario #{label.presence || "##{id}"} when the deal closed",
+        changes_made: { 'Home selling price' => [money.(change[:from]), money.(change[:to])] },
+        metadata: { source: 'deal_desk_close', deal_desk_scenario_id: id, list_price: unit_price_snapshot&.to_f }
+      )
+    end
+    change
+  rescue ActiveRecord::RecordInvalid => e
+    # The history line never stops a deal from closing.
+    Rails.logger.warn("[DealDesk] Deal #{deal.id} close price history not written: #{e.message}")
+    change
+  end
+
   # Put this scenario's selling price on the deal's home line, the deal's authoritative home
   # price (Deal#home_line_item; selling_price and front gross read it, and the line total
   # feeds the deal value). The line keeps its quantity and discount; its unit price is set
@@ -637,7 +667,7 @@ class DealDeskScenario < ApplicationRecord
   FEE_LINE_NAMES = {
     'doc' => 'Doc Fee', 'delivery' => 'Delivery Fee', 'setup' => 'Setup Fee',
     'skirting' => 'Skirting Fee', 'accessories' => 'Accessories',
-    'title' => 'Title Fee', 'license' => 'License Fee', 'prep' => 'Prep Fee'
+    'title' => 'Title Fee', 'license' => 'License Fee', 'prep' => 'Prep Fee', 'other' => 'Other Fee'
   }.freeze
 
   # Flatten this scenario's add-ons into a uniform {name, price, cost, quantity, notes} list:
