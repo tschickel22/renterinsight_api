@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_13_213700) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_16_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -462,6 +462,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_13_213700) do
     t.datetime "scan_performed_at"
     t.string "example_document_url"
     t.jsonb "packet", default: {}, null: false
+    t.boolean "sensitive", default: false, null: false
     t.index ["agreement_category_id"], name: "index_agreement_templates_on_agreement_category_id"
     t.index ["company_id", "category"], name: "idx_agr_templates_company_category"
     t.index ["company_id", "status", "is_deleted"], name: "idx_agr_templates_company_status"
@@ -518,6 +519,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_13_213700) do
     t.jsonb "custom_field_values", default: {}, null: false
     t.jsonb "optional_equipment_snapshot", default: [], null: false
     t.jsonb "custom_field_definitions", default: []
+    t.boolean "sensitive", default: false, null: false
+    t.text "sensitive_values"
+    t.datetime "share_until"
     t.index ["account_id"], name: "index_agreements_on_account_id"
     t.index ["agreement_template_id"], name: "index_agreements_on_agreement_template_id"
     t.index ["company_id", "account_id"], name: "idx_agreements_company_account"

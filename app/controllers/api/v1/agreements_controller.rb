@@ -8,7 +8,7 @@ module Api
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
         :calculate, :vision_scan, :upload_signed_document,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
-        :validate_formula_field, :share_options, :share
+        :validate_formula_field, :share_options, :locked_copy, :renew_sharing, :share
       ]
 
       # GET /api/v1/agreements
@@ -141,6 +141,7 @@ module Api
             agreement.field_placements = template.field_placements if agreement.field_placements.blank?
             agreement.merge_field_placements = template.merge_field_placements if agreement.merge_field_placements.blank?
             agreement.merge_field_values = template.merge_fields if agreement.merge_field_values.blank?
+            agreement.sensitive = template.sensitive
           end
         end
 
@@ -540,8 +541,50 @@ module Api
         return unless authorize_action!('agreements', 'read')
         return unless shareable!
 
-        render json: { recipients: Agreements::Share.recipients(@agreement), link: Agreements::Share.link(@agreement),
-                       expires_in_days: Agreements::Share::LINK_DAYS }
+        # A sensitive agreement has no standing link: each Copy link or Send makes a
+        # fresh password-locked copy (locked_copy / share).
+        render json: { recipients: Agreements::Share.recipients(@agreement),
+                       link: @agreement.sensitive? ? nil : Agreements::Share.link(@agreement),
+                       expires_in_days: Agreements::Share::LINK_DAYS,
+                       sensitive: @agreement.sensitive, share_until: @agreement.share_open_until }
+      end
+
+      # POST /api/v1/agreements/:id/locked_copy
+      # A sensitive agreement's signed PDF, password-locked, for the dealer to send
+      # to a lender themselves: a download link (10 minutes), a share link (until the
+      # share window closes) and the password, shown this once and stored nowhere.
+      def locked_copy
+        return unless authorize_action!('agreements', 'read')
+        return unless shareable!
+        unless @agreement.sensitive?
+          return render json: { error: 'Only sensitive agreements are locked.' }, status: :unprocessable_entity
+        end
+
+        link, password = Agreements::Share.locked_link(@agreement)
+        file = Agreements::Share.resolve(link.split('/').last).last
+        AgreementAuditLog.log!(@agreement, 'shared', performed_by: current_user,
+                                                     metadata: { 'locked_copy' => true, 'via' => params[:via].to_s.presence || 'download' })
+        render json: { password: password, link: link, share_until: @agreement.share_open_until,
+                       download_url: PrivateFiles.url(file, expires_in: 10.minutes, disposition: 'attachment',
+                                                            filename: "#{@agreement.title.to_s.tr('/\\', '-')}.pdf") }
+      end
+
+      # POST /api/v1/agreements/:id/renew_sharing
+      # Opens a sensitive agreement's share window for another 30 days. Company and
+      # platform admins only.
+      def renew_sharing
+        return unless authorize_action!('agreements', 'read')
+        unless current_user.effective_admin?
+          return render json: { error: 'Only a company admin can allow more time to share.' }, status: :forbidden
+        end
+        unless @agreement.sensitive? && @agreement.status == Agreement::STATUS_COMPLETED
+          return render json: { error: 'Only a signed sensitive agreement has a share window.' }, status: :unprocessable_entity
+        end
+
+        @agreement.renew_sharing!
+        AgreementAuditLog.log!(@agreement, 'share_window_renewed', performed_by: current_user,
+                                                                  metadata: { 'share_until' => @agreement.share_until.iso8601 })
+        render json: { share_until: @agreement.share_open_until }
       end
 
       # POST /api/v1/agreements/:id/share
@@ -558,7 +601,8 @@ module Api
                                   .deliver(channels: Array(p[:channels]), to_email: p[:to_email], to_phone: p[:to_phone],
                                            message: p[:message])
         status = result[:sent].any? ? :ok : :unprocessable_entity
-        render json: { success: result[:sent].any?, sent: result[:sent], errors: result[:errors] }, status: status
+        render json: { success: result[:sent].any?, sent: result[:sent], errors: result[:errors],
+                       password: result[:password] }.compact, status: status
       end
 
       # GET /api/v1/agreements/:id/certificate
@@ -1252,6 +1296,14 @@ module Api
       def shareable!
         return true if Agreements::Share.shareable?(@agreement)
 
+        if @agreement.sensitive? && @agreement.status == Agreement::STATUS_COMPLETED && !@agreement.share_window_open?
+          render json: { error: "Sharing ended on #{@agreement.share_open_until&.strftime('%B %-d, %Y')}. " \
+                                'A company admin can allow 30 more days.',
+                         share_closed: true, can_renew: current_user.effective_admin? },
+                 status: :unprocessable_entity
+          return false
+        end
+
         render json: { error: 'Only a completed agreement with its signed document can be shared.' }, status: :unprocessable_entity
         false
       end
@@ -1435,6 +1487,8 @@ module Api
             .sort_by(&:signing_order)
             .map(&:name),
           custom_field_values: agreement.custom_field_values,
+          sensitive: agreement.sensitive,
+          share_until: agreement.share_open_until,
           optional_equipment_snapshot: agreement.optional_equipment_snapshot,
           # The Deal Sheet version it was made from, and whether the LIVE one has moved on.
           deal_sheet: agreement.deal_sheet_status,

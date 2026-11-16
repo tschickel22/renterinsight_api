@@ -6,6 +6,8 @@ module Public
 
     # GET /sign/:token
     def show
+      return sensitive_closed if sensitive_completed?
+
       company = @agreement.company
 
       # Determine signer's index in the ordered list (matches field_placements signerIndex)
@@ -87,9 +89,14 @@ module Public
       # complete! → SealAgreementJob which needs these values to stamp onto the PDF.
       # In dev/test, SealAgreementJob.perform_now runs synchronously inside sign!.
       if params[:field_values].present?
-        existing = @agreement.merge_field_values || {}
         signer_values = params[:field_values].to_unsafe_h rescue params[:field_values].to_h
-        @agreement.update!(merge_field_values: existing.merge(signer_values))
+        if @agreement.sensitive?
+          # Encrypted, never sent to the other signers, cleared once the PDF is sealed.
+          @agreement.add_sensitive_answers!(signer_values)
+        else
+          existing = @agreement.merge_field_values || {}
+          @agreement.update!(merge_field_values: existing.merge(signer_values))
+        end
       end
 
       result = @signer.sign!(
@@ -111,9 +118,13 @@ module Public
           success: true,
           agreement_status: agreement.status,
           completed: completed,
-          message: completed ?
-            'All signers have signed. Your completed document is ready for download.' :
-            'Thank you for signing! You will receive the fully signed document by email once all signers have completed.'
+          message: if agreement.sensitive?
+                     "Thank you for signing. #{agreement.company.name} has your signed application."
+                   elsif completed
+                     'All signers have signed. Your completed document is ready for download.'
+                   else
+                     'Thank you for signing! You will receive the fully signed document by email once all signers have completed.'
+                   end
         }
       else
         render json: { error: 'Unable to sign. This agreement may have already been signed or declined.' }, status: :unprocessable_entity
@@ -136,6 +147,8 @@ module Public
 
     # GET /sign/:token/download
     def download
+      return sensitive_closed if sensitive_completed?
+
       unless @agreement.status == Agreement::STATUS_COMPLETED
         return render json: {
           error: 'Document not ready yet',
@@ -180,6 +193,17 @@ module Public
       fp = agreement.field_placements || []
       mfp = agreement.merge_field_placements || []
       (mfp + fp).uniq { |p| p = p.stringify_keys; p['id'] || "#{p['fieldKey']}_#{p['page'] || p['pageIndex']}_#{p['x']}_#{p['y']}" }
+    end
+
+    # A signed credit application is not handed out again through a signing link
+    # (every signer, a non-applicant spouse included, has one): the dealer shares it.
+    def sensitive_completed?
+      @agreement.sensitive? && @agreement.status == Agreement::STATUS_COMPLETED
+    end
+
+    def sensitive_closed
+      render json: { error: "This document has been signed. #{@agreement.company.name} has the signed copy; ask them if you need one.",
+                     status: @agreement.status }, status: :gone
     end
 
     def find_signer

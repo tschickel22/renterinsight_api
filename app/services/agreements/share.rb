@@ -2,7 +2,7 @@
 
 module Agreements
   # Sends a completed agreement's signed document by email and/or text as a
-  # link. The link is a signed, expiring token (no column, no migration) that
+  # link. A sensitive agreement goes as a password-locked copy (see locked_link). The link is a signed, expiring token (no column, no migration) that
   # Public::AgreementFilesController turns into a short-lived S3 link, so the
   # PDF itself never sits in a public bucket and an old link stops working.
   class Share
@@ -10,7 +10,38 @@ module Agreements
     PURPOSE = :agreement_share
 
     def self.shareable?(agreement)
-      agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present?
+      agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? &&
+        agreement.share_window_open?
+    end
+
+    # A sensitive agreement (credit application) is shared as a password-locked
+    # copy (LockedCopy). Its link works until the share window closes; the token
+    # carries which locked file it opens. Returns [link, password].
+    LOCKED_PURPOSE = :agreement_locked_share
+
+    def self.locked_link(agreement)
+      copy = LockedCopy.create!(agreement)
+      token = locked_verifier.generate({ 'a' => agreement.id, 'k' => copy.key },
+                                       expires_at: agreement.share_open_until, purpose: LOCKED_PURPOSE)
+      ["#{Messaging::TrackingUrl.base}/agreement_files/#{token}", copy.password]
+    end
+
+    def self.locked_verifier = Rails.application.message_verifier(:agreement_locked_share)
+
+    # [agreement, file to serve]: the locked copy for a locked link, else the signed PDF.
+    def self.resolve(token)
+      data = locked_verifier.verified(token, purpose: LOCKED_PURPOSE)
+      if data.is_a?(Hash)
+        agreement = Agreement.find_by(id: data['a'])
+        return [nil, nil] unless agreement && PrivateFiles.owned_by?(data['k'], agreement.company_id)
+
+        return [agreement, data['k']]
+      end
+      agreement = find_by_token(token)
+      # A plain link never opens a sensitive agreement, even one made before it was marked.
+      agreement && !agreement.sensitive? ? [agreement, agreement.sealed_document_url] : [nil, nil]
+    rescue ActiveSupport::MessageVerifier::InvalidSignature
+      [nil, nil]
     end
 
     def self.link(agreement)
@@ -72,7 +103,13 @@ module Agreements
       result = { sent: [], errors: [] }
       channels = channels.map(&:to_s) & %w[email sms]
       result[:errors] << 'Choose email, text or both.' if channels.empty?
-      link = self.class.link(@agreement)
+      return result if result[:errors].any?
+
+      if @agreement.sensitive?
+        link, result[:password] = self.class.locked_link(@agreement)
+      else
+        link = self.class.link(@agreement)
+      end
 
       if channels.include?('email')
         if to_email.blank? then result[:errors] << 'Enter an email address.'
@@ -87,7 +124,8 @@ module Agreements
 
       if result[:sent].any?
         AgreementAuditLog.log!(@agreement, 'shared', performed_by: @user,
-                                                     metadata: { 'sent' => result[:sent], 'link_days' => LINK_DAYS })
+                                                     metadata: { 'sent' => result[:sent], 'locked' => @agreement.sensitive?,
+                                                                 'link_until' => link_until.iso8601 })
       end
       result
     end
@@ -95,6 +133,10 @@ module Agreements
     private
 
     def communicable = @contact || @agreement.contact || @agreement.account || @agreement
+
+    def link_until = @agreement.sensitive? ? @agreement.share_open_until : LINK_DAYS.days.from_now
+
+    def until_text = link_until.strftime('%B %-d, %Y')
 
     def send_one(result, channel, to)
       args = yield
@@ -121,6 +163,7 @@ module Agreements
     def email_args(to, message, link)
       esc = ->(t) { ERB::Util.html_escape(t.to_s) }
       note = message.present? ? "<p>#{esc.call(message).gsub("\n", '<br>')}</p>" : ''
+      return locked_email_args(to, note, link, esc) if @agreement.sensitive?
       body = <<~HTML
         #{note}<p>Here is your signed agreement: <strong>#{esc.call(@agreement.title)}</strong>.</p>
         <p><a href="#{esc.call(link)}">View the signed agreement</a></p>
@@ -130,7 +173,24 @@ module Agreements
       { to: to, subject: "Your signed agreement: #{@agreement.title}", body: body }
     end
 
+    # Goes to a lender. Says nothing about the applicant beyond the document's name,
+    # and never carries the password.
+    def locked_email_args(to, note, link, esc)
+      body = <<~HTML
+        #{note}<p>#{esc.call(@company.name)} has sent you <strong>#{esc.call(@agreement.title)}</strong>.</p>
+        <p><a href="#{esc.call(link)}">Download the PDF</a></p>
+        <p>The PDF is password protected. #{esc.call(@company.name)} will give you the password separately.</p>
+        <p style="color:#666;font-size:12px">This link works until #{until_text}.</p>
+      HTML
+      { to: to, subject: "#{@agreement.title} from #{@company.name}", body: body }
+    end
+
     def sms_body(message, link)
+      if @agreement.sensitive?
+        lead = message.present? ? message.strip : "#{@company.name}: #{@agreement.title} (password protected, sent separately)."
+        return "#{lead} #{link}"
+      end
+
       lead = message.present? ? message.strip : "#{@company.name}: here is your signed agreement, #{@agreement.title}."
       "#{lead} #{link}"
     end

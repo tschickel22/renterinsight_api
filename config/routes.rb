@@ -2305,6 +2305,8 @@ Rails.application.routes.draw do
           get :download
           get :share_options
           post :share
+          post :locked_copy
+          post :renew_sharing
           get :certificate
           post :prepare_signature
           put :preparer_sign

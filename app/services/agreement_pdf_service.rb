@@ -107,7 +107,7 @@ class AgreementPdfService
       sealed_url = upload_sealed_pdf(sealed_data)
 
       if sealed_url
-        @agreement.update!(sealed_document_url: sealed_url)
+        @agreement.update!(sealed_attributes(sealed_url))
         log_sealed!
         Rails.logger.info("[AgreementPdfService] ✅ Sealed document uploaded: #{sealed_url}")
         sealed_url
@@ -122,7 +122,7 @@ class AgreementPdfService
 
       sealed_url = seal_with_qpdf(source_pdf_data, placements_by_page, values_map, signatures_map)
       if sealed_url
-        @agreement.update!(sealed_document_url: sealed_url)
+        @agreement.update!(sealed_attributes(sealed_url))
         log_sealed!
         Rails.logger.info("[AgreementPdfService] ✅ Sealed via qpdf fallback: #{sealed_url}")
         return sealed_url
@@ -197,6 +197,13 @@ class AgreementPdfService
 
   # Build map of field_key → resolved value for ALL field types
   # Mirrors build_combined_merge_values in AgreementSigningController
+  # The sealed PDF becomes the only copy of a sensitive agreement's answers.
+  def sealed_attributes(url)
+    attrs = { sealed_document_url: url }
+    attrs[:sensitive_values] = nil if @agreement.sensitive?
+    attrs
+  end
+
   def build_values_map
     values = {}
 
@@ -294,6 +301,9 @@ class AgreementPdfService
         values["custom.#{k}"] = v.to_s
       end
     end
+
+    # 4. A sensitive agreement's signer answers (encrypted until sealed).
+    @agreement.sensitive_answers.each { |k, v| values[k.to_s] = v.to_s } if @agreement.sensitive?
 
     values.reject! { |_, v| v.blank? }
     Rails.logger.info("[AgreementPdfService] Values map: #{values.size} entries, keys: #{values.keys.join(', ')}")

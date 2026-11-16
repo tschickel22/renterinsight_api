@@ -20,6 +20,10 @@
 # Names, contact details, the home site address and the down payment start filled
 # from the deal or contact (each box's prefillFrom), and the buyers can change them.
 #
+# The template is sensitive: answers are kept encrypted until the signed PDF exists and
+# then cleared, signers never see each other's answers, and sharing sends a
+# password-locked PDF for a limited window (Agreement#share_window_open?).
+#
 # Box positions come from twentyfirst_credit_app_1223.json, generated from the
 # PDF's own label coordinates by twentyfirst_credit_app_layout.py (see its header).
 
@@ -37,7 +41,9 @@ dir         = ENV['TEMPLATE_DIR'].presence || __dir__
 PDF_PATH    = File.join(dir, 'twentyfirst_credit_app_1223.pdf')
 LAYOUT_PATH = File.join(dir, 'twentyfirst_credit_app_1223.json')
 FORM_NUMBER = 'TWENTYFIRST_CREDIT_APP_1223'
-NAME        = '21st Mortgage Credit Application'
+# Named for what it is, not the lender: dealers send this standard application to
+# 21st and to other lenders that accept it, and the form itself does not say 21st.
+NAME        = 'App for Financing'
 
 DEFAULT_SIGNERS = [
   { role: 'signer', order_index: 0, label: 'Applicant' },
@@ -66,7 +72,8 @@ document = PrivateFiles.put(File.binread(PDF_PATH), key: key, content_type: 'app
 template = existing || company.agreement_templates.build(form_number: FORM_NUMBER)
 template.assign_attributes(
   name: NAME,
-  description: "21st Mortgage's credit application (v. 12/20/2023). The applicant and co-applicant complete it " \
+  description: 'Standard credit application (21st Mortgage form v. 12/20/2023, accepted by other lenders). ' \
+               'The applicant and co-applicant complete it ' \
                'on the signing page and sign on page 5; a non-applicant spouse can sign the waiver. Names, ' \
                'contact details, the home site address and the down payment start filled from the deal, ' \
                'and the buyers can change them.',
@@ -80,6 +87,7 @@ template.assign_attributes(
   merge_field_placements: placements,
   field_placements: [],
   default_signers: DEFAULT_SIGNERS.map(&:stringify_keys),
+  sensitive: true,
   is_platform_template: false,
   is_system_template: false,
   is_deleted: false
