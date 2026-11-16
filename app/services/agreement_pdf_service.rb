@@ -267,6 +267,7 @@ class AgreementPdfService
     values['company.name'] = @company.name.to_s
     values['company.email'] = @company.try(:email).to_s
     values['company.phone'] = @company.try(:phone).to_s
+    values['company.address'] = [@company.try(:street), @company.try(:city), @company.try(:state), @company.try(:zip)].compact_blank.join(', ')
     values['date.today'] = Date.today.strftime('%m/%d/%Y')
     values['date.current_year'] = Date.today.year.to_s
 
@@ -395,6 +396,10 @@ class AgreementPdfService
         stamp_signer_email(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
       when 'checkbox', 'custom_checkbox'
         stamp_checkbox(pdf, x_pt, y_pt, w_pt, h_pt, value)
+      when 'image'
+        # The dealer logo resolves here, from Location then Company branding,
+        # never from a value saved with the agreement.
+        stamp_image(pdf, x_pt, y_pt, w_pt, h_pt, dealer_logo, ink: false) if field_key == ::Agreements::DealerLogo::KEY
       when 'currency'
         stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, format_currency(value)) if value.present?
       else
@@ -530,7 +535,9 @@ class AgreementPdfService
     true
   end
 
-  def stamp_image(pdf, x, y, w, h, image_data)
+  # ink: true is for signatures and initials (cropped to the ink, printed as
+  # solid strokes). A logo keeps its own colors: ink: false.
+  def stamp_image(pdf, x, y, w, h, image_data, ink: true)
     return false if image_data.blank?
 
     tempfile = if image_data.to_s.start_with?('data:')
@@ -544,7 +551,7 @@ class AgreementPdfService
 
     return false unless tempfile
 
-    inked = ink_only(tempfile.path, w, h)
+    inked = ink ? ink_only(tempfile.path, w, h) : as_png(tempfile.path)
     begin
       path = inked&.path || tempfile.path
       iw, ih = (Vips::Image.new_from_file(path).then { |i| [i.width, i.height] } rescue [w, h])
@@ -562,6 +569,28 @@ class AgreementPdfService
         f.unlink rescue nil
       end
     end
+  end
+
+  def dealer_logo
+    return @dealer_logo if defined?(@dealer_logo)
+
+    @dealer_logo = ::Agreements::DealerLogo.for_agreement(@agreement)
+  end
+
+  # Prawn takes PNG and JPEG only; logos are also uploaded as WebP or SVG.
+  # Plain margins around the mark are trimmed so it fills its box.
+  def as_png(path)
+    out = Tempfile.new(['logo', '.png'])
+    img = Vips::Image.new_from_file(path)
+    flat = img.has_alpha? ? img.flatten(background: [255] * (img.bands - 1)) : img
+    left, top, width, height = flat.find_trim(threshold: 12, background: flat.getpoint(0, 0))
+    img = img.crop(left, top, width, height) if width.positive? && height.positive?
+    img.write_to_file(out.path)
+    out
+  rescue => e
+    Rails.logger.warn("[AgreementPdfService] Logo conversion skipped: #{e.class}: #{e.message}")
+    out&.close!
+    nil
   end
 
   # Thinnest line a drawn mark may print at, in points. The pad's pen is a

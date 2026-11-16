@@ -96,6 +96,12 @@ module Api
           .transform_values(&:length)
       end
 
+      # The location whose logo the Dealer Logo field shows: the one asked for,
+      # else the location selector's, else the deal's.
+      def logo_location_id
+        params[:location_id].presence || Current.location_id.presence || @deal&.try(:location_id)
+      end
+
       def merge_field_definitions
         {
           contact: {
@@ -352,7 +358,8 @@ module Api
               { key: 'company.email', label: 'Company Email', type: 'text', value: @company.respond_to?(:email) ? @company.email : nil },
               { key: 'company.phone', label: 'Company Phone', type: 'text', value: @company.respond_to?(:phone) ? @company.phone : nil },
               { key: 'company.website', label: 'Company Website', type: 'text', value: @company.respond_to?(:website) ? @company.website : nil },
-              { key: 'company.address', label: 'Company Address', type: 'text', value: [@company.try(:street), @company.try(:city), @company.try(:state), @company.try(:zip)].compact.join(', ').presence }
+              { key: 'company.address', label: 'Company Address', type: 'text', value: [@company.try(:street), @company.try(:city), @company.try(:state), @company.try(:zip)].compact.join(', ').presence },
+              { key: ::Agreements::DealerLogo::KEY, label: 'Dealer Logo', type: 'image', value: ::Agreements::DealerLogo.url(@company, location_id: logo_location_id) }
             ]
           },
           date: {
