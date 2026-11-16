@@ -2307,6 +2307,7 @@ Rails.application.routes.draw do
           post :share
           post :locked_copy
           post :renew_sharing
+          post :send_password
           get :certificate
           post :prepare_signature
           put :preparer_sign

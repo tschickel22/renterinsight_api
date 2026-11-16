@@ -13,6 +13,8 @@ module Agreements
 
     Result = Struct.new(:key, :password, keyword_init: true)
 
+    PASSWORD_FORMAT = /\A[#{ALPHABET.join}]{4}-[#{ALPHABET.join}]{4}-[#{ALPHABET.join}]{4}\z/
+
     def self.password
       Array.new(12) { ALPHABET[SecureRandom.random_number(ALPHABET.size)] }.each_slice(4).map(&:join).join('-')
     end
@@ -20,8 +22,9 @@ module Agreements
     def self.create!(agreement)
       raise ArgumentError, 'Only a sealed agreement can be locked' if agreement.sealed_document_url.blank?
 
-      pdf = PrivateFiles.read(agreement.sealed_document_url, company_id: agreement.company_id)
-      raise 'The signed document could not be read' if pdf.blank?
+      # Raw bytes: blank? would run a text regex over them and fail on non-UTF-8 bytes.
+      pdf = PrivateFiles.read(agreement.sealed_document_url, company_id: agreement.company_id)&.b
+      raise 'The signed document could not be read' if pdf.nil? || pdf.empty?
 
       pw = password
       locked = lock(pdf, pw)

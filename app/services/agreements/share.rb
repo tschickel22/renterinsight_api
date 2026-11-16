@@ -55,6 +55,34 @@ module Agreements
       Agreement.find_signed(token, purpose: PURPOSE)
     end
 
+    # Sends a locked copy's password in its own text or email, never with the file,
+    # then blanks it out of the saved message so it is stored nowhere afterwards.
+    def self.send_password(agreement, user:, password:, channel:, to:)
+      return { success: false, error: 'That is not a password from this screen.' } unless password.to_s.match?(LockedCopy::PASSWORD_FORMAT)
+      return { success: false, error: channel == 'sms' ? 'Enter a mobile number.' : 'Enter an email address.' } if to.blank?
+
+      company = agreement.company
+      common = { communicable: agreement.contact || agreement.account || agreement, category: 'agreements',
+                 portal_visible: false, send_async: false, sender_user_id: user&.id, user: user,
+                 metadata: { 'agreement_id' => agreement.id, 'locked_copy_password' => true } }
+      text = "Password to open #{agreement.title} from #{company.name}: #{password}"
+      result = if channel == 'sms'
+                 CommunicationService.send_sms(**common, to: to, body: text)
+               else
+                 CommunicationService.send_email(**common, to: to, subject: "Password for #{agreement.title} from #{company.name}",
+                                                           body: "<p>#{ERB::Util.html_escape(text)}</p>")
+               end
+      result[:communication]&.update_columns(body: text.sub(password, '[password removed after sending]'))
+      if result[:success]
+        AgreementAuditLog.log!(agreement, 'password_sent', performed_by: user, metadata: { 'channel' => channel, 'to' => to })
+        { success: true }
+      else
+        { success: false, error: result[:error].presence || 'Could not send the password.' }
+      end
+    rescue CommunicationService::OptOutError
+      { success: false, error: "#{to} has opted out of #{channel == 'sms' ? 'texts' : 'email'}." }
+    end
+
     # People the dialog offers: the agreement's contact, its signers and the
     # account's contacts, one row per person, only those with an email or phone.
     def self.recipients(agreement)

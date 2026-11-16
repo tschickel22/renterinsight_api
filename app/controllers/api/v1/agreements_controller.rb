@@ -8,7 +8,7 @@ module Api
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
         :calculate, :vision_scan, :upload_signed_document,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
-        :validate_formula_field, :share_options, :locked_copy, :renew_sharing, :share
+        :validate_formula_field, :share_options, :locked_copy, :renew_sharing, :send_password, :share
       ]
 
       # GET /api/v1/agreements
@@ -573,6 +573,18 @@ module Api
         render json: { password: password, link: link, share_until: @agreement.share_open_until,
                        download_url: PrivateFiles.url(file, expires_in: 10.minutes, disposition: 'attachment',
                                                             filename: "#{@agreement.title.to_s.tr('/\\', '-')}.pdf") }
+      end
+
+      # POST /api/v1/agreements/:id/send_password
+      # Texts or emails a locked copy's password, separately from the PDF.
+      def send_password
+        return unless authorize_action!('agreements', 'read')
+        return unless shareable!
+
+        p = params.permit(:password, :channel, :to)
+        result = Agreements::Share.send_password(@agreement, user: current_user, password: p[:password],
+                                                             channel: p[:channel] == 'sms' ? 'sms' : 'email', to: p[:to].to_s.strip)
+        render json: result, status: result[:success] ? :ok : :unprocessable_entity
       end
 
       # POST /api/v1/agreements/:id/renew_sharing
