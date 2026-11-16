@@ -66,7 +66,8 @@ RSpec.describe 'Sensitive agreements', type: :request do
     end
 
     it 'shares only as a locked copy, with the password returned once' do
-      allow(PrivateFiles).to receive(:read).and_return('%PDF-1.4')
+      # As S3 hands it back: binary bytes labelled UTF-8 (what broke blank? on staging).
+      allow(PrivateFiles).to receive(:read).and_return("%PDF-1.4\n%\xE2\xE3\xCF\xD3".dup.force_encoding('UTF-8'))
       allow(Agreements::LockedCopy).to receive(:lock).and_return('%PDF-locked')
       allow(PrivateFiles).to receive(:put) { |_body, key:, **| "private://dealertide-private-test/#{key}" }
       allow(PrivateFiles).to receive(:owned_by?).and_return(true)
@@ -83,6 +84,22 @@ RSpec.describe 'Sensitive agreements', type: :request do
       get URI(body['link']).path
       expect(response).to have_http_status(:redirect)
       expect(response.location).to match(%r{/#{agreement.id}-\h{16}\.pdf\z})
+    end
+
+    it 'sends the password in its own text and keeps it out of the saved message' do
+      comm = Communication.new
+      expect(CommunicationService).to receive(:send_sms)
+        .with(hash_including(to: '303-555-0100', body: include('ABCD-EFGH-JKMN')))
+        .and_return(success: true, communication: comm)
+      expect(comm).to receive(:update_columns).with(body: include('[password removed after sending]'))
+
+      post "/api/v1/agreements/#{agreement.id}/send_password",
+           params: { password: 'ABCD-EFGH-JKMN', channel: 'sms', to: '303-555-0100' }, headers: headers_for.call(admin)
+      expect(response).to have_http_status(:ok)
+
+      post "/api/v1/agreements/#{agreement.id}/send_password",
+           params: { password: 'anything at all', channel: 'sms', to: '303-555-0100' }, headers: headers_for.call(admin)
+      expect(response).to have_http_status(:unprocessable_entity)
     end
 
     it 'never opens through an old plain share link' do
