@@ -56,9 +56,22 @@ RSpec.describe 'GET /api/v1/users/assignable', type: :request do
     get '/api/v1/users/assignable', headers: headers
 
     row = JSON.parse(response.body)['users'].first
-    expect(row.keys).to contain_exactly('id', 'firstName', 'lastName', 'fullName', 'displayRole', 'avatarUrl')
+    expect(row.keys).to contain_exactly('id', 'firstName', 'lastName', 'fullName', 'displayRole', 'avatarUrl', 'active')
     expect(response.body).not_to include('@example.com')
     expect(response.body).not_to include('7205550100')
     expect(row['displayRole']).to eq('Sales Representative')
+  end
+
+  # Owner filters on Deals, Leads, Contacts and Accounts (Tom, 2026-11-16): a
+  # rep can filter by someone who left and still owns records.
+  it 'adds inactive users, marked, only when asked' do
+    rep
+    make_user(company, 'Gone', status: 'inactive')
+    make_user(company, 'Buyer', role: 'client')
+
+    get '/api/v1/users/assignable', params: { include_inactive: 'true' }, headers: headers
+
+    rows = JSON.parse(response.body)['users'].to_h { |u| [u['firstName'], u['active']] }
+    expect(rows).to eq('Rita' => true, 'Gone' => false)
   end
 end
