@@ -149,7 +149,8 @@ RSpec.describe 'Deal front-end add-on classification', type: :model do
     # 'License Fee' the names of its keyed fees (FEE_LINE_NAMES); the rest are typed names.
     ['Title', 'License', 'Title Fee', 'License Fee', 'Title & License', 'Title and Registration',
      'Registration', 'Registration fee', 'Tag and title', 'License plates', 'DMV fees',
-     'State title transfer fee', 'Licence fee'].each do |name|
+     'State title transfer fee', 'Licence fee', 'Title/Lic/Reg', 'MVD fee', 'Title & Lic.',
+     'Title fees (est.)', 'Reg fee'].each do |name|
       it "keeps #{name} out of add-on gross" do
         add_line(category: 'fee', name: name, price: 185, cost: 0)
         add_line(category: 'fee', name: 'Delivery Fee', price: 1_000, cost: 0)
@@ -188,6 +189,27 @@ RSpec.describe 'Deal front-end add-on classification', type: :model do
       component = Struct.new(:rate).new(0.1)
       result = CommissionCalculationService.new(deal).send(:calculate_addon_commission, component)
       expect(result).to eq(300.0)
+    end
+
+    # Plans paid on front, commissionable or total gross leave them out too, while the
+    # accounting gross keeps them.
+    it 'takes title and license margin off every gross a plan pays on, not off accounting gross' do
+      add_line(category: 'fee', name: 'Title Fee', price: 200, cost: 0)
+      add_line(category: 'fee', name: 'License Fee', price: 100, cost: 40)
+      add_line(category: 'fee', name: 'Delivery Fee', price: 3_000, cost: 1_000)
+      deal.reload
+      front = deal.front_gross
+      expect(front).not_to be_nil
+      expect(deal.title_license_fee_margin).to eq(260.0)
+      expect(deal.commission_gross('front_gross')).to eq((front - 260).round(2))
+      expect(deal.commission_gross('total')).to eq((deal.total_gross - 260).round(2))
+      expect(deal.commission_gross('commissionable_front')).to eq((deal.commissionable_front_gross - 260).round(2))
+      expect(deal.commission_gross('addon')).to eq(deal.addon_gross)
+      expect(deal.commission_gross('nonsense')).to be_nil
+
+      component = Struct.new(:gross_type, :rate).new('front_gross', 0.1)
+      paid = CommissionCalculationService.new(deal).send(:calculate_percent_of_gross, component)
+      expect(paid).to eq(((front - 260) * 0.1).round(2))
     end
   end
 end

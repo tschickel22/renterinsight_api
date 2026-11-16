@@ -60,7 +60,14 @@ module McpTools
     # secondary salesperson id stands in for "someone shares this deal".
     SimDeal = Struct.new(:commission_plan, :selling_price, :front_gross, :commissionable_front_gross, :back_gross,
                          :total_gross, :addon_gross, :quantity, :commission_deal_type, :commission_vertical,
-                         :primary_salesperson_id, :secondary_salesperson_id, keyword_init: true)
+                         :primary_salesperson_id, :secondary_salesperson_id, keyword_init: true) do
+      # The engine asks the deal for the gross a plan pays on (Deal#commission_gross). The
+      # figures here are typed already as the gross to pay on, so they are used as given.
+      def commission_gross(gross_type)
+        method = Deal::COMMISSION_GROSS_TYPES[gross_type.to_s]
+        method && public_send(method)
+      end
+    end
 
     def self.perform(ctx, scenarios:, plan_id: nil, components: nil)
       CommissionPlanSupport.require!(ctx, 'read')
