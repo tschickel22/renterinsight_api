@@ -193,7 +193,8 @@ module Api
       def module_for_type(type)
         case type
         when 'Lead', 'Contact', 'Account', 'Deal' then 'crm'
-        when 'Quote', 'Invoice', 'Payment' then 'finance'
+        when 'Quote' then 'quotes'
+        when 'Invoice', 'Payment' then 'finance'
         when 'ServiceTicket' then 'service'
         when 'Vehicle', 'Part' then 'inventory'
         when 'Communication' then 'communications'
