@@ -63,14 +63,18 @@ module Agreements
 
     def buyers
       out = {}
-      [[filled[:buyer_1], @deal.contact], [filled[:buyer_2], @deal.co_applicant_contact]].each_with_index do |(b, contact), i|
+      people = @deal.agreement_buyers
+      [[filled[:buyer_1], people[0]], [filled[:buyer_2], people[1]]].each_with_index do |(b, contact), i|
         next unless b
 
         n = "buyer_#{i + 1}"
         out.merge!("#{n}.name" => b[:name], "#{n}.phone" => b[:phone], "#{n}.email" => b[:email], "#{n}.address" => b[:address],
                    "#{n}.street" => contact.street, "#{n}.city" => contact.city, "#{n}.state" => contact.state, "#{n}.zip" => contact.zip)
       end
-      out['buyers.names'] = [out['buyer_1.name'], out['buyer_2.name']].compact.join(' and ')
+      # Every buyer by name, a third or fourth from the Buyers card included,
+      # though the contract has signing blanks for two.
+      names = people.map { |c| [c.first_name, c.last_name].compact.join(' ').squish }.reject(&:blank?)
+      out['buyers.names'] = names.to_sentence(two_words_connector: ' and ', last_word_connector: ' and ')
       out
     end
 

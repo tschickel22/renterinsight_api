@@ -45,6 +45,15 @@ class Deal < ApplicationRecord
   # lead conversion from the lead's co_applicant_* fields. The Contact stays the
   # source of truth — the deal only points at it.
   belongs_to :co_applicant_contact, class_name: 'Contact', optional: true
+
+  # Everyone buying, each once: the deal's contact, the co-applicant, then the
+  # people on the deal's Buyers card in their order. Agreements print and sign
+  # from this list (Tom, 2026-11-16), so a buyer added only on the Buyers card
+  # still reaches the contract.
+  def agreement_buyers
+    card = entity_buyers.active.ordered.includes(:contact).map(&:contact)
+    [contact, co_applicant_contact, *card].compact.select { |c| c.company_id == company_id }.uniq(&:id)
+  end
   belongs_to :user, optional: true  # FIX: Made optional to prevent 422 errors when user_id not set
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   belongs_to :territory, optional: true

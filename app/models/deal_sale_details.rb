@@ -87,7 +87,8 @@ class DealSaleDetails
     buyer = ->(c) { c && { name: [c.first_name, c.last_name].compact.join(' ').squish, email: c.email, phone: c.phone,
                            address: [c.street, [c.city, c.state, c.zip].compact.join(' ').squish].reject(&:blank?).join(', ') } }
     received = @deal.purchase_orders.where.not(received_vehicle_id: nil).order(:id).last&.received_vehicle
-    { buyer_1: buyer.call(@deal.contact), buyer_2: buyer.call(@deal.co_applicant_contact),
+    buyers = @deal.agreement_buyers
+    { buyer_1: buyer.call(buyers[0]), buyer_2: buyer.call(buyers[1]),
       delivery: { street: @deal.delivery_street, city: @deal.delivery_city, state: @deal.delivery_state, zip: @deal.delivery_zip },
       payment_type: @deal.payment_type, lender_id: @deal.lender_id, lender_name: @deal.lender_name,
       down_payment_due_date: @deal.down_payment_due_date&.iso8601, expected_delivery: @deal.delivery_date&.iso8601,

@@ -35,4 +35,27 @@ RSpec.describe 'Agreement merge fields: co-buyer', type: :request do
     fields = fields_for(deal)
     expect(fields).to include('deal.co_buyer_name' => nil, 'deal.co_buyer_email' => nil)
   end
+
+  # Tom, 2026-11-16: agreements print the Buyers card names too.
+  it 'fills Buyer 2 from the Buyers card when there is no co-applicant, and names everyone once' do
+    deal = company.deals.create!(name: 'Card buyers', contact_id: buyer.id)
+    third = company.contacts.create!(first_name: 'Lee', last_name: 'Ray', email: 'lee@example.com')
+    [buyer, co_buyer, third].each_with_index do |c, i|
+      EntityBuyer.create!(company: company, contact: c, buyable: deal, role: i.zero? ? 'buyer' : 'co_buyer', position: i)
+    end
+
+    fields = fields_for(deal)
+    expect(fields['deal.co_buyer_name']).to eq('Pat Smuts')
+    expect(fields['deal.buyer_names']).to eq('Jeretta Smuts, Pat Smuts and Lee Ray')
+    expect(deal.reload.agreement_buyers.map(&:id)).to eq([buyer.id, co_buyer.id, third.id])
+  end
+
+  it 'leaves a removed Buyers card person off' do
+    deal = company.deals.create!(name: 'Removed', contact_id: buyer.id)
+    EntityBuyer.create!(company: company, contact: co_buyer, buyable: deal, role: 'co_buyer', is_deleted: true)
+
+    fields = fields_for(deal)
+    expect(fields['deal.co_buyer_name']).to be_nil
+    expect(fields['deal.buyer_names']).to eq('Jeretta Smuts')
+  end
 end
