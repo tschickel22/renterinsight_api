@@ -382,6 +382,126 @@ for p in OUT:
         p['prefillFrom'] = rule
 assert not PREFILL, f'prefill for unknown boxes: {list(PREFILL)}'
 
+# ── Step-by-step signing (phones): sections, grouped choices, keyboards ─────
+# The signing page turns these boxes into a form one section at a time
+# (frontend utils/guidedSteps.ts). Order of sections = first box in each.
+import re as _re
+
+def section_of(k):
+    s = _re.sub(r'^[ab]_', '', k)
+    if not _re.match(r'^[ab]_', k):
+        if k.startswith(('expense_', 'gov_assistance')):
+            return 'Monthly expenses'
+        return 'The home and where it goes'
+    if _re.match(r'(full_name|birth_date|ssn|marital_|dependent|email|cell_phone|other_phone)', s):
+        return 'About you'
+    if _re.match(r'(street|city_state_zip|county|mailing_|years_at|months_at|housing_|landlord|current_home|prev_|relative_)', s):
+        return 'Where you live'
+    if _re.match(r'(emp\d|pay_|hourly|hours_|weekly|biweekly|monthly_salary|bonus|commission|overtime|job_gaps)', s):
+        return 'Your work'
+    if _re.match(r'(child_support|alimony|other_income)', s):
+        return 'Other income'
+    if _re.match(r'(bank_|account_type|liquid_|retirement_)', s):
+        return 'Bank accounts and savings'
+    if _re.match(r'(loan\d|cosign|paidoff|debt_)', s):
+        return 'Loans and debts'
+    if _re.match(r'(citizen|permanent_resident|bankruptcy)', s):
+        return 'A few questions'
+    return 'Optional: demographic information'
+
+ETHNICITY = {'hispanic': 'Hispanic or Latino', 'mexican': 'Mexican', 'puerto_rican': 'Puerto Rican', 'cuban': 'Cuban',
+             'other_hispanic': 'Other Hispanic or Latino', 'not_hispanic': 'Not Hispanic or Latino',
+             'ethnicity_decline': 'I do not wish to provide this'}
+RACE = {'american_indian': 'American Indian or Alaska Native', 'asian': 'Asian', 'asian_indian': 'Asian Indian',
+        'chinese': 'Chinese', 'filipino': 'Filipino', 'japanese': 'Japanese', 'korean': 'Korean', 'vietnamese': 'Vietnamese',
+        'other_asian': 'Other Asian', 'black': 'Black or African American',
+        'pacific_islander': 'Native Hawaiian or Other Pacific Islander', 'native_hawaiian': 'Native Hawaiian',
+        'samoan': 'Samoan', 'guamanian': 'Guamanian or Chamorro', 'other_pacific': 'Other Pacific Islander',
+        'white': 'White', 'race_decline': 'I do not wish to provide this'}
+SEX = {'female': 'Female', 'male': 'Male', 'sex_decline': 'I do not wish to provide this'}
+
+def choice_of(k):
+    """(group, question, one|many, answer) for a checkbox key."""
+    m = _re.match(r'^([ab])_(.*)$', k)
+    p, s = (m.group(1), m.group(2)) if m else ('', k)
+    yn = {'yes': 'Yes', 'no': 'No'}
+    for key, label in [('citizen', 'Are you a U.S. citizen?'), ('permanent_resident', 'Are you a permanent resident alien?'),
+                       ('bankruptcy', 'Have you declared bankruptcy in the last 5 years?'),
+                       ('bonus', 'Do you receive bonuses?'), ('commission', 'Do you receive commission?'),
+                       ('overtime', 'Do you receive overtime?'),
+                       ('emp1_self', 'Current employer: are you self employed?'),
+                       ('emp2_self', 'Second employer: are you self employed?'),
+                       ('emp3_self', 'Previous employer: are you self employed?')]:
+        mm = _re.match(rf'^{key}_(yes|no)$', s)
+        if mm:
+            return (f'{p}_{key}', label, 'one', yn[mm.group(1)])
+    if s.startswith('marital_'):
+        return (f'{p}_marital', 'Marital status', 'one', s[8:].capitalize())
+    if s.startswith('housing_'):
+        return (f'{p}_housing', 'Where you live now, you are a', 'one',
+                {'homeowner': 'Homeowner', 'other': 'Other', 'renter': 'Renter', 'family': 'Living with family'}[s[8:]])
+    if s.startswith('pay_'):
+        return (f'{p}_pay', 'How are you paid?', 'one',
+                {'hourly': 'Hourly', 'weekly': 'Weekly salary', 'biweekly': 'Bi-weekly salary', 'monthly': 'Monthly salary'}[s[4:]])
+    if s in ETHNICITY:
+        return (f'{p}_ethnicity', 'Ethnicity', 'many', ETHNICITY[s])
+    if s in RACE:
+        return (f'{p}_race', 'Race', 'many', RACE[s])
+    if s in SEX:
+        return (f'{p}_sex', 'Sex', 'one', SEX[s])
+    if k.startswith('property_'):
+        return ('property', 'The home will be your', 'one',
+                {'primary': 'Primary residence', 'secondary': 'Secondary residence', 'investment': 'Investment or rental', 'buy_for': 'Buy-for'}[k[9:]])
+    if k in ('loan_home_only', 'loan_land_and_home', 'loan_land_only'):
+        return ('loan_type', 'Loan type', 'one', {'loan_home_only': 'Home only', 'loan_land_and_home': 'Land and home', 'loan_land_only': 'Land only'}[k])
+    if k in ('loan_purchased', 'loan_refinanced'):
+        return ('home_being', 'The home is being', 'one', 'Purchased' if k == 'loan_purchased' else 'Refinanced')
+    if k.startswith('land_') :
+        return ('land_being', 'If land and home, the land is being', 'one',
+                {'land_purchased': 'Purchased', 'land_refinanced': 'Refinanced', 'land_owned': 'Owned free and clear'}[k])
+    if k.startswith('public_road_'):
+        return ('public_road', 'Does the property front a publicly maintained road?', 'one', yn[k[12:]])
+    if k.startswith('paved_road_'):
+        return ('paved_road', 'Is the property on a paved road?', 'one', yn[k[11:]])
+    if k.startswith('site_'):
+        return ('site_placement', 'If home only, the home will sit on', 'one',
+                {'site_owned_no_lien': 'Owned property with no lien', 'site_leased_private': 'Leased private property',
+                 'site_family_land': 'Family land, no rent', 'site_reservation': 'Reservation',
+                 'site_community_park': 'Community or park', 'site_land_contract': 'Owned property with a land contract, mortgage or trust deed'}[k])
+    if k.startswith('down_'):
+        return ('down_source', 'Where the down payment comes from', 'many',
+                {'down_savings': 'Savings', 'down_checking': 'Checking', 'down_cash': 'Cash on hand', 'down_loan': 'Loan',
+                 'down_land': 'My land as the down payment', 'down_gift': 'Gift', 'down_other': 'Other'}[k])
+    raise SystemExit(f'checkbox without a choice group: {k}')
+
+def input_of(k):
+    s = _re.sub(r'^[ab]_', '', k)
+    if s == 'ssn':
+        return 'ssn'
+    if s in ('birth_date', 'bankruptcy_date'):
+        return 'date'
+    if s in ('email',):
+        return 'email'
+    if _re.search(r'(phone)$', s):
+        return 'tel'
+    if s in ('dependents', 'years_at_address', 'months_at_address', 'hours_weekly'):
+        return 'number'
+    if _re.search(r'(balance|payment|salary|rate|income|amount|_monthly|12_months|garnishment|child_support$|^debt_alimony$|^alimony$|value|price|fee|down_payment|^expense_fuel|^expense_child_care|site_payment)', s) \
+            and not s.endswith(('_lender', '_ages', 'duration', '_source', 'how_long')):
+        return 'money'
+    return 'text'
+
+for p in OUT:
+    if not p['fieldKey'].startswith('credit_app.'):
+        continue
+    k = p['fieldKey'].removeprefix('credit_app.')
+    p['section'] = section_of(k)
+    if p['fieldType'] == 'checkbox':
+        g, q, mode, ans = choice_of(k)
+        p.update(choiceGroup=g, choiceLabel=q, choiceMode=mode, optionLabel=ans)
+    else:
+        p['inputType'] = input_of(k)
+
 json.dump(OUT, sys.stdout, indent=1)
 from collections import Counter
 print(f"{len(OUT)} boxes; by page {dict(sorted(Counter(p['page'] + 1 for p in OUT).items()))}; "
