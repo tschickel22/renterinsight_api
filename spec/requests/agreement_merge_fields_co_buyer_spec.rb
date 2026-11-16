@@ -29,6 +29,16 @@ RSpec.describe 'Agreement merge fields: co-buyer', type: :request do
     expect(fields['deal.co_buyer_phone']).to eq('260-555-0100')
   end
 
+  it "splits Buyer 2's name and gives their address (credit applications prefill from these)" do
+    co_buyer.update!(street: '11010 Road 739', city: 'Philadelphia', state: 'MS', zip: '39350')
+    deal = company.deals.create!(name: 'Smuts home', contact_id: buyer.id, co_applicant_contact_id: co_buyer.id)
+
+    fields = fields_for(deal)
+    expect(fields).to include('deal.co_buyer_first_name' => 'Pat', 'deal.co_buyer_last_name' => 'Smuts',
+                              'deal.co_buyer_street' => '11010 Road 739', 'deal.co_buyer_city' => 'Philadelphia',
+                              'deal.co_buyer_state' => 'MS', 'deal.co_buyer_zip' => '39350')
+  end
+
   it 'leaves Buyer 2 empty on a one-buyer deal' do
     deal = company.deals.create!(name: 'Solo', contact_id: buyer.id)
 

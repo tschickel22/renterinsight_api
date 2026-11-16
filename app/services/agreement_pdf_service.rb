@@ -360,7 +360,8 @@ class AgreementPdfService
               values_map[field_key.sub(/^custom\./, '')] ||
               values_map[p[:id].to_s] || ''
 
-      Rails.logger.info("[AgreementPdfService] Value lookup: key=#{field_key} id=#{p[:id]} → #{value.present? ? "found (#{value.to_s.truncate(50)})" : 'EMPTY'}")
+      # Never log the value itself: signer answers include SSNs, birth dates and income.
+      Rails.logger.info("[AgreementPdfService] Value lookup: key=#{field_key} id=#{p[:id]} → #{value.present? ? 'found' : 'EMPTY'}")
 
       applied = case field_type.downcase
       when 'signature'
