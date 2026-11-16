@@ -239,12 +239,16 @@ module Api
       # active user offered, with typing to narrow the list.
       # params[:context] narrows by department when the company turns on
       # filter_assignments_by_role.
+      # params[:include_inactive] adds users who are no longer active (marked
+      # active: false), for Owner filters on lists where they still own records.
+      # Pickers that assign never send it.
       def assignable
         context = params[:context] || 'general'
+        statuses = ActiveModel::Type::Boolean.new.cast(params[:include_inactive]) ? nil : 'active'
 
-        users = current_company.users
-                               .where(deleted_at: nil, status: 'active')
+        users = current_company.users.where(deleted_at: nil)
                                .where('users.role IS NULL OR users.role <> ?', 'client')
+        users = users.where(status: statuses) if statuses
 
         if current_company.filter_assignments_by_role?
           users = filter_by_context(users, context)
@@ -687,7 +691,8 @@ module Api
           lastName: user.last_name,
           fullName: user.name,
           displayRole: role_display,
-          avatarUrl: user.try(:avatar_url)
+          avatarUrl: user.try(:avatar_url),
+          active: user.status == 'active'
         }
       end
     end
