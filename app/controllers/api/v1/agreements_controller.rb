@@ -183,6 +183,12 @@ module Api
           params[:agreement][:custom_field_values] = merged
         end
 
+        # The builder auto-saves a draft as soon as there is a title, often before a
+        # template is picked, so the template usually arrives here, not in create.
+        # Without this the agreement kept the template's form and boxes but lost the
+        # link, and with it the template's sensitive flag (credit applications).
+        attach_template(@agreement, params.dig(:agreement, :agreement_template_id))
+
         if @agreement.update(agreement_params)
           # Sync signers if provided (full replace while in draft)
           sync_signers(@agreement) if params.dig(:agreement, :signers).present?
@@ -1291,6 +1297,16 @@ module Api
           resets_at: month_end.strftime('%B %d, %Y'),
           month: Time.current.strftime('%B %Y'),
         }
+      end
+
+      def attach_template(agreement, template_id)
+        return if template_id.blank?
+
+        template = AgreementTemplate.available_for_company(@company).find_by(id: template_id)
+        return unless template
+
+        agreement.agreement_template = template
+        agreement.sensitive = template.sensitive
       end
 
       def shareable!

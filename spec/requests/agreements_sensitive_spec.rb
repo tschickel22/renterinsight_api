@@ -110,6 +110,19 @@ RSpec.describe 'Sensitive agreements', type: :request do
     end
   end
 
+  it 'becomes sensitive when the template is picked after the draft was auto-saved' do
+    template = company.agreement_templates.create!(name: 'App for Financing', template_type: 'upload', status: 'active',
+                                                   sensitive: true)
+    post '/api/v1/agreements', params: { agreement: { title: 'Test Loan App' } }, headers: headers_for.call(admin)
+    draft = Agreement.find(JSON.parse(response.body)['id'] || JSON.parse(response.body).dig('agreement', 'id'))
+    expect(draft.sensitive).to be(false)
+
+    patch "/api/v1/agreements/#{draft.id}", params: { agreement: { title: 'Test Loan App', agreement_template_id: template.id } },
+                                             headers: headers_for.call(admin)
+    expect(response).to have_http_status(:ok)
+    expect(draft.reload).to have_attributes(agreement_template_id: template.id, sensitive: true)
+  end
+
   it 'locks a PDF with a password (qpdf)', if: system('which qpdf > /dev/null 2>&1') do
     pdf = Prawn::Document.new.tap { |d| d.text 'hello' }.render
     locked = Agreements::LockedCopy.lock(pdf, 'ABCD-EFGH-JKMN')
