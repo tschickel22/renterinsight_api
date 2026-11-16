@@ -135,6 +135,30 @@ RSpec.describe 'Deal Desk configurable write-back timing', type: :model do
       expect(deal.front_gross).to eq((66_500 - deal.landed_cost + 1_000).round(2))
     end
 
+    it 'writes the close price change to the deal history' do
+      deal.deal_products.create!(product_name: '2024 Fleetwood Aspire', unit_price: 70_000, cost: 50_000, quantity: 1,
+                                 discount: 0, discount_type: 'fixed', notes: 'category:home')
+      selected_scenario(unit_price_snapshot: 70_000, selling_price_override: 66_500)
+
+      deal.reload.update!(stage: 'closed_won')
+
+      log = ActivityLog.where(trackable: deal).order(:id).to_a.find { |l| l.metadata.to_h['source'] == 'deal_desk_close' }
+      expect(log&.description).to include('$70,000.00 to $66,500.00')
+    end
+
+    it 'leaves a signed Deal Sheet price alone at close' do
+      deal.deal_products.create!(product_name: '2024 Fleetwood Aspire', unit_price: 70_000, cost: 50_000, quantity: 1,
+                                 discount: 0, discount_type: 'fixed', notes: 'category:home')
+      selected_scenario(unit_price_snapshot: 70_000, selling_price_override: 66_500)
+      deal.reload
+      allow(deal).to receive(:home_build).and_return(Object.new)
+      allow(Agreements::DealSheetLock).to receive(:edit_problem).and_return('The Deal Sheet is signed')
+
+      deal.update!(stage: 'closed_won')
+
+      expect(deal.reload.home_line_item.unit_price.to_f).to eq(70_000.0)
+    end
+
     it 'uses the assignment path (no nested save / re-entrancy)' do
       selected_scenario
       expect_any_instance_of(DealDeskScenario)
