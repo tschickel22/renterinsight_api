@@ -141,7 +141,7 @@ module Api
             agreement.field_placements = template.field_placements if agreement.field_placements.blank?
             agreement.merge_field_placements = template.merge_field_placements if agreement.merge_field_placements.blank?
             agreement.merge_field_values = template.merge_fields if agreement.merge_field_values.blank?
-            agreement.sensitive = template.sensitive
+            agreement.sensitive = true if template.sensitive
           end
         end
 
@@ -1306,7 +1306,7 @@ module Api
         return unless template
 
         agreement.agreement_template = template
-        agreement.sensitive = template.sensitive
+        agreement.sensitive = true if template.sensitive
       end
 
       def shareable!
@@ -1337,7 +1337,7 @@ module Api
           :title, :description, :category, :document_url, :content,
           :content_type, :expires_at, :reminder_frequency_days, :location_id,
           :contact_id, :account_id, :deal_id,
-          :delivery_method, :signing_order, :message_to_signers
+          :delivery_method, :signing_order, :message_to_signers, :sensitive
         )
 
         # Handle JSONB fields - must use permit!/to_unsafe_h for arbitrary nested structures
@@ -1504,6 +1504,7 @@ module Api
             .map(&:name),
           custom_field_values: agreement.custom_field_values,
           sensitive: agreement.sensitive,
+          template_sensitive: agreement.agreement_template&.sensitive || false,
           share_until: agreement.share_open_until,
           optional_equipment_snapshot: agreement.optional_equipment_snapshot,
           # The Deal Sheet version it was made from, and whether the LIVE one has moved on.

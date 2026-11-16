@@ -868,7 +868,7 @@ module Api
         permitted = params.require(:agreement_template).permit(
           :name, :description, :category, :agreement_category_id,
           :document_url, :content, :template_type, :status, :location_id,
-          :state_code, :form_type, :form_number, :page_count,
+          :state_code, :form_type, :form_number, :page_count, :sensitive,
           default_signers: [:role, :label, :order_index, :user_id, :user_name, :user_email],
           custom_field_definitions: []
         )
@@ -916,6 +916,7 @@ module Api
           form_type: template.form_type,
           form_number: template.form_number,
           is_platform_template: template.is_platform_template,
+          sensitive: template.sensitive,
           is_master: template.is_master?,
           template_group_id: template.template_group_id,
           page_count: template.page_count,
