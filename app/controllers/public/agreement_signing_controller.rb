@@ -286,6 +286,7 @@ module Public
       combined['company.name'] = company.name.to_s
       combined['company.email'] = company.try(:email).to_s
       combined['company.phone'] = company.try(:phone).to_s
+      combined['company.address'] = [company.try(:street), company.try(:city), company.try(:state), company.try(:zip)].compact_blank.join(', ')
       combined['date.today'] = Date.today.strftime('%m/%d/%Y')
       combined['date.current_year'] = Date.today.year.to_s
 
@@ -311,6 +312,10 @@ module Public
           combined["custom.#{key}"] = value.to_s
         end
       end
+
+      # The dealer logo always comes from Location / Company branding, never
+      # from a stored value.
+      combined[::Agreements::DealerLogo::KEY] = ::Agreements::DealerLogo.for_agreement(@agreement, deal: deal)
 
       # Remove empty string values
       combined.reject { |_, v| v.blank? }

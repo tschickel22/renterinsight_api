@@ -83,15 +83,17 @@ def signer(page, who, type, x, y, w, h, label)
   place(page, "signer.#{type}", label, type, x, y, w, h, 'isCustomField' => false, 'isSignerField' => true, 'signerIndex' => who)
 end
 
-# Dealer name, address and phone in the header space the form leaves open.
-def dealer_header(page, top)
-  merge page, 'company.name', 'Dealer name', 250, top, 240, 15
-  merge page, 'company.address', 'Dealer address', 250, top + 15, 240, 12
-  merge page, 'company.phone', 'Dealer phone', 250, top + 27, 240, 12
+# The header space the form leaves open: the dealer's logo on the left
+# (Location branding, else Company branding), name, address and phone beside it.
+def dealer_header(page, top, logo_h)
+  merge page, 'company.logo', 'Dealer logo', 24, top, 230, logo_h, type: 'image'
+  merge page, 'company.name', 'Dealer name', 262, top, 230, 15
+  merge page, 'company.address', 'Dealer address', 262, top + 15, 230, 12
+  merge page, 'company.phone', 'Dealer phone', 262, top + 27, 230, 12
 end
 
 # ── Page 1: Purchase Agreement ────────────────────────────────────────────
-dealer_header 1, 12
+dealer_header 1, 12, 58
 
 field 1, 'buyer_names', 'Buyer(s)', 20.4, 80.2, 337.0, group: 'buyer', merge_from: 'contact.full_name'
 merge 1, 'contact.phone', 'Home phone', 359.2, 80.2, 81.2
@@ -206,7 +208,7 @@ signer 1, DEALER, 'signature', 72, 743, 215, 18, 'Dealer approval signature'
 field 2, 'buyer_names', 'Buyer(s)', 203.0, 11.8, 337.0, group: 'buyer', merge_from: 'contact.full_name'
 
 # ── Page 3: Arbitration Addendum ──────────────────────────────────────────
-dealer_header 3, 42
+dealer_header 3, 42, 72
 field 3, 'buyer_names', 'Buyer(s)', 20.6, 143.0, 337.0, group: 'buyer', merge_from: 'contact.full_name'
 merge 3, 'contact.phone', 'Home phone', 359.7, 143.0, 81.2
 merge 3, 'contact.mobile_phone', 'Cell phone', 443.4, 143.0, 80.1
