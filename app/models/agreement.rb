@@ -22,6 +22,41 @@ class Agreement < ApplicationRecord
   has_many :agreement_audit_logs, dependent: :destroy
   has_many :agreement_reminders, dependent: :destroy
 
+  # ── Sensitive agreements (credit applications) ──────────────────────────
+  # A template marked sensitive makes its agreements sensitive. Signer answers
+  # (SSN, birth date, income) then live only in sensitive_values, encrypted, and
+  # only until the signed PDF exists: sealing stamps them and clears them, so the
+  # PDF in the private bucket is the one copy. Signers never receive each other's
+  # answers, and sharing is a password-locked PDF for a limited window.
+  encrypts :sensitive_values
+  SENSITIVE_SHARE_DAYS = 30
+
+  def sensitive_answers
+    sensitive_values.present? ? JSON.parse(sensitive_values) : {}
+  rescue JSON::ParserError
+    {}
+  end
+
+  def add_sensitive_answers!(values)
+    update!(sensitive_values: sensitive_answers.merge(values.to_h.stringify_keys).to_json)
+  end
+
+  # Sharing is open for SENSITIVE_SHARE_DAYS after completion; a company or
+  # platform admin can open it again for the same length (renew_sharing!).
+  def share_open_until
+    return nil unless sensitive?
+
+    share_until || completed_at&.+(SENSITIVE_SHARE_DAYS.days)
+  end
+
+  def share_window_open?
+    !sensitive? || (share_open_until.present? && share_open_until.future?)
+  end
+
+  def renew_sharing!
+    update!(share_until: SENSITIVE_SHARE_DAYS.days.from_now)
+  end
+
   # Validations
   validates :title, presence: true
   validate :linked_records_in_company

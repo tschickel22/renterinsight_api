@@ -38,7 +38,10 @@ class SealAgreementJob < ApplicationJob
       send_signer_completion_email(agreement, signer, branding, frontend_base)
     end
 
-    # 3. Notify CC recipients (public link — no login required)
+    # 3. Notify CC recipients (public link — no login required). Never for a
+    #    sensitive agreement: a credit application goes to no one but the dealer.
+    return if agreement.sensitive?
+
     agreement.agreement_signers.cc_recipients.each do |cc|
       send_cc_completion_email(agreement, cc, branding, frontend_base)
     end
@@ -106,7 +109,7 @@ class SealAgreementJob < ApplicationJob
         </p>
         <p style="color: #475569; font-size: 15px; line-height: 1.5; margin: 0 0 16px 0;">
           All parties have signed <strong>"#{ERB::Util.html_escape(agreement.title)}"</strong>.
-          A copy of the signed agreement is available for download.
+          #{agreement.sensitive? ? "It holds personal information, so it is not sent by email. #{ERB::Util.html_escape(agreement.company.name)} has the signed copy; ask them if you need one." : 'A copy of the signed agreement is available for download.'}
         </p>
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;text-align:center;margin-bottom:16px;">
           <p style="color:#166534;font-size:14px;font-weight:600;margin:0;">✓ All signatures collected</p>
@@ -114,11 +117,13 @@ class SealAgreementJob < ApplicationJob
             Completed on #{agreement.completed_at&.strftime('%B %d, %Y at %l:%M %p')}
           </p>
         </div>
-        <table role="presentation" width="100%"><tr><td align="center" style="padding: 8px 0;">
-          <a href="#{public_link}" style="display:inline-block;padding:12px 28px;background-color:#{branding[:primary_color]};color:#ffffff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">
-            View &amp; Download Agreement
-          </a>
-        </td></tr></table>
+        #{agreement.sensitive? ? '' : <<~BUTTON}
+          <table role="presentation" width="100%"><tr><td align="center" style="padding: 8px 0;">
+            <a href="#{public_link}" style="display:inline-block;padding:12px 28px;background-color:#{branding[:primary_color]};color:#ffffff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">
+              View &amp; Download Agreement
+            </a>
+          </td></tr></table>
+        BUTTON
         <p style="color:#94a3b8;font-size:12px;margin:8px 0 0 0;text-align:center;">
           Agreement: #{ERB::Util.html_escape(agreement.agreement_number)}
         </p>
