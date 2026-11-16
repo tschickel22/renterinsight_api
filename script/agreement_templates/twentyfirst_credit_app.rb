@@ -17,6 +17,8 @@
 # the co-applicant (column B), signer 3 an optional non-applicant spouse (waiver on
 # page 5). Picking 1 or 2 signers in the builder drops the later ones. Typed boxes
 # and checkboxes are optional on the signing page; only signatures are required.
+# Names, contact details, the home site address and the down payment start filled
+# from the deal or contact (each box's prefillFrom), and the buyers can change them.
 #
 # Box positions come from twentyfirst_credit_app_1223.json, generated from the
 # PDF's own label coordinates by twentyfirst_credit_app_layout.py (see its header).
@@ -64,9 +66,10 @@ document = PrivateFiles.put(File.binread(PDF_PATH), key: key, content_type: 'app
 template = existing || company.agreement_templates.build(form_number: FORM_NUMBER)
 template.assign_attributes(
   name: NAME,
-  description: "21st Mortgage's credit application (v. 12/20/2023). The applicant and co-applicant fill in " \
-               'every box themselves on the signing page and sign on page 5; a non-applicant spouse can sign ' \
-               'the waiver. Nothing is filled in by the dealer, as the form requires.',
+  description: "21st Mortgage's credit application (v. 12/20/2023). The applicant and co-applicant complete it " \
+               'on the signing page and sign on page 5; a non-applicant spouse can sign the waiver. Names, ' \
+               'contact details, the home site address and the down payment start filled from the deal, ' \
+               'and the buyers can change them.',
   template_type: 'upload',
   status: 'active',
   form_type: 'other',

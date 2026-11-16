@@ -137,7 +137,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{deal.delivery_street|contact.delivery_street}"
  },
  {
   "id": "tfca_11",
@@ -179,7 +180,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{deal.delivery_city|contact.delivery_city}"
  },
  {
   "id": "tfca_14",
@@ -193,7 +195,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{deal.delivery_state|contact.delivery_state}"
  },
  {
   "id": "tfca_15",
@@ -207,7 +210,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{deal.delivery_zip|contact.delivery_zip}"
  },
  {
   "id": "tfca_16",
@@ -557,7 +561,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{deal.down_payment:money}"
  },
  {
   "id": "tfca_41",
@@ -697,7 +702,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{contact.last_name}, {contact.first_name}"
  },
  {
   "id": "tfca_51",
@@ -809,7 +815,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{contact.email}"
  },
  {
   "id": "tfca_59",
@@ -823,7 +830,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{contact.mobile_phone|contact.phone}"
  },
  {
   "id": "tfca_60",
@@ -851,7 +859,8 @@
   "height": 1.9,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{contact.street}"
  },
  {
   "id": "tfca_62",
@@ -865,7 +874,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 0
+  "signerIndex": 0,
+  "prefillFrom": "{contact.city}, {contact.state} {contact.zip}"
  },
  {
   "id": "tfca_63",
@@ -1173,7 +1183,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 1
+  "signerIndex": 1,
+  "prefillFrom": "{deal.co_buyer_last_name}, {deal.co_buyer_first_name}"
  },
  {
   "id": "tfca_85",
@@ -1285,7 +1296,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 1
+  "signerIndex": 1,
+  "prefillFrom": "{deal.co_buyer_email}"
  },
  {
   "id": "tfca_93",
@@ -1299,7 +1311,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 1
+  "signerIndex": 1,
+  "prefillFrom": "{deal.co_buyer_phone}"
  },
  {
   "id": "tfca_94",
@@ -1327,7 +1340,8 @@
   "height": 1.9,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 1
+  "signerIndex": 1,
+  "prefillFrom": "{deal.co_buyer_street}"
  },
  {
   "id": "tfca_96",
@@ -1341,7 +1355,8 @@
   "height": 1.6,
   "isCustomField": false,
   "isSignerField": true,
-  "signerIndex": 1
+  "signerIndex": 1,
+  "prefillFrom": "{deal.co_buyer_city}, {deal.co_buyer_state} {deal.co_buyer_zip}"
  },
  {
   "id": "tfca_97",

@@ -9,7 +9,9 @@ filled by a signer on the signing page, never by the dealer: signer 0 is the app
 co-applicant (column B), signer 2 an optional non-applicant spouse (waiver on page 5).
 Boxes are placed against the printed labels' own coordinates (percent of the page).
 Every box has its own key: signing stores answers by key, so a shared key would make
-all boxes print the same answer.
+all boxes print the same answer. Names, contact details, the home site address and the
+down payment start filled from the deal or contact (PREFILL at the bottom); the signer
+can change them.
 """
 import json, re, sys
 
@@ -353,6 +355,32 @@ sign(5, APPLICANT, 'signature', 'Applicant signature', a_sig['x0'], a_date['x0']
 sign(5, APPLICANT, 'date_signed', 'Applicant date', a_date['x0'], 39.3, top + 1.2, 1.8)
 sign(5, CO_APPLICANT, 'signature', 'Co-applicant signature', b_sig['x0'], b_date['x0'] - 1.0, top, 3.1)
 sign(5, CO_APPLICANT, 'date_signed', 'Co-applicant date', b_date['x0'], 89.0, top + 1.2, 1.8)
+
+# Boxes that start filled from the deal or contact; the signer can change them.
+# Syntax in the frontend's utils/signerPrefill.ts. Values come from what the agreement
+# builder resolved, so they appear when the agreement is made from a deal or contact.
+PREFILL = {
+    'a_full_name': '{contact.last_name}, {contact.first_name}',
+    'a_email': '{contact.email}',
+    'a_cell_phone': '{contact.mobile_phone|contact.phone}',
+    'a_street': '{contact.street}',
+    'a_city_state_zip': '{contact.city}, {contact.state} {contact.zip}',
+    'b_full_name': '{deal.co_buyer_last_name}, {deal.co_buyer_first_name}',
+    'b_email': '{deal.co_buyer_email}',
+    'b_cell_phone': '{deal.co_buyer_phone}',
+    'b_street': '{deal.co_buyer_street}',
+    'b_city_state_zip': '{deal.co_buyer_city}, {deal.co_buyer_state} {deal.co_buyer_zip}',
+    'site_street': '{deal.delivery_street|contact.delivery_street}',
+    'site_city': '{deal.delivery_city|contact.delivery_city}',
+    'site_state': '{deal.delivery_state|contact.delivery_state}',
+    'site_zip': '{deal.delivery_zip|contact.delivery_zip}',
+    'down_payment': '{deal.down_payment:money}',
+}
+for p in OUT:
+    rule = PREFILL.pop(p['fieldKey'].removeprefix('credit_app.'), None)
+    if rule:
+        p['prefillFrom'] = rule
+assert not PREFILL, f'prefill for unknown boxes: {list(PREFILL)}'
 
 json.dump(OUT, sys.stdout, indent=1)
 from collections import Counter
