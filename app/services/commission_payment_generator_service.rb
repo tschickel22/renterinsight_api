@@ -185,14 +185,10 @@ class CommissionPaymentGeneratorService
   end
 
   def gross_for(gross_type)
-    case gross_type
-    when 'front', 'front_gross' then @deal.front_gross
-    when 'commissionable_front', 'commissionable_front_gross' then @deal.commissionable_front_gross
-    when 'back', 'back_gross' then @deal.back_gross
-    when 'total', 'total_gross' then @deal.total_gross
-    when 'addon', 'addon_gross' then @deal.addon_gross
-    when 'selling_price' then @deal.selling_price
-    end
+    return @deal.selling_price if gross_type.to_s == 'selling_price'
+
+    # Title and license fees carry no commission on any gross (Deal#commission_gross).
+    @deal.commission_gross(gross_type)
   end
 
   def volume_bonus(component, role)

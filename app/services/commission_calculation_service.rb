@@ -101,14 +101,8 @@ class CommissionCalculationService
   
   # Calculate percentage of gross
   def calculate_percent_of_gross(component)
-    gross_amount = case component.gross_type
-    when 'front', 'front_gross' then @deal.front_gross
-    when 'back', 'back_gross' then @deal.back_gross
-    when 'total', 'total_gross' then @deal.total_gross
-    when 'commissionable_front', 'commissionable_front_gross' then @deal.commissionable_front_gross
-    when 'addon', 'addon_gross' then @deal.addon_gross
-    else 0
-    end
+    # Title and license fees carry no commission on any gross (Deal#commission_gross).
+    gross_amount = @deal.commission_gross(component.gross_type) || 0
     
     return 0 if gross_amount.nil? || gross_amount <= 0
     

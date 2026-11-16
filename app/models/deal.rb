@@ -663,6 +663,38 @@ class Deal < ApplicationRecord
     (fg - effective_pack_amount).round(2)
   end
 
+  # Margin on title and license fee lines. They stay in accounting gross (front_gross,
+  # total_gross), but carry no commission (Tom, 2026-11-13), so commission plans paid on
+  # front, commissionable or total gross take this off (commission_gross).
+  def title_license_fee_margin
+    deal_products.sum do |dp|
+      next 0.0 unless front_end_addon_line_item?(dp) && self.class.title_license_fee_name?(dp.product_name)
+
+      (dp.unit_price.to_f - dp.cost.to_f) * (dp.quantity || 1).to_f
+    end.round(2)
+  end
+
+  COMMISSION_GROSS_TYPES = {
+    'front' => :front_gross, 'front_gross' => :front_gross,
+    'commissionable_front' => :commissionable_front_gross, 'commissionable_front_gross' => :commissionable_front_gross,
+    'back' => :back_gross, 'back_gross' => :back_gross,
+    'total' => :total_gross, 'total_gross' => :total_gross,
+    'addon' => :addon_gross, 'addon_gross' => :addon_gross
+  }.freeze
+
+  # The gross a commission plan pays on: the named gross less title and license fee
+  # margin where that gross includes it (addon_gross already leaves them out; back gross
+  # never had them). nil when the gross is nil (cost not entered) or the type is unknown.
+  def commission_gross(gross_type)
+    method = COMMISSION_GROSS_TYPES[gross_type.to_s]
+    return nil unless method
+
+    amount = public_send(method)
+    return amount if amount.nil? || %i[addon_gross back_gross].include?(method)
+
+    (amount - title_license_fee_margin).round(2)
+  end
+
   # BACK GROSS (finance & products)
   def back_gross
     ((finance_reserve || 0) + (product_margin || 0)).round(2)
@@ -713,9 +745,9 @@ class Deal < ApplicationRecord
   # least one must name title, license or registration, so "Licensed electrician" or a
   # "Transfer fee" alone are not caught. Like the doc fee these are government pass-throughs
   # and carry no commission.
-  TITLE_LICENSE_CORE_WORDS = %w[title titles titling license licenses licence licences licensing
-                                registration registrations register tag tags plate plates dmv].freeze
-  TITLE_LICENSE_EXTRA_WORDS = %w[fee fees charge charges and state transfer].freeze
+  TITLE_LICENSE_CORE_WORDS = %w[title titles titling license licenses licence licences licensing lic
+                                registration registrations register reg regs tag tags plate plates dmv mvd bmv].freeze
+  TITLE_LICENSE_EXTRA_WORDS = %w[fee fees charge charges and state transfer est estimated].freeze
 
   def self.title_license_fee_name?(name)
     words = name.to_s.downcase.gsub(/[^a-z]+/, ' ').split
