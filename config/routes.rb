@@ -2365,6 +2365,7 @@ Rails.application.routes.draw do
         post   'search',                action: :search
         get    'navigate',              action: :navigate
         get    'for_screen',            action: :for_screen
+        get    'learn_map',             action: :learn_map
         get    'articles',              action: :articles
         get    'articles/:slug',        action: :article, constraints: { slug: %r{[^/]+} }
         # IMPORTANT: generate must come before the :slug routes below so it
