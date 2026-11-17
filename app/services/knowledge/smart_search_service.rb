@@ -35,7 +35,7 @@ module Knowledge
 
       deduplicate!
       record_search
-      @results.first(MAX_RESULTS)
+      capped_results
     end
 
     private
@@ -315,6 +315,14 @@ module Knowledge
     # ═══════════════════════════════════════════════════════════
     # Helpers
     # ═══════════════════════════════════════════════════════════
+
+    # Videos are found last, so a broad question that fills every slot with
+    # pages, tours and articles would cut them all. Keep room for them.
+    def capped_results
+      videos, others = @results.partition { |r| r[:type] == 'video' }
+      videos = videos.first(3)
+      others.first(MAX_RESULTS - videos.size) + videos
+    end
 
     def deduplicate!
       seen = Set.new
