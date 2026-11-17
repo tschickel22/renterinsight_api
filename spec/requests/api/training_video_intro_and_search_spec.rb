@@ -76,6 +76,18 @@ RSpec.describe 'Training video intros and videos in search', type: :request do
       expect(search('branch reports', user: platform).filter_map { |r| r[:video_id] }).to include(draft.id)
     end
 
+    it 'keeps room for videos when pages, tours and articles fill every slot' do
+      service = Knowledge::SmartSearchService.new('anything', user: dealer)
+      others = Array.new(20) { |i| { type: 'article', slug: "a-#{i}" } }
+      videos = Array.new(4) { |i| { type: 'video', video_id: i } }
+      service.instance_variable_set(:@results, others + videos)
+
+      results = service.send(:capped_results)
+      expect(results.size).to eq(Knowledge::SmartSearchService::MAX_RESULTS)
+      expect(results.count { |r| r[:type] == 'video' }).to eq(3)
+      expect(results.first[:slug]).to eq('a-0')
+    end
+
     it 'still returns articles when a video also matches' do
       TrainingVideo.enabled = true
       mod = Knowledge::Module.create!(key: 'settings', name: 'Settings', route: '/settings', is_active: true)
