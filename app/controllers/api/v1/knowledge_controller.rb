@@ -48,6 +48,22 @@ module Api
         }
       end
 
+      # GET /api/v1/knowledge/learn_map
+      # The Learning Center (/learn): every video, tour and article, as stages
+      # from first inquiry to money in the bank. Same visibility as the Learn icon.
+      def learn_map
+        stages = Knowledge::LearnMap.new(admin: platform_admin?).stages.map do |s|
+          {
+            key: s[:key], title: s[:title], blurb: s[:blurb],
+            video_ids: s[:videos].map(&:id),
+            seconds: s[:videos].sum { |v| v.duration_seconds.to_i },
+            tours: s[:tours].map { |t| { id: t.id, name: copy(t.name), description: copy(t.description.to_s), steps: t.steps.size, menu_paths: t.menu_paths, draft: t.approved_at.nil? } },
+            articles: s[:articles].map { |a| { slug: a.slug, title: copy(a.title), excerpt: copy(a.excerpt.to_s), minutes: read_minutes(a) } }
+          }
+        end
+        render json: { stages: stages }
+      end
+
       # GET /api/v1/knowledge/articles/:slug
       def article
         scope = platform_admin? ? Knowledge::Article.all : Knowledge::Article.published
