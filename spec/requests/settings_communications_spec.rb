@@ -108,4 +108,40 @@ RSpec.describe 'Settings — communications secrets', type: :request do
       expect(encrypted.sub('encrypted:', '').split('--').first.length).to eq(48)
     end
   end
+
+  # In dedicated mode texts go out from the company's own number and the From
+  # field in its communications setting is ignored, so the SMS screen needs to
+  # know which number really sends (Easy Homesource changed the field on
+  # 2026-11-17 and kept sending from the old number).
+  describe 'smsSender on the tenant view' do
+    it 'reports the platform mode with no dedicated number' do
+      get '/api/settings/tenant', headers: headers
+
+      expect(response.parsed_body.dig('tenant', 'smsSender'))
+        .to eq('mode' => 'platform', 'dedicatedNumber' => nil, 'ownAccount' => false)
+    end
+
+    it 'reports the connected number that actually sends' do
+      company.update!(sms_provisioning_mode: 'dedicated')
+      TwilioAccount.create!(company: company, phone_number: '+13525550100', phone_number_sid: 'PN123',
+                            status: 'active', sub_account_sid: 'AC123', auth_token: 'tok',
+                            metadata: { 'own_account' => true })
+      put_communications('provider' => 'twilio', 'fromNumber' => '+13525550199')
+
+      get '/api/settings/tenant', headers: headers
+
+      expect(response.parsed_body.dig('tenant', 'smsSender'))
+        .to eq('mode' => 'dedicated', 'dedicatedNumber' => '+13525550100', 'ownAccount' => true)
+    end
+
+    it 'gives no dedicated number while the account is not active' do
+      company.update!(sms_provisioning_mode: 'dedicated')
+      TwilioAccount.create!(company: company, phone_number: '+13525550100', phone_number_sid: 'PN123',
+                            status: 'suspended')
+
+      get '/api/settings/tenant', headers: headers
+
+      expect(response.parsed_body.dig('tenant', 'smsSender', 'dedicatedNumber')).to be_nil
+    end
+  end
 end
