@@ -20,7 +20,9 @@ class DealInvoiceService
 
   PLAN_TYPES = %w[single draws financed].freeze
 
-  # Note on the invoice a deal gets when it closes, until accounting approves it.
+  # The note drafts used to carry. Notes print for the customer, so drafts now
+  # carry none (staff see the awaiting-approval banner instead); approval still
+  # clears this one from any draft made before that.
   PENDING_NOTE = 'Awaiting accounting approval. This invoice is made from the deal and follows it: ' \
                  'change the deal, not the invoice.'
 
@@ -89,7 +91,7 @@ class DealInvoiceService
       contact: @deal.contact, deal: @deal, location: @deal.location,
       invoice_date: base_date,
       due_date: schedule_last_due_date(schedule) || (base_date + 30.days),
-      status: 'draft', notes: PENDING_NOTE, draw_schedule: schedule
+      status: 'draft', draw_schedule: schedule
     )
     fill_line(invoice, total)
     invoice.save!
