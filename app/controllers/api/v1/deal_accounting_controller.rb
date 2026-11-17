@@ -29,7 +29,7 @@ class Api::V1::DealAccountingController < ApplicationController
     result = service.post_closing_entries!(user: current_user)
 
     if result[:error]
-      render json: { error: result[:error] }, status: :unprocessable_entity
+      render json: { error: result[:error], code: result[:code] }.compact, status: :unprocessable_entity
     else
       render json: result
     end

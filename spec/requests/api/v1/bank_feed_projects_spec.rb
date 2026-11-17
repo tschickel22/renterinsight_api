@@ -39,7 +39,7 @@ RSpec.describe 'Bank feed to projects and deals', type: :request do
   def body = JSON.parse(response.body)
 
   def approved_deal(price: 100_000)
-    deal = company.deals.create!(location: location, name: 'Diaz home', account: account, selling_price: price, actual_close_date: Date.current - 10)
+    deal = company.deals.create!(location: location, name: 'Diaz home', account: account, selling_price: price, home_cost: 1, actual_close_date: Date.current - 10)
     deal.update!(stage: 'closed_won')
     result = Accounting::DealAccountingService.new(deal).post_closing_entries!(user: dealer)
     expect(result).to include(success: true), result.inspect
