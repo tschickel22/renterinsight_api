@@ -273,6 +273,27 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
       expect(CommunicationOptOut.check(channel: 'sms', company: company, record: lead)).not_to be_opted_out
     end
 
+    it "reads 3CX's plain US date text and recognises the same conversation reported again" do
+      first = chat(started_at: '11/17/2026 9:38:00 PM', ended_at: '11/17/2026 9:40:12 PM')
+      post '/api/partner/v1/phone/chats', params: first.to_json, headers: headers
+      expect(company.phone_call_logs.last.started_at).to eq(Time.utc(2026, 11, 17, 21, 38))
+      expect do
+        post '/api/partner/v1/phone/chats',
+             params: first.merge(messages: first[:messages] + "\nPat Buyer: ok").to_json, headers: headers
+      end.not_to(change { Communication.count })
+    end
+
+    it 'keeps one transcript per conversation when 3CX leaves the times unfilled' do
+      bare = chat(started_at: '[ChatStartTimeUTC]', ended_at: '[ChatEndTimeUTC]', duration: nil)
+      post '/api/partner/v1/phone/chats', params: bare.to_json, headers: headers
+      expect(response).to have_http_status(:created)
+      expect do
+        post '/api/partner/v1/phone/chats',
+             params: bare.merge(messages: bare[:messages] + "\nPat Buyer: ok").to_json, headers: headers
+      end.not_to(change { Communication.count })
+      expect(Communication.where(communicable: lead, channel: 'sms').last.body).to include('Pat Buyer: ok')
+    end
+
     it 'logs a report with an empty message list without adding an empty text' do
       expect do
         post '/api/partner/v1/phone/chats', params: chat(messages: '[ChatMessages]').to_json, headers: headers
@@ -291,9 +312,11 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
       expect(doc.at_xpath("//Parameter[@Name='ApiKey']")['Default']).to eq('ri_live_abc&<x>')
       expect(doc.at_xpath("//Parameter[@Name='Url']")['Default']).to eq('https://api.example.com')
       expect(doc.at_xpath("//Parameter[@Name='CreateLeadEnabled']")['Default']).to eq('True')
-      expect(doc.at_xpath("//Parameter[@Name='ReportChatEnabled']")['Default']).to eq('True')
       chat_keys = doc.xpath("//Scenario[@Id='ReportChat']//PostValues/Value").map { |n| n['Key'] }
       expect(chat_keys).to include('number', 'messages', 'started_at', 'create_lead')
+      # Chat journaling sends plain variables: no SkipIf, no formulas (see chat_values).
+      expect(doc.at_xpath("//Scenario[@Id='ReportChat']/Request")['SkipIf']).to be_nil
+      expect(doc.xpath("//Scenario[@Id='ReportChat']//PostValues/Value").map(&:text).join).not_to include('ToString')
       expect(doc.xpath("//Scenario[@Id='ReportCall']//PostValues/Value").map { |n| n['Key'] }).to include('create_lead')
       expect(doc.at_xpath('//Number')['MaxLength']).to eq('10')
     end

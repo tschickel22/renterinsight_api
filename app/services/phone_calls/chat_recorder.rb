@@ -113,7 +113,10 @@ module PhoneCalls
     end
 
     def dedupe_key(a, started)
-      parts = [@provider, 'sms', a[:number].to_s.gsub(/\D/, '').last(10), started&.utc&.iso8601 || a[:started_at]]
+      # Without a start time, the first line of the transcript stands in: it
+      # stays the same when 3CX reports a conversation again with more.
+      when_key = started&.utc&.iso8601 || a[:messages].to_s.lines.first.to_s.strip.presence
+      parts = [@provider, 'sms', a[:number].to_s.gsub(/\D/, '').last(10), when_key]
       Digest::SHA256.hexdigest(parts.join('|'))
     end
 
@@ -187,10 +190,23 @@ module PhoneCalls
       Rails.logger.error "[PhoneCalls::ChatRecorder] notify failed for lead #{lead.id}: #{e.class}: #{e.message}"
     end
 
+    # ISO, or 3CX's plain .NET text for a UTC time ("11/17/2026 9:38:00 PM",
+    # US month first, which Time.zone.parse would read day first).
+    US_TIME = %r{\A\d{1,2}/\d{1,2}/\d{4}}
+    US_FORMATS = ['%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y'].freeze
+
     def parse_time(value)
       return nil if value.blank?
 
-      Time.zone.parse(value.to_s)
+      text = value.to_s.strip
+      return Time.zone.parse(text) unless text.match?(US_TIME)
+
+      US_FORMATS.each do |fmt|
+        return Time.strptime("#{text} UTC", "#{fmt} %Z").in_time_zone
+      rescue ArgumentError
+        next
+      end
+      nil
     rescue ArgumentError
       nil
     end
