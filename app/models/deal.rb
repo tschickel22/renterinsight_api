@@ -238,6 +238,26 @@ class Deal < ApplicationRecord
   # Fires on the closed_won transition whether closed via mark_as_won or a direct
   # stage update (just_closed_won? keys off saved_change_to_stage?).
   after_commit :notify_home_sold_other_deals, if: -> { just_closed_won? && vehicle_id.present? }
+  # A closed deal gets its sale invoice as a draft right away, so people can see
+  # and send it instead of making their own (which billed the sale twice). The
+  # draft follows the deal until approval takes it over.
+  after_commit :keep_pending_sale_invoice, on: [:create, :update], unless: :gl_posted?
+
+  def keep_pending_sale_invoice
+    service = DealInvoiceService.new(self, user: try(:owner) || try(:user))
+    if deleted_at.present?
+      service.cancel_pending_invoice!('The deal was deleted.')
+    elsif stage_is_won?
+      # Auto-posted deals get their real invoice the moment they close.
+      return if AccountingSettings.for_company(company).try(:auto_post_deals)
+
+      saved_change_to_stage? ? service.create_pending_invoice! : service.sync_pending_invoice!
+    elsif saved_change_to_stage?
+      service.cancel_pending_invoice!
+    end
+  rescue => e
+    Rails.logger.error("[PendingInvoice] Deal #{id}: #{e.class}: #{e.message}")
+  end
 
   def auto_post_closing_to_accounting
     settings = AccountingSettings.for_company(company)

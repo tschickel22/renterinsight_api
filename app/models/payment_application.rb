@@ -16,6 +16,7 @@ class PaymentApplication < ApplicationRecord
   validate  :total_applied_does_not_exceed_payment
   validate  :company_matches_payment
   validate  :company_matches_applicable
+  validate  :applicable_not_awaiting_deal_approval
 
   before_validation :set_defaults, on: :create
   after_commit      :refresh_applicable_paid_state, on: %i[create update destroy]
@@ -25,6 +26,12 @@ class PaymentApplication < ApplicationRecord
   }
 
   private
+
+  def applicable_not_awaiting_deal_approval
+    return unless applicable_type == 'Invoice' && applicable.respond_to?(:awaiting_deal_approval?) && applicable.awaiting_deal_approval?
+
+    errors.add(:base, 'That invoice awaits accounting approval of its deal. Take the money as a deposit on the deal.')
+  end
 
   def set_defaults
     self.applied_at ||= Time.current

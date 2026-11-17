@@ -370,15 +370,19 @@ class Api::V1::DealApprovalsController < ApplicationController
       draw_templates: templates.map { |t| { id: t.id, name: t.name, is_default: t.is_default, location_id: t.location_id } },
       can_record_payments: current_user.has_permission?('accounting', 'create'),
       other_invoices: other_deal_invoices.map { |inv| other_invoice_payload(inv) },
+      pending_invoice: invoices.pending_invoice&.slice(:id, :invoice_number),
       can_replace_invoices: current_user.has_permission?('finance', 'delete')
     }
   end
 
   # Invoices already on the deal besides its own sale invoice. Approval makes
   # that invoice, so one of these billing the home bills the customer twice.
+  # The draft the deal got when it closed is not one of them: approval takes it over.
   def other_deal_invoices
     @company.invoices.not_deleted.where(deal_id: @deal.id).where.not(status: 'cancelled')
-            .where.not(id: @deal.deal_invoice_id).order(:invoice_date, :id)
+            .where.not(id: @deal.deal_invoice_id)
+            .where.not(id: @company.invoices.awaiting_deal_approval.where(source_id: @deal.id).select(:id))
+            .order(:invoice_date, :id)
   end
 
   def other_invoice_payload(inv)

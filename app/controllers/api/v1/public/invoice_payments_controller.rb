@@ -70,11 +70,14 @@ class Api::V1::Public::InvoicePaymentsController < ApplicationController
       contact: @invoice.contact.as_json(only: [:id, :first_name, :last_name, :email, :phone, :street, :city, :state, :zip]),
       branding: branding,
       payment_url: @invoice.payment_url,
-      payments_enabled: @invoice.company.external_payments_id.present?
+      payments_enabled: @invoice.company.external_payments_id.present? && !@invoice.awaiting_deal_approval?
     }
   end
   
   def process_payment
+    if @invoice.awaiting_deal_approval?
+      return render json: { error: 'This invoice is not ready for payment yet. Please contact the business directly.' }, status: :unprocessable_entity
+    end
     unless @invoice.company.external_payments_id.present?
       return render json: { error: 'Online payments are not enabled for this account. Please contact the business directly.' }, status: :unprocessable_entity
     end
