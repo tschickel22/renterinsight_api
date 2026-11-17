@@ -125,8 +125,18 @@ module SiteProfiles
           'token' => token,
           'company_id' => company.id,
           'enabled' => true,
-          'card' => Websites::InventoryCardSettings.for(company)
+          'card' => Websites::InventoryCardSettings.for(company),
+          # A demo shows TrueBuild models beside the homes when this lot offers
+          # any: the designer on its plan and at least one released factory.
+          'truebuild' => truebuild_offered?(company)
         }
+      end
+
+      def truebuild_offered?(company)
+        company.has_module?(Truebuild::BuyerCatalog::MODULE) && Truebuild::DealerFactories.offered_ids(company).any?
+      rescue StandardError => e
+        Rails.logger.warn("[DemoInventoryResolver] TrueBuild check failed for #{company.id}: #{e.message}")
+        false
       end
 
       private

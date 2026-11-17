@@ -11,6 +11,10 @@
 # the dealer's own website. Without the add-on it gets no designable flags,
 # the designer endpoints refuse it, and a home that could be designed points
 # to its page on the DealerTide site instead.
+#
+# A shared demo (a scanned site we are proposing) is a DealerTide site too:
+# it sends its preview token (demo_token), and counts for the one lot that
+# demo shows (DemoInventoryResolver). Nothing a buyer designs there is saved.
 module TruebuildReach
   extend ActiveSupport::Concern
 
@@ -21,7 +25,19 @@ module TruebuildReach
   def dealertide_site_request?
     return @dealertide_site_request if defined?(@dealertide_site_request)
 
-    @dealertide_site_request = params[:website_id].present? && @company.websites.exists?(id: params[:website_id].to_i)
+    @dealertide_site_request = (params[:website_id].present? && @company.websites.exists?(id: params[:website_id].to_i)) ||
+                               demo_request?
+  end
+
+  # Proven by the demo's preview token, which only a platform admin can make
+  # and can withdraw, and only for the lot that demo borrows.
+  def demo_request?
+    return @demo_request if defined?(@demo_request)
+
+    token = params[:demo_token].presence
+    profile = token && SiteContentProfile.find_by(preview_token: token.to_s)
+    @demo_request = !!(profile&.shareable? &&
+                       SiteProfiles::DemoInventoryResolver.config_for_profile(profile)&.dig('company_id') == @company.id)
   end
 
   def truebuild_reachable?
