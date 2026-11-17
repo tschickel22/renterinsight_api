@@ -249,7 +249,8 @@ class SmsService
 
     message = "#{company_name}: Invoice #{invoice_number} balance #{amount}"
     message += " is due #{due_date}." if due_date
-    message += " Pay online: #{payment_link}"
+    # A deal's invoice awaiting approval takes no payment yet: the link is to view it.
+    message += invoice.try(:awaiting_deal_approval?) ? " View it: #{payment_link}" : " Pay online: #{payment_link}"
 
     message
   end

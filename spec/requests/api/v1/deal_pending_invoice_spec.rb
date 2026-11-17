@@ -51,6 +51,8 @@ RSpec.describe 'Deal sale invoice awaiting approval', type: :request do
     inv = pending
     expect(inv).to have_attributes(status: 'draft', deal_id: deal.id, contact_id: contact.id, total: 100_000)
     expect(inv.invoice_items.map { |i| i.cost.to_d }).to all(be_zero) # never the dealer's cost
+    expect(inv.notes).to be_blank # notes print for the customer
+    expect(SmsService.new(company: company).send(:invoice_template, inv)).to include('View it:').and(satisfy { |m| !m.include?('Pay online') })
     expect(deal.reload.deal_invoice_id).to be_nil
     expect(ar_balance).to eq(0)
 
