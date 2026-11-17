@@ -62,6 +62,10 @@ RSpec.describe 'Learning Center map', type: :request do
       TrainingVideo.create!(title: 'One home, start to finish', module_key: 'workflows', is_published: true,
                             video_url: 'https://bucket.example/w.mp4', covers: { 'routes' => ['/deals/:id', '/accounting/deals-commissions'] })
     end
+    let!(:truebuild_video) do
+      TrainingVideo.create!(title: 'Freight rates', module_key: 'truebuild', is_published: true,
+                            video_url: 'https://bucket.example/f.mp4', covers: { 'routes' => ['/settings', '/deals/:id'] })
+    end
     let!(:loose_video) do
       TrainingVideo.create!(title: 'No screens yet', module_key: 'other', is_published: true, video_url: 'https://bucket.example/x.mp4')
     end
@@ -84,6 +88,8 @@ RSpec.describe 'Learning Center map', type: :request do
 
       expect(body['stages'].map { |s| s['key'] }.first(4)).to eq(%w[start leads customers deal])
       expect(stage('start')['video_ids']).to eq([workflow_video.id])
+      expect(stage('truebuild')['video_ids']).to eq([truebuild_video.id])
+      expect(stage('setup')).to be_nil.or(include('video_ids' => []))
       expect(stage('build')).to include('video_ids' => [projects_video.id], 'seconds' => 83)
       expect(stage('build')['tours'].map { |t| t['name'] }).to eq(['Award a bid'])
       expect(stage('leads')['articles'].map { |a| a['slug'] }).to eq(['working-leads'])

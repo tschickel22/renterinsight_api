@@ -22,7 +22,11 @@ class Knowledge::LearnMap
     { key: 'deal', title: 'Quote and deal', blurb: 'Put a home in front of a buyer and write it up.',
       screens: %w[/quotes /deals /deal-desk /agreements] },
     { key: 'home', title: 'Price and build the home', blurb: 'The Deal Sheet, options and the factory order.',
-      screens: %w[/deals/:id?tab=home_build /deals/:dealId?tab=home_build /truebuild /inventory] },
+      screens: %w[/deals/:id?tab=home_build /deals/:dealId?tab=home_build /inventory] },
+    # TrueBuild is its own product with its own course: every TrueBuild video sits
+    # here (by area, like workflows), whatever screen it shows.
+    { key: 'truebuild', title: 'TrueBuild', blurb: 'Your price book, the buyer designer and the Deal Sheet.',
+      screens: %w[/truebuild] },
     { key: 'close', title: 'Close and approve', blurb: 'Accounting checks the deal before it posts.',
       screens: %w[/accounting/deals-commissions /commissions] },
     # A project's page is /deals/:dealId (a deal's is /deals/:id), so the name tells them apart.
@@ -34,7 +38,8 @@ class Knowledge::LearnMap
       screens: %w[/settings /locations /account/settings /data /company /dashboard /service /warranty] }
   ].freeze
   MORE = { key: 'more', title: 'More', blurb: 'Everything else.', screens: [] }.freeze
-  WORKFLOW_AREA = 'workflows'
+  # Areas whose videos sit on one stage whatever screens they show.
+  AREA_STAGES = { 'workflows' => 'start', 'truebuild' => 'truebuild' }.freeze
 
   def initialize(admin: false)
     @admin = admin
@@ -45,12 +50,12 @@ class Knowledge::LearnMap
     @stages ||= begin
       out = (STAGES + [MORE]).to_h { |s| [s[:key], s.merge(videos: [], tours: [], articles: [])] }
       videos.each do |v|
-        key = v.module_key == WORKFLOW_AREA ? 'start' : stage_for(Array(v.covers['routes']))
+        key = AREA_STAGES[v.module_key] || stage_for(Array(v.covers['routes']))
         out[key][:videos] << v
       end
       tours.each { |t| out[stage_for(t.menu_paths)][:tours] << t }
       articles.each { |a| out[stage_for(Knowledge::ScreenHelp::MODULE_SCREENS[a.knowledge_module&.key])][:articles] << a }
-      out.values.reject { |s| %w[start more].include?(s[:key]) && (s[:videos] + s[:tours] + s[:articles]).empty? }
+      out.values.reject { |s| (s[:videos] + s[:tours] + s[:articles]).empty? && %w[start truebuild more].include?(s[:key]) }
     end
   end
 
