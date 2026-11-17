@@ -362,7 +362,11 @@ class Invoice < ApplicationRecord
       reduction = total_paid + total_credited
       calculated_amount_due = total - reduction
 
-      new_status = if reduction >= total && total > 0
+      new_status = if awaiting_deal_approval?
+        # A deal's invoice awaiting approval takes no payments and is not yet
+        # owed on the books, so it is never paid or overdue; approval moves it.
+        status
+      elsif reduction >= total && total > 0
         'paid'
       elsif reduction > 0 && reduction < total
         'partial'
