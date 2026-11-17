@@ -118,10 +118,22 @@ class Api::V1::InvoicesController < ApplicationController
     end
   end
   
+  # What can change on a deal's invoice awaiting approval: the words to the
+  # customer. Everything it bills comes from the deal.
+  AWAITING_APPROVAL_EDITABLE = %w[notes terms footer_text].freeze
+
   def update
     return unless authorize_action!('finance', 'update')
-    
-    if @invoice.update(invoice_params)
+
+    attrs = invoice_params
+    if @invoice.awaiting_deal_approval?
+      blocked = attrs.keys - AWAITING_APPROVAL_EDITABLE
+      if blocked.any?
+        return render json: { error: awaiting_approval_message(@invoice), code: 'awaiting_deal_approval' }, status: :unprocessable_entity
+      end
+    end
+
+    if @invoice.update(attrs)
       render json: @invoice, include: [:contact, :invoice_items]
     else
       render json: { errors: @invoice.errors }, status: :unprocessable_entity
@@ -255,6 +267,10 @@ class Api::V1::InvoicesController < ApplicationController
   def mark_paid
     return unless authorize_action!('finance', 'update')
 
+    if @invoice.awaiting_deal_approval?
+      return render json: { error: 'This deal is not approved yet. Take the money as a deposit with Record Payment on the deal.', code: 'awaiting_deal_approval' }, status: :unprocessable_entity
+    end
+
     # A deal's invoice: approval booked what it bills as owed, so a payment on
     # it must reach the books. It used to save only a payment record, which
     # posts nothing unless "auto-post payments" is on (off for most dealers),
@@ -284,7 +300,11 @@ class Api::V1::InvoicesController < ApplicationController
 
   def finalize
     return unless authorize_action!('finance', 'update')
-    
+
+    if @invoice.awaiting_deal_approval?
+      return render json: { error: awaiting_approval_message(@invoice), code: 'awaiting_deal_approval' }, status: :unprocessable_entity
+    end
+
     unless @invoice.draft?
       return render json: { error: 'Only draft invoices can be finalized' }, status: :unprocessable_entity
     end
@@ -581,6 +601,8 @@ class Api::V1::InvoicesController < ApplicationController
       # The invoice approval made for its deal: payments on it post to the
       # books and fill its draws (Record Payment asks for the bank account).
       is_deal_invoice: deal_for_invoice(invoice).present?,
+      # Made when the deal closed: edit the deal, not this; no payments until approval.
+      awaiting_deal_approval: invoice.awaiting_deal_approval?,
       quote_id: invoice.quote_id,
       draw_schedule: invoice.draw_schedule,
       invoice_items: begin
@@ -608,6 +630,12 @@ class Api::V1::InvoicesController < ApplicationController
     raise
   end
   
+  def awaiting_approval_message(invoice)
+    deal = invoice.deal
+    label = deal ? (deal.deal_number.presence || deal.name.presence || "##{deal.id}") : 'its deal'
+    "This invoice is made from deal #{label} and follows it until accounting approves the deal. Make the change on the deal."
+  end
+
   def serialize_deal_reference(invoice)
     deal = invoice.deal
     return nil unless deal
@@ -697,6 +725,7 @@ class Api::V1::InvoicesController < ApplicationController
       draw_schedule: invoice.draw_schedule,
       deal_id: invoice.deal_id,
       deal: invoice.deal_id.present? ? serialize_deal_reference(invoice) : nil,
+      awaiting_deal_approval: invoice.awaiting_deal_approval?,
       created_at: invoice.created_at,
       updated_at: invoice.updated_at
     }

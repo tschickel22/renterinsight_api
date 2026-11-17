@@ -84,6 +84,7 @@ class Invoice < ApplicationRecord
   validates :status, inclusion: { in: %w[draft finalized sent viewed partial paid overdue cancelled] }
   validates :location_id, presence: { message: 'must be assigned — every invoice must have a location' }
   validate :draw_schedule_sub_items_within_parent
+  validate :awaiting_deal_approval_stays_draft
 
   # Sub-items on a draw are dollar amounts that draw down from the parent draw's calculated amount.
   # Sum of sub_items for any single draw must NOT exceed that draw's amount.
@@ -119,6 +120,10 @@ class Invoice < ApplicationRecord
     Current.location_filtered? ? where(location_id: Current.location_id) : all 
   }
   scope :not_deleted, -> { where(is_deleted: [false, nil]) }
+  # A closed deal's sale invoice before accounting approves the deal
+  # (DealInvoiceService#create_pending_invoice!). Approval is the only thing
+  # that moves it out of draft.
+  scope :awaiting_deal_approval, -> { where(status: 'draft', source_type: 'Deal') }
   scope :drafts, -> { where(status: 'draft') }
   scope :sent, -> { where.not(sent_at: nil) }
   scope :unpaid, -> { where.not(status: ['paid', 'cancelled']) }
@@ -185,6 +190,20 @@ class Invoice < ApplicationRecord
   end
   
   # Payment link
+  # Made from a deal and following it until approval: edited on the deal, never
+  # here; sendable to the customer, but it takes no payments and posts nothing.
+  def awaiting_deal_approval?
+    status == 'draft' && source_type == 'Deal'
+  end
+
+  def awaiting_deal_approval_stays_draft
+    return unless status_changed? && status_was == 'draft' && source_type == 'Deal'
+    return if status == 'cancelled'
+    return if Deal.where(id: source_id).where.not(gl_posted_at: nil).exists?
+
+    errors.add(:base, "This is the deal's invoice. It stays a draft until accounting approves the deal.")
+  end
+
   def payment_url(base_url = nil)
     # Environment-aware base URL
     base_url ||= if Rails.env.production?
@@ -218,7 +237,7 @@ class Invoice < ApplicationRecord
   
   # Mark as finalized (real invoice, not yet sent)
   def finalize!
-    update(status: 'finalized') if draft?
+    update(status: 'finalized') if draft? && !awaiting_deal_approval?
   end
 
   def finalized?
@@ -227,6 +246,9 @@ class Invoice < ApplicationRecord
 
   # Mark as sent
   def mark_as_sent!
+    # A deal's invoice awaiting approval is sent as it is and stays a draft.
+    return update(sent_at: Time.current) if awaiting_deal_approval?
+
     update(status: 'sent', sent_at: Time.current) if draft? || finalized?
   end
   

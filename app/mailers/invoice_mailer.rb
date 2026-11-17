@@ -28,7 +28,7 @@ class InvoiceMailer < ApplicationMailer
     @amount_due = @invoice.amount_due
 
     @payment_link = @invoice.payment_url
-    @payments_enabled = @company.external_payments_id.present?
+    @payments_enabled = @company.external_payments_id.present? && !@invoice.awaiting_deal_approval?
 
     deliver_with_resolved_config(
       to: @contact.email,

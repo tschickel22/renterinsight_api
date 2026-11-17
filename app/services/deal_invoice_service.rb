@@ -20,7 +20,12 @@ class DealInvoiceService
 
   PLAN_TYPES = %w[single draws financed].freeze
 
-  # Returns the existing invoice if already created; otherwise builds one.
+  # Note on the invoice a deal gets when it closes, until accounting approves it.
+  PENDING_NOTE = 'Awaiting accounting approval. This invoice is made from the deal and follows it: ' \
+                 'change the deal, not the invoice.'
+
+  # Returns the existing invoice if already created; otherwise builds one, or
+  # takes over the draft the deal got when it closed (see create_pending_invoice!).
   # Idempotent: safe to call repeatedly from the approve action.
   #
   # plan (from the approval screen; nil keeps the default: the location's or
@@ -31,7 +36,7 @@ class DealInvoiceService
   #       the customer's share due at close, then the lender's funding as its
   #       own draw on the same invoice
   #
-  # Deposits already taken on the deal are applied to the new invoice.
+  # Deposits already taken on the deal are applied to the invoice.
   def create_invoice!(plan: nil)
     existing = existing_invoice
     return existing if existing
@@ -41,33 +46,21 @@ class DealInvoiceService
     schedule = plan.present? ? schedule_for_plan(plan, total, base_date) : build_schedule(resolve_template, total, base_date)
     single_due = plan.present? && plan[:type].to_s == 'single' ? (parse_date(plan[:due_date]) || base_date) : nil
 
-    invoice = nil
+    invoice = pending_invoice
 
     Invoice.transaction do
-      invoice = Invoice.new(
-        company: @company,
+      invoice ||= Invoice.new(company: @company, source: @deal, billing_category: 'home_sale', sales_rep: @user)
+      invoice.assign_attributes(
         contact: @deal.contact,
         deal: @deal,
         location: @deal.location,
         invoice_date: base_date,
         due_date: schedule_last_due_date(schedule) || single_due || (base_date + 30.days),
         status: 'sent',
-        source_type: 'deal_close',
-        source: @deal,
-        billing_category: 'home_sale',
-        notes: 'Auto-generated from deal close',
-        sales_rep: @user
+        notes: invoice.notes.blank? || invoice.notes == PENDING_NOTE ? 'Auto-generated from deal close' : invoice.notes,
+        draw_schedule: schedule
       )
-
-      invoice.draw_schedule = schedule if schedule
-      invoice.invoice_items.build(
-        description: invoice_line_description,
-        quantity: 1,
-        rate: total,
-        amount: total,
-        position: 1
-      )
-
+      fill_line(invoice, total)
       invoice.save!
 
       @deal.update_columns(deal_invoice_id: invoice.id)
@@ -75,6 +68,73 @@ class DealInvoiceService
 
     apply_deposits!(invoice)
     invoice
+  end
+
+  # The deal's invoice made when it closes, before accounting approves it, so
+  # people can see and send it instead of making their own. It stays a draft:
+  # it posts nothing (the closing entry books the sale), takes no payments
+  # (money before approval is a deposit on the deal) and follows the deal.
+  # Approval takes it over through create_invoice!.
+  def create_pending_invoice!
+    return nil if @deal.gl_posted? || existing_invoice
+    return sync_pending_invoice! if pending_invoice
+
+    total = pending_total
+    base_date = resolve_base_date
+    schedule = build_schedule(resolve_template, total, base_date)
+    invoice = Invoice.new(
+      company: @company, source: @deal, billing_category: 'home_sale', sales_rep: @user,
+      contact: @deal.contact, deal: @deal, location: @deal.location,
+      invoice_date: base_date,
+      due_date: schedule_last_due_date(schedule) || (base_date + 30.days),
+      status: 'draft', notes: PENDING_NOTE, draw_schedule: schedule
+    )
+    fill_line(invoice, total)
+    invoice.save!
+    invoice
+  end
+
+  # Brings the draft in line with the deal after the deal changes. Writes only
+  # when something the invoice shows moved.
+  def sync_pending_invoice!
+    invoice = pending_invoice
+    return nil unless invoice
+
+    total = pending_total
+    base_date = resolve_base_date
+    description = invoice_line_description
+    line = invoice.invoice_items.first
+    unchanged = invoice.invoice_items.size == 1 && line && line.amount.to_d == total && line.description == description &&
+                invoice.contact_id == @deal.contact_id && invoice.location_id == @deal.location_id &&
+                invoice.invoice_date == base_date
+    return invoice if unchanged
+
+    schedule = build_schedule(resolve_template, total, base_date)
+    Invoice.transaction do
+      invoice.assign_attributes(
+        contact: @deal.contact, location: @deal.location, invoice_date: base_date,
+        due_date: schedule_last_due_date(schedule) || (base_date + 30.days), draw_schedule: schedule
+      )
+      fill_line(invoice, total)
+      invoice.save!
+    end
+    invoice
+  end
+
+  # The deal reopened or was lost before approval: its draft goes.
+  def cancel_pending_invoice!(reason = 'The deal is no longer closed.')
+    invoice = pending_invoice
+    return nil unless invoice
+
+    invoice.update!(status: 'cancelled', notes: [invoice.notes.presence, "Cancelled: #{reason}"].compact.join("\n\n"))
+    invoice
+  end
+
+  # The draft made at close, while the deal awaits approval.
+  def pending_invoice
+    return @pending_invoice if defined?(@pending_invoice) && @pending_invoice&.persisted?
+
+    @pending_invoice = @company.invoices.not_deleted.awaiting_deal_approval.where(source_id: @deal.id).order(:id).last
   end
 
   # Money taken on the deal before it had an invoice, applied to it oldest
@@ -212,6 +272,17 @@ class DealInvoiceService
       'percentage' => total.to_d.positive? ? (amount / total.to_d * 100).round(4).to_f : 0,
       'due_date' => due.iso8601, 'days_after_close' => 0, 'status' => 'pending', 'paid_amount' => 0.0
     }
+  end
+
+  # One line for the sale: what the home is and what is owed. Never cost.
+  def fill_line(invoice, total)
+    invoice.invoice_items.destroy_all if invoice.persisted?
+    invoice.invoice_items.build(description: invoice_line_description, quantity: 1, rate: total, amount: total, position: 1)
+  end
+
+  # Before approval nothing is posted, so the tax is the tax approval will post.
+  def pending_total
+    total_parts.values.sum.to_d.round(2)
   end
 
   def existing_invoice
