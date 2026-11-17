@@ -1092,6 +1092,10 @@ module Api
           
           base.merge!(
             products: products_array,
+            # Closed won with a price and no home cost: approval will refuse to post it,
+            # so the deal page warns the rep. A flag, not cost data.
+            costMissing: deal.stage_is_won? && !deal.gl_posted &&
+              Accounting::DealAccountingService.new(deal).missing_cost_problem.present?,
             stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) },
             # The deal sheet version the deal's numbers come from, for the LIVE badge.
             dealSheet: deal_sheet_json(deal),

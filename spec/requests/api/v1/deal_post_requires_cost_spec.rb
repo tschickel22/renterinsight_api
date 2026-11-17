@@ -90,6 +90,16 @@ RSpec.describe 'Posting a deal needs a home cost', type: :request do
     end
   end
 
+  it 'flags the deal page so the rep sees it after closing' do
+    missing = closed_deal
+    costed = closed_deal(name: 'Costed home', home_cost: 70_000)
+
+    get "/api/crm/deals/#{missing.id}", headers: headers
+    expect(body.dig('deal', 'costMissing') || body['costMissing']).to be(true)
+    get "/api/crm/deals/#{costed.id}", headers: headers
+    expect(body.dig('deal', 'costMissing') || body['costMissing']).to be(false)
+  end
+
   it 'still posts a deal with no selling price' do
     expect(Accounting::DealAccountingService.new(closed_deal(selling_price: 0)).missing_cost_problem).to be_nil
   end
