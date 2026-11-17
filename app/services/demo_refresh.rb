@@ -71,13 +71,18 @@ class DemoRefresh
     "#{first_name}.#{last_name}@#{EMAIL_DOMAIN}".downcase
   end
 
-  def initialize(company:, user:)
+  # seeding: true is for db/seeds/demo_company.rb, which builds a brand new
+  # is_demo company and wants its queues full on day one in any environment.
+  # It skips only the DEMO_REFRESH_COMPANY_IDS list; is_demo is still required.
+  def initialize(company:, user:, seeding: false)
     @company = company
     @user = user
+    @seeding = seeding
   end
 
   def call
-    raise NotAvailable, 'Demo refresh is not turned on for this company.' unless self.class.available?(@company)
+    allowed = self.class.available?(@company) || (@seeding && @company&.is_demo?)
+    raise NotAvailable, 'Demo refresh is not turned on for this company.' unless allowed
 
     @now = Time.current
     @counts = Hash.new(0)

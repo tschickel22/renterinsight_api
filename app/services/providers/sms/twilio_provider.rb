@@ -59,6 +59,12 @@ module Providers
       private
       
       def send_via_http(to:, from:, body:, account_sid:, auth_token:, messaging_service_sid: nil, media_urls: nil)
+        # Demo data uses 555 numbers; never text them (see ReservedRecipient).
+        if ReservedRecipient.block_phone?(to)
+          Rails.logger.info "[TwilioProvider] Not texting #{to}: reserved demo number"
+          return { success: true, message_sid: nil, status: 'not_delivered' }
+        end
+
         require 'net/http'
         require 'uri'
         require 'json'
