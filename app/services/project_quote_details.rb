@@ -9,8 +9,8 @@
 class ProjectQuoteDetails
   FLAG = 'quote_details'
 
-  # Never shown: money of any kind, and anything internal.
-  HIDDEN_KEY = /price|cost|total|amount|rate|discount|tax|margin|profit|markup|gross|internal/i
+  # Lines that are money, not work: fees, and payments, deposits and financing.
+  NOT_WORK = /\b(down\s*payment|deposit|payment|financ\w*|loan|discount|rebate|credit|promo\w*)\b/i
 
   class Error < StandardError; end
 
@@ -92,8 +92,8 @@ class ProjectQuoteDetails
     enable!
   end
 
-  # What goes on the sheet: each line with money taken out. Credit and
-  # discount lines are left out (they are money, not work).
+  # What goes on the sheet: each line with money taken out. Credit, discount,
+  # fee and payment lines are left out (they are money, not work).
   def lines(q)
     Array(q.items).filter_map do |item|
       next unless item.is_a?(Hash)
@@ -103,6 +103,7 @@ class ProjectQuoteDetails
 
       description = item['description'].presence || item['name'].presence
       next if description.blank?
+      next if item['category'].to_s == 'fee' || description.to_s.match?(NOT_WORK)
 
       { description: description.to_s, category: item['category'].to_s.tr('_', ' ').presence,
         quantity: item['quantity'].presence || 1, notes: item['notes'].to_s.strip.presence }
