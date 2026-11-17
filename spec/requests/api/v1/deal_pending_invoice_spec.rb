@@ -108,6 +108,14 @@ RSpec.describe 'Deal sale invoice awaiting approval', type: :request do
     expect(pending.id).not_to eq(first.id)
   end
 
+  it 'keeps a draft for a deal closed long ago a draft, not overdue' do
+    deal.update!(actual_close_date: Date.current - 60)
+    close!
+    expect(pending).to have_attributes(status: 'draft')
+    deal.update!(selling_price: 101_000)
+    expect(pending).to have_attributes(status: 'draft', total: 101_000)
+  end
+
   it 'makes no draft for a company that posts deals as they close' do
     AccountingSettings.for_company(company).update!(auto_post_deals: true)
     close!
