@@ -40,6 +40,14 @@ class DealVehicleStatusSync
   def self.mark_sold(deal, vehicle)
     return unless deal && vehicle
 
+    # A catalog home ("available to order") is never sold itself: it has to stay
+    # orderable for the next customer. Sell the dealer's own copy instead and move
+    # this deal onto it, the same way the deal sheet's home status does.
+    if vehicle.catalog_row?
+      vehicle = copy_catalog_home_for(deal, vehicle)
+      return false unless vehicle
+    end
+
     if vehicle.status == 'sold' && vehicle.sold_via_deal_id.present? && vehicle.sold_via_deal_id != deal.id
       Rails.logger.warn(
         "[DealVehicleStatusSync] Deal #{deal.id} mark_sold but vehicle #{vehicle.id} already sold via deal #{vehicle.sold_via_deal_id} — skipping"
@@ -73,6 +81,31 @@ class DealVehicleStatusSync
   rescue => e
     Rails.logger.error("[DealVehicleStatusSync] release failed for deal #{deal.id}: #{e.message}")
     false
+  end
+
+  # Makes the dealer's copy of a catalog home for this sale and points the deal
+  # (and the deal's own home build, desk scenarios and project) at it. Returns the
+  # copy, or nil when it could not be made (the catalog home is left as it is).
+  def self.copy_catalog_home_for(deal, catalog_vehicle)
+    service = VehicleCloneFromCatalogService.new(
+      catalog_vehicle, status: 'sold', attributes: { location_id: deal.location_id }.compact
+    )
+    copy = service.call
+    unless copy
+      Rails.logger.error(
+        "[DealVehicleStatusSync] Deal #{deal.id} could not copy catalog home #{catalog_vehicle.id}: #{service.errors.full_messages.join(', ')}"
+      )
+      return nil
+    end
+
+    if deal.vehicle_id == catalog_vehicle.id
+      deal.update_columns(vehicle_id: copy.id)
+      deal.association(:vehicle).reset
+    end
+    [DealHomeBuild, DealDeskScenario, Project].each do |model|
+      model.where(deal_id: deal.id, vehicle_id: catalog_vehicle.id).update_all(vehicle_id: copy.id)
+    end
+    copy
   end
 
   private

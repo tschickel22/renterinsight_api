@@ -105,4 +105,40 @@ RSpec.describe DealVehicleStatusSync do
       expect(veh.sold_via_deal_id).to be_nil
     end
   end
+
+  describe 'a deal on a catalog home (available to order)' do
+    def catalog_home
+      vehicle(status: 'available_to_order', source: 'champion_ims', inventory_id: "MH-CAT-#{SecureRandom.hex(3)}")
+    end
+
+    it 'keeps the catalog home orderable and sells a dealer copy that the deal moves to' do
+      cat = catalog_home
+      deal = deal_for(cat, stage: 'negotiation')
+      other = deal_for(cat, stage: 'negotiation')
+
+      deal.update!(stage: 'closed_won')
+
+      expect(cat.reload.status).to eq('available_to_order')
+      expect(cat.sold_via_deal_id).to be_nil
+
+      copy = deal.reload.vehicle
+      expect(copy.id).not_to eq(cat.id)
+      expect(copy.cloned_from_id).to eq(cat.id)
+      expect(copy.source).to eq('champion_ims_clone')
+      expect(copy.status).to eq('sold')
+      expect(copy.sold_via_deal_id).to eq(deal.id)
+
+      expect(other.reload.vehicle_id).to eq(cat.id) # another customer's deal keeps ordering it
+    end
+
+    it 'leaves the catalog home alone when the copy cannot be made' do
+      cat = catalog_home
+      deal = deal_for(cat, stage: 'negotiation')
+      allow_any_instance_of(VehicleCloneFromCatalogService).to receive(:call).and_return(nil)
+
+      expect(described_class.mark_sold(deal, cat)).to eq(false)
+      expect(cat.reload.status).to eq('available_to_order')
+      expect(deal.reload.vehicle_id).to eq(cat.id)
+    end
+  end
 end
