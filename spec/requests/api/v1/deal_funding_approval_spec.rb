@@ -257,4 +257,55 @@ RSpec.describe 'Deal funding at approval', type: :request do
     row = body['projects'].find { |r| r['id'] == project.id }
     expect(row).to include('received' => 25_000.0, 'owed' => 75_000.0)
   end
+
+  describe 'an invoice made by hand on the deal before approval' do
+    let(:contact) { company.contacts.create!(first_name: 'Ana', last_name: 'Diaz', email: 'ana@example.com') }
+
+    def hand_invoice(amount)
+      AccountingSettings.for_company(company).update!(auto_post_invoices: true)
+      inv = company.invoices.create!(location: location, contact: contact, deal: deal, invoice_date: Date.current, status: 'draft')
+      inv.invoice_items.create!(description: 'Home', quantity: 1, rate: amount)
+      inv.save!
+      inv.update!(status: 'sent')
+      Accounting::InvoicePostingService.new(inv.reload).post! # after_commit never runs in transactional specs
+      inv.reload
+    end
+
+    it 'shows it on the approval screen' do
+      inv = hand_invoice(100_000)
+      get "/api/v1/deal_approvals/#{deal.id}", headers: headers
+      expect(body.dig('funding', 'other_invoices'))
+        .to match([include('id' => inv.id, 'total' => 100_000.0, 'amount_paid' => 0.0, 'can_replace' => true)])
+    end
+
+    it 'cancels it and reverses its entry when approval replaces it, so the sale is booked once' do
+      inv = hand_invoice(100_000)
+      expect(balance(ar.id)).to eq(100_000)
+
+      approve(plan: { type: 'single', due_date: Date.current.to_s }, replace_invoice_ids: [inv.id])
+      expect(response).to have_http_status(:ok), response.body
+      expect(body['replaced_invoices']).to eq([inv.invoice_number])
+      expect(inv.reload.status).to eq('cancelled')
+      expect(deal.reload.deal_invoice_id).not_to eq(inv.id)
+      expect(balance(ar.id)).to eq(100_000)
+      expect(balance(revenue.id)).to eq(-100_000)
+    end
+
+    it 'leaves it alone when approval is not told to replace it' do
+      inv = hand_invoice(2_500)
+      approve(plan: { type: 'single', due_date: Date.current.to_s })
+      expect(response).to have_http_status(:ok), response.body
+      expect(inv.reload.status).to eq('sent')
+      expect(balance(ar.id)).to eq(102_500)
+    end
+
+    it 'refuses to replace an invoice with money on it, before anything posts' do
+      inv = hand_invoice(100_000)
+      inv.update_columns(amount_paid: 1_000)
+      approve(plan: { type: 'single', due_date: Date.current.to_s }, replace_invoice_ids: [inv.id])
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(body['error']).to include('has money on it')
+      expect(deal.reload.gl_posted?).to be(false)
+    end
+  end
 end
