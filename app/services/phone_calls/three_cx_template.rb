@@ -5,7 +5,19 @@ module PhoneCalls
   # CRM, Add Template). It makes 3CX:
   #   - look up every caller in DealerTide (name on the phone, link to the record),
   #   - report every finished call (ReportCall, 3CX's call journaling),
-  #   - optionally create a lead for a caller nobody has (off by default).
+  #   - report every text conversation marked dealt with (ReportChat, 3CX's
+  #     chat journaling; SMS only reaches us this way, see ChatRecorder),
+  #   - make a lead of an unknown number that calls or texts in (on by default;
+  #     done by us when the call or chat is reported, because 3CX has no
+  #     automatic create step: CreateContactRecordFromClient runs only when
+  #     someone clicks create contact in the 3CX app, and is wired to the same
+  #     endpoint for that).
+  #
+  # Scenario Ids are 3CX's reserved names (crm-template-xml-description): no Id
+  # is the number lookup, ReportCall, ReportChat, CreateContactRecordFromClient.
+  # An Id 3CX does not know is never run. The first version used
+  # "CreateContactRecord", which is why Easy Homesource could not turn lead
+  # creation on.
   #
   # Format follows 3CX's server-side CRM template, checked against public
   # templates that work on V20 (FreeITSM, Pipedrive, a clinic's own). 3CX sends
@@ -35,7 +47,8 @@ module PhoneCalls
             <Parameter Name="Url" Type="String" Parent="General Configuration" Editor="String" Title="#{e(@brand)} address:" Default="#{e(@base)}" />
             <Parameter Name="ApiKey" Type="Password" Parent="General Configuration" Editor="String" Title="API key:" Default="#{e(@key)}" />
             <Parameter Name="ReportCallEnabled" Type="Boolean" Parent="Call Journaling" Editor="String" Title="Log calls on #{e(@brand)} activities" Default="True" />
-            <Parameter Name="CreateContactEnabled" Type="Boolean" Parent="Contact Creation" Editor="String" Title="Create a lead for unknown callers" Default="False" />
+            <Parameter Name="ReportChatEnabled" Type="Boolean" Parent="Chat Journaling" Editor="String" Title="Save text conversations on #{e(@brand)} records" Default="True" />
+            <Parameter Name="CreateLeadEnabled" Type="Boolean" Parent="Contact Creation" Editor="String" Title="Create a lead for unknown numbers that call or text" Default="True" />
           </Parameters>
           <Authentication Type="No" />
           <Scenarios>
@@ -56,11 +69,11 @@ module PhoneCalls
         #{outputs}
               </Outputs>
             </Scenario>
-            <Scenario Id="CreateContactRecord" Type="REST">
-              <Request SkipIf="[CreateContactEnabled]!=True" Url="[Url]/api/partner/v1/phone/contacts" MessagePasses="0" RequestContentType="application/json" RequestEncoding="Json" RequestType="Post" ResponseType="Json">
+            <Scenario Id="CreateContactRecordFromClient" Type="REST">
+              <Request Url="[Url]/api/partner/v1/phone/contacts" MessagePasses="0" RequestContentType="application/json" RequestEncoding="Json" RequestType="Post" ResponseType="Json">
         #{headers}
                 <PostValues Key="">
-        #{v('number', '[Number]')}
+        #{create_values}
                 </PostValues>
               </Request>
               <Rules>
@@ -78,6 +91,16 @@ module PhoneCalls
         #{headers}
                 <PostValues Key="">
         #{report_values}
+                </PostValues>
+              </Request>
+              <Variables />
+              <Outputs AllowEmpty="true" />
+            </Scenario>
+            <Scenario Id="ReportChat" Type="REST">
+              <Request SkipIf="[ReportChatEnabled]!=True" Url="[Url]/api/partner/v1/phone/chats" MessagePasses="0" RequestContentType="application/json" RequestEncoding="Json" RequestType="Post" ResponseType="Json">
+        #{headers}
+                <PostValues Key="">
+        #{chat_values}
                 </PostValues>
               </Request>
               <Variables />
@@ -115,7 +138,41 @@ module PhoneCalls
         v('started_at', e('[[CallStartTimeUTC].ToString("yyyy-MM-ddTHH:mm:ssZ")]'), 2),
         v('entity_id', '[EntityId]'),
         v('contact_id', '[Contact::ContactID]'),
-        v('queue_extension', '[QueueExtension]')
+        v('queue_extension', '[QueueExtension]'),
+        v('create_lead', '[CreateLeadEnabled]')
+      ].join("\n")
+    end
+
+    # 3CX's chat journaling variables. Number is only filled for SMS (a live
+    # chat carries Email instead, and is ignored without a number).
+    def chat_values
+      [
+        v('provider', '3cx', 0),
+        v('number', '[Number]'),
+        v('email', '[Email]'),
+        v('name', '[Name]'),
+        v('messages', '[ChatMessages]'),
+        v('agent', '[Agent]'),
+        v('agent_email', '[AgentEmail]'),
+        v('agent_name', '[AgentFirstName] [AgentLastName]'),
+        v('duration', e('[[[DurationTimespan].get_TotalSeconds()].ToString("F0")]')),
+        v('started_at', e('[[ChatStartTimeUTC].ToString("yyyy-MM-ddTHH:mm:ssZ")]'), 2),
+        v('ended_at', e('[[ChatEndTimeUTC].ToString("yyyy-MM-ddTHH:mm:ssZ")]'), 2),
+        v('entity_id', '[EntityId]'),
+        v('entity_type', '[EntityType]'),
+        v('queue_extension', '[QueueExtension]'),
+        v('create_lead', '[CreateLeadEnabled]')
+      ].join("\n")
+    end
+
+    # 3CX's create-contact form (CreateContactRecordFromClient).
+    def create_values
+      [
+        v('number', '[Number]'),
+        v('first_name', '[FirstName]'),
+        v('last_name', '[LastName]'),
+        v('email', '[Email]'),
+        v('company', '[Company]')
       ].join("\n")
     end
 

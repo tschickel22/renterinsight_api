@@ -3942,6 +3942,7 @@ Rails.application.routes.draw do
         match 'phone/lookup', to: 'phone#lookup', via: [:get, :post]
         post 'phone/contacts', to: 'phone#create_contact'
         post 'phone/calls', to: 'phone#calls'
+        post 'phone/chats', to: 'phone#chats'
 
         # Webhooks
         get 'webhook-events', to: 'webhook_events#index'

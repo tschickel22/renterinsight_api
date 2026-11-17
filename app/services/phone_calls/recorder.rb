@@ -5,10 +5,12 @@ module PhoneCalls
   # journaling) and puts it on the Activities tab of the lead, contact or account
   # that owns the outside number.
   #
-  # - Every report lands in phone_call_logs, matched or not. A call from a number
-  #   nobody in the CRM has is kept there and does NOT create a lead: plenty of
-  #   calls are vendors, factories and robocalls. 3CX's own "create contact"
-  #   option is the route for turning a caller into a lead.
+  # - Every report lands in phone_call_logs, matched or not. An incoming call
+  #   (answered or missed) from a number nobody in the CRM has becomes a lead
+  #   when create_lead is on (the template's "Create a lead for unknown
+  #   numbers", on by default since 2026-11-17 at Easy Homesource's request).
+  #   3CX's own create-contact step cannot do this: it runs only when someone
+  #   asks for it in the 3CX app (see LeadMaker). Outgoing calls never create one.
   # - 3CX sends no call id, so a resent report is recognised by a key built from
   #   the number, start time, extension and call type.
   # - The activity is credited to the DealerTide user whose email or name matches
@@ -30,7 +32,7 @@ module PhoneCalls
       'notanswered' => %w[outbound no_answer]
     }.freeze
 
-    Result = Struct.new(:log, :record, :activity, :duplicate, keyword_init: true)
+    Result = Struct.new(:log, :record, :activity, :duplicate, :created_lead, keyword_init: true)
 
     def initialize(company:, provider: '3cx')
       @company = company
@@ -38,7 +40,8 @@ module PhoneCalls
     end
 
     # attrs: call_type, direction, number, agent, agent_email, agent_name,
-    # duration (seconds or hh:mm:ss), started_at, entity_id. Values 3CX left as an
+    # duration (seconds or hh:mm:ss), started_at, entity_id, create_lead
+    # ("True"/"False"). Values 3CX left as an
     # unfilled "[Variable]" placeholder count as blank.
     def call(attrs, payload: {})
       a = clean(attrs)
@@ -50,6 +53,11 @@ module PhoneCalls
       return Result.new(log: existing, record: existing.loggable, duplicate: true) if existing
 
       record = resolve_record(a)
+      created = false
+      if record.nil? && direction == 'inbound' && a[:create_lead].to_s.casecmp('true').zero?
+        record = LeadMaker.new(@company).create!(number: a[:number], kind: :call)
+        created = record.present?
+      end
       user = resolve_user(a, record)
       log = @company.phone_call_logs.create!(
         provider: @provider, dedupe_key: key, call_type: a[:call_type], direction: direction, outcome: outcome,
@@ -60,7 +68,7 @@ module PhoneCalls
       activity = record && user ? create_activity!(log, record, user) : nil
       log.update_columns(activity_type: activity.class.name, activity_id: activity.id) if activity
       notify_missed(log, record) if record && direction == 'inbound' && outcome == 'no_answer' && recent?(log)
-      Result.new(log: log, record: record, activity: activity, duplicate: false)
+      Result.new(log: log, record: record, activity: activity, duplicate: false, created_lead: created)
     rescue ActiveRecord::RecordNotUnique
       existing = @company.phone_call_logs.find_by(dedupe_key: key)
       Result.new(log: existing, record: existing&.loggable, duplicate: true)
@@ -185,8 +193,12 @@ module PhoneCalls
       nil
     end
 
-    # "95", "95.4", "00:01:35" or "1.00:01:35" (a .NET TimeSpan)
     def parse_duration(value)
+      self.class.parse_duration(value)
+    end
+
+    # "95", "95.4", "00:01:35" or "1.00:01:35" (a .NET TimeSpan)
+    def self.parse_duration(value)
       s = value.to_s.strip
       return nil if s.blank?
       return s.to_f.round if s.match?(/\A\d+(\.\d+)?\z/)
