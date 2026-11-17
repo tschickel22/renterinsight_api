@@ -110,6 +110,6 @@ class Knowledge::LearnMap
   end
 
   def articles
-    Knowledge::Article.published.where.not(article_type: 'release_note').includes(:knowledge_module).ordered.to_a
+    Knowledge::Article.published.standalone.includes(:knowledge_module).ordered.to_a
   end
 end

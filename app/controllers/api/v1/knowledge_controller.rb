@@ -83,7 +83,8 @@ module Api
                 end
         scope = scope.ordered
         scope = scope.joins(:knowledge_module).where(knowledge_modules: { key: params[:module] }) if params[:module].present?
-        scope = scope.of_type(params[:article_type]) if params[:article_type].present?
+        # Bookends belong to a Watch all, not a list of articles, unless asked for by type.
+        scope = params[:article_type].present? ? scope.of_type(params[:article_type]) : scope.where.not(article_type: Knowledge::Article::BOOKEND_TYPES)
         # What's New reads newest first.
         scope = scope.reorder(created_at: :desc) if params[:article_type] == 'release_note'
 

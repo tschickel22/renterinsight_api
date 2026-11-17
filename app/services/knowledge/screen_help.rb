@@ -63,7 +63,7 @@ class Knowledge::ScreenHelp
   end
 
   def articles
-    records = Knowledge::Article.published.where.not(article_type: 'release_note')
+    records = Knowledge::Article.published.standalone
                                 .includes(:knowledge_module).ordered.to_a
     best(records) { |article| MODULE_SCREENS[article.knowledge_module&.key] }
   end
