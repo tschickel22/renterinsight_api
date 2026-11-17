@@ -79,6 +79,9 @@ class Deal < ApplicationRecord
   has_many :purchase_orders, dependent: :nullify
   has_many :deal_desk_scenarios, dependent: :destroy
   has_many :invoices, dependent: :nullify
+  # Staff-only files on the deal. Files shared with the buyer are owned by the
+  # contact and point here through related_to (see Api::Admin::DocumentsController).
+  has_many :owned_documents, as: :owner, class_name: 'PortalDocument', dependent: :destroy
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
