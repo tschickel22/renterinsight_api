@@ -47,7 +47,6 @@ module PhoneCalls
             <Parameter Name="Url" Type="String" Parent="General Configuration" Editor="String" Title="#{e(@brand)} address:" Default="#{e(@base)}" />
             <Parameter Name="ApiKey" Type="Password" Parent="General Configuration" Editor="String" Title="API key:" Default="#{e(@key)}" />
             <Parameter Name="ReportCallEnabled" Type="Boolean" Parent="Call Journaling" Editor="String" Title="Log calls on #{e(@brand)} activities" Default="True" />
-            <Parameter Name="ReportChatEnabled" Type="Boolean" Parent="Chat Journaling" Editor="String" Title="Save text conversations on #{e(@brand)} records" Default="True" />
             <Parameter Name="CreateLeadEnabled" Type="Boolean" Parent="Contact Creation" Editor="String" Title="Create a lead for unknown numbers that call or text" Default="True" />
           </Parameters>
           <Authentication Type="No" />
@@ -97,7 +96,7 @@ module PhoneCalls
               <Outputs AllowEmpty="true" />
             </Scenario>
             <Scenario Id="ReportChat" Type="REST">
-              <Request SkipIf="[ReportChatEnabled]!=True" Url="[Url]/api/partner/v1/phone/chats" MessagePasses="0" RequestContentType="application/json" RequestEncoding="Json" RequestType="Post" ResponseType="Json">
+              <Request Url="[Url]/api/partner/v1/phone/chats" MessagePasses="0" RequestContentType="application/json" RequestEncoding="Json" RequestType="Post" ResponseType="Json">
         #{headers}
                 <PostValues Key="">
         #{chat_values}
@@ -145,6 +144,14 @@ module PhoneCalls
 
     # 3CX's chat journaling variables. Number is only filled for SMS (a live
     # chat carries Email instead, and is ignored without a number).
+    #
+    # Plain variables only, no formulas and no SkipIf. The first version
+    # formatted the times and duration the way ReportCall does and skipped on
+    # ReportChatEnabled; on Easy Homesource's V20 (2026-11-17) 3CX closed and
+    # archived dealt-with SMS chats but never sent one report, while lookups
+    # and ReportCall worked. A formula over a variable 3CX does not fill for a
+    # chat is the likely cause. A variable left unfilled arrives as its own
+    # "[Name]" text and ChatRecorder treats it as blank.
     def chat_values
       [
         v('provider', '3cx', 0),
@@ -155,9 +162,8 @@ module PhoneCalls
         v('agent', '[Agent]'),
         v('agent_email', '[AgentEmail]'),
         v('agent_name', '[AgentFirstName] [AgentLastName]'),
-        v('duration', e('[[[DurationTimespan].get_TotalSeconds()].ToString("F0")]')),
-        v('started_at', e('[[ChatStartTimeUTC].ToString("yyyy-MM-ddTHH:mm:ssZ")]'), 2),
-        v('ended_at', e('[[ChatEndTimeUTC].ToString("yyyy-MM-ddTHH:mm:ssZ")]'), 2),
+        v('started_at', '[ChatStartTimeUTC]'),
+        v('ended_at', '[ChatEndTimeUTC]'),
         v('entity_id', '[EntityId]'),
         v('entity_type', '[EntityType]'),
         v('queue_extension', '[QueueExtension]'),
