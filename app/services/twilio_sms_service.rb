@@ -13,6 +13,12 @@ module TwilioSmsService
     require 'uri'
     require 'json'
 
+    # Demo data uses 555 numbers; never text them (see ReservedRecipient).
+    if ReservedRecipient.block_phone?(to)
+      Rails.logger.info "[TwilioSmsService] Not texting #{to}: reserved demo number"
+      return { success: true, message_sid: nil, status: 'not_delivered' }
+    end
+
     unless account_sid.present? && auth_token.present?
       Rails.logger.error "[TwilioSmsService] Missing credentials (account_sid or auth_token)"
       return { success: false, error: 'Twilio credentials not configured' }

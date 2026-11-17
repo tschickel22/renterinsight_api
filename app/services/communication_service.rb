@@ -341,6 +341,16 @@ class CommunicationService
         options: options
       )
       
+      # A reserved address (demo data) is recorded as sent so the demo reads
+      # normally, but nothing went to a provider and nothing is billed.
+      if result[:not_delivered]
+        @communication.metadata = (@communication.metadata.is_a?(Hash) ? @communication.metadata : {})
+                                    .merge('not_delivered' => result[:not_delivered]).deep_stringify_keys
+        @communication.save!
+        @communication.track_event('sent', { 'not_delivered' => result[:not_delivered] })
+        return { success: true, communication: @communication, provider: provider, external_id: nil, not_delivered: result[:not_delivered] }
+      end
+
       # Update communication with external ID
       @communication.update!(external_id: result[:external_id]) if result[:external_id]
 
@@ -508,6 +518,13 @@ class CommunicationService
   end
 
   def send_via_provider(provider:, channel:, communication:, options:)
+    # Never hand a reserved address (example.com, 555 numbers) to a provider.
+    # See ReservedRecipient for why.
+    if ReservedRecipient.block?(channel, communication.to_address)
+      Rails.logger.info "[CommunicationService] Not delivering communication #{communication.id}: #{communication.to_address} is a reserved demo address"
+      return { external_id: nil, not_delivered: 'reserved_address' }
+    end
+
     # Extract company and location from communicable for settings lookup
     company = extract_company_from_communicable(communication.communicable)
     location = extract_location_from_communicable(communication.communicable)
@@ -539,13 +556,19 @@ class CommunicationService
       end
     end
     
+    # A caller's cc/bcc also travel in options and win over the keywords below,
+    # so reserved entries are dropped from both.
+    options = options.merge(
+      options.slice(:cc, :bcc).transform_values { |list| ReservedRecipient.reject_emails(list) }
+    )
+
     provider_instance.send_message(
       to: communication.to_address,
       from: communication.from_address,
       subject: communication.subject,
       body: communication.body,
-      cc: communication.cc_addresses,
-      bcc: communication.bcc_addresses,
+      cc: ReservedRecipient.reject_emails(communication.cc_addresses),
+      bcc: ReservedRecipient.reject_emails(communication.bcc_addresses),
       reply_to: communication.reply_to,
       metadata: communication.metadata,
       attachments: attachments_data,

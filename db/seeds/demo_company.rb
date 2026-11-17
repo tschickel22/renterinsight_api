@@ -15,7 +15,9 @@
 DEMO_PASSWORD = "Demo2026!"
 DEMO_PREFIX = ENV['DEMO_PREFIX'] || 'sunshine'
 DEMO_COMPANY_NAME = ENV['DEMO_NAME'] || "Sunshine MH Homes"
-DEMO_EMAIL_DOMAIN = "#{DEMO_PREFIX}demo.com"
+# Reserved domain (RFC 2606): nothing addressed here can reach a real inbox, and
+# ReservedRecipient stops the platform from even trying. Never use a real domain.
+DEMO_EMAIL_DOMAIN = "#{DEMO_PREFIX}.example.com"
 
 S3_STAGING = "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com"
 S3_FDHC    = "https://factory-direct-homescenter.s3.us-east-1.amazonaws.com"
@@ -57,6 +59,11 @@ if ENV['RESET'] == 'true'
       CampaignEvent.where(campaign_id: campaign_ids).delete_all if defined?(CampaignEvent)
       CampaignSend.where(campaign_id: campaign_ids).delete_all if defined?(CampaignSend)
     end
+
+    # Deal Desk shares and scenarios FK-reference deals, and Company exposes
+    # neither, so RESET failed at "deals" once section 41 had shared a pencil.
+    DealDeskShare.where(company_id: existing.id).delete_all if defined?(DealDeskShare)
+    DealDeskScenario.where(company_id: existing.id).delete_all if defined?(DealDeskScenario)
 
     %i[
       buyer_portal_accesses
@@ -136,7 +143,7 @@ end
 # ── 1. Company ─────────────────────────────────────────────
 puts "\n1. Creating company..."
 company = Company.find_or_create_by!(name: DEMO_COMPANY_NAME) do |c|
-  c.email = "info@#{DEMO_PREFIX}mhhomes.com"
+  c.email = "info@#{DEMO_EMAIL_DOMAIN}"
   c.phone = "(260) 555-0100"
   c.address_line1 = "4520 Homestead Road"
   c.city = "Auburn"
@@ -353,26 +360,26 @@ puts "\n7. Creating contacts..."
 contacts = {}
 
 contact_data = [
-  { first: "Robert",   last: "Chen",      email: "rchen@21stmortgage.com",    phone: "(865) 555-1001", account: "21st Mortgage Corporation",  title: "Loan Officer" },
-  { first: "Amanda",   last: "White",     email: "awhite@21stmortgage.com",   phone: "(865) 555-1002", account: "21st Mortgage Corporation",  title: "Sr. Underwriter" },
-  { first: "James",    last: "Patterson", email: "jpatterson@vmf.com",        phone: "(865) 555-1003", account: "Vanderbilt Mortgage",        title: "Account Manager" },
-  { first: "Lisa",     last: "Nguyen",    email: "lnguyen@cascadeloans.com",  phone: "(877) 555-1004", account: "Cascade Financial Services", title: "Loan Processor" },
-  { first: "William",  last: "Martin",    email: "wmartin@gmail.com",         phone: "(260) 555-2001", account: "Martin Family Properties",   title: "Owner" },
-  { first: "Carol",    last: "Martin",    email: "cmartin@gmail.com",         phone: "(260) 555-2002", account: "Martin Family Properties",   title: "Co-Owner" },
-  { first: "Dennis",   last: "Hopper",    email: "dhopper@lakesidemhc.com",   phone: "(260) 555-2003", account: "Lakeside MH Community",      title: "Park Manager" },
-  { first: "Rebecca",  last: "Stone",     email: "rstone@lakesidemhc.com",    phone: "(260) 555-2004", account: "Lakeside MH Community",      title: "Maintenance Dir." },
-  { first: "Marcus",   last: "Johnson",   email: "mjohnson@hoosierland.com",  phone: "(317) 555-3001", account: "Hoosier Land Development",   title: "VP Development" },
-  { first: "Patricia", last: "Adams",     email: "padams@hoosierland.com",    phone: "(317) 555-3002", account: "Hoosier Land Development",   title: "Project Manager" },
-  { first: "Jeretta",  last: "Smuts",     email: "jsmuts1959@gmail.com",      phone: "(260) 227-0394", account: nil, title: nil },
-  { first: "Kevin",    last: "O'Brien",   email: "kobrien88@yahoo.com",       phone: "(260) 555-4002", account: nil, title: nil },
-  { first: "Maria",    last: "Gonzalez",  email: "mgonzalez@hotmail.com",     phone: "(260) 555-4003", account: nil, title: nil },
-  { first: "Daniel",   last: "Crawford",  email: "dcrawford@outlook.com",     phone: "(317) 555-4004", account: nil, title: nil },
-  { first: "Tammy",    last: "Fisher",    email: "tammyf@gmail.com",          phone: "(574) 555-4005", account: nil, title: nil },
-  { first: "Brian",    last: "Keller",    email: "bkeller@icloud.com",        phone: "(260) 555-4006", account: nil, title: nil },
-  { first: "Sandra",   last: "Mitchell",  email: "smitchell99@gmail.com",     phone: "(765) 555-4007", account: nil, title: nil },
-  { first: "Jason",    last: "Turner",    email: "jturner@me.com",            phone: "(317) 555-4008", account: nil, title: nil },
-  { first: "Angela",   last: "Brooks",    email: "abrooks@gmail.com",         phone: "(260) 555-4009", account: nil, title: nil },
-  { first: "Raymond",  last: "Price",     email: "rprice55@yahoo.com",        phone: "(812) 555-4010", account: nil, title: nil },
+  { first: "Robert",   last: "Chen",      email: "rchen@21stmortgage.example.com",    phone: "(865) 555-1001", account: "21st Mortgage Corporation",  title: "Loan Officer" },
+  { first: "Amanda",   last: "White",     email: "awhite@21stmortgage.example.com",   phone: "(865) 555-1002", account: "21st Mortgage Corporation",  title: "Sr. Underwriter" },
+  { first: "James",    last: "Patterson", email: "jpatterson@vmf.example.com",        phone: "(865) 555-1003", account: "Vanderbilt Mortgage",        title: "Account Manager" },
+  { first: "Lisa",     last: "Nguyen",    email: "lnguyen@cascadeloans.example.com",  phone: "(877) 555-1004", account: "Cascade Financial Services", title: "Loan Processor" },
+  { first: "William",  last: "Martin",    email: "wmartin@gmail.example.com",         phone: "(260) 555-2001", account: "Martin Family Properties",   title: "Owner" },
+  { first: "Carol",    last: "Martin",    email: "cmartin@gmail.example.com",         phone: "(260) 555-2002", account: "Martin Family Properties",   title: "Co-Owner" },
+  { first: "Dennis",   last: "Hopper",    email: "dhopper@lakesidemhc.example.com",   phone: "(260) 555-2003", account: "Lakeside MH Community",      title: "Park Manager" },
+  { first: "Rebecca",  last: "Stone",     email: "rstone@lakesidemhc.example.com",    phone: "(260) 555-2004", account: "Lakeside MH Community",      title: "Maintenance Dir." },
+  { first: "Marcus",   last: "Johnson",   email: "mjohnson@hoosierland.example.com",  phone: "(317) 555-3001", account: "Hoosier Land Development",   title: "VP Development" },
+  { first: "Patricia", last: "Adams",     email: "padams@hoosierland.example.com",    phone: "(317) 555-3002", account: "Hoosier Land Development",   title: "Project Manager" },
+  { first: "Jeretta",  last: "Smuts",     email: "jsmuts1959@gmail.example.com",      phone: "(260) 555-0194", account: nil, title: nil },
+  { first: "Kevin",    last: "O'Brien",   email: "kobrien88@yahoo.example.com",       phone: "(260) 555-4002", account: nil, title: nil },
+  { first: "Maria",    last: "Gonzalez",  email: "mgonzalez@hotmail.example.com",     phone: "(260) 555-4003", account: nil, title: nil },
+  { first: "Daniel",   last: "Crawford",  email: "dcrawford@outlook.example.com",     phone: "(317) 555-4004", account: nil, title: nil },
+  { first: "Tammy",    last: "Fisher",    email: "tammyf@gmail.example.com",          phone: "(574) 555-4005", account: nil, title: nil },
+  { first: "Brian",    last: "Keller",    email: "bkeller@icloud.example.com",        phone: "(260) 555-4006", account: nil, title: nil },
+  { first: "Sandra",   last: "Mitchell",  email: "smitchell99@gmail.example.com",     phone: "(765) 555-4007", account: nil, title: nil },
+  { first: "Jason",    last: "Turner",    email: "jturner@me.example.com",            phone: "(317) 555-4008", account: nil, title: nil },
+  { first: "Angela",   last: "Brooks",    email: "abrooks@gmail.example.com",         phone: "(260) 555-4009", account: nil, title: nil },
+  { first: "Raymond",  last: "Price",     email: "rprice55@yahoo.example.com",        phone: "(812) 555-4010", account: nil, title: nil },
 ]
 
 contact_data.each do |cd|
@@ -416,21 +423,21 @@ puts "\n8. Creating leads..."
 leads = {}
 
 lead_data = [
-  { first: "Steven",   last: "Baker",    email: "sbaker@gmail.com",      phone: "(260) 555-5001", status: "new",       location: "AUB", source: "website" },
-  { first: "Michelle", last: "Rivera",   email: "mrivera@yahoo.com",     phone: "(260) 555-5002", status: "new",       location: "AUB", source: "walk-in" },
-  { first: "Gregory",  last: "Ward",     email: "gward@outlook.com",     phone: "(317) 555-5003", status: "new",       location: "FTW", source: "referral" },
-  { first: "Dorothy",  last: "Hughes",   email: "dhughes@gmail.com",     phone: "(574) 555-5004", status: "contacted", location: "AUB", source: "facebook" },
-  { first: "Larry",    last: "Coleman",  email: "lcoleman@hotmail.com",  phone: "(260) 555-5005", status: "contacted", location: "FTW", source: "website" },
-  { first: "Nancy",    last: "Reed",     email: "nreed@gmail.com",       phone: "(812) 555-5006", status: "contacted", location: "IND", source: "zillow" },
-  { first: "Kenneth",  last: "Stewart",  email: "kstewart@icloud.com",   phone: "(260) 555-5007", status: "qualified", location: "AUB", source: "walk-in" },
-  { first: "Betty",    last: "Sanchez",  email: "bsanchez@gmail.com",    phone: "(317) 555-5008", status: "qualified", location: "FTW", source: "referral" },
-  { first: "Ronald",   last: "Morris",   email: "rmorris@yahoo.com",     phone: "(260) 555-5009", status: "qualified", location: "AUB", source: "website" },
-  { first: "Sharon",   last: "Bell",     email: "sbell22@gmail.com",     phone: "(574) 555-5010", status: "proposal",  location: "FTW", source: "walk-in" },
-  { first: "Frank",    last: "Wood",     email: "fwood@outlook.com",     phone: "(260) 555-5011", status: "proposal",  location: "AUB", source: "facebook" },
-  { first: "Helen",    last: "Rogers",   email: "hrogers@gmail.com",     phone: "(317) 555-5012", status: "proposal",  location: "IND", source: "zillow" },
-  { first: "Arthur",   last: "Gray",     email: "agray@hotmail.com",     phone: "(260) 555-5013", status: "won",       location: "AUB", source: "referral" },
-  { first: "Diane",    last: "Watson",   email: "dwatson@gmail.com",     phone: "(260) 555-5014", status: "won",       location: "FTW", source: "walk-in" },
-  { first: "Carl",     last: "Brooks",   email: "cbrooks@yahoo.com",     phone: "(812) 555-5015", status: "lost",      location: "AUB", source: "website" },
+  { first: "Steven",   last: "Baker",    email: "sbaker@gmail.example.com",      phone: "(260) 555-5001", status: "new",       location: "AUB", source: "website" },
+  { first: "Michelle", last: "Rivera",   email: "mrivera@yahoo.example.com",     phone: "(260) 555-5002", status: "new",       location: "AUB", source: "walk-in" },
+  { first: "Gregory",  last: "Ward",     email: "gward@outlook.example.com",     phone: "(317) 555-5003", status: "new",       location: "FTW", source: "referral" },
+  { first: "Dorothy",  last: "Hughes",   email: "dhughes@gmail.example.com",     phone: "(574) 555-5004", status: "contacted", location: "AUB", source: "facebook" },
+  { first: "Larry",    last: "Coleman",  email: "lcoleman@hotmail.example.com",  phone: "(260) 555-5005", status: "contacted", location: "FTW", source: "website" },
+  { first: "Nancy",    last: "Reed",     email: "nreed@gmail.example.com",       phone: "(812) 555-5006", status: "contacted", location: "IND", source: "zillow" },
+  { first: "Kenneth",  last: "Stewart",  email: "kstewart@icloud.example.com",   phone: "(260) 555-5007", status: "qualified", location: "AUB", source: "walk-in" },
+  { first: "Betty",    last: "Sanchez",  email: "bsanchez@gmail.example.com",    phone: "(317) 555-5008", status: "qualified", location: "FTW", source: "referral" },
+  { first: "Ronald",   last: "Morris",   email: "rmorris@yahoo.example.com",     phone: "(260) 555-5009", status: "qualified", location: "AUB", source: "website" },
+  { first: "Sharon",   last: "Bell",     email: "sbell22@gmail.example.com",     phone: "(574) 555-5010", status: "proposal",  location: "FTW", source: "walk-in" },
+  { first: "Frank",    last: "Wood",     email: "fwood@outlook.example.com",     phone: "(260) 555-5011", status: "proposal",  location: "AUB", source: "facebook" },
+  { first: "Helen",    last: "Rogers",   email: "hrogers@gmail.example.com",     phone: "(317) 555-5012", status: "proposal",  location: "IND", source: "zillow" },
+  { first: "Arthur",   last: "Gray",     email: "agray@hotmail.example.com",     phone: "(260) 555-5013", status: "won",       location: "AUB", source: "referral" },
+  { first: "Diane",    last: "Watson",   email: "dwatson@gmail.example.com",     phone: "(260) 555-5014", status: "won",       location: "FTW", source: "walk-in" },
+  { first: "Carl",     last: "Brooks",   email: "cbrooks@yahoo.example.com",     phone: "(812) 555-5015", status: "lost",      location: "AUB", source: "website" },
 ]
 
 lead_data.each do |ld|
@@ -595,10 +602,10 @@ rescue => e
   puts "  ⚠ Allowance defaults skipped: #{e.message}"
 end
 lender_specs = [
-  { name: '21st Mortgage',          contact_name: 'Robert Chen',   phone: '(865) 215-9000', email: 'rchen@21stmortgage.com',     website: 'https://www.21stmortgage.com', notes: 'Primary MH lender; fast approvals' },
-  { name: 'Vanderbilt Mortgage',    contact_name: 'Sandra Mills',  phone: '(800) 970-7283', email: 'smills@vmf.com',              website: 'https://www.vmf.com',          notes: 'Strong on used-home financing' },
-  { name: 'Triad Financial Services', contact_name: 'Greg Patton', phone: '(800) 522-2013', email: 'gpatton@triadfs.com',         website: 'https://www.triadfs.com',      notes: 'Competitive on land-home packages' },
-  { name: 'Cascade Financial',      contact_name: 'Dana Lowe',     phone: '(877) 869-7082', email: 'dlowe@cascadeloans.com',      website: 'https://www.cascadeloans.com', notes: 'Government-backed (FHA/VA) programs' },
+  { name: '21st Mortgage',          contact_name: 'Robert Chen',   phone: '(865) 555-0121', email: 'rchen@21stmortgage.example.com',     website: 'https://www.21stmortgage.com', notes: 'Primary MH lender; fast approvals' },
+  { name: 'Vanderbilt Mortgage',    contact_name: 'Sandra Mills',  phone: '(800) 555-0122', email: 'smills@vmf.example.com',              website: 'https://www.vmf.com',          notes: 'Strong on used-home financing' },
+  { name: 'Triad Financial Services', contact_name: 'Greg Patton', phone: '(800) 555-0123', email: 'gpatton@triadfs.example.com',         website: 'https://www.triadfs.com',      notes: 'Competitive on land-home packages' },
+  { name: 'Cascade Financial',      contact_name: 'Dana Lowe',     phone: '(877) 555-0124', email: 'dlowe@cascadeloans.example.com',      website: 'https://www.cascadeloans.com', notes: 'Government-backed (FHA/VA) programs' },
   { name: 'Mountain West Lending' } # quick-add style: name only, other fields blank
 ]
 managed_lenders = {}
@@ -678,6 +685,8 @@ deal_data.each_with_index do |dd, idx|
     vehicle_id:             assigned_vehicle&.id,
     primary_salesperson_id: rep.id,
     owner_id:               rep.id,
+    # The Workqueue (My deals, closing this week/month) reads user_id.
+    user_id:                rep.id,
     location_id:            assigned_vehicle&.location_id || locations["AUB"].id,
     # Reference the managed Lender list; denormalize its name onto lender_name (the
     # column the reports read), exactly as Deal#denormalize_lender_name does at runtime.
@@ -695,6 +704,11 @@ deal_data.each_with_index do |dd, idx|
     updated_at:          closed_at_date || 30.days.ago
   }
   updates[:won_at] = closed_at_date if dd[:stage] == "closed_won" && deal.respond_to?(:won_at)
+  # Open deals need a close date or the closing-this-week/month queues stay empty.
+  unless closed_at_date
+    updates[:expected_close_date] = [Date.current + 4, Date.current.end_of_month, Date.current + 35][idx % 3]
+    updates[:last_activity_at]    = (idx.even? ? 2 : 6).days.ago
+  end
   deal.update_columns(updates)
   deals[dd[:title]] = deal
 end
@@ -813,9 +827,9 @@ puts "\n14. Creating suppliers..."
 suppliers = {}
 
 [
-  { name: "Midwest MH Parts Supply",  contact: "Tom Brennan", email: "tbrennan@midwestmhparts.com", phone: "(260) 555-6001" },
-  { name: "Indiana Skirting & Supply", contact: "Paula Davis", email: "pdavis@inskirting.com",       phone: "(574) 555-6002" },
-  { name: "Hoosier HVAC Distribution", contact: "Mark Wilson", email: "mwilson@hoosierhvac.com",     phone: "(317) 555-6003" },
+  { name: "Midwest MH Parts Supply",  contact: "Tom Brennan", email: "tbrennan@midwestmhparts.example.com", phone: "(260) 555-6001" },
+  { name: "Indiana Skirting & Supply", contact: "Paula Davis", email: "pdavis@inskirting.example.com",       phone: "(574) 555-6002" },
+  { name: "Hoosier HVAC Distribution", contact: "Mark Wilson", email: "mwilson@hoosierhvac.example.com",     phone: "(317) 555-6003" },
 ].each do |sd|
   supplier = company.suppliers.find_or_create_by!(name: sd[:name]) do |s|
     s.contact_name = sd[:contact]
@@ -998,6 +1012,16 @@ if company.respond_to?(:project_templates)
 
     contact = deal.contact_id ? Contact.find_by(id: deal.contact_id) : nil
 
+    # Start far enough back that every finished phase finished in the past and
+    # the current phase began a few days ago. (A flat 45 days put the finished
+    # phases of late-stage projects in the future.)
+    done_days = tp_data.first(pc[:done]).sum { |ph| ph[:days] }
+    project_start = (done_days + (pc[:status] == 'completed' ? 5 : 3)).days.ago.beginning_of_day
+    total_days = tp_data.sum { |ph| ph[:days] }
+    # Field phases go to the service tech; paperwork and closing to the deal's rep.
+    field_phase = ->(pos) { pos.between?(8, 16) }
+    project_rep_id = deal.primary_salesperson_id || users[:manager].id
+
     project = company.projects.find_or_create_by!(name: pc[:name]) do |p|
       p.deal_id = deal.id
       p.project_template_id = template.id
@@ -1011,7 +1035,7 @@ if company.respond_to?(:project_templates)
       p.phase_count = tp_data.length
       p.completed_phase_count = pc[:done]
       p.progress_percent = ((pc[:done].to_f / tp_data.length) * 100).round
-      p.started_at = 45.days.ago
+      p.started_at = project_start
       p.actual_completion_date = 5.days.ago if pc[:status] == 'completed'
       p.client_access_token = SecureRandom.hex(16)
       p.is_deleted = false
@@ -1031,16 +1055,25 @@ if company.respond_to?(:project_templates)
       started = project.started_at + days_offset.days if phase_status != 'not_started'
       completed = started + tp[:days].days if phase_status == 'completed' && started
 
+      # Created with the default status, then moved with update_columns. Saving a
+      # phase as completed fires its status-change notice, which is how every
+      # past production seed emailed the made-up buyers "Contract Signed is
+      # complete!" about 80 times.
       phase = project.project_phases.find_or_create_by!(name: tp[:name]) do |ph|
         ph.company_id = company.id
         ph.position = tp[:pos]
-        ph.status = phase_status
         ph.color = tp[:color]
         ph.icon = tp[:icon]
         ph.estimated_days = tp[:days]
-        ph.started_at = started if started
-        ph.completed_at = completed if completed
       end
+
+      # Status, actual and planned dates, and an owner, refreshed each run.
+      est_start = (project.started_at + days_offset.days).to_date
+      est_done  = est_start + [tp[:days], 1].max
+      phase_owner_id = field_phase.(tp[:pos]) ? users[:tech].id : project_rep_id
+      phase.update_columns(status: phase_status, started_at: started, completed_at: completed,
+                           estimated_start_date: est_start, estimated_completion_date: est_done,
+                           assigned_to_id: phase_owner_id)
 
       # Sub-tasks per phase. completed phase => all tasks done; in_progress =>
       # first done, the rest open; not_started => all open. This guarantees every
@@ -1054,17 +1087,28 @@ if company.respond_to?(:project_templates)
                       when 'in_progress' then (i.zero? ? 'completed' : 'pending')
                       else 'pending'
                       end
-        phase.project_phase_tasks.find_or_create_by!(name: task_name) do |t|
+        task = phase.project_phase_tasks.find_or_create_by!(name: task_name) do |t|
           t.company_id  = company.id
           t.position    = i + 1
-          t.status      = task_status
-          t.completed_at = (phase.completed_at || started || 5.days.ago) if task_status == 'completed'
         end
+        task.update_columns(status: task_status,
+                            completed_at: (task_status == 'completed' ? (completed || started || 5.days.ago) : nil),
+                            assigned_to_id: phase_owner_id,
+                            estimated_start_date: est_start, estimated_completion_date: est_done)
       end
     end
 
-    current = project.project_phases.find_by(status: 'in_progress')
-    project.update_column(:current_phase_id, current.id) if current
+    # Who runs it, the home it is for, when it should wrap up and its budget.
+    # Progress comes from the phases (update_progress_cache! also sets the
+    # current phase), never typed in: the typed value ended up 100% everywhere.
+    project.update_columns(
+      owner_id: users[:manager].id,
+      assigned_to_id: project_rep_id,
+      vehicle_id: deal.vehicle_id,
+      estimated_completion_date: (project.started_at + total_days.days).to_date,
+      budget_amount: (deal.delivery_setup_cost.to_f + 9500).round(-2)
+    )
+    project.update_progress_cache!
 
     puts "  Project: #{project.name} (#{pc[:status]}, #{pc[:done]}/#{tp_data.length})"
   end
@@ -1251,7 +1295,9 @@ puts "\n22. Setting up campaigns..."
 if defined?(Campaign)
   campaign = company.campaigns.find_or_create_by!(name: "Spring 2026 — New Inventory Showcase") do |c|
     c.description = "Featured new homes available now"
-    c.status = "running"
+    # Already sent (3 days ago) and finished, so the campaign runner never picks
+    # it up again and DemoRefresh can borrow it for opens and clicks.
+    c.status = "completed"
     c.campaign_type = "blast"
     c.channel = "email"
     c.audience_mode = "static"
@@ -1268,6 +1314,7 @@ if defined?(Campaign)
     c.utm_campaign = "spring-2026-showcase"
     c.scheduled_at = 3.days.ago
     c.started_at = 3.days.ago
+    c.completed_at = 3.days.ago + 1.hour
     c.created_by_user_id = users[:manager].id
     c.location_id = locations["AUB"].id
   end
@@ -1516,9 +1563,9 @@ end
 puts "\n26. Setting up contractors and warranty claims..."
 if defined?(Contractor)
   contractor_data = [
-    { name: "B&B Skirting Pros",    contact: "Bill Boykins",   email: "bill@bbskirting.com",    phone: "(260) 555-7001", trade: "skirting",   rate: 65 },
-    { name: "Reliant HVAC Service", contact: "Rita Gonzalez",  email: "rita@relianthvac.com",   phone: "(317) 555-7002", trade: "hvac",       rate: 95 },
-    { name: "Anchor Set Crew",      contact: "Carl Anchorson", email: "carl@anchorsetcrew.com", phone: "(260) 555-7003", trade: "foundation", rate: 85 },
+    { name: "B&B Skirting Pros",    contact: "Bill Boykins",   email: "bill@bbskirting.example.com",    phone: "(260) 555-7001", trade: "skirting",   rate: 65 },
+    { name: "Reliant HVAC Service", contact: "Rita Gonzalez",  email: "rita@relianthvac.example.com",   phone: "(317) 555-7002", trade: "hvac",       rate: 95 },
+    { name: "Anchor Set Crew",      contact: "Carl Anchorson", email: "carl@anchorsetcrew.example.com", phone: "(260) 555-7003", trade: "foundation", rate: 85 },
   ]
   contractors_hash = {}
   contractor_data.each do |cd|
@@ -2041,7 +2088,7 @@ end
 
 # ── 34. Buyer Portal Access (proxy-able client portal) ────
 # BuyerPortalAccess.email is globally unique, but seeded contact emails are
-# hardcoded and shared across every demo company (e.g. jsmuts1959@gmail.com).
+# hardcoded and shared across every demo company (e.g. jsmuts1959@gmail.example.com).
 # Whichever demo is seeded first claims those emails; subsequent demos would
 # end up with 0 portal accounts. Namespace the portal login with DEMO_PREFIX
 # so each demo company gets its own portal accounts.
@@ -2256,7 +2303,7 @@ da_specs = [
     start: at_hour(Date.current + 1.day, 10), finish: at_hour(Date.current + 1.day, 11),
     assignee: sales_users[1] },
   { deal: deal_smuts, type: 'call', subject: 'Final close-out confirmation',
-    due: at_hour(Date.current, 14), phone: '(260) 227-0394', dir: 'outbound',
+    due: at_hour(Date.current, 14), phone: '(260) 555-0194', dir: 'outbound',
     assignee: manager },
   { deal: deal_fisher, type: 'reminder', subject: 'Send updated proposal',
     reminder: 4.hours.from_now, assignee: sales_users[1] },
@@ -2589,6 +2636,7 @@ build_rpt_deal = lambda do |key, name, vehicle, rep, attrs|
     vehicle_id:             vehicle&.id,
     primary_salesperson_id: rep.id,
     owner_id:               rep.id,
+    user_id:                rep.id,
     location_id:            vehicle&.location_id || locations["AUB"].id,
     selling_price:          attrs[:selling_price],
     customer_name:          attrs[:customer_name],
@@ -2921,14 +2969,29 @@ else
   puts "   ⚠ Skipped (DealDeskScenario not defined)"
 end
 
+# ── 42. Project progress + "this morning" Workqueue ────────
+# Progress is recomputed last because later sections touch phases.
+# DemoRefresh then adds the signals the queues are built from (opens, clicks,
+# landing visits, a reply waiting, new web leads, deals closing, quotes out,
+# invoices overdue), all relative to now and owned by the admin login. It
+# writes with insert_all, so nothing fires and nothing is sent.
+puts "\n42. Project progress + Workqueue signals..."
+Project.where(company_id: company.id).find_each(&:update_progress_cache!)
+puts "  Project progress: " + Project.where(company_id: company.id).order(:id).pluck(:progress_percent).map { |p| "#{p}%" }.join(", ")
+begin
+  refresh = DemoRefresh.new(company: company, user: users[:admin], seeding: true).call
+  puts "  Workqueue signals for #{users[:admin].email}: #{refresh[:created].map { |k, v| "#{k}=#{v}" }.join(' ')}"
+rescue => e
+  puts "  ⚠ Workqueue signals skipped: #{e.class}: #{e.message}"
+end
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
 puts "=" * 60
 puts ""
 puts "Company:  #{company.name} (ID: #{company.id})"
-puts "URL:      https://dms.renterinsight.com/login"
-puts "          https://staging-dms.renterinsight.com/login (staging)"
+puts "URL:      #{Brand.current.app_url}/login  (#{Rails.env})"
 puts ""
 puts "Login Credentials (Password: #{DEMO_PASSWORD})"
 puts "-" * 55
