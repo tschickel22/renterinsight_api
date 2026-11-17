@@ -100,7 +100,9 @@ class ProjectLinkDocuments
       if phase_id
         map = mapped(pl, dealer_phase_id: phase_id)
         return [pl, pl.installer_project, map.installer_phase] if map&.installer_phase
-      elsif pl.whole_project?
+      # The quote details sheet goes to the installer whatever part of the job
+      # they took (ProjectQuoteDetails); other project files only with the whole job.
+      elsif pl.whole_project? || @doc.metadata&.dig('quote_details')
         return [pl, pl.installer_project, nil]
       end
     end
