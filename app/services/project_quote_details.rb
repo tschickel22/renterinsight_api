@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
-# "Share quote details with installers": a scope sheet of the deal's quote,
-# filed on the project for the installer to work from. It lists every line
-# (description, category, quantity, notes) and never a price, a cost or a
-# total. The installer sees it; the buyer does not. It is on when the project
-# has the sheet, so turning it off removes it. When the quote's items change,
-# the sheet is made again from them.
+# "Share quote details with the installer": a scope sheet of the deal's quote
+# for the installer company the job is sent to (a linked job, E68). It lists
+# every line (description, category, quantity, notes) and never a price, a
+# cost or a total. Only the installer gets it: not the buyer, and not
+# contractors working tasks. It crosses when the installer accepts the job
+# (or straight away once they have), whether they took the whole job or some
+# phases. It is on when the project has the sheet, so turning it off removes
+# it, the installer's copy too. When the quote's items change, it is remade.
 class ProjectQuoteDetails
   FLAG = 'quote_details'
 
@@ -52,8 +54,11 @@ class ProjectQuoteDetails
 
   def status
     doc = document
+    partner = ProjectLinkDocuments.partner(@project)
     {
       enabled: doc.present?,
+      # The installer it goes to, once the job is offered or sent.
+      installer: partner && partner['side'] == 'dealer' ? partner['name'] : nil,
       quote: quote && { id: quote.id, quote_number: quote.quote_number, status: quote.status },
       document: doc && { id: doc.id, title: doc.title, file_name: doc.file_name, created_at: doc.created_at,
                          quote_id: doc.metadata&.dig('quote_id') },
@@ -71,11 +76,11 @@ class ProjectQuoteDetails
     doc = @project.project_documents.create!(
       company_id: @project.company_id, uploaded_by_id: @user&.id, source: 'dealer',
       title: "Quote details (#{quote.quote_number})", category: 'other',
-      description: 'Each item on the quote, without prices, for the installer.',
+      description: 'Each item on the quote, without prices, for the installer. Not shown to the buyer or to contractors.',
       file_url: ref, file_s3_key: key, file_name: "Quote details #{quote.quote_number}.pdf",
       file_size: body.bytesize, content_type: 'application/pdf',
-      client_visible: false, contractor_visible: true,
-      # link_shared: a linked installer company gets its own copy too (E68).
+      client_visible: false, contractor_visible: false,
+      # link_shared: the linked installer company gets its own copy (E68).
       metadata: { FLAG => true, 'quote_id' => quote.id, 'link_shared' => true }
     )
     ProjectLinkDocumentJob.perform_later(doc.id)

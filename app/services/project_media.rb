@@ -109,10 +109,7 @@ module ProjectMedia
     return [] unless phase
 
     scope = ProjectDocument.not_deleted.where(project_id: phase.project_id, source: 'dealer')
-    # Files on the project itself reach them only when the dealer ticked them
-    # for contractors (the quote details sheet is one); project photos do not.
     docs = scope.where(documentable: task).or(scope.where(documentable: phase))
-                .or(scope.where(documentable_type: nil, contractor_visible: true))
                 .order(created_at: :desc)
     docs.select(&:shown_to_contractor?).map do |doc|
       {
@@ -122,7 +119,7 @@ module ProjectMedia
         title: doc.title,
         file_name: doc.file_name,
         content_type: doc.content_type,
-        on: doc.documentable_type.nil? ? 'project' : (doc.documentable_type == 'ProjectPhase' ? 'phase' : 'task'),
+        on: doc.documentable_type == 'ProjectPhase' ? 'phase' : 'task',
         from: phase.project.company&.name,
         created_at: doc.created_at
       }

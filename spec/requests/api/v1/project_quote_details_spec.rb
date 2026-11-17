@@ -39,14 +39,14 @@ RSpec.describe 'Project quote details for installers', type: :request do
 
   def pdf_text(bytes) = PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n")
 
-  it 'makes a sheet of every work line, with no prices or cost, that the installer sees and the buyer does not' do
+  it 'makes a sheet of every work line, with no prices or cost, kept from the buyer and contractors' do
     post "/api/v1/projects/#{project.id}/quote_details", headers: headers
     expect(response).to have_http_status(:created), response.body
     expect(body).to include('enabled' => true, 'lines' => 2)
 
     doc = project.project_documents.not_deleted.last
-    expect(doc).to have_attributes(contractor_visible: true, client_visible: false)
-    expect(doc.shown_to_contractor?).to be(true)
+    expect(doc).to have_attributes(contractor_visible: false, client_visible: false)
+    expect(doc.shown_to_contractor?).to be(false)
     expect(doc.shown_to_client?).to be(false)
 
     text = pdf_text(stored.values.last)
@@ -54,14 +54,12 @@ RSpec.describe 'Project quote details for installers', type: :request do
     expect(text).not_to include('39,109', '39109', '31000', '31,000', '2400', '2,400', 'Spring promo', 'Freight', 'Down Payment', '$')
   end
 
-  it 'shows on the installer task view' do
+  it 'is not on a contractor task view' do
     phase = project.project_phases.create!(company: company, name: 'Set', position: 0, status: 'not_started')
     task = phase.project_phase_tasks.create!(company: company, name: 'Set and level', position: 0)
     post "/api/v1/projects/#{project.id}/quote_details", headers: headers
 
-    files = ProjectMedia.contractor_files_for_task(task)
-    expect(files.map { |f| f[:title] }).to include("Quote details (#{quote.quote_number})")
-    expect(files.find { |f| f[:title].start_with?('Quote details') }[:on]).to eq('project')
+    expect(ProjectMedia.contractor_files_for_task(task).map { |f| f[:title] }).not_to include(a_string_starting_with('Quote details'))
   end
 
   it 'remakes the sheet when the quote items change, and removes it when turned off' do
