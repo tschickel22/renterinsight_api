@@ -80,7 +80,7 @@ class Quote < ApplicationRecord
     generate_public_token if public_token.blank?
     save! if changed?
     
-    "#{ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'}/q/#{public_token}"
+    "#{ENV['FRONTEND_URL'] || Brand.app_url}/q/#{public_token}"
   end
   
   # Status transitions

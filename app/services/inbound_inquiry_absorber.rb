@@ -338,7 +338,7 @@ class InboundInquiryAbsorber
   def send_repeat_inquiry_email(record, user, inbound_name: nil, match_type: :lead)
     return unless user.email.present?
 
-    frontend_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    frontend_url = ENV['FRONTEND_URL'] || Brand.app_url
     name = repeat_inquiry_display_name(matched_record_name(record, match_type), inbound_name)
     noun = match_type.to_s
     path = REPEAT_INQUIRY_PATH.fetch(match_type)

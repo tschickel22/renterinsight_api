@@ -254,6 +254,6 @@ class SealAgreementJob < ApplicationJob
     if agreement.company&.respond_to?(:custom_domain) && agreement.company.custom_domain.present?
       return "https://#{agreement.company.custom_domain}"
     end
-    ENV['FRONTEND_URL'] || ENV['APP_URL'] || 'https://staging.crm.landlordinsight.com'
+    ENV['FRONTEND_URL'] || ENV['APP_URL'] || Brand.app_url
   end
 end

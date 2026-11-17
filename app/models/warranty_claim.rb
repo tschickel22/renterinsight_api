@@ -330,7 +330,7 @@ class WarrantyClaim < ApplicationRecord
   
   # Public Link (for manufacturer email access - no login required)
   def public_link
-    frontend_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    frontend_url = ENV['FRONTEND_URL'] || Brand.app_url
     "#{frontend_url}/w/#{public_token}"
   end
   

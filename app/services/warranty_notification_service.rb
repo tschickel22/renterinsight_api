@@ -483,13 +483,13 @@ class WarrantyNotificationService
   
   # Generate admin claim URL
   def self.admin_claim_url(warranty_claim)
-    base_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    base_url = ENV['FRONTEND_URL'] || Brand.app_url
     "#{base_url}/warranty-claims/#{warranty_claim.id}"
   end
   
   # Generate client portal URL
   def self.client_portal_url(warranty_claim)
-    base_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    base_url = ENV['FRONTEND_URL'] || Brand.app_url
     "#{base_url}/portal/service-tickets"
   end
   
