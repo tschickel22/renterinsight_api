@@ -8137,6 +8137,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_17_030000) do
     t.integer "public_views", default: 0, null: false
     t.jsonb "source_files", default: {}, null: false
     t.jsonb "covers", default: {}, null: false
+    t.integer "intro_ends_at"
+    t.integer "outro_starts_at"
     t.index ["module_key", "position"], name: "index_training_videos_on_module_key_and_position"
     t.index ["share_token"], name: "index_training_videos_on_share_token", unique: true
     t.index ["slug"], name: "index_training_videos_on_slug", unique: true

@@ -117,6 +117,8 @@ module Knowledge
 
       existing_tour_ids = @results.select { |r| r[:type] == 'tour' }.filter_map { |r| r[:tour_id] }.to_set
       search_tours(terms, exclude_ids: existing_tour_ids)
+
+      search_videos
     end
 
     # ─── Step 5: Fallback ──────────────────────────────────────
@@ -237,6 +239,38 @@ module Knowledge
     def offerable_tours
       scope = Tour.where(is_active: true)
       admin_user? ? scope : scope.approved
+    end
+
+    # Videos that answer the question, each at the moment that answers it.
+    # TrainingVideo.search does its own term handling and returns [video, moment],
+    # which is the same call the help assistant already makes. A video that fails
+    # to score is simply absent, and a failure here never costs the other results.
+    def search_videos
+      seen = @results.select { |r| r[:type] == 'video' }.filter_map { |r| r[:video_id] }.to_set
+      TrainingVideo.search(@query, scope: TrainingVideo.visible(admin: admin_user?)).each do |video, moment|
+        next if seen.include?(video.id)
+
+        add_video_result(video, moment)
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[SmartSearch] video search failed: #{e.message}")
+    end
+
+    def add_video_result(video, moment)
+      start = moment[:start].to_i
+      @results << {
+        id:          "video-#{video.id}",
+        type:        'video',
+        title:       video.title,
+        label:       "Watch: #{video.title}",
+        description: moment[:label].presence || video.description.to_s.first(160).presence,
+        module:      video.module_key,
+        video_id:    video.id,
+        # Where in the video the answer is. The player seeks here, so a search
+        # lands on the sentence that answers rather than at 0:00.
+        start:       start,
+        length:      video.duration_seconds,
+      }.compact
     end
 
     def add_tour_result(tour)

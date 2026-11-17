@@ -142,6 +142,7 @@ class TrainingVideo < ApplicationRecord
       id: id, title: title, slug: slug, description: description, module_key: module_key,
       position: position, duration_seconds: duration_seconds, video_url: video_url,
       poster_url: poster_url, captions_url: captions_url, chapters: chapters,
+      intro_ends_at: intro_ends_at, outro_starts_at: outro_starts_at,
       is_published: is_published, created_at: created_at, updated_at: updated_at
     }
     if admin
@@ -173,7 +174,8 @@ class TrainingVideo < ApplicationRecord
   # What the public watch page gets: nothing about publishing or the admin.
   def as_public_json
     { title: title, description: description, duration_seconds: duration_seconds, video_url: video_url,
-      poster_url: poster_url, captions_url: captions_url, chapters: chapters }
+      poster_url: poster_url, captions_url: captions_url, chapters: chapters,
+      intro_ends_at: intro_ends_at, outro_starts_at: outro_starts_at }
   end
 
   private

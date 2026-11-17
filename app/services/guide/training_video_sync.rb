@@ -10,7 +10,7 @@ module Guide
   # captions are copied into production's own bucket, only when they changed
   # on staging. The help center switch stays each server's own.
   class TrainingVideoSync
-    FIELDS = %w[title description module_key position duration_seconds chapters transcript is_published share_enabled covers].freeze
+    FIELDS = %w[title description module_key position duration_seconds chapters intro_ends_at outro_starts_at transcript is_published share_enabled covers].freeze
     FILES = { 'video' => 'video_url', 'poster' => 'poster_url', 'captions' => 'captions_url' }.freeze
 
     def initialize(downloader: method(:download))
