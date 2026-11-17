@@ -162,10 +162,13 @@ class Api::V1::DealApprovalsController < ApplicationController
   # POST /api/v1/deal_approvals/:id/approve
   # Optional funding (E78): { plan: { type: single|draws|financed, ... },
   # receipts: [{ amount, payment_date, payment_method, bank_account_id,
-  # reference_number }] }. The plan shapes the deal's invoice; each receipt is
-  # money taken at closing, recorded against that invoice. Deposits already
-  # taken on the deal apply on their own. Everything is checked before the
-  # deal posts, so a bad row never leaves a half-approved deal.
+  # reference_number }], replace_invoice_ids: [] }. The plan shapes the deal's
+  # invoice; each receipt is money taken at closing, recorded against that
+  # invoice. Deposits already taken on the deal apply on their own.
+  # replace_invoice_ids names invoices someone made by hand on the deal for the
+  # sale itself: approval cancels them and reverses what they posted, since the
+  # closing entry and the deal's own invoice bill the sale. Everything is
+  # checked before the deal posts, so a bad row never leaves a half-approved deal.
   def approve
     if @deal.gl_posted?
       render json: { error: 'Deal already posted to GL' }, status: :unprocessable_entity
@@ -174,7 +177,8 @@ class Api::V1::DealApprovalsController < ApplicationController
 
     funding = params[:funding].present? ? params.require(:funding).permit(
       plan: %i[type due_date template_id lender_amount lender_due_date],
-      receipts: %i[amount payment_date payment_method bank_account_id reference_number memo]
+      receipts: %i[amount payment_date payment_method bank_account_id reference_number memo],
+      replace_invoice_ids: []
     ) : {}
     plan = funding[:plan].presence&.to_h&.symbolize_keys
     payments = DealPaymentService.new(@deal, user: current_user)
@@ -188,6 +192,11 @@ class Api::V1::DealApprovalsController < ApplicationController
     end
     if entries.any? && !current_user.has_permission?('accounting', 'create')
       return render(json: { error: 'Recording payments needs permission to create accounting entries' }, status: :forbidden)
+    end
+    replacing, replace_error = invoices_to_replace(funding[:replace_invoice_ids])
+    return render(json: { error: replace_error }, status: :unprocessable_entity) if replace_error
+    if replacing.any? && !current_user.has_permission?('finance', 'delete')
+      return render(json: { error: 'Cancelling an invoice needs permission to delete invoices' }, status: :forbidden)
     end
 
     service = Accounting::DealAccountingService.new(@deal)
@@ -212,6 +221,14 @@ class Api::V1::DealApprovalsController < ApplicationController
       invoice_id = nil
       invoice = nil
       funding_errors = []
+      replaced = replacing.filter_map do |inv|
+        replace_invoice!(inv)
+        inv.invoice_number
+      rescue => e
+        Rails.logger.error("[DealApprovals] Replacing invoice #{inv.id} failed for deal #{@deal.id}: #{e.message}")
+        funding_errors << "Invoice #{inv.invoice_number} was not cancelled (#{e.message}). Cancel it by hand so the sale is not billed twice."
+        nil
+      end
       begin
         invoice = DealInvoiceService.new(@deal, user: current_user).create_invoice!(plan: plan)
         invoice_id = invoice&.id
@@ -245,6 +262,7 @@ class Api::V1::DealApprovalsController < ApplicationController
           errors: funding_errors
         },
         funding_errors: funding_errors,
+        replaced_invoices: replaced,
         tax: result[:tax],
         lines_count: result[:lines_count],
         message: result[:message]
@@ -353,8 +371,53 @@ class Api::V1::DealApprovalsController < ApplicationController
       deposits: held.map { |r| { id: r.id, receipt_number: r.receipt_number, receipt_date: r.receipt_date, amount: r.amount_unapplied.to_f, payment_method: r.payment_method } },
       deposits_total: held.sum { |r| r.amount_unapplied.to_d }.to_f,
       draw_templates: templates.map { |t| { id: t.id, name: t.name, is_default: t.is_default, location_id: t.location_id } },
-      can_record_payments: current_user.has_permission?('accounting', 'create')
+      can_record_payments: current_user.has_permission?('accounting', 'create'),
+      other_invoices: other_deal_invoices.map { |inv| other_invoice_payload(inv) },
+      can_replace_invoices: current_user.has_permission?('finance', 'delete')
     }
+  end
+
+  # Invoices already on the deal besides its own sale invoice. Approval makes
+  # that invoice, so one of these billing the home bills the customer twice.
+  def other_deal_invoices
+    @company.invoices.not_deleted.where(deal_id: @deal.id).where.not(status: 'cancelled')
+            .where.not(id: @deal.deal_invoice_id).order(:invoice_date, :id)
+  end
+
+  def other_invoice_payload(inv)
+    taken = inv.amount_paid.to_d + inv.amount_credited.to_d
+    {
+      id: inv.id, invoice_number: inv.invoice_number, invoice_date: inv.invoice_date,
+      status: inv.status, total: inv.total.to_f, amount_paid: taken.to_f,
+      can_replace: taken.zero?
+    }
+  end
+
+  # [invoices, error]. Only this deal's other invoices, and only unpaid ones:
+  # money on an invoice has to be moved by hand before it can go.
+  def invoices_to_replace(ids)
+    ids = Array(ids).map(&:to_i).uniq
+    return [[], nil] if ids.empty?
+
+    found = other_deal_invoices.where(id: ids).to_a
+    return [[], 'That invoice is not one of this deal\'s other invoices'] if found.size != ids.size
+
+    paid = found.find { |inv| (inv.amount_paid.to_d + inv.amount_credited.to_d).positive? }
+    return [[], "Invoice #{paid.invoice_number} has money on it. Move or refund that payment first, then cancel it."] if paid
+
+    [found, nil]
+  end
+
+  # Cancels a hand-made invoice for the sale and reverses its journal entry,
+  # since the closing entry already books the sale and its receivable.
+  def replace_invoice!(inv)
+    Invoice.transaction do
+      @company.journal_entries.excluding_void_pairs
+              .where(source_entity_type: 'Invoice', source_entity_id: inv.id)
+              .find_each { |je| je.void!(current_user) }
+      note = "Cancelled at deal approval: the deal's own invoice bills this sale."
+      inv.update!(status: 'cancelled', notes: [inv.notes.presence, note].compact.join("\n\n"))
+    end
   end
 
   # What approval will post as sales tax, by the taxing state's rules, so the
