@@ -9,7 +9,9 @@ class PortalDocument < ApplicationRecord
   belongs_to :related_to, polymorphic: true, optional: true
   
   # Validations
-  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account Contact BuyerPortalAccess Loan] }
+  # Deal: staff-only paperwork filed on a deal. A deal file shared with the
+  # buyer is owned by the deal's contact instead, with related_to the deal.
+  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account Contact BuyerPortalAccess Loan Deal] }
   validates :owner_id, presence: true
   validates :category, inclusion: { 
     in: %w[general insurance registration invoice receipt other contract warranty manual photo credit_application income_verification title_deed loan_agreement appraisal], 

@@ -10,7 +10,7 @@ module Api
       def index
         return unless authorize_action!('documents', 'read')
         
-        documents = company_scoped_documents.includes(:owner).order(created_at: :desc)
+        documents = company_scoped_documents.includes(:owner, :related_to).order(created_at: :desc)
         
         if params[:search].present?
           search_term = "%#{params[:search]}%"
@@ -30,7 +30,20 @@ module Api
         # Files filed on the account or lead itself (GoHighLevel imports put
         # deal files there). Staff only: the buyer portal reads Contact-owned
         # documents, so these never reach a customer.
-        documents = documents.where(owner_type: 'Account', owner_id: params[:account_id]) if params[:account_id].present?
+        # The account's own files plus every file on its deals, so the
+        # account's Documents tab sums up everything about the customer.
+        if params[:account_id].present?
+          deal_ids = @company.deals.where(account_id: params[:account_id]).select(:id)
+          documents = documents.where(owner_type: 'Account', owner_id: params[:account_id])
+                               .or(documents.where(owner_type: 'Deal', owner_id: deal_ids))
+                               .or(documents.where(related_to_type: 'Deal', related_to_id: deal_ids))
+        end
+        # A deal's files: staff-only ones filed on it and ones shared with the buyer.
+        if params[:deal_id].present?
+          deal_ids = @company.deals.where(id: params[:deal_id]).select(:id)
+          documents = documents.where(owner_type: 'Deal', owner_id: deal_ids)
+                               .or(documents.where(related_to_type: 'Deal', related_to_id: deal_ids))
+        end
         documents = documents.where(owner_type: 'Lead', owner_id: params[:lead_id]) if params[:lead_id].present?
         
         # Pagination
@@ -57,6 +70,8 @@ module Api
 
       def create
         return unless authorize_action!('documents', 'create')
+        return create_for_deal if params[:deal_id].present?
+
         # Accept either direct Contact ID or BuyerPortalAccess ID
         contact = @company.contacts.find_by(id: params[:buyer_id])
         
@@ -124,6 +139,39 @@ module Api
 
       private
 
+      # A file added on a deal. Staff-only unless share_with_buyer, which files
+      # it on the deal's contact (the buyer portal reads Contact-owned files)
+      # and tells them it is there.
+      def create_for_deal
+        deal = @company.deals.find_by(id: params[:deal_id])
+        return render json: { error: 'Deal not found' }, status: :not_found unless deal
+
+        share = ActiveModel::Type::Boolean.new.cast(params[:share_with_buyer])
+        contact = deal.contact if share
+        if share && !contact
+          return render json: { error: 'This deal has no contact to share the file with' }, status: :unprocessable_entity
+        end
+
+        @document = PortalDocument.new(
+          owner: contact || deal,
+          related_to: deal,
+          document_name: params[:document_name] || params[:title],
+          category: params[:category],
+          description: params[:description],
+          admin_notes: params[:admin_notes],
+          uploaded_by: current_user&.email || 'Admin',
+          uploaded_at: Time.current
+        )
+        @document.file.attach(params[:file]) if params[:file].present?
+
+        if @document.save
+          PortalPushService.new_document(document: @document, buyer: contact) if contact
+          render json: { document: document_json(@document) }, status: :created
+        else
+          render json: { errors: @document.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
       def set_document
         @document = company_scoped_documents.find_by(id: params[:id])
         unless @document
@@ -148,14 +196,27 @@ module Api
         PortalDocument.where(owner_type: 'Contact', owner_id: @company.contacts.select(:id))
                       .or(PortalDocument.where(owner_type: 'Account', owner_id: @company.accounts.select(:id)))
                       .or(PortalDocument.where(owner_type: 'Lead', owner_id: @company.leads.select(:id)))
+                      .or(PortalDocument.where(owner_type: 'Deal', owner_id: @company.deals.select(:id)))
       end
 
       def update_params
         params.permit(:description, :category, :document_name, :admin_notes)
       end
 
+      # Which deal a file belongs to, for the account and deal views.
+      def deal_ref(doc)
+        deal = doc.owner if doc.owner_type == 'Deal'
+        deal ||= doc.related_to if doc.related_to_type == 'Deal'
+        deal && { deal_id: deal.id, deal_number: deal.try(:deal_number), deal_name: deal.try(:name) }
+      end
+
       def document_json(doc)
-        return record_document_json(doc) if %w[Account Lead].include?(doc.owner_type)
+        json = document_json_base(doc)
+        json && (ref = deal_ref(doc)) ? json.merge(ref) : json
+      end
+
+      def document_json_base(doc)
+        return record_document_json(doc) if %w[Account Lead Deal].include?(doc.owner_type)
 
         # For Contact-owned documents
         if doc.owner_type == 'Contact'
@@ -221,7 +282,7 @@ module Api
         owner = doc.owner
         return nil unless owner
 
-        name = if owner.is_a?(Account)
+        name = if owner.is_a?(Account) || owner.is_a?(Deal)
                  owner.name
                else
                  [owner.first_name, owner.last_name].compact.join(' ').presence || owner.email
