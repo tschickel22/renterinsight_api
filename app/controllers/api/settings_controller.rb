@@ -723,8 +723,25 @@ module Api
         settings: serialize_settings,
         branding: serialize_branding,
         customFields: serialize_custom_fields,
+        smsSender: serialize_sms_sender,
         createdAt: @company.created_at,
         updatedAt: @company.updated_at
+      }
+    end
+
+    # Which number texts really go out from. A company on its own dedicated
+    # number (one we provisioned, or its own Twilio number connected to us)
+    # sends from that number, and the From field in its communications setting
+    # is ignored (CommunicationSettingsService#sms_config). The SMS settings
+    # screen reads this so it does not offer an edit that changes nothing.
+    def serialize_sms_sender
+      mode = @company.sms_provisioning_mode.presence || 'platform'
+      account = @company.twilio_account
+      dedicated = mode == 'dedicated' && account&.active?
+      {
+        mode: mode,
+        dedicatedNumber: dedicated ? account.phone_number : nil,
+        ownAccount: dedicated ? account.own_account? : false
       }
     end
 
