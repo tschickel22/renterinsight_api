@@ -914,6 +914,8 @@ Rails.application.routes.draw do
           # Email the buyer that new photos are on their project (E102)
           post :notify_client, on: :collection
         end
+        # Share quote details with installers: a scope sheet without prices
+        resource :quote_details, controller: 'project_quote_details', only: %i[show create destroy]
       end
 
       # Phase 2A: Offline sync
