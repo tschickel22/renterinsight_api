@@ -83,6 +83,18 @@ RSpec.describe 'Training video drafts and the public series', type: :request do
       expect(video.transcript).to include('Open the list.')
     end
 
+    it "replaces a published video's file and leaves it published, shared and named as it was" do
+      live = TrainingVideo.find_by!(slug: 'users-settings')
+      live.update!(is_published: true, share_enabled: true, video_url: 'https://x/old.mp4')
+      service = instance_double(S3UploadService, upload: { url: 'https://x/new.mp4', key: 'k2', size: 9 })
+      allow(S3UploadService).to receive(:new).and_return(service)
+      mp4 = Rack::Test::UploadedFile.new(StringIO.new('mp4'), 'video/mp4', original_filename: 'v.mp4')
+      post '/api/public/training_video_drafts/users-settings/files', headers: headers, params: { kind: 'video', file: mp4, duration_seconds: 101 }
+      expect(response).to have_http_status(:ok), response.body
+      expect(live.reload).to have_attributes(video_url: 'https://x/new.mp4', duration_seconds: 101, is_published: true,
+                                             share_enabled: true, title: 'Users settings')
+    end
+
     it 'refuses the wrong kind of file' do
       post '/api/public/training_video_drafts/users-settings/files', headers: headers, params: { kind: 'video', file: file }
       expect(response).to have_http_status(:unprocessable_entity)

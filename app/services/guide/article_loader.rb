@@ -26,8 +26,9 @@ module Guide
     def load!
       result = Result.new(created: [], skipped: [], unpublished: [], missing_modules: [])
       Array(@data['articles']).each do |a|
-        mod = Knowledge::Module.find_by(key: a['module'])
-        unless mod
+        # No module is fine (section bookends belong to a training area, not a help module).
+        mod = a['module'].present? ? Knowledge::Module.find_by(key: a['module']) : nil
+        if a['module'].present? && !mod
           result.missing_modules << a['module']
           next
         end
@@ -39,7 +40,7 @@ module Guide
         Knowledge::Article.create!(
           knowledge_module: mod, slug: a['slug'], title: a['title'], excerpt: a['excerpt'],
           content: a['content'], article_type: a['article_type'] || 'how_to',
-          position: a['position'].to_i, is_published: true
+          position: a['position'].to_i, is_published: a['published'] != false
         )
         result.created << a['slug']
       end

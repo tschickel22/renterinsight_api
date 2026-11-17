@@ -1,0 +1,66 @@
+# Section bookends (deal-to-cash plan item 16): the written words around a
+# training area's Watch all. section-intro-<area> shows before the first video,
+# section-recap-<area> after the last. The lists of videos, the runtime and the
+# Next button are generated; only these sentences are written. Search, Ask and
+# article lists never show them. Text approved by Tom 2026-11-17
+# (SECTION_BOOKENDS_DRAFT.md beside the backlog). No em or en dashes.
+#
+# Loaded by db/migrate/20261117200000_load_section_bookends.rb (Guide::ArticleLoader,
+# insert only by slug). Edit them later in Knowledge admin.
+
+articles:
+  - slug: section-intro-workflows
+    title: "Start here: intro"
+    article_type: section_intro
+    content: Watch these first. They show how the parts of {{brand}} fit together, before you learn any one screen.
+  - slug: section-recap-workflows
+    title: "Start here: recap"
+    article_type: section_recap
+    content: Next, open the stage you work in most. Every stage has its own short videos, articles and, on a computer, guided tours.
+
+  - slug: section-intro-company_settings
+    title: "Company Settings: intro"
+    article_type: section_intro
+    content: Settings decide how every other screen works for your dealership, so set them once, set them right, and the rest of {{brand}} follows.
+  - slug: section-recap-company_settings
+    title: "Company Settings: recap"
+    article_type: section_recap
+    content: |
+      - Settings change things for everyone in your company, not just you. Check with your team before changing a shared one, like pipeline stages or roles.
+      - If something works differently than you expect, look here first. Most of it is a setting.
+
+  - slug: section-intro-crm_sales
+    title: "CRM and Sales: intro"
+    article_type: section_intro
+    content: This is where a shopper becomes a buyer. Every lead, customer, deal and quote lives here, and everything after the sale starts from the deal.
+  # Held unpublished: the home cost rule (deal-to-cash item 12) is on staging only.
+  # Publish it in Knowledge admin once item 12 is on production.
+  - slug: section-recap-crm_sales
+    title: "CRM and Sales: recap"
+    article_type: section_recap
+    published: false
+    content: |
+      - Accepting a quote does not move its deal. Move the deal yourself when the buyer says yes.
+      - Before you close a deal, enter the home cost. A deal with no cost can't be approved, and nothing posts to your books until accounting approves it.
+
+  - slug: section-intro-projects
+    title: "Project management: intro"
+    article_type: section_intro
+    content: Projects run the work after the sale, phase by phase, so every install stays on schedule and every crew knows what is theirs.
+  - slug: section-recap-projects
+    title: "Project management: recap"
+    article_type: section_recap
+    content: |
+      - Check Review Updates every day. It is where work waits on you, from finished phases to changes a crew asked for.
+      - Give every phase an owner, so it is always clear who moves it next.
+
+  - slug: section-intro-truebuild
+    title: "TrueBuild: intro"
+    article_type: section_intro
+    content: TrueBuild prices every home the same way every time, from your price book to the buyer's design to the Deal Sheet.
+  - slug: section-recap-truebuild
+    title: "TrueBuild: recap"
+    article_type: section_recap
+    content: |
+      - Prices buyers see on your website leave out freight. Add freight on the Deal Sheet.
+      - When new factory prices arrive, review them before your homes and website use them.
