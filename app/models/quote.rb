@@ -64,6 +64,16 @@ class Quote < ApplicationRecord
   before_validation :calculate_totals
   before_validation :check_expiration
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
+  # Projects sharing this quote's details with installers get a fresh sheet
+  # (ProjectQuoteDetails) when its items change or it becomes the accepted one.
+  after_commit :refresh_installer_quote_details, on: :update,
+               if: -> { deal_id.present? && (saved_change_to_items? || saved_change_to_status?) }
+
+  def refresh_installer_quote_details
+    ProjectQuoteDetailsJob.perform_later(id)
+  rescue StandardError => e
+    Rails.logger.error("[QuoteDetails] Quote #{id}: #{e.message}")
+  end
   
   # Soft Delete
   def soft_delete!
