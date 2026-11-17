@@ -2298,6 +2298,8 @@ Rails.application.routes.draw do
         end
         member do
           post :send_agreement
+          # Hand this screen to a buyer at the desk; nothing is emailed or texted.
+          post :sign_in_person
           post :void
           post :remind
           post :remind_signer

@@ -33,8 +33,12 @@ class SealAgreementJob < ApplicationJob
       send_owner_completion_email(agreement, branding, frontend_base)
     end
 
-    # 2. Send completion receipt to each signer (public link — no login required)
+    # 2. Send completion receipt to each signer (public link — no login required).
+    #    A walk-in who signed in person at the desk may have no address at all;
+    #    their copy is printed or downloaded there instead.
     agreement.agreement_signers.required_signers.signed.each do |signer|
+      next if signer.email.blank?
+
       send_signer_completion_email(agreement, signer, branding, frontend_base)
     end
 
@@ -43,6 +47,8 @@ class SealAgreementJob < ApplicationJob
     return if agreement.sensitive?
 
     agreement.agreement_signers.cc_recipients.each do |cc|
+      next if cc.email.blank?
+
       send_cc_completion_email(agreement, cc, branding, frontend_base)
     end
   end

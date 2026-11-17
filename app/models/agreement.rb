@@ -135,6 +135,19 @@ class Agreement < ApplicationRecord
     true
   end
 
+  # Signed at the desk on the dealer's own screen. The same transition as sending,
+  # without the invitation: nothing is emailed or texted, and an agreement already
+  # out for signature simply carries on from where it is.
+  def start_in_person!(user = nil)
+    return true if ACTIVE_STATUSES.include?(status)
+    return false unless status == STATUS_DRAFT
+    return false if agreement_signers.required_signers.empty?
+
+    update!(status: STATUS_SENT, sent_at: Time.current, sealed_document_url: nil)
+    AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_IN_PERSON_STARTED, performed_by: user)
+    true
+  end
+
   def mark_viewed!(signer = nil)
     if status == STATUS_SENT
       update!(status: STATUS_VIEWED)
@@ -223,7 +236,17 @@ class Agreement < ApplicationRecord
       !has_unsigned_preparer_fields?
   end
 
-  # A buyer with no email signs on paper: the signed copy is uploaded instead of sent.
+  # Handing the buyer the screen at the desk. Unlike can_send?, an address is not
+  # needed: this is how a walk-in with no email signs electronically instead of on
+  # paper. The preparer's own fields still have to be signed first.
+  def can_sign_in_person?
+    (status == STATUS_DRAFT || ACTIVE_STATUSES.include?(status)) &&
+      pending_signers.any? &&
+      !has_unsigned_preparer_fields?
+  end
+
+  # A buyer with no email signs on paper, or in person: the signed copy is uploaded
+  # instead of sent.
   def signers_without_email
     agreement_signers.where(email: '').pluck(:name)
   end

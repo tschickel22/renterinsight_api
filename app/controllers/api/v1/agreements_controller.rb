@@ -3,7 +3,7 @@ module Api
     class AgreementsController < ApplicationController
       before_action :set_company_scope
       before_action :set_agreement, only: [
-        :show, :update, :destroy, :send_agreement, :void, :remind, :remind_signer,
+        :show, :update, :destroy, :send_agreement, :sign_in_person, :void, :remind, :remind_signer,
         :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature, :preparer_sign,
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
         :calculate, :vision_scan, :upload_signed_document,
@@ -223,7 +223,7 @@ module Api
         end
 
         if (no_email = @agreement.signers_without_email).any?
-          return render json: { error: "#{no_email.to_sentence} has no email address. Add one to the signer, or sign on paper and upload the signed copy." }, status: :unprocessable_entity
+          return render json: { error: "#{no_email.to_sentence} has no email address. Add one to the signer, have them sign here in person, or sign on paper and upload the signed copy." }, status: :unprocessable_entity
         end
 
         unless @agreement.can_send?
@@ -252,6 +252,60 @@ module Api
         else
           render json: { error: 'Failed to send agreement' }, status: :unprocessable_entity
         end
+      end
+
+      # POST /api/v1/agreements/:id/sign_in_person
+      # Hands this screen to a signer standing at the desk. Nothing is emailed or
+      # texted: the agreement makes the same transition as sending, and the signer's
+      # own signing token comes back for the app to open the signing view with.
+      def sign_in_person
+        return unless authorize_action!('agreements', 'update')
+
+        signer = @agreement.agreement_signers.find(params[:signer_id])
+
+        unless signer.requires_signature? && !signer.is_cc?
+          return render json: { error: "#{signer.name} has nothing to sign" }, status: :unprocessable_entity
+        end
+        unless [AgreementSigner::STATUS_PENDING, AgreementSigner::STATUS_VIEWED].include?(signer.status)
+          return render json: { error: "#{signer.name} has already #{signer.status} this agreement" }, status: :unprocessable_entity
+        end
+
+        if @agreement.has_unsigned_preparer_fields?
+          return render json: {
+            error: 'Your own signature and initials fields have to be filled in before the buyer signs. Go to the Fill Form step and sign.',
+            code: 'preparer_signature_required'
+          }, status: :unprocessable_entity
+        end
+
+        # Signing locks the Deal Sheet version this agreement was made from, so the
+        # same check that guards sending guards handing over the screen.
+        if @agreement.status == Agreement::STATUS_DRAFT && @agreement.deal_id &&
+           (problem = Agreements::DealSheetLock.send_problem(@agreement))
+          return render json: { error: problem, code: 'deal_sheet_changed' }, status: :unprocessable_entity
+        end
+
+        unless @agreement.start_in_person!(current_user)
+          return render json: { error: 'This agreement cannot be signed right now. It needs at least one signer and must not be voided, expired or already complete.' }, status: :unprocessable_entity
+        end
+
+        signer.start_in_person!(current_user)
+
+        AgreementAuditLog.log!(
+          @agreement, AgreementAuditLog::ACTION_IN_PERSON_HANDOFF,
+          agreement_signer: signer, performed_by: current_user,
+          ip_address: request.remote_ip, user_agent: request.user_agent,
+          metadata: { signer_id: signer.id, signer_name: signer.name }.deep_stringify_keys
+        )
+
+        render json: {
+          token: signer.access_token,
+          signer_id: signer.id,
+          signer_name: signer.name,
+          expires_at: signer.in_person_until,
+          agreement: agreement_json(@agreement.reload, detailed: true)
+        }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Signer not found' }, status: :not_found
       end
 
       # POST /api/v1/agreements/:id/void
@@ -646,7 +700,10 @@ module Api
               signed_at: s.signed_at,
               ip_address: s.ip_address,
               signature_method: s.signature_method,
-              signature_hash: s.signature_hash
+              signature_hash: s.signature_hash,
+              # Signed at the desk on a dealer screen, and which employee handed it over.
+              signed_in_person: s.signed_in_person,
+              hosted_by: s.hosted_by&.name
             }
           },
           audit_trail: logs.map { |l|
@@ -1527,6 +1584,9 @@ module Api
 
         if detailed
           data.merge!(
+            # Whether a signer can be handed this screen now. Detailed only: it queries
+            # the signers, and the list endpoint renders this for every row.
+            can_sign_in_person: agreement.can_sign_in_person?,
             content: agreement.content,
             document_url: agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? ?
               agreement.sealed_document_url_link : agreement.document_url_link,
@@ -1559,6 +1619,8 @@ module Api
                 viewed_at: s.viewed_at,
                 declined_at: s.declined_at,
                 signature_method: s.signature_method,
+                signed_in_person: s.signed_in_person,
+                hosted_by_name: s.hosted_by&.name,
                 signing_url: s.signing_url,
                 signable_type: s.signable_type,
                 signable_id: s.signable_id,
