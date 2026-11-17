@@ -81,6 +81,7 @@ module Api
 
       def video_params
         params.require(:video).permit(:title, :slug, :description, :module_key, :position, :duration_seconds,
+                                      :intro_ends_at, :outro_starts_at,
                                       :is_published, :share_enabled, chapters: %i[title start terms],
                                       covers: { routes: [], markers: [] })
       end
