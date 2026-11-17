@@ -22,7 +22,9 @@ RSpec.describe 'Project quote details for installers', type: :request do
                                'unit_cost' => 31_000, 'category' => 'home', 'notes' => '' },
                              { 'description' => 'Skirting, vinyl, 160 lf', 'quantity' => 1, 'unit_price' => 2400, 'total' => 2400,
                                'category' => 'accessory', 'notes' => 'Color: Clay' },
-                             { 'description' => 'Spring promo', 'quantity' => 1, 'unit_price' => -500, 'total' => -500, 'category' => 'other' }
+                             { 'description' => 'Spring promo', 'quantity' => 1, 'unit_price' => -500, 'total' => -500, 'category' => 'other' },
+                             { 'description' => 'Freight to homesite', 'quantity' => 1, 'total' => 1800, 'category' => 'fee' },
+                             { 'description' => 'Down Payment', 'quantity' => 1, 'total' => 5000, 'category' => 'service' }
                            ])
   end
   let(:stored) { {} }
@@ -49,7 +51,7 @@ RSpec.describe 'Project quote details for installers', type: :request do
 
     text = pdf_text(stored.values.last)
     expect(text).to include('Aspire 023', 'Skirting, vinyl, 160 lf', 'Color: Clay', quote.quote_number)
-    expect(text).not_to include('39,109', '39109', '31000', '31,000', '2400', '2,400', 'Spring promo', '$')
+    expect(text).not_to include('39,109', '39109', '31000', '31,000', '2400', '2,400', 'Spring promo', 'Freight', 'Down Payment', '$')
   end
 
   it 'shows on the installer task view' do

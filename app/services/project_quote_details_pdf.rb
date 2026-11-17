@@ -39,7 +39,7 @@ class ProjectQuoteDetailsPdf
           rows << [(i + 1).to_s, l[:description], l[:category].to_s.capitalize, qty(l[:quantity]), l[:notes].to_s]
         end
         pdf.table(rows, header: true, width: pdf.bounds.width,
-                        column_widths: { 0 => 24, 2 => 80, 3 => 36 },
+                        column_widths: { 0 => 24, 1 => 200, 2 => 76, 3 => 32 },
                         cell_style: { size: 9, padding: [5, 6], border_color: 'DDDDDD' }) do
           row(0).font_style = :bold
           row(0).background_color = 'F3F4F6'
