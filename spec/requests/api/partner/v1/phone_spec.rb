@@ -3,7 +3,8 @@
 require 'rails_helper'
 
 # What a dealer's 3CX calls through the template from PhoneCalls::ThreeCxTemplate:
-# caller lookup, call journaling, and create-lead-for-unknown-caller.
+# caller lookup, call journaling, text conversation (chat) journaling, and
+# create-lead-for-unknown-numbers.
 RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}", industry: 'manufactured_housing') }
   let(:other_company) { Company.create!(name: "Other-#{SecureRandom.hex(4)}", industry: 'manufactured_housing') }
@@ -110,12 +111,43 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
       expect(contact.contact_activities.where(activity_type: 'call').count).to eq(1)
     end
 
-    it 'keeps an unknown caller in the log without creating a lead' do
+    it 'keeps an unknown caller in the log without creating a lead when lead creation is off' do
       expect do
-        post '/api/partner/v1/phone/calls', params: report(number: '+19995550000').to_json, headers: headers
+        post '/api/partner/v1/phone/calls', params: report(number: '+19995550000', create_lead: 'False').to_json,
+                                            headers: headers
       end.not_to(change { company.leads.count })
       expect(response.parsed_body['matched']).to be(false)
       expect(company.phone_call_logs.unmatched.count).to eq(1)
+    end
+
+    it 'makes an unknown incoming caller a lead and logs the call on it when lead creation is on' do
+      expect do
+        post '/api/partner/v1/phone/calls', params: report(number: '3215550177', create_lead: 'True').to_json,
+                                            headers: headers
+      end.to change { company.leads.count }.by(1)
+      body = response.parsed_body
+      expect(body['created_lead']).to be(true)
+      new_lead = company.leads.order(:id).last
+      expect(body['record']).to eq("lead-#{new_lead.id}")
+      expect(new_lead.last_name).to eq('(321) 555-0177')
+      expect(new_lead.lead_activities.where(activity_type: 'call').count).to eq(1)
+    end
+
+    it 'does not make a lead of an outgoing call or a number cut to seven digits' do
+      expect do
+        post '/api/partner/v1/phone/calls',
+             params: report(call_type: 'Outbound', number: '3215550166', create_lead: 'True').to_json, headers: headers
+        post '/api/partner/v1/phone/calls',
+             params: report(number: '5550166', create_lead: 'True', started_at: '2026-11-06T17:00:00Z').to_json,
+             headers: headers
+      end.not_to(change { company.leads.count })
+    end
+
+    it 'treats an unfilled [CreateLeadEnabled] as off' do
+      expect do
+        post '/api/partner/v1/phone/calls', params: report(number: '3215550155', create_lead: '[CreateLeadEnabled]').to_json,
+                                            headers: headers
+      end.not_to(change { company.leads.count })
     end
 
     it 'falls back to the record owner when the extension matches nobody, and tells them about a missed call' do
@@ -159,17 +191,110 @@ RSpec.describe 'Api::Partner::V1 Phone (3CX)', type: :request do
       post '/api/partner/v1/phone/contacts', params: { number: '+13215550188' }.to_json, headers: headers
       expect(company.leads.count).to eq(2) # Pat plus the one caller, no duplicate
     end
+
+    it 'uses the name and email typed into 3CX, and ignores fields 3CX left unfilled' do
+      post '/api/partner/v1/phone/contacts',
+           params: { number: '3215550199', first_name: 'Rita', last_name: 'Home', email: '[Email]' }.to_json,
+           headers: headers
+      new_lead = company.leads.order(:id).last
+      expect([new_lead.first_name, new_lead.last_name, new_lead.email]).to eq(['Rita', 'Home', nil])
+    end
+  end
+
+  describe 'chats (text conversations)' do
+    def chat(overrides = {})
+      {
+        provider: '3cx', number: '3525550101', email: '[Email]', name: 'Pat Buyer',
+        messages: "Pat Buyer: Is the Hamilton still available?\nMeave Agbon: Yes, want to come see it Saturday?",
+        agent: '105', agent_email: rep.email, agent_name: 'Meave Agbon', duration: '600',
+        started_at: '2026-11-17T15:00:00Z', ended_at: '2026-11-17T15:10:00Z',
+        entity_id: '[EntityId]', entity_type: '[EntityType]', create_lead: 'True'
+      }.merge(overrides)
+    end
+
+    it 'saves the conversation on the matching lead as one text, credited to the rep, and keeps the raw report' do
+      post '/api/partner/v1/phone/chats', params: chat.to_json, headers: headers
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body['record']).to eq("lead-#{lead.id}")
+      comm = Communication.where(communicable: lead, channel: 'sms').last
+      expect(comm.body).to include('Hamilton')
+      expect(comm.direction).to eq('inbound')
+      expect(comm.user_id).to eq(rep.id)
+      expect(comm.metadata['transcript']).to be(true)
+      log = company.phone_call_logs.last
+      expect(log.call_type).to eq('sms')
+      expect(log.payload['messages']).to include('Hamilton')
+    end
+
+    it 'updates the saved transcript when 3CX reports the same conversation again with more' do
+      post '/api/partner/v1/phone/chats', params: chat.to_json, headers: headers
+      more = chat[:messages] + "\nPat Buyer: Saturday works"
+      expect do
+        post '/api/partner/v1/phone/chats', params: chat(messages: more).to_json, headers: headers
+      end.not_to(change { Communication.count })
+      expect(response.parsed_body['duplicate']).to be(true)
+      expect(Communication.where(communicable: lead, channel: 'sms').last.body).to include('Saturday works')
+    end
+
+    it 'makes an unknown number a lead, puts the conversation on it and tells its owner' do
+      UnmatchedTextRouting.new(company).save!(mode: 'user', user_id: rep.id)
+      expect do
+        post '/api/partner/v1/phone/chats', params: chat(number: '+13215550144', name: '[Name]').to_json, headers: headers
+      end.to change { company.leads.count }.by(1)
+      new_lead = company.leads.order(:id).last
+      expect(response.parsed_body['created_lead']).to be(true)
+      expect(new_lead.first_name).to eq('Text from')
+      expect(new_lead.origin).to eq(Lead::ORIGIN_SMS)
+      expect(Communication.where(communicable: new_lead, channel: 'sms').count).to eq(1)
+      expect(new_lead.owner_id).to eq(rep.id)
+      expect(Notification.where(recipient: rep, notification_type: 'sms_new_lead', notifiable: new_lead).count).to eq(1)
+    end
+
+    it 'keeps an unknown number in the log only, when lead creation is off' do
+      expect do
+        post '/api/partner/v1/phone/chats', params: chat(number: '+13215550133', create_lead: 'False').to_json,
+                                            headers: headers
+      end.not_to(change { company.leads.count })
+      expect(response.parsed_body['matched']).to be(false)
+      expect(company.phone_call_logs.unmatched.where(call_type: 'sms').count).to eq(1)
+    end
+
+    it 'opts the person out of texts when they replied STOP' do
+      post '/api/partner/v1/phone/chats',
+           params: chat(messages: "Meave Agbon: Still looking for a home?\nPat Buyer: STOP").to_json, headers: headers
+      expect(response.parsed_body['opted_out']).to be(true)
+      expect(CommunicationOptOut.check(channel: 'sms', company: company, record: lead)).to be_opted_out
+    end
+
+    it 'does not opt out on a message that merely mentions stopping' do
+      post '/api/partner/v1/phone/chats',
+           params: chat(messages: 'Pat Buyer: please stop by Saturday instead').to_json, headers: headers
+      expect(response.parsed_body['opted_out']).to be(false)
+      expect(CommunicationOptOut.check(channel: 'sms', company: company, record: lead)).not_to be_opted_out
+    end
+
+    it 'logs a report with an empty message list without adding an empty text' do
+      expect do
+        post '/api/partner/v1/phone/chats', params: chat(messages: '[ChatMessages]').to_json, headers: headers
+      end.not_to(change { Communication.count })
+      expect(company.phone_call_logs.where(call_type: 'sms').count).to eq(1)
+    end
   end
 
   describe 'template' do
-    it 'is well formed XML carrying the key and the three scenarios' do
+    it 'is well formed XML carrying the key and the scenarios 3CX runs' do
       xml = PhoneCalls::ThreeCxTemplate.new(base_url: 'https://api.example.com/', api_key: 'ri_live_abc&<x>').to_xml
       doc = Nokogiri::XML(xml) { |c| c.strict }
       expect(doc.errors).to be_empty
-      expect(doc.xpath('//Scenario').map { |s| s['Id'] }).to eq(['', 'CreateContactRecord', 'ReportCall'])
+      expect(doc.xpath('//Scenario').map { |s| s['Id'] })
+        .to eq(['', 'CreateContactRecordFromClient', 'ReportCall', 'ReportChat'])
       expect(doc.at_xpath("//Parameter[@Name='ApiKey']")['Default']).to eq('ri_live_abc&<x>')
       expect(doc.at_xpath("//Parameter[@Name='Url']")['Default']).to eq('https://api.example.com')
-      expect(doc.at_xpath("//Parameter[@Name='CreateContactEnabled']")['Default']).to eq('False')
+      expect(doc.at_xpath("//Parameter[@Name='CreateLeadEnabled']")['Default']).to eq('True')
+      expect(doc.at_xpath("//Parameter[@Name='ReportChatEnabled']")['Default']).to eq('True')
+      chat_keys = doc.xpath("//Scenario[@Id='ReportChat']//PostValues/Value").map { |n| n['Key'] }
+      expect(chat_keys).to include('number', 'messages', 'started_at', 'create_lead')
+      expect(doc.xpath("//Scenario[@Id='ReportCall']//PostValues/Value").map { |n| n['Key'] }).to include('create_lead')
       expect(doc.at_xpath('//Number')['MaxLength']).to eq('10')
     end
   end

@@ -7,8 +7,12 @@ module Api
       # (Authorization: Bearer). See PhoneCalls::ThreeCxTemplate for the caller side.
       #
       #   POST|GET /phone/lookup    number          -> { contacts: [best match] }
-      #   POST     /phone/contacts  number          -> creates a lead, same shape
-      #   POST     /phone/calls     call journaling -> logs the call
+      #   POST     /phone/contacts  number, name... -> creates a lead, same shape
+      #                                                (3CX's "create contact" in its app)
+      #   POST     /phone/calls     call journaling -> logs the call; an unknown
+      #                                                caller becomes a lead if asked
+      #   POST     /phone/chats     chat journaling -> saves an SMS conversation; an
+      #                                                unknown number becomes a lead if asked
       class PhoneController < BaseController
         def lookup
           authorize_permission!('leads', 'read')
@@ -29,14 +33,12 @@ module Api
           found = lookup.by_number(number)
           return render(json: { contacts: found }) if found.any?
 
-          source = SourceResolverService.resolve(company: current_company, source_name: 'Phone call')
-          current_company.leads.create!(
-            first_name: 'Caller', last_name: pretty(digits), phone: number, status: 'new',
-            origin: Lead::ORIGIN_API, source_id: source&.id,
-            owner_id: UnmatchedTextRouting.new(current_company).next_owner_id,
-            location_id: current_company.inbound_lead_location&.id,
-            notes: "Created by the phone system for a call from #{number}."
+          lead = PhoneCalls::LeadMaker.new(current_company).create!(
+            number: number, kind: :call, first_name: given(:first_name), last_name: given(:last_name),
+            email: given(:email), company_name: given(:company)
           )
+          return render(json: { error: 'a full 10 digit number is required' }, status: :unprocessable_entity) unless lead
+
           render json: { contacts: lookup.by_number(number) }, status: :created
         end
 
@@ -45,22 +47,40 @@ module Api
           return if performed?
 
           attrs = params.to_unsafe_h.slice('call_type', 'direction', 'number', 'agent', 'agent_email', 'agent_name',
-                                           'duration', 'started_at', 'entity_id', 'contact_id')
+                                           'duration', 'started_at', 'entity_id', 'contact_id', 'create_lead')
           attrs['entity_id'] = attrs['contact_id'] if attrs['entity_id'].to_s !~ /\A(lead|contact|account)-\d+\z/i
           payload = params.to_unsafe_h.except('controller', 'action', 'format', 'phone')
           result = PhoneCalls::Recorder.new(company: current_company, provider: params[:provider].presence || '3cx')
                                        .call(attrs.except('contact_id'), payload: payload)
           render json: {
-            ok: true, id: result.log&.id, duplicate: result.duplicate,
+            ok: true, id: result.log&.id, duplicate: result.duplicate, created_lead: result.created_lead || false,
             matched: result.record.present?, record: result.record && PhoneCalls::Lookup.entity_id(result.record)
+          }, status: result.duplicate ? :ok : :created
+        end
+
+        def chats
+          authorize_permission!('leads', 'write')
+          return if performed?
+
+          attrs = params.to_unsafe_h.slice('number', 'messages', 'agent', 'agent_email', 'agent_name', 'duration',
+                                           'started_at', 'ended_at', 'entity_id', 'contact_id', 'create_lead')
+          attrs['entity_id'] = attrs['contact_id'] if attrs['entity_id'].to_s !~ /\A(lead|contact|account)-\d+\z/i
+          payload = params.to_unsafe_h.except('controller', 'action', 'format', 'phone')
+          result = PhoneCalls::ChatRecorder.new(company: current_company, provider: params[:provider].presence || '3cx')
+                                           .call(attrs.except('contact_id'), payload: payload)
+          render json: {
+            ok: true, id: result.log&.id, duplicate: result.duplicate, created_lead: result.created_lead || false,
+            matched: result.record.present?, record: result.record && PhoneCalls::Lookup.entity_id(result.record),
+            opted_out: result.opted_out || false
           }, status: result.duplicate ? :ok : :created
         end
 
         private
 
-        def pretty(digits)
-          d = digits.last(10)
-          d.length == 10 ? "(#{d[0, 3]}) #{d[3, 3]}-#{d[6, 4]}" : digits
+        # A 3CX value that was really filled in (not left as "[FirstName]").
+        def given(key)
+          v = params[key].to_s.strip
+          v.match?(/\A\[[^\]]*\]\z/) ? nil : v.presence
         end
       end
     end
