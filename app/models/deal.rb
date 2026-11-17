@@ -244,6 +244,8 @@ class Deal < ApplicationRecord
     return unless settings.try(:auto_post_deals)
 
     result = Accounting::DealAccountingService.new(self).post_closing_entries!(user: try(:owner) || try(:user))
+    # Refused (no home cost, say): the deal stays in the approvals queue, which shows why.
+    Rails.logger.info("[AutoPost] Deal #{id} not posted: #{result[:error]}") if result[:error]
     # When auto-post is enabled the deal is GL-posted without going through the approval
     # controller, so generate commission payments here too once the post succeeds. Keeps
     # the gate consistent: commissions are generated on GL post, never merely on close.

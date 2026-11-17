@@ -23,6 +23,9 @@ module Accounting
     def post_closing_entries!(user: nil)
       return { error: 'Deal is not closed/won' } unless deal_is_closed?
       return { error: 'Already posted to GL' } if @deal.gl_posted?
+      if (problem = missing_cost_problem)
+        return { error: problem, code: 'cost_not_entered' }
+      end
 
       posting_service = ManualPostingService.new(@company)
 
@@ -50,6 +53,21 @@ module Accounting
       end
     end
 
+    # A home sold with no cost behind it would post revenue with no COGS line,
+    # leave the unit in inventory, and pay commission on the whole selling price.
+    # The first two can be fixed by a journal entry later; the commission cannot.
+    # So every posting path (approval, Post to GL, auto-post on close) refuses it
+    # here, and the approvals queue shows this same sentence on the deal's row.
+    # nil when the deal is fine to post.
+    def missing_cost_problem
+      return nil unless deal_selling_price > 0
+      return nil if @deal.cost_entered?
+
+      'This deal has a selling price but no home cost. Enter the cost on the ' \
+        "deal's home line or on the home in inventory, then post it. Posting " \
+        'without one would record no cost of goods and pay commission on the full price.'
+    end
+
     # The lines the closing entry posts for the deal as it stands: revenue, COGS
     # and inventory relief, reconditioning, floor plan payoff, the deal's other
     # line items and commission. Posts nothing; post_closing_entries! posts them
@@ -60,7 +78,7 @@ module Accounting
       lines = []
       deal_location_id = @deal.try(:location_id)
 
-      selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
+      selling_price = deal_selling_price
       # PRODUCT cost relieved to COGS = vehicle structured cost (close-time snapshot) +
       # reconditioning, from the SAME snapshot GP uses, so the COGS product cost and GP's
       # product component can never drift. Floor-plan interest and delivery/setup are
@@ -408,6 +426,10 @@ module Accounting
     end
 
     private
+
+    def deal_selling_price
+      @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
+    end
 
     # What the deal owes in sales tax and where it posts: { skipped: reason }
     # when it posts none, otherwise the AR account, rates and one slot per

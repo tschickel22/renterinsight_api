@@ -26,7 +26,7 @@ RSpec.describe 'Deal funding at approval', type: :request do
   let(:bank_gl) { company.chart_of_accounts.where(account_type: 'asset', is_header: false).order(:account_number).first }
   let(:bank) { company.bank_accounts.create!(bank_name: 'Chase', account_type: 'checking', account_purpose: 'sync_only', chart_of_account: bank_gl) }
   let(:deal) do
-    company.deals.create!(location: location, name: 'Diaz home', account: account, selling_price: 100_000,
+    company.deals.create!(location: location, name: 'Diaz home', account: account, selling_price: 100_000, home_cost: 1,
                           actual_close_date: Date.current, stage: 'closed_won', payment_type: 'financed',
                           lender_name: 'Triad', financed_amount: 80_000)
   end

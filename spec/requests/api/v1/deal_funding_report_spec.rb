@@ -32,7 +32,7 @@ RSpec.describe 'Deal Funding report', type: :request do
   def body = JSON.parse(response.body)
 
   def approved_deal(price: 100_000, name: 'Diaz home')
-    deal = company.deals.create!(location: location, name: name, account: account, selling_price: price, actual_close_date: Date.current - 40)
+    deal = company.deals.create!(location: location, name: name, account: account, selling_price: price, home_cost: 1, actual_close_date: Date.current - 40)
     deal.update!(stage: 'closed_won')
     result = Accounting::DealAccountingService.new(deal).post_closing_entries!(user: dealer)
     expect(result).to include(success: true), result.inspect
@@ -92,13 +92,13 @@ RSpec.describe 'Deal Funding report', type: :request do
   end
 
   it 'bills the sales tax posted at approval when the deal sheet tax is 0' do
-    deal = company.deals.create!(location: location, name: 'Taxed', account: account, selling_price: 50_000, tax_amount: 0, total_tax_amount: 1450)
+    deal = company.deals.create!(location: location, name: 'Taxed', account: account, selling_price: 50_000, home_cost: 1, tax_amount: 0, total_tax_amount: 1450)
     expect(DealInvoiceService.new(deal).deal_total).to eq(51_450)
   end
 
   it 'gives an auto-posted deal its invoice' do
     AccountingSettings.for_company(company).update!(auto_post_deals: true)
-    deal = company.deals.create!(location: location, name: 'Auto', account: account, selling_price: 70_000)
+    deal = company.deals.create!(location: location, name: 'Auto', account: account, selling_price: 70_000, home_cost: 1)
     deal.update!(stage: 'closed_won')
 
     expect(deal.reload.gl_posted_at).to be_present
@@ -121,7 +121,7 @@ RSpec.describe 'Deal Funding report', type: :request do
   end
 
   it 'bills every line item approval books, and matches an older invoice to the books' do
-    deal = company.deals.create!(location: location, name: 'With F&I', account: account, selling_price: 50_000,
+    deal = company.deals.create!(location: location, name: 'With F&I', account: account, selling_price: 50_000, home_cost: 1,
                                  actual_close_date: Date.current)
     deal.deal_products.create!(product_name: 'Installation', quantity: 1, unit_price: 5000, discount: 0, total: 5000, notes: 'category:fi')
     deal.update!(stage: 'closed_won')

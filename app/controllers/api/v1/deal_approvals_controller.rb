@@ -194,7 +194,7 @@ class Api::V1::DealApprovalsController < ApplicationController
     result = service.post_closing_entries!(user: current_user)
 
     if result[:error]
-      render json: { error: result[:error] }, status: :unprocessable_entity
+      render json: { error: result[:error], code: result[:code] }.compact, status: :unprocessable_entity
     else
       @deal.reload
 
@@ -321,6 +321,9 @@ class Api::V1::DealApprovalsController < ApplicationController
 
     render json: {
       pending_deals: pending_scope.count,
+      # Closed deals that cannot post until someone enters the home's cost.
+      pending_missing_cost: pending_scope.includes(:vehicle, :deal_products).to_a
+                                         .count { |d| Accounting::DealAccountingService.new(d).missing_cost_problem },
       pending_commissions: commission_pending_scope.count,
       posted_today: posted_today,
       total_posted_this_month: total_posted_this_month,
@@ -446,8 +449,9 @@ class Api::V1::DealApprovalsController < ApplicationController
     je_numbers = je_numbers_by_id(related_je_ids)
 
     # Build profitability once and flatten key fields to top level
+    accounting = Accounting::DealAccountingService.new(deal)
     prof = begin
-      Accounting::DealAccountingService.new(deal).profitability_summary
+      accounting.profitability_summary
     rescue => e
       Rails.logger.warn("[DealApprovals] profitability_summary failed for deal #{deal.id}: #{e.message}")
       {}
@@ -496,6 +500,9 @@ class Api::V1::DealApprovalsController < ApplicationController
       city_tax_rate: deal.try(:city_tax_rate),
       # Status flags
       gl_posted: deal.try(:gl_posted) || false,
+      # Why Approve will refuse this deal, in words the queue shows as is. nil once
+      # posted, or when nothing is in the way.
+      posting_problem: (accounting.missing_cost_problem unless deal.try(:gl_posted)),
       commission_posted: deal.try(:commission_posted) || false,
       # Journal entry references
       gl_journal_entry_id: gl_je_id,
