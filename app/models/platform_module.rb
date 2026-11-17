@@ -25,9 +25,10 @@ class PlatformModule
     'inventory.vehicles' => { name: 'Inventory Management', category: 'Inventory & Operations', icon: 'Package', description: 'Vehicle and unit inventory tracking' },
     'inventory.parts' => { name: 'Parts Management', category: 'Inventory & Operations', icon: 'Box', description: 'Parts inventory and stock management' },
     'inventory.land' => { name: 'Land Management', category: 'Inventory & Operations', icon: 'Map', description: 'Land and lot inventory management' },
-    # Lot Map and PDI Checklist are not offered (Tom, 2026-11-17): prototypes a dealer
-    # cannot open (PDI runs on browser data, Lot Map has no backend). Kept here so
-    # the menu config and old plan rows still resolve; in no plan template.
+    # Lot Map, PDI Checklist and Delivery Tracker are not offered (Tom, 2026-11-17):
+    # prototypes a dealer cannot open (PDI and Delivery run on browser data, Lot Map
+    # has no backend). Kept here so the menu config and old plan rows still resolve;
+    # in no plan template.
     'inventory.lot_map' => { name: 'Lot Map', category: 'Inventory & Operations', icon: 'MapPin', description: 'Visual lot mapping and assignment' },
     'inventory.pdi' => { name: 'PDI Checklist', category: 'Inventory & Operations', icon: 'ClipboardCheck', description: 'Pre-delivery inspection management' },
     'inventory.delivery' => { name: 'Delivery Tracker', category: 'Inventory & Operations', icon: 'Truck', description: 'Delivery scheduling and tracking' },
@@ -185,7 +186,7 @@ class PlatformModule
     ].freeze,
     professional: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.deal_desk
-      inventory.vehicles inventory.parts inventory.land inventory.delivery
+      inventory.vehicles inventory.parts inventory.land
       marketing.listings marketing.brochures marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal
@@ -194,7 +195,7 @@ class PlatformModule
     ].freeze,
     enterprise: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.deal_desk
-      inventory.vehicles inventory.parts inventory.land inventory.delivery inventory.champion_ims
+      inventory.vehicles inventory.parts inventory.land inventory.champion_ims
       marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal service.warranty
