@@ -2,9 +2,11 @@
 
 module Api
   module Public
-    # The training pipeline sends finished videos here for review (E91). All it
-    # can do is make or replace an unpublished draft with sharing off: it cannot
-    # publish, share, delete or touch a published video. It answers only where
+    # The training pipeline sends finished videos here for review (E91). It can
+    # make or replace an unpublished draft with sharing off, and replace the MP4,
+    # poster or captions of any video, published or not (a rebuilt ending, a
+    # fixed caption; Tom, 2026-11-17). It cannot publish, unpublish, share,
+    # rename, change a published video's words or delete anything. It answers only where
     # the key's digest is stored in Settings, which is staging, and never on a
     # server that copies its help from another one, which is production.
     class TrainingVideoDraftsController < ApplicationController
@@ -28,9 +30,9 @@ module Api
       end
 
       # POST /api/public/training_video_drafts/:slug/files  kind=video|poster|captions, file
+      # A published video keeps its publishing, sharing, title and words; only the file changes.
+      # Production copies the new file on its next help sync (it is stored under a new key).
       def file
-        return refuse_published if @video.is_published
-
         kind = params[:kind].to_s
         upload = params[:file]
         return render(json: { error: 'kind must be video, poster or captions' }, status: :unprocessable_entity) unless FILES.key?(kind)

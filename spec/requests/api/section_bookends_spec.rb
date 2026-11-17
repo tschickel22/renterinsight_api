@@ -56,3 +56,19 @@ RSpec.describe 'Section bookends', type: :request do
     expect(body['articles'].map { |a| a['slug'] }).to eq(['section-recap-projects'])
   end
 end
+
+RSpec.describe 'Section bookends as loaded', type: :request do
+  it 'loads every approved bookend, typed by slug, with no module, holding the CRM recap back' do
+    result = Guide::ArticleLoader.load!(Rails.root.join('db/guide/section_bookends.yml'))
+    expect(result.created.size).to eq(10)
+    expect(result.missing_modules).to be_empty
+
+    loaded = Knowledge::Article.where(slug: result.created)
+    expect(loaded.pluck(:article_type).uniq).to match_array(%w[section_intro section_recap])
+    expect(loaded.where(is_published: false).pluck(:slug)).to eq(['section-recap-crm_sales'])
+    expect(loaded.pluck(:content).join).not_to match(/[–—]/)
+
+    again = Guide::ArticleLoader.load!(Rails.root.join('db/guide/section_bookends.yml'))
+    expect(again.created).to be_empty
+  end
+end
