@@ -101,6 +101,12 @@ RSpec.describe 'Training video intros and videos in search', type: :request do
     let!(:short_intro) do
       TrainingVideo.create!(title: 'Short intro', chapters: [{ 'title' => 'Intro', 'start' => 0 }, { 'title' => 'Go', 'start' => 7 }])
     end
+    # How our videos are made: a title card, then the first chapter where the
+    # narrator starts, sometimes a second after the first words.
+    let!(:title_card) do
+      TrainingVideo.create!(title: 'Title card', transcript: "0:05 Open Deals.\n0:09 Press New Deal.",
+                            chapters: [{ 'title' => 'Open Deals', 'start' => 6 }, { 'title' => 'New Deal', 'start' => 20 }])
+    end
     let!(:long_first) do
       TrainingVideo.create!(title: 'Long first chapter', chapters: [{ 'title' => 'A', 'start' => 0 }, { 'title' => 'B', 'start' => 60 }])
     end
@@ -111,6 +117,7 @@ RSpec.describe 'Training video intros and videos in search', type: :request do
 
       run(write: true)
       expect(short_intro.reload.intro_ends_at).to eq(7)
+      expect(title_card.reload.intro_ends_at).to eq(5) # first words, not the second chapter (20)
       expect(long_first.reload.intro_ends_at).to be_nil
       expect(locations.reload.intro_ends_at).to eq(6)
       expect(locations.outro_starts_at).to eq(80)

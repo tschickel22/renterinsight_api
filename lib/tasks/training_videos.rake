@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 # Intro timings for "Watch all" (it skips each video's intro). Rather than
-# scrub every video by hand, guess: the intro ends where the second chapter
-# starts. Right when the first chapter is the intro, wrong when it is already
-# content, so a guess past MAX_GUESS seconds is reported for a person to set
-# in Knowledge admin, Videos, and never written.
+# scrub every video by hand, guess: the intro is the title card before anyone
+# speaks, so it ends at the first narration line or the first chapter after
+# 0:00, whichever comes first. (Not "the second chapter": our chapters start
+# after the title card, so that would skip the whole first chapter.) A guess
+# past MAX_GUESS seconds is reported for a person to set in Knowledge admin,
+# Videos, and never written.
 #
 #   bin/rails training_videos:prefill_intros           # report only
 #   bin/rails training_videos:prefill_intros WRITE=1   # save the guesses
@@ -14,7 +16,14 @@
 namespace :training_videos do
   MAX_GUESS = 45
 
-  desc 'Guess intro_ends_at from the second chapter (WRITE=1 saves; only fills blanks)'
+  # Seconds of the first "m:ss" narration line, and of the first chapter after 0:00.
+  def self.intro_guess(video)
+    spoken = video.transcript.to_s[/^\s*(\d+):(\d{2})\b/] && (Regexp.last_match(1).to_i * 60) + Regexp.last_match(2).to_i
+    chapter = Array(video.chapters).map { |c| c['start'].to_i }.reject(&:zero?).min
+    [spoken, chapter].compact.reject(&:zero?).min
+  end
+
+  desc 'Guess intro_ends_at from the first narration line or chapter (WRITE=1 saves; only fills blanks)'
   task prefill_intros: :environment do
     write = ENV['WRITE'] == '1'
     counts = Hash.new(0)
@@ -24,16 +33,16 @@ namespace :training_videos do
         counts[:already_set] += 1
         next
       end
-      second = Array(v.chapters).map { |c| c['start'].to_i }.sort.reject(&:zero?).first
-      if second.nil?
-        puts "  no guess   #{label}: fewer than two chapters"
+      guess = intro_guess(v)
+      if guess.nil?
+        puts "  no guess   #{label}: no timed narration or chapters"
         counts[:no_guess] += 1
-      elsif second > MAX_GUESS
-        puts "  set by hand #{label}: second chapter starts at #{second}s"
+      elsif guess > MAX_GUESS
+        puts "  set by hand #{label}: first words or chapter at #{guess}s"
         counts[:by_hand] += 1
       else
-        puts "  #{write ? 'saved' : 'would save'} #{second}s  #{label}"
-        v.update_columns(intro_ends_at: second, updated_at: Time.current) if write
+        puts "  #{write ? 'saved' : 'would save'} #{guess}s  #{label}"
+        v.update_columns(intro_ends_at: guess, updated_at: Time.current) if write
         counts[:guessed] += 1
       end
     end
