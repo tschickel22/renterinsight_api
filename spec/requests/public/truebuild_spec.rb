@@ -447,6 +447,52 @@ RSpec.describe 'Public TrueBuild', type: :request do
       expect(JSON.parse(response.body)['items'].find { |i| i['id'] == vehicle.id }['design_url']).to be_nil
     end
 
+    describe 'on a shared demo (its preview token, demo_token)' do
+      def demo_for(lot, **attrs)
+        SiteContentProfile.create!(company: company, inventory_company: lot, source_url: 'https://prospect.com',
+                                   status: 'ready', source_kind: 'url', **attrs)
+      end
+
+      it 'counts as a DealerTide site for the lot the demo shows, and saves nothing' do
+        demo = demo_for(company)
+        params = embed.merge(demo_token: demo.preview_token)
+
+        get "/public/inventory/#{vehicle.id}", params: params
+        expect(JSON.parse(response.body)['truebuild']).to eq('available' => true)
+        get '/public/inventory', params: params
+        expect(JSON.parse(response.body)['items'].find { |i| i['id'] == vehicle.id }).to include('designable' => true)
+        get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, demo_token: demo.preview_token }
+        expect(response).to have_http_status(:ok)
+        get '/public/truebuild/models', params: { token: token, demo_token: demo.preview_token }
+        expect(JSON.parse(response.body)['models'].size).to eq(1)
+
+        expect do
+          post '/public/truebuild/designs', params: { token: token, demo_token: demo.preview_token, variant_id: variant.id,
+                                                      contact: { first_name: 'Tia', last_name: 'Ray', email: 'tia@example.com' } }
+        end.not_to change(TruebuildDesign, :count)
+        expect(response).to have_http_status(:forbidden)
+        expect(JSON.parse(response.body)['error']).to eq('This is a demo: designs are not saved')
+      end
+
+      it 'does not open the designer for another lot, or once the demo link is withdrawn' do
+        other = create(:company).tap { |c| c.update!(public_inventory_token: SecureRandom.hex(8), public_inventory_settings: { 'public_inventory_enabled' => true }) }
+        get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, demo_token: demo_for(other).preview_token }
+        expect(response).to have_http_status(:forbidden)
+
+        expired = demo_for(company, preview_expires_at: 1.day.ago)
+        get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, demo_token: expired.preview_token }
+        expect(response).to have_http_status(:forbidden)
+        get "/public/truebuild/homes/#{vehicle.id}", params: { token: token, demo_token: 'made-up' }
+        expect(response).to have_http_status(:forbidden)
+      end
+
+      it "tells the demo page whether its lot offers TrueBuild" do
+        expect(SiteProfiles::DemoInventoryResolver.config_for_profile(demo_for(company))['truebuild']).to be(true)
+        company.dealer_factories.destroy_all
+        expect(SiteProfiles::DemoInventoryResolver.config_for_profile(demo_for(company))['truebuild']).to be(false)
+      end
+    end
+
     it 'serves the hosted designer page for the link, on the design host too' do
       company.tenant_module_overrides.create!(module_key: 'sales.truebuild_embed', is_enabled: true)
       company.update!(subdomain: 'summit-homes')

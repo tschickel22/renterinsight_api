@@ -87,6 +87,8 @@ class Public::TruebuildController < ApplicationController
 
   def create_design
     return render json: { error: 'This is a preview: designs are not saved' }, status: :forbidden if @preview
+    # A prospect trying the designer on a demo is not a buyer of this lot.
+    return render json: { error: 'This is a demo: designs are not saved' }, status: :forbidden if demo_request?
     variant = CatalogPlanVariant.find_by(id: params[:variant_id])
     return not_designable unless designable_model?(variant)
     return render json: { error: 'Please try again' }, status: :unprocessable_entity if params[:website].present? # honeypot
