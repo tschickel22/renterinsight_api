@@ -25,6 +25,9 @@ class AgreementAuditLog < ApplicationRecord
   ACTION_SIGNER_REMOVED = 'signer_removed'
   ACTION_SIGNER_UPDATED = 'signer_updated'
   ACTION_DELIVERY_FAILED = 'delivery_failed'
+  # Signed at the desk on the dealer's own screen, rather than from an invitation.
+  ACTION_IN_PERSON_STARTED = 'in_person_started'
+  ACTION_IN_PERSON_HANDOFF = 'in_person_handoff'
 
   scope :for_agreement, ->(agreement_id) { where(agreement_id: agreement_id).order(created_at: :asc) }
   scope :by_action, ->(action) { where(action: action) if action.present? }

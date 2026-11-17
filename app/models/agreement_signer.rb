@@ -5,6 +5,8 @@ class AgreementSigner < ApplicationRecord
 
   belongs_to :agreement
   belongs_to :signable, polymorphic: true, optional: true
+  # The employee who handed their screen over for an in-person signature.
+  belongs_to :hosted_by, class_name: 'User', foreign_key: :hosted_by_user_id, optional: true
 
   has_many :agreement_audit_logs, dependent: :nullify
   has_many :agreement_reminders, dependent: :destroy
@@ -63,6 +65,11 @@ class AgreementSigner < ApplicationRecord
   def sign!(params = {})
     return false if status == STATUS_SIGNED || status == STATUS_DECLINED
 
+    # Signed at the desk on the dealer's own screen: Sign Now opened a short window
+    # on this signer and recorded who handed it over. The public signing endpoint has
+    # no session, so the window is what says this was in person, not the browser.
+    in_person = in_person_until.present? && in_person_until.future?
+
     sig_data = {
       signature_url: params[:signature_url],
       signature_method: params[:signature_method],
@@ -77,6 +84,9 @@ class AgreementSigner < ApplicationRecord
       status: STATUS_SIGNED,
       signature_hash: generate_signature_hash(params)
     }
+    sig_data[:signed_in_person] = true if in_person
+    # Spent, either way: a later signature on this signer is not this handoff.
+    sig_data[:in_person_until] = nil if in_person_until.present?
 
     update!(sig_data)
 
@@ -86,7 +96,8 @@ class AgreementSigner < ApplicationRecord
       ip_address: params[:ip_address],
       user_agent: params[:user_agent],
       performed_by: self,
-      metadata: { method: params[:signature_method] }
+      metadata: { method: params[:signature_method], in_person: in_person,
+                  hosted_by: (in_person ? hosted_by&.name : nil) }.compact.deep_stringify_keys
     )
 
     agreement.fire_agreement_webhook('agreement.signed', signer: self)
@@ -152,6 +163,14 @@ class AgreementSigner < ApplicationRecord
   # went to wherever the old one points. Only an unsigned signer can be changed.
   def rotate_access_token!
     update!(access_token: SecureRandom.urlsafe_base64(32))
+  end
+
+  # The screen is being handed to this person now. The window is short so that a
+  # handoff nobody completed cannot label a signature made days later from home.
+  IN_PERSON_WINDOW = 30.minutes
+
+  def start_in_person!(user)
+    update!(in_person_until: IN_PERSON_WINDOW.from_now, hosted_by: user)
   end
 
   def requires_signature?
