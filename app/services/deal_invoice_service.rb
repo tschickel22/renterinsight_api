@@ -80,6 +80,8 @@ class DealInvoiceService
     return sync_pending_invoice! if pending_invoice
 
     total = pending_total
+    # A deal with no price yet bills nothing; its draft comes once it has one.
+    return nil unless total.positive?
     base_date = resolve_base_date
     schedule = build_schedule(resolve_template, total, base_date)
     invoice = Invoice.new(

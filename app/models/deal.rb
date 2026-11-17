@@ -251,7 +251,9 @@ class Deal < ApplicationRecord
       # Auto-posted deals get their real invoice the moment they close.
       return if AccountingSettings.for_company(company).try(:auto_post_deals)
 
-      saved_change_to_stage? ? service.create_pending_invoice! : service.sync_pending_invoice!
+      # Makes the draft if there is none yet (a deal closed before it had a
+      # price gets one once it does), else brings it in line with the deal.
+      service.create_pending_invoice!
     elsif saved_change_to_stage?
       service.cancel_pending_invoice!
     end
