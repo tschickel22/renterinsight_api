@@ -92,7 +92,7 @@ module Knowledge
       tour = find_tour_for_module(mod.id)
       add_tour_result(tour) if tour
 
-      Knowledge::Article.where(is_published: true)
+      Knowledge::Article.where(is_published: true).standalone
                         .where(knowledge_module_id: mod.id)
                         .order(:position)
                         .limit(3)
@@ -188,7 +188,7 @@ module Knowledge
     def search_articles(terms, exclude_slugs: Set.new)
       sql, *binds = build_ilike_conditions(terms, %w[title excerpt content])
 
-      articles = Knowledge::Article.where(is_published: true)
+      articles = Knowledge::Article.where(is_published: true).standalone
                                   .where(sql, *binds)
                                   .where.not(slug: exclude_slugs.to_a)
                                   .includes(:knowledge_module)

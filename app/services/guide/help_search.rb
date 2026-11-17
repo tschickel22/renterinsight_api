@@ -14,7 +14,7 @@ module Guide
 
       clauses = terms.map { '(title ILIKE ? OR excerpt ILIKE ? OR content ILIKE ?)' }
       binds = terms.flat_map { |t| ["%#{Knowledge::Article.sanitize_sql_like(t)}%"] * 3 }
-      candidates = Knowledge::Article.published.where.not(article_type: 'release_note')
+      candidates = Knowledge::Article.published.standalone
                                      .where(clauses.join(' OR '), *binds).limit(40)
 
       candidates.map do |a|
