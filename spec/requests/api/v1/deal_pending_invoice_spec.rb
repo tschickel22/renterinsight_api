@@ -116,6 +116,14 @@ RSpec.describe 'Deal sale invoice awaiting approval', type: :request do
     expect(pending).to have_attributes(status: 'draft', total: 101_000)
   end
 
+  it 'waits for a price before making the draft' do
+    deal.update!(selling_price: 0)
+    close!
+    expect(pending).to be_nil
+    deal.update!(selling_price: 90_000)
+    expect(pending).to have_attributes(status: 'draft', total: 90_000)
+  end
+
   it 'makes no draft for a company that posts deals as they close' do
     AccountingSettings.for_company(company).update!(auto_post_deals: true)
     close!
