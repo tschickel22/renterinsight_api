@@ -50,7 +50,7 @@
       </ul>
       
       <div style="text-align: center;">
-        <a href="<%= ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com' %>/quotes/<%= @quote.id %>" class="view-button">View Quote in Dashboard</a>
+        <a href="<%= ENV['FRONTEND_URL'] || Brand.app_url %>/quotes/<%= @quote.id %>" class="view-button">View Quote in Dashboard</a>
       </div>
       
       <% if @quote.notes.present? %>

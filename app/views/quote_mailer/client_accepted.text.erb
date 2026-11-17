@@ -22,7 +22,7 @@ Next steps:
 - Contact the client to proceed with next steps
 - Update the quote status as needed
 
-View Quote: <%= ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com' %>/quotes/<%= @quote.id %>
+View Quote: <%= ENV['FRONTEND_URL'] || Brand.app_url %>/quotes/<%= @quote.id %>
 
 <% if @quote.notes.present? %>
 Quote Notes:

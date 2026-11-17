@@ -494,7 +494,7 @@ class IntakeSubmission < ApplicationRecord
 
     company = Company.find_by(id: form.company_id)
     record = match.record
-    frontend_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    frontend_url = ENV['FRONTEND_URL'] || Brand.app_url
     detail_path = case match.type
                   when :account then "/accounts/#{record.id}"
                   when :contact then "/contacts/#{record.id}"
@@ -625,7 +625,7 @@ class IntakeSubmission < ApplicationRecord
       vehicle_info += "<br><a href='#{submission_data['vehicle_url']}'>View Listing</a>" if submission_data['vehicle_url'].present?
     end
     
-    frontend_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    frontend_url = ENV['FRONTEND_URL'] || Brand.app_url
 
     heading = is_update ? 'Repeat Inquiry on Existing Lead' : 'New Lead from Intake Form'
     subject = if is_update

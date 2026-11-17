@@ -205,15 +205,9 @@ class Invoice < ApplicationRecord
   end
 
   def payment_url(base_url = nil)
-    # Environment-aware base URL
-    base_url ||= if Rails.env.production?
-      'https://crm.landlordinsight.com'
-    elsif Rails.env.staging?
-      'https://staging.crm.landlordinsight.com'
-    else
-      # Local development
-      'https://localhost:5173'
-    end
+    # The app's address for this environment (app.dealertide.com, staging.dealertide.com),
+    # from the brand kernel. It used to be hardcoded to the old landlordinsight.com hosts.
+    base_url ||= Brand.app_url(company: company).to_s.chomp('/')
     
     "#{base_url}/pay/invoice/#{payment_token}"
   end
@@ -222,15 +216,9 @@ class Invoice < ApplicationRecord
   def public_url(base_url = nil)
     return nil unless public_token.present?
     
-    # Environment-aware base URL
-    base_url ||= if Rails.env.production?
-      'https://crm.landlordinsight.com'
-    elsif Rails.env.staging?
-      'https://staging.crm.landlordinsight.com'
-    else
-      # Local development
-      'https://localhost:5173'
-    end
+    # The app's address for this environment (app.dealertide.com, staging.dealertide.com),
+    # from the brand kernel. It used to be hardcoded to the old landlordinsight.com hosts.
+    base_url ||= Brand.app_url(company: company).to_s.chomp('/')
     
     "#{base_url}/invoice/#{public_token}"
   end

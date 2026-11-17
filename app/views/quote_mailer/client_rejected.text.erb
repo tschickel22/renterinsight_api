@@ -26,7 +26,7 @@ Next steps:
 - Consider reaching out to discuss alternatives
 - Update the quote or create a revised version
 
-View Quote: <%= ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com' %>/quotes/<%= @quote.id %>
+View Quote: <%= ENV['FRONTEND_URL'] || Brand.app_url %>/quotes/<%= @quote.id %>
 
 <% if @quote.notes.present? %>
 Quote Notes:
