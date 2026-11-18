@@ -65,5 +65,11 @@ RSpec.describe 'Public inventory hides serial numbers', type: :request do
       expect(response).to have_http_status(:ok)
       expect(site.reload.inventory_settings['hide_serial_numbers']).to be(true)
     end
+
+    it 'turns off from the Inventory tab' do
+      put "/api/v1/websites/#{site.id}/inventory_settings", params: { inventory_settings: { hide_serial_numbers: false } }.to_json, headers: headers
+      expect(JSON.parse(response.body).dig('settings', 'hide_serial_numbers')).to be(false)
+      expect(detail).to include('SERIALSECRET456')
+    end
   end
 end
