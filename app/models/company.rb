@@ -1490,13 +1490,35 @@ class Company < ApplicationRecord
   # An install company (E68 step 7) works on the same homes as a manufactured
   # housing dealer, so it keeps those words, but its projects are jobs and the
   # companies it is linked to are dealers.
+  #
+  # Inventory statuses are labels too (status_<stored value>). A dealer's home
+  # marked available is on the lot, so it reads In Stock; a rental or storage
+  # unit is not stock, so it stays Available.
+  INVENTORY_STATUS_LABELS = {
+    'status_available'          => 'Available',
+    'status_available_to_order' => 'Available to Order',
+    'status_reserved'           => 'Reserved',
+    'status_pending'            => 'Pending',
+    'status_sold'               => 'Sold',
+    'status_service'            => 'In Service',
+    'status_ordered'            => 'Ordered',
+    'status_on_order'           => 'On Order',
+    'status_rso'                => 'RSO (Retail Sold Order)',
+    'status_trade_in'           => 'Trade-In'
+  }.freeze
+  IN_STOCK_INDUSTRIES = %w[manufactured_housing rv installer].freeze
+
   LABEL_DEFAULTS = BASE_LABEL_DEFAULTS.merge(
     'installer' => BASE_LABEL_DEFAULTS['manufactured_housing'].merge(
       'project'          => 'Job',
       'projects'         => 'Jobs',
       'linked_companies' => 'Linked Dealers'
     ).freeze
-  ).freeze
+  ).to_h do |industry, labels|
+    statuses = INVENTORY_STATUS_LABELS
+    statuses = statuses.merge('status_available' => 'In Stock') if IN_STOCK_INDUSTRIES.include?(industry)
+    [industry, labels.merge(statuses).freeze]
+  end.freeze
 
   def label_defaults
     LABEL_DEFAULTS[industry] || LABEL_DEFAULTS['manufactured_housing']

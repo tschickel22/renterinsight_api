@@ -944,7 +944,7 @@ module Api
           color: vehicle.color,
           stockNumber: vehicle.stock_number,
           status: vehicle.status,
-          statusLabel: vehicle.respond_to?(:status_label) ? vehicle.status_label : vehicle.status&.titleize,
+          statusLabel: InventoryStatusNames.new(vehicle.company).for(vehicle.status),
           priceType: vehicle.respond_to?(:price_type) ? vehicle.price_type : 'sale',
           salePrice: vehicle.sale_price&.to_f,
           rentPrice: vehicle.rent_price&.to_f,

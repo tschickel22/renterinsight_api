@@ -214,7 +214,7 @@ class Api::V1::SearchController < ApplicationController
           type: 'vehicle',
           title: vehicle.display_name || "#{vehicle.year} #{vehicle.make} #{vehicle.model}",
           subtitle: vehicle.inventory_id || vehicle.vin,
-          badge: vehicle.status&.titleize,
+          badge: (@status_names ||= InventoryStatusNames.new(@company)).for(vehicle.status),
           matched_buyers: matched_buyers_by_vehicle[vehicle.id] || [],
           score: calculate_score(query, vehicle.display_name, vehicle.vin, vehicle.stock_number)
         }
