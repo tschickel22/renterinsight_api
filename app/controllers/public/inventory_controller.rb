@@ -870,6 +870,13 @@ class Public::InventoryController < ApplicationController
     @site_inventory = Websites::InventorySettings.for_request(@company, params[:website_id])
   end
 
+  # A dealer can keep serial numbers off the web (Websites::InventorySettings).
+  def serials_hidden?
+    return @serials_hidden if defined?(@serials_hidden)
+
+    @serials_hidden = Websites::InventorySettings.serials_hidden?(@company)
+  end
+
   # What a buyer sees for a price here (Websites::PublicPrice).
   def public_price
     @public_price ||= Websites::PublicPrice.new(@company, site: site_inventory)
@@ -1070,8 +1077,8 @@ class Public::InventoryController < ApplicationController
       floor_plan_images: display_floor_plans(vehicle),
       
       # Identifiers
-      vin: vehicle.vin,
-      serial_number: vehicle.serial_number,
+      vin: (vehicle.vin unless serials_hidden?),
+      serial_number: (vehicle.serial_number unless serials_hidden?),
       stock_number: vehicle.stock_number,
       color: vehicle.color,
       

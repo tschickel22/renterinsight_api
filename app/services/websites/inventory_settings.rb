@@ -16,6 +16,9 @@ module Websites
   #                       the dealer's TrueBuild "What buyers see", as before,
   #                       until the dealer saves the switch or presses
   #                       "Show them too" on the tab.
+  #   hide_serial_numbers true leaves serial numbers and VINs out of everything
+  #                       public. It covers the whole company, because the
+  #                       public inventory answers without naming a site too.
   #
   # Stored on websites.inventory_settings (jsonb). A hidden home stays in
   # inventory; it is only left out of this site's public inventory answers.
@@ -37,6 +40,13 @@ module Websites
 
       website = company.websites.where(is_deleted: [false, nil]).find_by(id: website_id.to_i)
       website && new(website)
+    end
+
+    # Whether any of the company's sites keeps serial numbers off the web.
+    def self.serials_hidden?(company)
+      return false if company.nil?
+
+      company.websites.where(is_deleted: [false, nil]).where("inventory_settings ->> 'hide_serial_numbers' = 'true'").exists?
     end
 
     # Cleans what the editor sends. Unknown fields and blank values drop out;
@@ -125,6 +135,10 @@ module Websites
       return @show_prices if defined?(@show_prices)
 
       @show_prices = @raw.key?('show_prices') ? @raw['show_prices'] == true : self.class.legacy_show_prices(@website)
+    end
+
+    def hide_serial_numbers?
+      @raw['hide_serial_numbers'] == true
     end
 
     # Price list prices and the design page's prices held back (see above).
