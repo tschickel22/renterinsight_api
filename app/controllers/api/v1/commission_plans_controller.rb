@@ -75,7 +75,11 @@ module Api
       def update
         return unless authorize_action!('commission_plans', 'update')
         
-        if @plan.update(plan_params)
+        attributes = plan_params
+        # Each screen saves only its own settings, so one never wipes another's.
+        attributes[:metadata] = @plan.metadata.to_h.merge(attributes[:metadata].to_h) if attributes.key?(:metadata)
+
+        if @plan.update(attributes)
           render json: serialize_plan(@plan, detailed: true)
         else
           render json: { errors: @plan.errors.full_messages }, status: :unprocessable_entity

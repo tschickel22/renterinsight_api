@@ -26,6 +26,11 @@
 # bonuses are personal and never split. Everyone on the deal is paid
 # all_participants components in full, once per person.
 #
+# Fees before commission: a plan can take an admin fee (a percent of the profit,
+# kept by the company) and flat fees it pays someone off the profit before its
+# percent commissions are figured. A flat fee comes off only when someone holds
+# that position on the deal.
+#
 # One person can hold two positions on a deal. They get one payment, carrying
 # what both positions earn.
 class CommissionPaymentGeneratorService
@@ -231,10 +236,45 @@ class CommissionPaymentGeneratorService
         units = [@deal.try(:quantity).to_i, 1].max
         [component.flat_amount.to_d * units, units > 1 ? "#{units} units" : nil]
       when 'addon_commission' then [percent_of(@deal.addon_gross, component.rate), nil]
-      when 'percent_of_gross', 'percentage' then [percent_of(gross_for(component.gross_type), component.rate), nil]
+      when 'percent_of_gross', 'percentage' then percent_after_fees(component)
       else [BigDecimal('0'), "unknown component type #{component.component_type}"]
       end
     { component: component, amount: amount.to_d.round(2), note: note }
+  end
+
+  def percent_after_fees(component)
+    gross = gross_for(component.gross_type)
+    fees = gross.to_d.positive? ? fees_before_commission(gross.to_d) : []
+    return [percent_of(gross, component.rate), nil] if fees.empty?
+
+    base = [gross.to_d - fees.sum { |f| f[:amount] }, BigDecimal('0')].max
+    taken_off = fees.map { |f| "#{money(f[:amount])} #{f[:name]}" }.join(' and ')
+    [percent_of(base, component.rate), "paid on #{money(base)}: #{money(gross)} less #{taken_off}"]
+  end
+
+  def fees_before_commission(gross)
+    plan = @deal.commission_plan
+    percent = plan.try(:company_fee_percent).to_d
+    fees = percent.positive? ? [{ name: "#{percent.to_f.to_s.delete_suffix('.0')}% admin fee", amount: (gross * percent / 100).round(2) }] : []
+    fees + flat_fees_before_commission(plan)
+  end
+
+  def flat_fees_before_commission(plan)
+    ids = plan.try(:fee_component_ids).to_a
+    return [] if ids.empty?
+
+    plan.commission_components.where(id: ids, is_active: true, component_type: 'flat_per_unit').ordered
+        .select { |c| c.applies_to_deal?(@deal) && position_filled?(c.applies_to_role) }
+        .map { |c| { name: c.name, amount: c.flat_amount.to_d * [@deal.try(:quantity).to_i, 1].max } }
+  end
+
+  def position_filled?(role)
+    field = ROLE_FIELDS[role.to_s.to_sym]
+    field.present? && @deal.try(field).present?
+  end
+
+  def money(amount)
+    ActiveSupport::NumberHelper.number_to_currency(amount)
   end
 
   def percent_of(base, rate)

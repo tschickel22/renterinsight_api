@@ -8,6 +8,7 @@ class CommissionPlan < ApplicationRecord
   
   validates :name, presence: true
   validates :company_id, presence: true
+  validate :company_fee_percent_in_range
   
   scope :active, -> { where(is_active: true) }
   scope :for_user, ->(user_id) { where(assigned_user_id: user_id) }
@@ -44,10 +45,31 @@ class CommissionPlan < ApplicationRecord
     (expiration_date.nil? || expiration_date >= date)
   end
   
+  # What comes off the profit before percent commissions are figured, kept in
+  # metadata as before_commission: { company_fee_percent:, fee_component_ids: }.
+  # The company fee is a percent of the profit the company keeps. Fee components
+  # are flat amounts this plan pays someone, taken off only when that person is on
+  # the deal.
+  def company_fee_percent
+    metadata.to_h.dig('before_commission', 'company_fee_percent').to_d
+  end
+
+  def fee_component_ids
+    Array(metadata.to_h.dig('before_commission', 'fee_component_ids')).map(&:to_i)
+  end
+
   # Get active components
   def active_components
     commission_components
       .where(is_active: true)
       .order(:sequence)
+  end
+
+  private
+
+  def company_fee_percent_in_range
+    return if company_fee_percent.between?(0, 100)
+
+    errors.add(:base, 'Admin fee must be between 0% and 100%')
   end
 end
