@@ -4,7 +4,7 @@ module Api
   module V1
     class CommissionPlansController < ApplicationController
       before_action :set_company_scope
-      before_action :set_commission_plan, only: [:show, :update, :destroy, :activate, :deactivate, :components, :available_components, :add_component, :remove_component, :reorder_components]
+      before_action :set_commission_plan, only: [:show, :update, :destroy, :activate, :deactivate, :components, :available_components, :add_component, :remove_component, :reorder_components, :guide, :test_options, :test_deal]
 
       # GET /api/v1/commission-plans
       def index
@@ -176,6 +176,40 @@ module Api
         render json: { payableAt: CommissionSettings.payable_at(@company), options: CommissionSettings::PAYABLE_AT }
       end
 
+      # GET /api/v1/commission-plans/:id/guide
+      def guide
+        return unless authorize_action!('commission_plans', 'read')
+
+        render json: CommissionPlanGuide.new(@plan).as_json
+      end
+
+      # GET /api/v1/commission-plans/:id/test-options
+      # The sample deals, and real deals for people allowed to see deal costs.
+      def test_options
+        return unless authorize_action!('commission_plans', 'read')
+
+        deals = can_test_real_deals? ? testable_deals : Deal.none
+        deals = deals.where('deals.name ILIKE ?', "%#{Deal.sanitize_sql_like(params[:search])}%") if params[:search].present?
+        render json: {
+          samples: CommissionPlanTester::SAMPLES.map { |s| s.transform_keys { |k| k.to_s.camelize(:lower) } },
+          canUseRealDeals: can_test_real_deals?,
+          deals: deals.order(updated_at: :desc).limit(20).pluck(:id, :name, :stage).map { |id, name, stage| { id: id, name: name, stage: stage } }
+        }
+      end
+
+      # POST /api/v1/commission-plans/:id/test-deal
+      # What this plan would pay on a real deal (deal_id) or a sample. Nothing is saved.
+      def test_deal
+        return unless authorize_action!('commission_plans', 'read')
+        return render json: CommissionPlanTester.sample_result(@plan, sample_figures, sample_roles) if params[:deal_id].blank?
+        return render(json: { error: 'You do not have access to deal costs' }, status: :forbidden) unless can_test_real_deals?
+
+        deal = testable_deals.find_by(id: params[:deal_id])
+        return render(json: { error: 'Deal not found' }, status: :not_found) unless deal
+
+        render json: CommissionPlanTester.deal_result(@plan, deal)
+      end
+
       # GET /api/v1/commission-plans/:id/components
       # Returns all components linked to this plan
       def components
@@ -332,6 +366,29 @@ module Api
         @plan = @company.commission_plans.find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Commission plan not found' }, status: :not_found
+      end
+
+      def can_test_real_deals?
+        !current_user.uses_rbac? || current_user.effective_admin? || current_user.has_permission?('deals', 'read', scope: 'view_cost_details')
+      end
+
+      def testable_deals
+        deals = @company.deals.where(deleted_at: nil).for_current_location
+        return deals if !current_user.uses_rbac? || current_user.effective_admin?
+
+        location_ids = permission_service.accessible_location_ids
+        location_ids.any? ? deals.where(location_id: location_ids) : deals.none
+      end
+
+      def sample_figures
+        %i[home_price home_cost addon_price addon_cost pack].index_with do |key|
+          number = params[key].to_s.to_d
+          number.abs < 1_000_000_000 ? number : 0.to_d
+        end
+      end
+
+      def sample_roles
+        Array(params[:positions]).filter_map { |role| role.to_s.to_sym if CommissionPlanTester::SAMPLE_PEOPLE.key?(role.to_s.to_sym) }.uniq
       end
 
       def plan_params

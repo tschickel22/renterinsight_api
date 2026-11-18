@@ -151,6 +151,12 @@ class CommissionPaymentGeneratorService
     line(component, role)
   end
 
+  # What comes off this much profit before percent commissions, in order:
+  # [{ name:, amount:, role: }]. role is who is paid the fee; nil means the company keeps it.
+  def fees_for(gross)
+    fees_before_commission(gross.to_d)
+  end
+
   def calculate_component_amount(component)
     component_line(component)[:amount]
   end
@@ -265,7 +271,7 @@ class CommissionPaymentGeneratorService
 
     plan.commission_components.where(id: ids, is_active: true, component_type: 'flat_per_unit').ordered
         .select { |c| c.applies_to_deal?(@deal) && position_filled?(c.applies_to_role) }
-        .map { |c| { name: c.name, amount: c.flat_amount.to_d * [@deal.try(:quantity).to_i, 1].max } }
+        .map { |c| { name: c.name, amount: c.flat_amount.to_d * [@deal.try(:quantity).to_i, 1].max, role: c.applies_to_role } }
   end
 
   def position_filled?(role)
