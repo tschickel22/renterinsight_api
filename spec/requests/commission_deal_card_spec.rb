@@ -57,6 +57,17 @@ RSpec.describe 'Deal commissions', type: :request do
       expect(both['totalCommission']).to eq(6700.0)
     end
 
+    it 'still offers the plans when the deal owner is not on this account' do
+      outsider = Company.create!(name: "Other-#{SecureRandom.hex(3)}", industry: 'manufactured_housing', use_rbac_system: false)
+                        .users.create!(email: "out-#{SecureRandom.hex(3)}@example.com", first_name: 'Out', last_name: 'T',
+                                       password: 'Pass1234!', role: 'user', status: 'active')
+      body = preview(deal!(stage: 'proposal'), owner_id: outsider.id)
+
+      expect(body['availablePlans'].map { |p| p['id'] }).to include(plan.id)
+      expect(body['participants']).to eq([])
+      expect(body['totalCommission']).to eq(0.0)
+    end
+
     it 'follows the pack and trade on screen before they are saved' do
       deal = deal!(stage: 'proposal', pack_amount: 0)
       expect(preview(deal, trade_payoff: 10_000)['totalCommission']).to eq(4000.0)
@@ -76,12 +87,14 @@ RSpec.describe 'Deal commissions', type: :request do
       expect(deal.reload).to have_attributes(commission_plan_id: plan.id, desk_manager_id: nil)
     end
 
-    it 'refuses a person from another company' do
-      stranger = Company.create!(name: "X-#{SecureRandom.hex(3)}", industry: 'rv')
-                        .users.create!(email: "s-#{SecureRandom.hex(3)}@example.com", first_name: 'S', last_name: 'T',
-                                       password: 'Pass1234!', role: 'user', status: 'active')
-      post "/api/crm/deals/#{deal!.id}/commissions/preview", params: { desk_manager_id: stranger.id }, headers: headers, as: :json
-      expect(response).to have_http_status(:unprocessable_entity)
+    it 'never prices or names a person from another company' do
+      other = Company.create!(name: "Else-#{SecureRandom.hex(3)}", industry: 'manufactured_housing', use_rbac_system: false)
+      stranger = other.users.create!(email: "s-#{SecureRandom.hex(3)}@example.com", first_name: 'Stranger', last_name: 'T',
+                                     password: 'Pass1234!', role: 'user', status: 'active')
+      body = preview(deal!, secondary_salesperson_id: stranger.id)
+
+      expect(body['participants'].map { |p| p['userId'] }).not_to include(stranger.id)
+      expect(body.to_json).not_to include('Stranger')
     end
   end
 

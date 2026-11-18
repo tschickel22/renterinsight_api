@@ -78,8 +78,10 @@ module Api
 
       PREVIEW_FIGURES = %i[pack_amount trade_allowance trade_payoff].freeze
 
-      # Sets the on-screen choices on this in-memory deal only. False after
-      # rendering an error when a choice is not from this company.
+      # Sets the on-screen choices on this in-memory deal only. A person who is
+      # not on this account counts as nobody in that position, so the card still
+      # opens and can ask for someone. False after rendering an error when the
+      # plan is not from this company.
       def apply_choices_on_screen
         @deal.readonly!
         if params.key?(:commission_plan_id) && !payments_locked?
@@ -95,10 +97,7 @@ module Api
           next unless params.key?(param)
 
           user_id = params[param].presence&.to_i
-          if user_id && !@company.users.exists?(id: user_id)
-            render json: { error: 'That person is not on this account' }, status: :unprocessable_entity
-            return false
-          end
+          user_id = nil if user_id && !@company.users.exists?(id: user_id)
           @deal.public_send("#{field}=", user_id)
         end
 
