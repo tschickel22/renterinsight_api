@@ -95,7 +95,7 @@ end
 # ── Page 1: Purchase Agreement ────────────────────────────────────────────
 dealer_header 1, 12, 58
 
-field 1, 'buyer_names', 'Buyer(s)', 20.4, 80.2, 337.0, group: 'buyer', merge_from: 'contact.full_name'
+field 1, 'buyer_names', 'Buyer(s)', 20.4, 80.2, 337.0, group: 'buyer', merge_from: 'deal.buyer_names'
 merge 1, 'contact.phone', 'Home phone', 359.2, 80.2, 81.2
 merge 1, 'contact.mobile_phone', 'Cell phone', 441.6, 80.2, 80.1
 merge 1, 'date.today', 'Date', 524.1, 80.2, 67.2, type: 'date'
@@ -110,10 +110,10 @@ merge 1, 'deal.delivery_state', 'Delivery state', 388.6, 122.7, 28.5
 merge 1, 'deal.delivery_zip', 'Delivery ZIP', 418.2, 122.7, 33.9
 merge 1, 'deal.owner_name', 'Sales person', 453.6, 122.7, 137.8
 
-field 1, 'unit_new', 'New', 50, 137, 11, 9.5, type: 'checkbox', group: 'unit'
-field 1, 'unit_used', 'Used', 50, 147.5, 11, 9.5, type: 'checkbox', group: 'unit'
-field 1, 'unit_single_wide', 'Single wide', 92, 137, 11, 9.5, type: 'checkbox', group: 'unit'
-field 1, 'unit_double_wide', 'Double wide', 92, 147.5, 11, 9.5, type: 'checkbox', group: 'unit'
+field 1, 'unit_new', 'New', 50, 137, 11, 9.5, type: 'checkbox', group: 'unit', merge_from: 'vehicle.is_new'
+field 1, 'unit_used', 'Used', 50, 147.5, 11, 9.5, type: 'checkbox', group: 'unit', merge_from: 'vehicle.is_used'
+field 1, 'unit_single_wide', 'Single wide', 92, 137, 11, 9.5, type: 'checkbox', group: 'unit', merge_from: 'vehicle.is_single_section'
+field 1, 'unit_double_wide', 'Double wide', 92, 147.5, 11, 9.5, type: 'checkbox', group: 'unit', merge_from: 'vehicle.is_multi_section'
 merge 1, 'vehicle.make', 'Make', 167.4, 145.6, 119.0
 merge 1, 'vehicle.model', 'Model', 288.5, 145.8, 111.0
 merge 1, 'vehicle.stock_number', 'Stock number', 401.4, 145.8, 71.5
@@ -205,11 +205,11 @@ signer 1, BUYER_2, 'signature', 360, 743, 205, 18, 'Buyer 2 signature'
 signer 1, DEALER, 'signature', 72, 743, 215, 18, 'Dealer approval signature'
 
 # ── Page 2: Additional Terms and Conditions ───────────────────────────────
-field 2, 'buyer_names', 'Buyer(s)', 203.0, 11.8, 337.0, group: 'buyer', merge_from: 'contact.full_name'
+field 2, 'buyer_names', 'Buyer(s)', 203.0, 11.8, 337.0, group: 'buyer', merge_from: 'deal.buyer_names'
 
 # ── Page 3: Arbitration Addendum ──────────────────────────────────────────
 dealer_header 3, 42, 72
-field 3, 'buyer_names', 'Buyer(s)', 20.6, 143.0, 337.0, group: 'buyer', merge_from: 'contact.full_name'
+field 3, 'buyer_names', 'Buyer(s)', 20.6, 143.0, 337.0, group: 'buyer', merge_from: 'deal.buyer_names'
 merge 3, 'contact.phone', 'Home phone', 359.7, 143.0, 81.2
 merge 3, 'contact.mobile_phone', 'Cell phone', 443.4, 143.0, 80.1
 merge 3, 'date.today', 'Date sold', 526.6, 143.0, 64.8, type: 'date'

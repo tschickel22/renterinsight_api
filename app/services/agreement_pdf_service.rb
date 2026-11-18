@@ -298,6 +298,10 @@ class AgreementPdfService
     if @agreement.custom_field_values.is_a?(Hash)
       @agreement.custom_field_values.each do |k, v|
         next if v.nil?
+        # A box the preparer started and the signer then answered: the signer's
+        # answer is saved under custom.<key> and is the last word.
+        answer = @agreement.merge_field_values.is_a?(Hash) ? @agreement.merge_field_values["custom.#{k}"] : nil
+        v = answer if answer.to_s.strip.present?
         values[k.to_s] = v.to_s
         values["custom.#{k}"] = v.to_s
       end

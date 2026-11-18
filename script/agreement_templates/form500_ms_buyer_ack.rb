@@ -3,27 +3,27 @@
 require 'open3'
 require 'tempfile'
 
-# Builds "Form 500 & Buyer Acknowledgement" for one dealer: a clone of the
-# Mississippi Form 500 platform template (form500_ms.rb, form number
-# FORM500_MS) with the Dealers Network buyer acknowledgement packet appended
-# as pages 4 to 12. The template belongs to the dealer, not the platform.
+# Builds "Form 500 & Buyer Acknowledgement" for Coastal Breeze Homes: a clone of
+# the Mississippi Form 500 platform template (form500_ms.rb, FORM500_MS) followed
+# by the dealer's 10-page Closing Package as pages 4 to 13.
 #
 #   bin/rails runner script/agreement_templates/form500_ms_buyer_ack.rb RI-00027 --expect "Coastal Breeze"
 #   bin/rails runner script/agreement_templates/form500_ms_buyer_ack.rb RI-00027 --expect "Coastal Breeze" --apply
 #
 # Preview is the default and changes nothing. --apply uploads the combined PDF
-# and creates the template (or rebuilds it in place on a re-run, so agreements
-# already made from it keep their link). Pages 1 to 3 and their fields are
-# copied from the live platform template at run time, so run form500_ms.rb
-# first in that environment.
+# and creates the template, or rebuilds it in place on a re-run so agreements
+# already made from it keep their link. Pages 1 to 3 and their fields are copied
+# from the live platform template, so run form500_ms.rb first in that environment.
 #
-# The packet (buyer_ack_dealers_network.pdf beside this file) is the dealer's
-# scanned copy, straightened and re-saved at 150 dpi:
-#   4  Buyers Acknowledgment and Agreement Not To Occupy  (buyers sign, dealer witnesses)
-#   5  Credit Approval Acknowledgment                      (buyers initial and sign, dealer signs)
-#   6  Dealer's Acknowledgment                             (dealer signs)
-#   7  Dealers Network Land/Home Checklist                 (customer name fills; rest by hand)
-#   8-12 Dealers Network deal checklists                   (printed as they are, filled by hand)
+# How a blank in the package gets filled:
+#   - The preparer sees it on the Fill Form step, already filled from the deal,
+#     contact or home when we hold the value (merge_from), and can change it.
+#   - The buyer sees that value in the box at signing and can correct it.
+#   - A value repeated across forms has ONE editable box, the first place it
+#     appears. The signing page saves answers by field key, so two editable boxes
+#     sharing a key would overwrite each other. The repeats print the same answer.
+# Page 1 is the dealer's internal checklist, so nothing on it is buyer-editable.
+# The notary block on the last page is completed by hand.
 
 account = ARGV[0] or abort 'usage: bin/rails runner script/agreement_templates/form500_ms_buyer_ack.rb <account_number> --expect "<name>" [--apply]'
 expect  = ARGV[ARGV.index('--expect') + 1] if ARGV.include?('--expect')
@@ -39,10 +39,10 @@ source = AgreementTemplate.find_by(form_number: 'FORM500_MS', is_platform_templa
   abort 'No FORM500_MS platform template here. Run script/agreement_templates/form500_ms.rb first.'
 
 FORM500_PDF = File.expand_path('form500_ms.pdf', __dir__)
-PACKET_PDF  = File.expand_path('buyer_ack_dealers_network.pdf', __dir__)
+PACKAGE_PDF = File.expand_path('coastal_breeze_closing_package.pdf', __dir__)
 FORM_NUMBER = 'FORM500_MS_BUYER_ACK'
 NAME        = 'Form 500 & Buyer Acknowledgement'
-FIRST_PAGE  = source.page_count.to_i # packet page 1 is page FIRST_PAGE + 1
+FIRST_PAGE  = source.page_count.to_i # package page 1 is page FIRST_PAGE + 1
 
 BUYER_1 = 0
 BUYER_2 = 1
@@ -53,83 +53,194 @@ PAGE_H = 792.0
 
 @definitions = (source.custom_field_definitions || []).map(&:deep_dup).index_by { |d| d['key'] }
 @placements  = (source.merge_field_placements || []).map(&:deep_dup)
+@editable    = {}
 cloned_fields = @placements.size
 
-# Coordinates are PDF points from the top-left corner of the packet page: x, y, width, height.
-def place(packet_page, key, label, type, x, y, w, h, extra = {})
+# x, y, width, height are PDF points from the top-left of the package page.
+def place(page, key, label, type, box, extra = {})
+  x, y, w, h = box
   @placements << {
-    'id' => "ack_#{@placements.size + 1}",
+    'id' => "cbh_#{@placements.size + 1}",
     'fieldKey' => key, 'fieldLabel' => label, 'fieldType' => type,
-    'page' => FIRST_PAGE + packet_page - 1,
+    'page' => FIRST_PAGE + page - 1,
     'x' => (x / PAGE_W * 100).round(2), 'y' => (y / PAGE_H * 100).round(2),
     'width' => (w / PAGE_W * 100).round(2), 'height' => (h / PAGE_H * 100).round(2)
   }.merge(extra)
 end
 
-def field(packet_page, key, label, x, y, w, h = 11.7, type: 'text', group: 'buyer_acknowledgement', merge_from: nil)
+# Boxes sit on a printed rule: from x0 to x1, with the rule at y `line`.
+def on_line(x0, x1, line) = [x0 + 2, line - 12.5, x1 - x0 - 4, 12]
+
+def define(page, key, label, merge_from, type: 'text', group: 'closing_package')
   @definitions[key] ||= {
-    'key' => key, 'label' => label, 'type' => type, 'group' => group, 'page' => FIRST_PAGE + packet_page,
+    'key' => key, 'label' => label, 'type' => type, 'group' => group, 'page' => FIRST_PAGE + page,
     'required' => false, 'position' => @definitions.size + 1, 'filled_by' => 'preparer'
   }.tap { |d| d['merge_from'] = merge_from if merge_from }
-  place(packet_page, "custom.#{key}", label, type, x, y, w, h, 'isCustomField' => true, 'isSignerField' => false)
 end
 
-def merge(packet_page, key, label, x, y, w, h = 11.7, type: 'text')
-  place(packet_page, key, label, type, x, y, w, h, 'isCustomField' => false, 'isSignerField' => false)
+# Preparer or buyer: editable by `owner` where it first appears, printed elsewhere.
+def blank(page, key, label, x0, x1, line, section, from: nil, owner: BUYER_1)
+  define(page, key, label, from)
+  if @editable[key]
+    place(page, "custom.#{key}", label, 'text', on_line(x0, x1, line), 'isCustomField' => true, 'isSignerField' => false)
+  else
+    @editable[key] = true
+    place(page, "custom.#{key}", label, 'text_input', on_line(x0, x1, line),
+          'isCustomField' => true, 'isSignerField' => true, 'signerIndex' => owner, 'section' => section)
+  end
 end
 
-def signer(packet_page, who, type, x, y, w, h, label)
-  place(packet_page, "signer.#{type}", label, type, x, y, w, h, 'isCustomField' => false, 'isSignerField' => true, 'signerIndex' => who)
+def auto(page, key, label, x0, x1, line)
+  place(page, key, label, 'text', on_line(x0, x1, line), 'isCustomField' => false, 'isSignerField' => false)
 end
 
-# ── Packet page 1: Buyers Acknowledgment And Agreement Not To Occupy ──────
-merge 1, 'deal.delivery_street', 'Site address', 162, 106, 186
-merge 1, 'deal.delivery_city', 'Site city', 182, 122, 74
-merge 1, 'deal.delivery_state', 'Site state', 258, 122, 20
-merge 1, 'deal.delivery_zip', 'Site ZIP', 280, 122, 40
-signer 1, BUYER_1, 'signature', 120, 424, 162, 16, 'Buyer 1 signature (not to occupy)'
-signer 1, BUYER_1, 'date_signed', 334, 429, 86, 11, 'Buyer 1 date (not to occupy)'
-signer 1, BUYER_2, 'signature', 120, 457, 162, 16, 'Buyer 2 signature (not to occupy)'
-signer 1, BUYER_2, 'date_signed', 334, 462, 86, 11, 'Buyer 2 date (not to occupy)'
-signer 1, DEALER, 'signature', 122, 505, 160, 16, 'Witness signature'
-signer 1, DEALER, 'date_signed', 336, 510, 84, 11, 'Witness date'
+def sign(page, who, x0, x1, line, label)
+  place(page, 'signer.signature', label, 'signature', [x0 + 4, line - 19, [x1 - x0 - 8, 230].min, 18],
+        'isCustomField' => false, 'isSignerField' => true, 'signerIndex' => who)
+end
 
-# ── Packet page 2: Credit Approval Acknowledgment ─────────────────────────
-merge 2, 'date.today', 'Date', 93, 117, 60, type: 'date'
-merge 2, 'company.name', 'Dealer', 346, 143, 146
-field 2, 'lender_name', 'Lender', 108, 171, 214
-signer 2, BUYER_1, 'initials', 50, 296, 36, 13, 'Buyer 1 initials (expiration date)'
-signer 2, BUYER_2, 'initials', 104, 296, 36, 13, 'Buyer 2 initials (expiration date)'
-signer 2, BUYER_1, 'signature', 42, 564, 150, 16, 'Buyer 1 signature (credit approval)'
-signer 2, BUYER_1, 'date_signed', 242, 569, 74, 11, 'Buyer 1 date (credit approval)'
-signer 2, BUYER_2, 'signature', 42, 608, 150, 16, 'Buyer 2 signature (credit approval)'
-signer 2, BUYER_2, 'date_signed', 246, 613, 70, 11, 'Buyer 2 date (credit approval)'
-signer 2, DEALER, 'signature', 42, 653, 150, 16, 'Dealer signature (credit approval)'
-signer 2, DEALER, 'date_signed', 257, 658, 54, 11, 'Dealer date (credit approval)'
+def dated(page, who, x0, x1, line, label)
+  place(page, 'signer.date_signed', label, 'date_signed', on_line(x0, x1, line),
+        'isCustomField' => false, 'isSignerField' => true, 'signerIndex' => who)
+end
 
-# ── Packet page 3: Dealer's Acknowledgment ────────────────────────────────
-merge 3, 'company.name', 'Dealer', 112, 102, 200
-field 3, 'buyer_names', 'Buyer(s)', 160, 134, 160, group: 'buyer', merge_from: 'contact.full_name'
-field 3, 'lender_name', 'Lender', 112, 166, 182
-signer 3, DEALER, 'signature', 72, 467, 182, 16, "Dealer signature (dealer's acknowledgment)"
-field 3, 'dealer_signer_title', 'Title of the dealer signing', 84, 505, 170
-signer 3, DEALER, 'date_signed', 88, 537, 166, 11, "Dealer date (dealer's acknowledgment)"
+def initials(page, who, x0, x1, line, label)
+  place(page, 'signer.initials', label, 'initials', [x0 + 8, line - 15, x1 - x0 - 16, 14],
+        'isCustomField' => false, 'isSignerField' => true, 'signerIndex' => who)
+end
 
-# ── Packet page 4: Land/Home Checklist ────────────────────────────────────
-field 4, 'buyer_names', 'Buyer(s)', 135, 167, 186, group: 'buyer', merge_from: 'contact.full_name'
+def buyers_blank(page, x0, x1, line, section, label = 'Buyer(s)')
+  blank page, 'cbh_buyer_names', label, x0, x1, line, section, from: 'deal.buyer_names'
+end
+
+def date_blank(page, x0, x1, line, section)
+  blank page, 'cbh_date', 'Agreement date', x0, x1, line, section, from: 'date.today'
+end
+
+def home_blank(page, x0, x1, line, section)
+  blank page, 'cbh_home', 'Home: year, size, manufacturer, serial number', x0, x1, line, section, from: 'vehicle.home_description'
+end
+
+def site_blank(page, x0, x1, line, section)
+  blank page, 'cbh_site_address', 'Site address (full)', x0, x1, line, section, from: 'deal.delivery_full_address'
+end
+
+# Two buyers with driver's licenses, then the dealer's signature and date.
+def license_block(page, name, x0, mid0, mid1, x1, dealer_x1, dealer_date_x0, lines)
+  [[BUYER_1, 'cbh_license_1', 'Buyer 1'], [BUYER_2, 'cbh_license_2', 'Buyer 2']].each_with_index do |(who, key, buyer), i|
+    sign page, who, x0, mid0, lines[i], "#{buyer} signature (#{name})"
+    blank page, key, "#{buyer} driver's license number", mid1, x1, lines[i], name, owner: who
+  end
+  sign page, DEALER, x0, dealer_x1, lines[2], "Member / Manager / Director (#{name})"
+  dated page, DEALER, dealer_date_x0, x1, lines[2], "Dealer date (#{name})"
+end
+
+# ── CBH-02 Credit Approval Acknowledgment ─────────────────────────────────
+s = 'Credit Approval Acknowledgment'
+buyers_blank 2, 91.5, 293.2, 140.2, s
+date_blank 2, 345.8, 564, 140.2, s
+auto 2, 'company.name', 'Dealer', 82.5, 293.2, 159.8
+blank 2, 'cbh_lender', 'Lender', 355.5, 564, 159.8, s, from: 'deal.lender_name'
+initials 2, BUYER_1, 126, 190.5, 326.2, 'Buyer 1 initials (approval expires)'
+initials 2, BUYER_2, 208.5, 273, 326.2, 'Buyer 2 initials (approval expires)'
+[[BUYER_1, 637.5, 'Buyer 1'], [BUYER_2, 680.2, 'Buyer 2'], [DEALER, 723, 'Dealer representative']].each do |who, line, name|
+  sign 2, who, 48, 406.5, line, "#{name} signature (credit approval)"
+  dated 2, who, 429, 564, line, "#{name} date (credit approval)"
+end
+
+# ── CBH-03 Agreement Not to Occupy ────────────────────────────────────────
+s = 'Agreement Not to Occupy'
+buyers_blank 3, 94.5, 561, 164.2, s
+blank 3, 'cbh_site_street', 'Site street address', 111, 561, 186.8, s, from: 'deal.delivery_street'
+blank 3, 'cbh_site_city_state_zip', 'Site city, state, ZIP', 127.5, 293.2, 209.2, s, from: 'deal.delivery_city_state_zip'
+date_blank 3, 345.8, 561, 209.2, s
+[[BUYER_1, 610.5, 'Buyer 1'], [BUYER_2, 663.8, 'Buyer 2'], [DEALER, 717, 'Witness']].each do |who, line, name|
+  sign 3, who, 51, 403.5, line, "#{name} signature (not to occupy)"
+  dated 3, who, 426, 561, line, "#{name} date (not to occupy)"
+end
+
+# ── CBH-04 Responsibilities Agreement (2 pages) ───────────────────────────
+s = 'Responsibilities Agreement'
+buyers_blank 4, 111, 561, 161.2, s, 'Customer(s)'
+home_blank 4, 255.8, 561, 183, s
+site_blank 4, 157.5, 561, 204.8, s
+license_block 5, s, 51, 294.8, 317.2, 561, 403.5, 426, [610.5, 663.8, 717]
+
+# ── CBH-05 No Service Warranty Agreement ──────────────────────────────────
+s = 'No Service Warranty Agreement'
+home_blank 6, 267.8, 561, 148.5, s
+site_blank 6, 93.8, 561, 170.2, s
+license_block 6, s, 51, 294.8, 317.2, 561, 403.5, 426, [631.5, 674.2, 717]
+
+# ── CBH-06 Mold Disclosure and Waiver ─────────────────────────────────────
+s = 'Mold Disclosure and Waiver'
+buyers_blank 7, 160.5, 565.5, 120.8, s
+home_blank 7, 263.2, 565.5, 140.2, s
+site_blank 7, 89.2, 565.5, 159.8, s
+initials 7, BUYER_1, 123.8, 183.8, 339.8, 'Buyer 1 initials (mold inspections)'
+initials 7, BUYER_2, 201, 261, 339.8, 'Buyer 2 initials (mold inspections)'
+license_block 7, s, 46.5, 294.8, 317.2, 565.5, 408, 430.5, [647.2, 687.8, 728.2]
+
+# ── CBH-07 Hold Harmless Agreement ────────────────────────────────────────
+s = 'Hold Harmless Agreement'
+buyers_blank 8, 94.5, 561, 165.8, s
+home_blank 8, 255.8, 561, 188.2, s
+site_blank 8, 111, 293.2, 210.8, s
+date_blank 8, 345.8, 561, 210.8, s
+license_block 8, s, 51, 294.8, 317.2, 561, 403.5, 426, [610.5, 663.8, 717]
+
+# ── CBH-08 Arbitration Agreement ──────────────────────────────────────────
+s = 'Arbitration Agreement'
+buyers_blank 9, 111, 293.2, 132, s, 'Customer(s)'
+date_blank 9, 345.8, 561, 132, s
+license_block 9, s, 51, 294.8, 317.2, 561, 403.5, 426, [640.5, 682.5, 724.5]
+
+# ── CBH-09 Buyer's Power of Attorney (notary block completed by hand) ─────
+s = "Buyer's Power of Attorney"
+home_blank 10, 255.8, 561, 253.5, s
+blank 10, 'cbh_home_land_description', 'Description of home, or land and home', 225, 561, 276, s, from: 'vehicle.home_type'
+[[BUYER_1, 387.8, 'Buyer 1'], [BUYER_2, 442.5, 'Buyer 2']].each do |who, line, name|
+  sign 10, who, 51, 291, line, "#{name} signature (power of attorney)"
+  sign 10, DEALER, 321, 561, line, "Witness for #{name} (power of attorney)"
+end
+
+# ── CBH-01 Closing Package Checklist (internal: dealer side only) ─────────
+buyers_blank 1, 99.8, 293.2, 149.2, 'Closing Package Checklist', 'Customer'
+auto 1, 'vehicle.serial_number', 'Full serial number', 402, 561, 149.2
+auto 1, 'deal.owner_name', 'Salesperson', 111, 293.2, 168.8
+auto 1, 'vehicle.stock_number', 'Stock number', 385.5, 561, 168.8
+auto 1, 'deal.close_date', 'Closing date', 111.8, 293.2, 188.2
+auto 1, 'vehicle.year_size', 'Home year / size', 397.5, 561, 188.2
+CHECKLIST = {
+  'Credit Approval Acknowledgment' => 247.5, 'Agreement Not to Occupy' => 267, 'Responsibilities Agreement' => 286.5,
+  'No Service Warranty Agreement' => 306, 'Mold Disclosure and Waiver' => 325.5, 'Hold Harmless Agreement' => 345,
+  'Arbitration Agreement' => 364.5, "Buyer's Power of Attorney" => 384, 'Original Form 100 / Bill of Sale' => 421.5,
+  'Promise Sheet' => 441, 'Copy of deposit slip' => 460.5, 'Title application' => 480, 'Flood certification completed' => 499.5,
+  "Copy of driver's license and Social Security card" => 519, 'Landlord waiver' => 538.5,
+  'Bids and quotes on add-on options' => 558, 'Gross profit worksheet' => 577.5
+}.freeze
+CHECKLIST.each_with_index do |(item, line), i|
+  [['sales', 'Salesperson', 417], ['manager', 'Manager', 495]].each do |col, who, x0|
+    key = "cbh_check_#{i + 1}_#{col}"
+    define 1, key, "#{item}: #{who}", nil, type: 'checkbox', group: 'closing_checklist'
+    place 1, "custom.#{key}", "#{item}: #{who}", 'checkbox', [x0 + 20, line - 13, 14, 12], 'isCustomField' => true, 'isSignerField' => false
+  end
+end
+auto 1, 'deal.owner_name', 'Sales representative', 51, 403.5, 666
+auto 1, 'date.today', 'Sales representative date', 426, 561, 666
+sign 1, DEALER, 51, 403.5, 708.8, 'Manager signature (checklist)'
+dated 1, DEALER, 426, 561, 708.8, 'Manager date (checklist)'
 
 # ── Build ─────────────────────────────────────────────────────────────────
-# qpdf, not CombinePDF: form500_ms.pdf has optional content layers, which
-# CombinePDF refuses to read.
+# qpdf, not CombinePDF: form500_ms.pdf has optional content layers CombinePDF refuses.
 def npages(path)
   out, status = Open3.capture2('qpdf', '--show-npages', path)
   status.success? or abort "qpdf could not read #{path}"
   out.to_i
 end
 form500_pages = npages(FORM500_PDF)
-packet_pages  = npages(PACKET_PDF)
 abort "Platform template says #{FIRST_PAGE} pages but form500_ms.pdf has #{form500_pages}." if form500_pages != FIRST_PAGE
-page_count = form500_pages + packet_pages
+page_count = form500_pages + npages(PACKAGE_PDF)
 
 pages = @placements.group_by { |p| p['page'] + 1 }.transform_values(&:size).sort.map { |pg, n| "p#{pg}:#{n}" }.join(' ')
 per_signer = @placements.select { |p| p['isSignerField'] }.group_by { |p| p['signerIndex'] }.transform_values(&:size)
@@ -142,11 +253,12 @@ puts "Cloned from platform template ##{source.id} \"#{source.name}\": #{cloned_f
 puts "#{existing ? "Rebuild template ##{existing.id}" : 'Create template'} \"#{NAME}\": " \
      "#{@placements.size} fields, #{@definitions.size} fillable, #{page_count} pages"
 puts "  by page: #{pages}"
-puts '  signer fields: ' + signers.map { |s| "#{s['label']} #{per_signer[s['order_index'].to_i].to_i}" }.join(', ')
+puts '  signer fields: ' + signers.map { |x| "#{x['label']} #{per_signer[x['order_index'].to_i].to_i}" }.join(', ')
+puts "  auto-filled: #{@definitions.values.count { |d| d['merge_from'] }} of #{@definitions.size}"
 exit unless apply
 
 combined = Tempfile.new(['form500_ms_buyer_ack', '.pdf'])
-_, err, status = Open3.capture3('qpdf', '--empty', '--pages', FORM500_PDF, PACKET_PDF, '--', combined.path)
+_, err, status = Open3.capture3('qpdf', '--empty', '--pages', FORM500_PDF, PACKAGE_PDF, '--', combined.path)
 abort "qpdf could not join the PDFs: #{err}" unless [0, 3].include?(status.exitstatus) && npages(combined.path) == page_count
 key = "agreements/#{company.id}/documents/form500_ms_buyer_ack.pdf"
 document = PrivateFiles.put(File.binread(combined.path), key: key, content_type: 'application/pdf')
@@ -155,9 +267,10 @@ combined.close!
 template = existing || AgreementTemplate.new(company_id: company.id, form_number: FORM_NUMBER)
 template.assign_attributes(
   name: NAME,
-  description: 'Mississippi Form 500 purchase agreement (same fields as the platform Form 500) followed by the ' \
-               'Dealers Network buyer acknowledgement packet: Agreement Not To Occupy, Credit Approval ' \
-               "Acknowledgment, Dealer's Acknowledgment, Land/Home Checklist and the deal checklists.",
+  description: 'Mississippi Form 500 purchase agreement followed by the Coastal Breeze Closing Package: checklist, ' \
+               'Credit Approval Acknowledgment, Agreement Not to Occupy, Responsibilities, No Service Warranty, Mold ' \
+               "Disclosure, Hold Harmless, Arbitration and Buyer's Power of Attorney. Blanks fill from the deal; the " \
+               'preparer or the buyer can complete or correct them.',
   template_type: 'upload',
   status: 'active',
   form_type: 'purchase_agreement',

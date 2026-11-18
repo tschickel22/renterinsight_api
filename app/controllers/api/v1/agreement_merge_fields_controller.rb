@@ -193,6 +193,9 @@ module Api
               { key: 'deal.co_buyer_state', label: 'Co-Buyer State', type: 'text', value: co_buyer&.state },
               { key: 'deal.co_buyer_zip', label: 'Co-Buyer ZIP', type: 'text', value: co_buyer&.zip },
               { key: 'deal.buyer_names', label: 'All Buyer Names', type: 'text', value: buyer_names },
+              { key: 'deal.lender_name', label: 'Lender', type: 'text', value: @deal.try(:lender_name).presence || @deal.try(:lender)&.try(:name) },
+              { key: 'deal.delivery_city_state_zip', label: 'Delivery City, State ZIP', type: 'text', value: delivery_city_state_zip },
+              { key: 'deal.delivery_full_address', label: 'Delivery Full Address', type: 'text', value: [@deal&.delivery_street.presence, delivery_city_state_zip].compact.join(', ').presence },
               { key: 'deal.delivery_street', label: 'Delivery Address', type: 'text', value: @deal&.delivery_street },
               { key: 'deal.delivery_city', label: 'Delivery City', type: 'text', value: @deal&.delivery_city },
               { key: 'deal.delivery_state', label: 'Delivery State', type: 'text', value: @deal&.delivery_state },
@@ -259,6 +262,12 @@ module Api
               { key: 'vehicle.stock_number', label: 'Stock Number', type: 'text', value: @vehicle.try(:stock_number) },
               { key: 'vehicle.inventory_id', label: 'Inventory ID', type: 'text', value: @vehicle.try(:inventory_id) },
               { key: 'vehicle.condition', label: 'New/Used', type: 'text', value: @vehicle.try(:condition)&.titleize },
+              { key: 'vehicle.is_new', label: 'Home Is New (checkbox)', type: 'checkbox', value: vehicle_condition == 'new' ? 'true' : nil },
+              { key: 'vehicle.is_used', label: 'Home Is Used (checkbox)', type: 'checkbox', value: vehicle_condition == 'used' ? 'true' : nil },
+              { key: 'vehicle.is_single_section', label: 'Single Section (checkbox)', type: 'checkbox', value: @vehicle.try(:sections).to_i == 1 ? 'true' : nil },
+              { key: 'vehicle.is_multi_section', label: 'Multi Section (checkbox)', type: 'checkbox', value: @vehicle.try(:sections).to_i >= 2 ? 'true' : nil },
+              { key: 'vehicle.year_size', label: 'Home Year / Size', type: 'text', value: vehicle_year_size },
+              { key: 'vehicle.home_description', label: 'Home: Year, Size, Manufacturer, Serial', type: 'text', value: vehicle_home_description },
               { key: 'vehicle.status', label: 'Status', type: 'text', value: @vehicle.try(:status)&.titleize },
               # Dimensions & layout
               { key: 'vehicle.sections', label: 'Sections (Single/Double)', type: 'text', value: @vehicle.try(:sections)&.to_s },
@@ -485,10 +494,34 @@ module Api
         counts.to_h { |k, c| ["history.#{k}", c.sort_by { |v, n| [-n, v] }.first(HISTORY_LIMIT).map(&:first)] }
       end
 
+      # Everyone buying on the deal; with no deal, the linked contact.
       def buyer_names
-        return nil unless @deal.respond_to?(:agreement_buyers)
+        names = @deal.respond_to?(:agreement_buyers) ? @deal.agreement_buyers.map { |p| p.full_name.presence }.compact : []
+        return names.to_sentence(two_words_connector: ' and ', last_word_connector: ' and ') if names.any?
 
-        @deal.agreement_buyers.map { |p| p.full_name.presence }.compact.to_sentence(two_words_connector: ' and ', last_word_connector: ' and ').presence
+        @contact ? [@contact.first_name, @contact.last_name].compact.join(' ').presence : nil
+      end
+
+      def delivery_city_state_zip
+        return nil unless @deal
+
+        state_zip = [@deal.delivery_state.presence, @deal.delivery_zip.presence].compact.join(' ')
+        [@deal.delivery_city.presence, state_zip.presence].compact.join(', ').presence
+      end
+
+      def vehicle_condition = @vehicle.try(:condition).to_s.strip.downcase
+
+      def vehicle_size
+        [@vehicle.try(:width).presence, @vehicle.try(:length).presence].compact.join(' x ').presence
+      end
+
+      def vehicle_year_size
+        [@vehicle.try(:year).presence, vehicle_size].compact.join(' / ').presence
+      end
+
+      def vehicle_home_description
+        serial = @vehicle.try(:serial_number).presence || @vehicle.try(:vin).presence
+        [@vehicle.try(:year).presence, vehicle_size, @vehicle.try(:make).presence, serial].compact.join(', ').presence
       end
 
       def co_buyer

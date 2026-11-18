@@ -333,6 +333,9 @@ module Public
       if @agreement.custom_field_values.present?
         @agreement.custom_field_values.each do |key, value|
           next if value.nil? || value.to_s.strip.empty?
+          # A signer's saved answer to this box wins over what the preparer started.
+          next if @agreement.merge_field_values.to_h["custom.#{key}"].to_s.strip.present?
+
           combined["custom.#{key}"] = value.to_s
         end
       end
