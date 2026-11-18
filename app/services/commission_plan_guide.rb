@@ -72,6 +72,7 @@ class CommissionPlanGuide
   def pay_sentence(component, engine, left)
     who = component.applies_to_role == 'all_participants' ? 'Everyone on the deal' : "The #{person(role_of(component)).downcase}"
     amount = engine.component_line(component, role_of(component))[:amount]
+    return flat_sentence(component, who) if component.component_type == 'flat_per_unit'
     return "#{who} earns #{component.calculation_description}." unless component.component_type.in?(PERCENT_TYPES)
 
     rate = "#{(component.rate.to_d * 100).to_f.to_s.delete_suffix('.0')}%"
@@ -80,6 +81,11 @@ class CommissionPlanGuide
 
     base = fees? ? "#{money(left)}, the #{name} left after fees" : "#{money(SAMPLE_PROFIT)} of #{name}"
     "#{who} earns #{rate} of #{base}: #{money(amount)}."
+  end
+
+  def flat_sentence(component, who)
+    when_there = role_of(component) == :primary_salesperson ? '' : ', only when someone holds that position'
+    "#{who} earns #{money(component.flat_amount)} per home#{when_there}."
   end
 
   def split_applies?

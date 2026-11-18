@@ -40,6 +40,20 @@ RSpec.describe 'Commission plan guide and test', type: :request do
     expect(response.parsed_body['checklist'].find { |c| c['key'] == 'activate' }['done']).to be(false)
   end
 
+  it 'pays on the full profit when no fees are set to come off first' do
+    plan.update!(metadata: { before_commission: { company_fee_percent: 0, fee_component_ids: [] } })
+    get "/api/v1/commission-plans/#{plan.id}/guide", headers: headers
+
+    expect(response.parsed_body['summary']).to eq([
+      'On a deal with $30,000.00 of profit:',
+      'The salesperson earns 20% of $30,000.00 of house profit: $6,000.00.',
+      'The finance manager earns $1,000.00 per home, only when someone holds that position.',
+      'With a second salesperson, they split it evenly: $3,000.00 and $3,000.00.'
+    ])
+    body = test_deal(home_price: 85_000, home_cost: 55_000, positions: %w[finance_manager])
+    expect(body['payouts'].to_h { |p| [p['role'], p['amount']] }).to eq('primary_salesperson' => 6000.0, 'finance_manager' => 1000.0)
+  end
+
   it 'warns when a plan with fees pays on more than the home, and when two rates stack' do
     agent.update!(gross_type: 'commissionable_front')
     company.commission_components.create!(name: 'Second', component_type: 'percent_of_gross', gross_type: 'house_profit', rate: 0.2,

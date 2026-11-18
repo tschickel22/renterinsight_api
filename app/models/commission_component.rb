@@ -132,9 +132,9 @@ scope :for_current_location, -> {
     when 'percent_of_gross'
       "#{(rate * 100).round(2)}% of #{gross_type.humanize} gross"
     when 'flat_per_unit'
-      "$#{flat_amount} per unit (times the deal's quantity)"
+      "#{money(flat_amount)} per unit (times the deal's quantity)"
     when 'volume_bonus'
-      "$#{flat_amount} bonus once per #{threshold_period == 'quarterly' ? 'quarter' : 'month'}, on the #{units_threshold.to_i.ordinalize} unit"
+      "#{money(flat_amount)} bonus once per #{threshold_period == 'quarterly' ? 'quarter' : 'month'}, on the #{units_threshold.to_i.ordinalize} unit"
     when 'addon_commission'
       "#{(rate * 100).round(2)}% of add-ons (delivery, setup, etc.)"
     else
@@ -158,5 +158,11 @@ scope :for_current_location, -> {
   # Scope level (company-wide or location-specific)
   def scope_level
     location_id.present? ? 'location' : 'company'
+  end
+
+  private
+
+  def money(amount)
+    ActiveSupport::NumberHelper.number_to_currency(amount)
   end
 end
