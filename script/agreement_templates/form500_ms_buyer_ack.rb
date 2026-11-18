@@ -24,6 +24,8 @@ require 'tempfile'
 #     sharing a key would overwrite each other. The repeats print the same answer.
 # Page 1 is the dealer's internal checklist, so nothing on it is buyer-editable.
 # The notary block on the last page is completed by hand.
+# The Sales Representative line on page 1 is signed only when the dealer adds a
+# fourth signer to the agreement. With no fourth signer it is skipped.
 
 account = ARGV[0] or abort 'usage: bin/rails runner script/agreement_templates/form500_ms_buyer_ack.rb <account_number> --expect "<name>" [--apply]'
 expect  = ARGV[ARGV.index('--expect') + 1] if ARGV.include?('--expect')
@@ -47,6 +49,8 @@ FIRST_PAGE  = source.page_count.to_i # package page 1 is page FIRST_PAGE + 1
 BUYER_1 = 0
 BUYER_2 = 1
 DEALER  = 2
+# Not a default signer: the dealer adds a fourth signer for it, otherwise the line stays blank.
+SALES_REP = 3
 
 PAGE_W = 612.0
 PAGE_H = 792.0
@@ -226,8 +230,8 @@ CHECKLIST.each_with_index do |(item, line), i|
     place 1, "custom.#{key}", "#{item}: #{who}", 'checkbox', [x0 + 20, line - 13, 14, 12], 'isCustomField' => true, 'isSignerField' => false
   end
 end
-auto 1, 'deal.owner_name', 'Sales representative', 51, 403.5, 666
-auto 1, 'date.today', 'Sales representative date', 426, 561, 666
+sign 1, SALES_REP, 51, 403.5, 666, 'Sales representative signature (checklist)'
+dated 1, SALES_REP, 426, 561, 666, 'Sales representative date (checklist)'
 sign 1, DEALER, 51, 403.5, 708.8, 'Manager signature (checklist)'
 dated 1, DEALER, 426, 561, 708.8, 'Manager date (checklist)'
 
