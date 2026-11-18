@@ -696,6 +696,16 @@ class Deal < ApplicationRecord
     (fg - effective_pack_amount).round(2)
   end
 
+  # HOUSE PROFIT: what the home itself made, for dealers who pay commission on the home
+  # only. Commissionable front gross without the margin on delivery, site work and every
+  # other add-on line. nil when cost not entered.
+  def house_profit
+    fg = front_gross
+    return nil if fg.nil?
+
+    (fg - front_end_addon_margin - effective_pack_amount).round(2)
+  end
+
   # Margin on title and license fee lines. They stay in accounting gross (front_gross,
   # total_gross), but carry no commission (Tom, 2026-11-13), so commission plans paid on
   # front, commissionable or total gross take this off (commission_gross).
@@ -712,18 +722,19 @@ class Deal < ApplicationRecord
     'commissionable_front' => :commissionable_front_gross, 'commissionable_front_gross' => :commissionable_front_gross,
     'back' => :back_gross, 'back_gross' => :back_gross,
     'total' => :total_gross, 'total_gross' => :total_gross,
-    'addon' => :addon_gross, 'addon_gross' => :addon_gross
+    'addon' => :addon_gross, 'addon_gross' => :addon_gross,
+    'house_profit' => :house_profit
   }.freeze
 
   # The gross a commission plan pays on: the named gross less title and license fee
-  # margin where that gross includes it (addon_gross already leaves them out; back gross
-  # never had them). nil when the gross is nil (cost not entered) or the type is unknown.
+  # margin where that gross includes it (addon_gross and house_profit already leave them
+  # out; back gross never had them). nil when the gross is nil (cost not entered) or the type is unknown.
   def commission_gross(gross_type)
     method = COMMISSION_GROSS_TYPES[gross_type.to_s]
     return nil unless method
 
     amount = public_send(method)
-    return amount if amount.nil? || %i[addon_gross back_gross].include?(method)
+    return amount if amount.nil? || %i[addon_gross back_gross house_profit].include?(method)
 
     (amount - title_license_fee_margin).round(2)
   end

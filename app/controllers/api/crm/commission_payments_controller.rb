@@ -76,6 +76,8 @@ module Api
         sales_manager_id: :sales_manager_id, finance_manager_id: :finance_manager_id, desk_manager_id: :desk_manager_id
       }.freeze
 
+      PREVIEW_FIGURES = %i[pack_amount trade_allowance trade_payoff].freeze
+
       # Sets the on-screen choices on this in-memory deal only. False after
       # rendering an error when a choice is not from this company.
       def apply_choices_on_screen
@@ -99,6 +101,8 @@ module Api
           end
           @deal.public_send("#{field}=", user_id)
         end
+
+        PREVIEW_FIGURES.each { |field| @deal.public_send("#{field}=", params[field].presence) if params.key?(field) }
         true
       end
 

@@ -23,7 +23,8 @@ module McpTools
     GROSS_TYPE_HELP = 'commissionable_front is front gross after pack (front gross minus pack), what most dealers ' \
                       'pay on and what they usually mean when they say "front gross". front is the accounting front ' \
                       'gross before pack. When the user just says "front gross", ask whether pack comes off first; ' \
-                      'if they do not say, use commissionable_front and tell them so.'
+                      'if they do not say, use commissionable_front and tell them so. house_profit is the home only: ' \
+                      'commissionable front without the margin on delivery, site work and other add-on lines.'
 
     COMPONENT_SCHEMA = {
       type: 'array',

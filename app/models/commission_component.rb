@@ -20,6 +20,7 @@ class CommissionComponent < ApplicationRecord
     total
     commissionable_front
     addon
+    house_profit
   ].freeze
   
   # Roles (applies_to_role values)

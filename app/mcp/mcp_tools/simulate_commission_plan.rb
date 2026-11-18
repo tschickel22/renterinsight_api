@@ -38,6 +38,7 @@ module McpTools
                                                           'gross" already after pack, pass it as commissionable_front_gross' },
               pack: { type: 'number', description: 'Dealer pack taken off front gross before commission' },
               commissionable_front_gross: { type: 'number', description: 'Defaults to front_gross minus pack' },
+              house_profit: { type: 'number', description: 'Profit on the home alone, after pack. Defaults to commissionable_front_gross less addon_gross' },
               back_gross: { type: 'number', description: 'Finance reserve plus product margin' },
               total_gross: { type: 'number', description: 'Defaults to front_gross plus back_gross' },
               addon_gross: { type: 'number', description: 'Delivery, setup, skirting, accessories' },
@@ -58,7 +59,7 @@ module McpTools
 
     # Only what the engine reads, built from what the user typed. A
     # secondary salesperson id stands in for "someone shares this deal".
-    SimDeal = Struct.new(:commission_plan, :selling_price, :front_gross, :commissionable_front_gross, :back_gross,
+    SimDeal = Struct.new(:commission_plan, :selling_price, :front_gross, :commissionable_front_gross, :house_profit, :back_gross,
                          :total_gross, :addon_gross, :quantity, :commission_deal_type, :commission_vertical,
                          :primary_salesperson_id, :secondary_salesperson_id, keyword_init: true) do
       # The engine asks the deal for the gross a plan pays on (Deal#commission_gross). The
@@ -137,6 +138,7 @@ module McpTools
     GROSS_FIGURES = {
       'front' => 'front gross, before pack',
       'commissionable_front' => 'commissionable front gross, front gross less pack',
+      'house_profit' => 'house profit, the home alone after pack',
       'back' => 'back gross', 'total' => 'total gross', 'addon' => 'add-on gross', 'selling_price' => 'selling price'
     }.freeze
 
@@ -154,7 +156,7 @@ module McpTools
             end
       return nil unless GROSS_FIGURES.key?(key)
 
-      value = { 'front' => deal.front_gross, 'commissionable_front' => deal.commissionable_front_gross,
+      value = { 'front' => deal.front_gross, 'commissionable_front' => deal.commissionable_front_gross, 'house_profit' => deal.house_profit,
                 'back' => deal.back_gross, 'total' => deal.total_gross, 'addon' => deal.addon_gross,
                 'selling_price' => deal.selling_price }[key]
       out = { gross_type: key, figure: GROSS_FIGURES[key], amount: value&.to_f }
@@ -187,9 +189,11 @@ module McpTools
       num = ->(key) { s[key].nil? ? nil : BigDecimal(s[key].to_s) }
       front = num.call('front_gross')
       back = num.call('back_gross') || 0
+      commissionable = num.call('commissionable_front_gross') || (front && (front - (num.call('pack') || 0)))
       SimDeal.new(
         commission_plan: plan, selling_price: num.call('selling_price'), front_gross: front,
-        commissionable_front_gross: num.call('commissionable_front_gross') || (front && (front - (num.call('pack') || 0))),
+        commissionable_front_gross: commissionable,
+        house_profit: num.call('house_profit') || (commissionable && (commissionable - (num.call('addon_gross') || 0))),
         back_gross: back, total_gross: num.call('total_gross') || ((front || 0) + back),
         addon_gross: num.call('addon_gross') || 0,
         quantity: [s['quantity'].to_i, 1].max, commission_deal_type: s['deal_type'].presence,
