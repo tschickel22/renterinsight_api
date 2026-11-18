@@ -95,10 +95,14 @@ class CommissionPayment < ApplicationRecord
   
   # Mark as paid (full or partial)
   def mark_paid!(paid_by:, payment_method:, payment_reference: nil, amount_paid: nil, paid_date: nil)
-    return false unless status == 'approved'
-    
-    # Default to full payment if amount not specified
-    actual_amount_paid = amount_paid || self.amount
+    return false unless status.in?(%w[approved partially_paid])
+
+    # What this payment adds to anything already paid. Default: all that is owed.
+    already_paid = self[:amount_paid].to_d
+    paying = amount_paid.present? ? amount_paid.to_d : self.amount - already_paid
+    return false unless paying.positive?
+
+    actual_amount_paid = already_paid + paying
     remaining = self.amount - actual_amount_paid
     
     # Determine status based on whether it's a full or partial payment
@@ -169,7 +173,7 @@ class CommissionPayment < ApplicationRecord
   
   # Can this payment be marked as paid?
   def can_mark_paid?
-    status == 'approved' && !is_reversed?
+    status.in?(%w[approved partially_paid]) && !is_reversed?
   end
   
   # Can this reversal be undone?

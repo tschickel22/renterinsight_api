@@ -20,8 +20,8 @@ module McpTools
                 'person in the bonus period, counting this one (a volume bonus pays once, on the unit that reaches its ' \
                 'threshold). front_gross is before pack; commissionable front is front gross less pack. Each percent ' \
                 'line says in based_on which gross figure it used and, when pack applies, how much the pack took off; ' \
-                'show that to the user. On a split deal the primary components are split 50/50 and volume bonuses are ' \
-                'not split. Warnings name anything the plan will not do the way it reads. Uses only the numbers given; ' \
+                'show that to the user. On a split deal the primary components are split 50/50 unless the plan has its own ' \
+                'secondary_salesperson component, and volume bonuses are not split. Warnings name anything the plan will not do the way it reads. Uses only the numbers given; ' \
                 'never reads real deals.'
     input_schema(
       properties: {

@@ -231,6 +231,8 @@ class Deal < ApplicationRecord
   # Mirror the deal's lifecycle onto the linked vehicle: close_won → sold,
   # transition back out → revert to available (only if this deal owns the sale).
   after_save :sync_vehicle_sold_status, if: :saved_change_to_stage?
+  # Companies that pay at close get their commission payments when the deal closes.
+  after_commit :generate_commissions_at_close, on: [:create, :update], if: -> { saved_change_to_stage? && stage_is_won? }
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
   # Deals queue for accountant approval by default. Auto-posting only fires when the
   # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
@@ -245,6 +247,10 @@ class Deal < ApplicationRecord
   # and send it instead of making their own (which billed the sale twice). The
   # draft follows the deal until approval takes it over.
   after_commit :keep_pending_sale_invoice, on: [:create, :update], unless: :gl_posted?
+
+  def generate_commissions_at_close
+    generate_commission_payments! if CommissionSettings.at_close?(company)
+  end
 
   def keep_pending_sale_invoice
     service = DealInvoiceService.new(self, user: try(:owner) || try(:user))
@@ -955,6 +961,24 @@ class Deal < ApplicationRecord
   # else the company's industry. nil when neither says.
   def commission_vertical
     COMMISSION_VERTICALS[vertical.to_s.strip.downcase] || COMMISSION_VERTICALS[company&.industry.to_s]
+  end
+
+  # The plan is locked once commission payments exist, so a deal's payments keep
+  # pointing at the plan they were figured under.
+  validate :commission_plan_unchanged_after_payments, on: :update, if: :commission_plan_id_changed?
+
+  def commission_plan_unchanged_after_payments
+    return unless commission_payments.where(is_deleted: [false, nil]).where.not(status: %w[reversed cancelled]).exists?
+
+    errors.add(:commission_plan_id, 'cannot change once commission payments exist for this deal')
+  end
+
+  # Has this deal reached the point where its commissions can be paid? Closed, and
+  # GL-approved unless the company pays at close (CommissionSettings).
+  def commissions_payable?
+    return false unless stage_is_won?
+
+    gl_posted? || CommissionSettings.at_close?(company)
   end
 
   # Generate commission payment records for this deal's participants. Called from the GL

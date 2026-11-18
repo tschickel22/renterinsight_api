@@ -36,121 +36,33 @@ module Api
       end
       
       # POST /api/crm/deals/:deal_id/commissions/preview
+      # What each person on the deal would earn, from the engine that makes the
+      # payments. The deal card sends the plan and people chosen on screen before
+      # they are saved; nothing here is written.
       def preview
         return unless authorize_action!('commissions', 'read')
-        
-        # Get commission plan - either from deal or auto-determine
-        plan = @deal.commission_plan || @deal.determine_commission_plan
-        
-        # Check if deal is delivered
-        is_delivered = @deal.stage_is_won? && @deal.delivery_date.present?
-        
-        # Determine salesperson
-        salesperson = @deal.primary_salesperson || @deal.owner
-        
-        unless salesperson
-          return render json: {
-            canGenerate: false,
-            message: 'No salesperson assigned to deal',
-            salespersonName: nil,
-            planName: nil,
-            totalAmount: 0,
-            lineItems: [],
-            isDelivered: is_delivered
-          }
-        end
-        
-        unless plan
-          return render json: {
-            canGenerate: false,
-            message: 'No commission plan available for this salesperson',
-            salespersonName: salesperson.name,
-            planName: nil,
-            totalAmount: 0,
-            lineItems: [],
-            isDelivered: is_delivered
-          }
-        end
-        
-        # Calculate commission preview
-        line_items = []
-        total_amount = 0
-        
-        plan.active_components.each do |component|
-          # Calculate basis amount based on component type and gross type
-          basis_amount = 0
-          
-          case component.component_type
-          when 'percent_of_gross'
-            # Use gross_type to determine which gross to use
-            basis_amount = case component.gross_type
-            when 'front'
-              @deal.front_gross
-            when 'back'
-              @deal.back_gross
-            when 'total'
-              @deal.total_gross
-            when 'commissionable_front'
-              @deal.commissionable_front_gross
-            when 'addon'
-              @deal.addon_gross
-            else
-              0
-            end
-          when 'flat_per_unit'
-            basis_amount = @deal.quantity || 1
-          when 'volume_bonus'
-            # For volume bonus, basis is 1 if threshold met, 0 otherwise
-            # This is simplified - would need to check actual units sold in period
-            basis_amount = 1
-          when 'addon_commission'
-            basis_amount = @deal.addon_gross
-          end
-          
-          # Calculate commission amount based on component type
-          calculated_amount = case component.component_type
-          when 'percent_of_gross'
-            (basis_amount * component.rate).round(2)
-          when 'flat_per_unit'
-            (component.flat_amount * basis_amount).round(2)
-          when 'volume_bonus'
-            # Simplified: always include bonus (would check threshold in real calculation)
-            component.flat_amount
-          when 'addon_commission'
-            (basis_amount * component.rate).round(2)
-          else
-            0
-          end
-          
-          line_items << {
-            componentName: component.name,
-            calculationMethod: component.component_type,
-            calculationBasis: component.gross_type || component.component_type,
-            basisAmount: basis_amount,
-            rate: component.rate || component.flat_amount,
-            calculatedAmount: calculated_amount
-          }
-          
-          total_amount += calculated_amount
-        end
-        
-        render json: {
-          canGenerate: is_delivered && total_amount > 0,
-          message: is_delivered ? nil : 'Deal must be closed won with delivery date',
-          salespersonName: salesperson.name,
-          planName: plan.name,
-          totalAmount: total_amount.round(2),
-          lineItems: line_items,
-          isDelivered: is_delivered,
-          dealEconomics: {
-            sellingPrice: @deal.selling_price || 0,
-            frontGross: @deal.front_gross,
-            backGross: @deal.back_gross,
-            totalGross: @deal.total_gross
-          }
-        }
+        return unless apply_choices_on_screen
+
+        @deal.commission_plan ||= @deal.determine_commission_plan
+        result = CommissionPaymentGeneratorService.preview_for_deal(@deal)
+        render json: preview_json(result)
       end
-      
+
+      # POST /api/crm/deals/:deal_id/commissions/refresh
+      # Makes the payments for a deal that is ready, or brings unpaid ones up to
+      # date after the deal changed. What is already paid stands.
+      def refresh
+        return unless authorize_action!('commission_payments', 'create')
+
+        unless @deal.commissions_payable?
+          return render json: { error: CommissionSettings.not_payable_message(@company) }, status: :unprocessable_entity
+        end
+
+        CommissionPaymentGeneratorService.new(@deal).recalculate
+        payments = @company.commission_payments.active.where(deal_id: @deal.id).ordered
+        render json: { payments: payments.map { |p| payment_json(p, detailed: true) } }
+      end
+
       private
       
       def set_deal
@@ -159,6 +71,69 @@ module Api
         render json: { error: 'Deal not found' }, status: :not_found
       end
       
+      PREVIEW_PEOPLE = {
+        owner_id: :primary_salesperson_id, secondary_salesperson_id: :secondary_salesperson_id,
+        sales_manager_id: :sales_manager_id, finance_manager_id: :finance_manager_id, desk_manager_id: :desk_manager_id
+      }.freeze
+
+      # Sets the on-screen choices on this in-memory deal only. False after
+      # rendering an error when a choice is not from this company.
+      def apply_choices_on_screen
+        @deal.readonly!
+        if params.key?(:commission_plan_id) && !payments_locked?
+          plan = params[:commission_plan_id].presence && @company.commission_plans.find_by(id: params[:commission_plan_id])
+          if params[:commission_plan_id].present? && plan.nil?
+            render json: { error: 'Commission plan not found' }, status: :not_found
+            return false
+          end
+          @deal.commission_plan = plan
+        end
+
+        PREVIEW_PEOPLE.each do |param, field|
+          next unless params.key?(param)
+
+          user_id = params[param].presence&.to_i
+          if user_id && !@company.users.exists?(id: user_id)
+            render json: { error: 'That person is not on this account' }, status: :unprocessable_entity
+            return false
+          end
+          @deal.public_send("#{field}=", user_id)
+        end
+        true
+      end
+
+      def payments_locked?
+        @company.commission_payments.active.where(deal_id: @deal.id).where.not(status: %w[reversed cancelled]).exists?
+      end
+
+      def available_plans
+        plans = @company.commission_plans.active.current.where(location_id: [nil, @deal.location_id]).order(:display_order, :name).to_a
+        plans |= [@deal.commission_plan] if @deal.commission_plan
+        plans.map { |p| { id: p.id, name: p.name, isActive: p.is_active && p.valid_for_date? } }
+      end
+
+      def preview_json(result)
+        plan = @deal.commission_plan
+        {
+          planId: plan&.id,
+          planName: plan&.name,
+          planActive: plan ? (plan.is_active && plan.valid_for_date?) : false,
+          availablePlans: available_plans,
+          locked: payments_locked?,
+          costEntered: @deal.cost_entered?,
+          commissionableGross: @deal.commission_gross('commissionable_front')&.to_f,
+          totalCommission: result[:total_commission].to_f.round(2),
+          payable: @deal.commissions_payable?,
+          payableAt: CommissionSettings.payable_at(@company),
+          reasons: result[:reasons],
+          participants: result[:participants].map do |p|
+            { role: p[:role], userId: p[:user_id], userName: p[:user_name], estimatedAmount: p[:estimated_amount],
+              components: p[:components].map { |c| { name: c[:name], amount: c[:amount], note: c[:note] }.compact } }
+          end,
+          unpaidPositions: result[:unpaid_positions].map { |p| { role: p[:role], userId: p[:user_id], userName: p[:user_name] } }
+        }
+      end
+
       def payment_json(payment, detailed: false)
         base = {
           id: payment.id,
@@ -179,6 +154,9 @@ module Api
           approvedAt: payment.approved_at&.iso8601,
           approvedBy: payment.approved_by_user&.name,
           paidAt: payment.paid_at&.iso8601,
+          paidDate: payment.paid_date&.iso8601,
+          amountPaid: payment.amount_paid,
+          remainingBalance: payment.remaining_balance,
           paidBy: payment.paid_by_user&.name,
           paymentMethod: payment.payment_method,
           paymentReference: payment.payment_reference,

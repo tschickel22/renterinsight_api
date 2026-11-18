@@ -13,9 +13,8 @@ module Api
         
         payments = @company.commission_payments.active
         
-        # CRITICAL: Only show commissions for GL-approved deals
-        # Commissions are not available for approval/payment until the deal is GL-posted
-        payments = payments.joins(:deal).where(deals: { gl_posted: true })
+        # Only commissions that have become payable (see CommissionSettings)
+        payments = payable_only(payments)
         
         # Filter by deal if nested route
         if params[:deal_id].present?
@@ -127,9 +126,7 @@ module Api
       def stats
         return unless authorize_action!('commission_payments', 'read')
         
-        base_payments = @company.commission_payments.active
-        # Only count commissions for GL-approved deals
-        base_payments = base_payments.joins(:deal).where(deals: { gl_posted: true })
+        base_payments = payable_only(@company.commission_payments.active)
         base_payments = base_payments.for_current_location if Current.location_filtered?
         
         # Apply RBAC filtering
@@ -175,9 +172,7 @@ module Api
       def dashboard
         return unless authorize_action!('commission_payments', 'read')
         
-        base_payments = @company.commission_payments.active
-        # Only count commissions for GL-approved deals
-        base_payments = base_payments.joins(:deal).where(deals: { gl_posted: true })
+        base_payments = payable_only(@company.commission_payments.active)
         base_payments = base_payments.for_current_location if Current.location_filtered?
         if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
@@ -327,9 +322,11 @@ module Api
         start_date = params[:start_date].present? ? Date.parse(params[:start_date]) : Date.today.beginning_of_year
         end_date = params[:end_date].present? ? Date.parse(params[:end_date]) : Date.today
         
+        # By the date the money was paid, which is what a 1099 reports, not the
+        # day someone recorded it.
         base_payments = @company.commission_payments
           .active
-          .where('paid_at >= ? AND paid_at <= ?', start_date.beginning_of_day, end_date.end_of_day)
+          .where("#{PAID_ON_SQL} BETWEEN ? AND ?", start_date, end_date)
           .where(status: ['paid', 'partially_paid'])
         
         base_payments = base_payments.for_current_location if Current.location_filtered?
@@ -442,7 +439,7 @@ module Api
           
           month_payments = @company.commission_payments
             .active
-            .where('paid_at >= ? AND paid_at <= ?', month_start.beginning_of_day, month_end.end_of_day)
+            .where("#{PAID_ON_SQL} BETWEEN ? AND ?", month_start, month_end)
             .where(status: ['paid', 'partially_paid'])
           
           {
@@ -619,9 +616,9 @@ module Api
       def approve
         return unless authorize_action!('commission_payments', 'approve')
         
-        # CRITICAL: Commission cannot be approved until deal is GL-posted
-        if @payment.deal && !@payment.deal.gl_posted?
-          render json: { error: 'Cannot approve commission: deal has not been GL-approved yet. Approve the deal first in Accounting > Deals & Commissions.' }, status: :unprocessable_entity
+        # Commission cannot be approved until the deal has reached the company's payable point
+        if @payment.deal && !@payment.deal.commissions_payable?
+          render json: { error: CommissionSettings.not_payable_message(@company) }, status: :unprocessable_entity
           return
         end
         
@@ -772,7 +769,7 @@ module Api
         errors = []
         
         payments_data.each do |payment_data|
-          payment = @company.commission_payments.find_by(id: payment_data[:id], status: 'approved')
+          payment = @company.commission_payments.find_by(id: payment_data[:id], status: %w[approved partially_paid])
           
           unless payment
             errors << "Payment ID #{payment_data[:id]}: Not found or not approved"
@@ -824,16 +821,15 @@ module Api
         
         deal = @company.deals.find(deal_id)
         
-        # Commission payments cannot be generated until deal is GL-posted
-        unless deal.gl_posted?
-          render json: { error: 'Cannot generate commission: deal has not been GL-approved yet' }, status: :unprocessable_entity
+        unless deal.commissions_payable?
+          render json: { error: CommissionSettings.not_payable_message(@company) }, status: :unprocessable_entity
           return
         end
         
-        payment = CommissionPaymentGeneratorService.generate_for_deal(deal)
+        payments = CommissionPaymentGeneratorService.generate_for_deal(deal)
         
-        if payment.present?
-          render json: { payment: payment_json(payment, detailed: true) }, status: :created
+        if payments.present?
+          render json: { payments: payments.map { |p| payment_json(p, detailed: true) } }, status: :created
         else
           render json: { error: 'Could not generate payment (deal not delivered or payment already exists)' }, status: :unprocessable_entity
         end
@@ -892,8 +888,8 @@ module Api
               payment.payee_user&.name,
               payment.deal&.name,
               format('%.2f', payment.amount),
-              format('%.2f', payment.amount_paid),
-              format('%.2f', payment.remaining_balance),
+              format('%.2f', payment.amount_paid.to_d),
+              format('%.2f', payment.remaining_balance || payment.amount),
               payment.display_status,
               payment.approved_by_user&.name,
               payment.approved_at&.strftime('%m/%d/%Y %I:%M %p'),
@@ -939,7 +935,15 @@ module Api
       alias_method :preview, :preview_for_deal
       
       private
-      
+
+      PAID_ON_SQL = 'COALESCE(commission_payments.paid_date, CAST(commission_payments.paid_at AS date))'
+
+      def payable_only(scope)
+        return scope if CommissionSettings.at_close?(@company)
+
+        scope.joins(:deal).where(deals: { gl_posted: true })
+      end
+
       def set_payment
         @payment = @company.commission_payments.find(params[:id])
       rescue ActiveRecord::RecordNotFound

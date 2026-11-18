@@ -32,7 +32,8 @@ module McpTools
                    'monthly or quarterly), addon_commission (rate on add-on gross: delivery, setup, skirting, accessories). ' \
                    "gross_type: #{CommissionComponent::GROSS_TYPES.join(', ')}. #{GROSS_TYPE_HELP} rate is a percent: 25 or " \
                    "0.25 both mean 25%. applies_to_role: #{CommissionComponent::ROLES.join(', ')}. A deal with a second " \
-                   'salesperson splits the primary salesperson components 50/50 with the secondary; volume bonuses are ' \
+                   'salesperson splits the primary salesperson components 50/50 with the secondary, unless the plan has its ' \
+                   'own secondary_salesperson component; volume bonuses are ' \
                    "never split. deal_type: #{CommissionComponent::DEAL_TYPES.join(', ')}. " \
                    "vertical: #{CommissionComponent::VERTICALS.join(', ')}.",
       items: {
