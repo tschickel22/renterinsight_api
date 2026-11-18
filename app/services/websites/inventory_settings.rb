@@ -56,6 +56,7 @@ module Websites
       raw = raw.deep_stringify_keys
       out = {}
       out['show_prices'] = ActiveModel::Type::Boolean.new.cast(raw['show_prices']) == true if raw.key?('show_prices')
+      out['hide_serial_numbers'] = ActiveModel::Type::Boolean.new.cast(raw['hide_serial_numbers']) == true if raw.key?('hide_serial_numbers')
 
       rules = Array(raw['hide_rules']).filter_map do |rule|
         rule = rule.respond_to?(:to_unsafe_h) ? rule.to_unsafe_h : rule
@@ -202,6 +203,7 @@ module Websites
     def to_h
       { show_prices: show_prices?, price_list_held: show_prices? && price_list_held?,
         featured_price_held: show_prices? && featured_price_held?,
+        hide_serial_numbers: hide_serial_numbers?,
         hide_rules: rules.map(&:symbolize_keys), hidden_vehicle_ids: hidden_ids }
     end
 

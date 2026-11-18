@@ -6,7 +6,7 @@
 # public inventory leaves them out (Websites::InventorySettings).
 #
 #   GET /api/v1/websites/:website_id/inventory_settings   settings, rule choices, counts
-#   PUT /api/v1/websites/:website_id/inventory_settings   { inventory_settings: { show_prices, hide_rules, hidden_vehicle_ids, release_price_list } }
+#   PUT /api/v1/websites/:website_id/inventory_settings   { inventory_settings: { show_prices, hide_serial_numbers, hide_rules, hidden_vehicle_ids, release_price_list } }
 #   GET /api/v1/websites/:website_id/inventory_homes      ?search=&page=&per_page=
 class Api::V1::WebsiteInventoryController < ApplicationController
   before_action :set_company_scope
@@ -23,11 +23,12 @@ class Api::V1::WebsiteInventoryController < ApplicationController
 
     raw = params.require(:inventory_settings)
     current = Websites::InventorySettings.new(@website)
-    incoming = Websites::InventorySettings.normalize(raw.permit(:show_prices, hidden_vehicle_ids: [], hide_rules: %i[field value]),
+    incoming = Websites::InventorySettings.normalize(raw.permit(:show_prices, :hide_serial_numbers, hidden_vehicle_ids: [], hide_rules: %i[field value]),
                                                      company: @company)
 
     stored = {
       'show_prices' => incoming.key?('show_prices') ? incoming['show_prices'] : current.show_prices?,
+      'hide_serial_numbers' => incoming.key?('hide_serial_numbers') ? incoming['hide_serial_numbers'] : current.hide_serial_numbers?,
       'hide_rules' => raw.key?(:hide_rules) ? incoming['hide_rules'] : current.rules,
       'hidden_vehicle_ids' => raw.key?(:hidden_vehicle_ids) ? incoming['hidden_vehicle_ids'] : current.hidden_ids
     }
@@ -37,7 +38,6 @@ class Api::V1::WebsiteInventoryController < ApplicationController
               stored['show_prices'] != current.show_prices?
     stored['price_list_held'] = true if current.price_list_held? && !release
     stored['featured_price_held'] = true if current.featured_price_held? && !release
-    stored['hide_serial_numbers'] = true if current.hide_serial_numbers?
 
     @website.update!(inventory_settings: stored.deep_stringify_keys)
     # The switch and TrueBuild "What buyers see" stay in step (Websites::PriceSync).
