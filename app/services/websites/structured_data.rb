@@ -290,7 +290,7 @@ module Websites
         '@id' => home_url,
         'name' => name,
         'description' => @vehicle.description.to_s.truncate(300).presence,
-        'sku' => @vehicle.vin.presence,
+        'sku' => (@vehicle.vin.presence unless InventorySettings.serials_hidden?(@website.company)),
         'brand' => (@vehicle.make.presence && { '@type' => 'Brand', 'name' => @vehicle.make }),
         'image' => Array(vehicle_images).first(6).presence,
         'numberOfBedrooms' => positive_number(@vehicle.bedrooms),

@@ -37,6 +37,7 @@ class Api::V1::WebsiteInventoryController < ApplicationController
               stored['show_prices'] != current.show_prices?
     stored['price_list_held'] = true if current.price_list_held? && !release
     stored['featured_price_held'] = true if current.featured_price_held? && !release
+    stored['hide_serial_numbers'] = true if current.hide_serial_numbers?
 
     @website.update!(inventory_settings: stored.deep_stringify_keys)
     # The switch and TrueBuild "What buyers see" stay in step (Websites::PriceSync).
