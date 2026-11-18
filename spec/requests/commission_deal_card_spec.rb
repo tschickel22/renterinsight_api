@@ -38,6 +38,31 @@ RSpec.describe 'Deal commissions', type: :request do
       expect(body).to include('costEntered' => false, 'totalCommission' => 0.0)
     end
 
+    it 'pays a house profit plan on the home alone, and splits it between two agents' do
+      house = company.commission_plans.create!(name: 'House', is_active: true)
+      company.commission_components.create!(name: 'Agent', component_type: 'percent_of_gross', gross_type: 'house_profit', rate: 0.19,
+                                            commission_plan: house, is_active: true, applies_to_role: 'primary_salesperson')
+      company.commission_components.create!(name: 'Processor', component_type: 'flat_per_unit', flat_amount: 1000, commission_plan: house,
+                                            is_active: true, applies_to_role: 'finance_manager')
+      deal = deal!(commission_plan_id: house.id, stage: 'proposal', pack_amount: 0)
+      deal.deal_products.create!(product_name: 'Home', unit_price: 100_000, cost: 70_000, quantity: 1, total: 100_000, notes: 'category:home')
+      deal.deal_products.create!(product_name: 'Delivery', unit_price: 9_000, cost: 4_000, quantity: 1, total: 9_000, notes: 'category:service')
+
+      alone = preview(deal.reload)
+      expect(alone['totalCommission']).to eq(5700.0)
+
+      both = preview(deal, secondary_salesperson_id: partner.id, finance_manager_id: admin.id)
+      expect(both['participants'].to_h { |p| [p['role'], p['estimatedAmount']] })
+        .to eq('primary_salesperson' => 2850.0, 'secondary_salesperson' => 2850.0, 'finance_manager' => 1000.0)
+      expect(both['totalCommission']).to eq(6700.0)
+    end
+
+    it 'follows the pack and trade on screen before they are saved' do
+      deal = deal!(stage: 'proposal', pack_amount: 0)
+      expect(preview(deal, trade_payoff: 10_000)['totalCommission']).to eq(4000.0)
+      expect(deal.reload.trade_payoff.to_f).to eq(0.0)
+    end
+
     it 'prices people and a plan chosen on screen without saving them' do
       other = company.commission_plans.create!(name: 'Other', is_active: true)
       company.commission_components.create!(name: 'Desk', component_type: 'flat_per_unit', flat_amount: 500, commission_plan: other,
