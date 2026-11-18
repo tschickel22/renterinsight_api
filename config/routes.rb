@@ -2964,6 +2964,13 @@ Rails.application.routes.draw do
       resource :sms_registration, only: %i[show update] do
         post :submit
       end
+      # Proactive Outreach (E105): DealerTide and Renter Insight only.
+      resource :proactive_outreach, only: %i[show update], controller: 'proactive_outreach' do
+        post :load_starter
+      end
+      resources :outreach_content_items, only: %i[create update destroy] do
+        collection { post :import_from_campaigns }
+      end
       resources :assistant_questions, only: %i[index] do
         member do
           post :answer

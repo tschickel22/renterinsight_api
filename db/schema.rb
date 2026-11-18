@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_17_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_18_233100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5477,6 +5477,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_17_200000) do
     t.index ["key"], name: "index_ops_marks_on_key", unique: true
   end
 
+  create_table "outreach_content_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "title", null: false
+    t.string "url", null: false
+    t.string "topic"
+    t.string "use_when"
+    t.text "description"
+    t.string "source_kind", default: "manual", null: false
+    t.bigint "source_campaign_id"
+    t.bigint "source_step_id"
+    t.string "status", default: "pending", null: false
+    t.bigint "approved_by_user_id"
+    t.datetime "approved_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_outreach_content_items_on_company_id_and_status"
+    t.index ["company_id", "url"], name: "index_outreach_content_items_on_company_id_and_url", unique: true
+  end
+
   create_table "package_templates", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -9776,6 +9795,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_17_200000) do
   add_foreign_key "onboarding_items", "users", column: "assignee_id"
   add_foreign_key "onboarding_items", "users", column: "created_by_id"
   add_foreign_key "onboarding_items", "users", column: "done_by_id"
+  add_foreign_key "outreach_content_items", "companies"
   add_foreign_key "package_templates", "companies"
   add_foreign_key "page_visit_events", "page_visits"
   add_foreign_key "page_visits", "campaigns"
