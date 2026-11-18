@@ -13,6 +13,9 @@ module Assistant
     # Returns true when the assistant will answer, so the caller does not also
     # forward the message to a rep.
     def received(conversation, communication, keyword: false)
+      # Proactive Outreach (E105) answers its own conversations.
+      return Outreach::Inbound.received(conversation, communication, keyword: keyword) if Outreach::Inbound.owns?(conversation)
+
       conversation.note_message!(communication)
       return false if keyword || !conversation.assistant_answering?
       return false unless Assistant::Settings.for(conversation.company).enabled?

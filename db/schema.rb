@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_18_233100) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_18_235500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5496,6 +5496,77 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_18_233100) do
     t.index ["company_id", "url"], name: "index_outreach_content_items_on_company_id_and_url", unique: true
   end
 
+  create_table "outreach_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "outreach_wave_id", null: false
+    t.bigint "outreach_target_id", null: false
+    t.string "event_type", null: false
+    t.string "channel"
+    t.bigint "communication_id"
+    t.datetime "occurred_at", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["outreach_target_id", "event_type", "communication_id"], name: "idx_outreach_events_once", unique: true
+    t.index ["outreach_target_id", "event_type"], name: "index_outreach_events_on_outreach_target_id_and_event_type"
+    t.index ["outreach_wave_id", "occurred_at"], name: "index_outreach_events_on_outreach_wave_id_and_occurred_at"
+  end
+
+  create_table "outreach_targets", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "outreach_wave_id", null: false
+    t.bigint "lead_id", null: false
+    t.string "test_group", default: "contact", null: false
+    t.string "status", default: "selected", null: false
+    t.integer "rank"
+    t.string "ai_reason"
+    t.string "channel"
+    t.string "draft_subject"
+    t.text "draft_body"
+    t.bigint "draft_content_item_id"
+    t.string "draft_error"
+    t.bigint "approved_by_user_id"
+    t.datetime "approved_at"
+    t.bigint "conversation_id"
+    t.bigint "activity_id"
+    t.integer "touch_count", default: 0, null: false
+    t.string "last_channel"
+    t.datetime "first_sent_at"
+    t.datetime "last_sent_at"
+    t.datetime "next_touch_at"
+    t.datetime "first_reply_at"
+    t.datetime "first_click_at"
+    t.datetime "booked_at"
+    t.datetime "held_at"
+    t.string "stop_reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "lead_id"], name: "index_outreach_targets_on_company_id_and_lead_id"
+    t.index ["conversation_id"], name: "index_outreach_targets_on_conversation_id"
+    t.index ["outreach_wave_id", "lead_id"], name: "index_outreach_targets_on_outreach_wave_id_and_lead_id", unique: true
+    t.index ["outreach_wave_id", "status", "next_touch_at"], name: "idx_outreach_targets_due"
+  end
+
+  create_table "outreach_waves", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "status", default: "building", null: false
+    t.text "prompt"
+    t.jsonb "filter_tree", default: {}, null: false
+    t.integer "target_size", default: 25, null: false
+    t.integer "daily_limit", default: 10, null: false
+    t.integer "eligible_count"
+    t.string "pause_reason"
+    t.string "build_error"
+    t.bigint "created_by_user_id"
+    t.datetime "started_at"
+    t.datetime "paused_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_outreach_waves_on_company_id_and_status"
+  end
+
   create_table "package_templates", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -9796,6 +9867,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_18_233100) do
   add_foreign_key "onboarding_items", "users", column: "created_by_id"
   add_foreign_key "onboarding_items", "users", column: "done_by_id"
   add_foreign_key "outreach_content_items", "companies"
+  add_foreign_key "outreach_events", "outreach_targets"
+  add_foreign_key "outreach_events", "outreach_waves", column: "outreach_wave_id"
+  add_foreign_key "outreach_targets", "companies"
+  add_foreign_key "outreach_targets", "outreach_waves", column: "outreach_wave_id"
+  add_foreign_key "outreach_waves", "companies"
   add_foreign_key "package_templates", "companies"
   add_foreign_key "page_visit_events", "page_visits"
   add_foreign_key "page_visits", "campaigns"

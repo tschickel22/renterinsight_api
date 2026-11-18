@@ -185,3 +185,78 @@ RSpec.describe 'Proactive Outreach', type: :request do
     end
   end
 end
+
+RSpec.describe 'Proactive Outreach waves', type: :request do
+  let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
+  let(:admin) do
+    User.create!(email: "a-#{SecureRandom.hex(4)}@example.com", first_name: 'Ada', last_name: 'Admin', password: 'Pass1234!',
+                 company_id: company.id, role: 'company_admin', status: 'active')
+  end
+  let(:headers) { { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: admin.id, company_id: company.id)}", 'Content-Type' => 'application/json' } }
+  let(:lead) { company.leads.create!(first_name: 'P', last_name: 'L', email: 'p@example.com', owner_id: admin.id, status: 'new') }
+
+  def grant!
+    TenantModuleOverride.create!(company: company, module_key: 'marketing.proactive_outreach', is_enabled: true)
+  end
+
+  it 'refuses a company without the module' do
+    post '/api/crm/outreach_waves', headers: headers, params: { wave: { prompt: 'Retailers' } }.to_json
+    expect(response).to have_http_status(:forbidden)
+    get '/api/crm/outreach_waves', headers: headers
+    expect(response).to have_http_status(:forbidden)
+  end
+
+  it 'will not show another company\'s wave' do
+    grant!
+    other = Company.create!(name: "Other-#{SecureRandom.hex(4)}")
+    theirs = other.outreach_waves.create!(name: 'Theirs')
+    get "/api/crm/outreach_waves/#{theirs.id}/results", headers: headers
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it 'will not start until every message is reviewed and setup is finished' do
+    grant!
+    wave = company.outreach_waves.create!(name: 'W', status: 'review')
+    target = wave.outreach_targets.create!(company_id: company.id, lead_id: lead.id, status: 'drafted', channel: 'email', draft_body: 'Hello there')
+
+    post "/api/crm/outreach_waves/#{wave.id}/start", headers: headers
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(wave.reload.status).to eq('review')
+
+    patch "/api/crm/outreach_waves/#{wave.id}/targets/#{target.id}", headers: headers,
+          params: { target: { draft_body: 'Only $99 per month', decision: 'approve' } }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(target.reload.status).to eq('drafted')
+
+    patch "/api/crm/outreach_waves/#{wave.id}/targets/#{target.id}", headers: headers,
+          params: { target: { draft_body: 'Would a short demo help?', decision: 'approve' } }.to_json
+    expect(target.reload).to have_attributes(status: 'approved', approved_by_user_id: admin.id)
+  end
+
+  it 'shows the unsubscribe page without opting out until confirmed' do
+    wave = company.outreach_waves.create!(name: 'W')
+    target = wave.outreach_targets.create!(company_id: company.id, lead_id: lead.id)
+    path = URI(Outreach::Tracking.unsubscribe_url(target)).path
+
+    get path
+    expect(response.body).to include('Unsubscribe')
+    expect(CommunicationOptOut.check(channel: 'email', company: company, record: lead, address: lead.email).opted_out?).to be(false)
+
+    post path
+    expect(CommunicationOptOut.check(channel: 'email', company: company, record: lead, address: lead.email).opted_out?).to be(true)
+    expect(target.reload.status).to eq('stopped')
+  end
+
+  it 'records a video click and refuses a forged link' do
+    wave = company.outreach_waves.create!(name: 'W')
+    target = wave.outreach_targets.create!(company_id: company.id, lead_id: lead.id)
+    item = company.outreach_content_items.create!(title: 'Tour', url: 'https://vimeo.com/9', status: 'approved')
+
+    get URI(Outreach::Tracking.video_url(target, item)).path, headers: { 'User-Agent' => 'Mozilla/5.0 (iPhone)' }
+    expect(response).to redirect_to('https://vimeo.com/9')
+    expect(target.recorded?('clicked')).to be(true)
+
+    get '/o/v/forged'
+    expect(response).to have_http_status(:not_found)
+  end
+end

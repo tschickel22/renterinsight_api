@@ -2779,6 +2779,10 @@ Rails.application.routes.draw do
   get  '/t/:token',  to: 'campaign_tracking#click', as: :campaign_click
   get  '/u/:token',  to: 'campaign_tracking#unsubscribe_show', as: :campaign_unsubscribe_show
   post '/u/:token',  to: 'campaign_tracking#unsubscribe_confirm', as: :campaign_unsubscribe_confirm
+  # Proactive Outreach links (E105).
+  get  '/o/v/:token', to: 'outreach_tracking#video', as: :outreach_video
+  get  '/o/u/:token', to: 'outreach_tracking#unsubscribe_page', as: :outreach_unsubscribe_page
+  post '/o/u/:token', to: 'outreach_tracking#unsubscribe', as: :outreach_unsubscribe
 
   # A rep's contact card, linked from play texts and emails ({{contact_card_link}}).
   get  '/vc/:token', to: 'contact_cards#show', as: :contact_card, constraints: { token: %r{[^/]+} }
@@ -2970,6 +2974,17 @@ Rails.application.routes.draw do
       end
       resources :outreach_content_items, only: %i[create update destroy] do
         collection { post :import_from_campaigns }
+      end
+      resources :outreach_waves, only: %i[index show create] do
+        member do
+          post :draft
+          post :start
+          post :pause
+          post :resume
+          get :results
+          delete 'targets/:target_id', action: :remove_target
+          patch 'targets/:target_id', action: :review_target
+        end
       end
       resources :assistant_questions, only: %i[index] do
         member do

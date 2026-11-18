@@ -78,7 +78,7 @@ module Assistant
     NEED_PHONE = 'To set that up I just need a good phone number for you. If you would rather not get texts, we will only call.'
 
     def book!(slot_id)
-      return Outcome.new(ok: false, text: NEED_PHONE) if !current_visit && @record.try(:phone).to_s.gsub(/\D/, '').length < 10
+      return Outcome.new(ok: false, text: NEED_PHONE) if phone_required? && !current_visit && @record.try(:phone).to_s.gsub(/\D/, '').length < 10
 
       slot = slots.find { |s| s.id == slot_id.to_s.strip.upcase }
       return taken_outcome unless slot
@@ -117,6 +117,14 @@ module Assistant
 
     private
 
+    def phone_required?
+      true
+    end
+
+    def booked_by
+      'quinn_ai'
+    end
+
     def create_visit!(slot)
       model, key = Assistant::Appointments::MODELS[@record.class.name]
       name = [@record.try(:first_name), @record.try(:last_name)].compact_blank.join(' ').presence || 'Buyer'
@@ -124,7 +132,7 @@ module Assistant
         key => @record.id, user_id: rep.id, assigned_to_id: rep.id, activity_type: 'meeting', status: 'pending',
         subject: "#{visit_word}: #{name}", start_time: slot.starts_at, end_time: slot.ends_at, duration_minutes: settings.visit_minutes,
         meeting_location: address, description: description,
-        metadata: { 'booked_by' => 'quinn_ai', 'conversation_id' => conversation.id }
+        metadata: { 'booked_by' => booked_by, 'conversation_id' => conversation.id }
       )
       visit.meeting_link = meeting_url if meeting_url && visit.has_attribute?(:meeting_link)
       visit.quinn_confirms = true

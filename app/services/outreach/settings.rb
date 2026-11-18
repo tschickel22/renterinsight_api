@@ -21,6 +21,7 @@ module Outreach
       'sender_user_id' => nil,
       'demo_minutes' => 30,
       'product_facts' => '',
+      'postal_address' => '',
       'playbook' => []
     }.freeze
 
@@ -66,6 +67,7 @@ module Outreach
         clean[field] = Assistant::Rules.tidy(clean[field]).truncate(80) if clean.key?(field)
       end
       clean['product_facts'] = clean_block(clean['product_facts']).truncate(8000) if clean.key?('product_facts')
+      clean['postal_address'] = Assistant::Rules.tidy(clean['postal_address']).truncate(200) if clean.key?('postal_address')
       clean['sender_user_id'] = company.users.find_by(id: clean['sender_user_id'])&.id if clean.key?('sender_user_id')
       if clean.key?('demo_minutes')
         minutes = clean['demo_minutes'].to_i
@@ -87,7 +89,8 @@ module Outreach
         texting_number: TwilioAccount.active.where(company_id: company.id).exists?,
         approved_content: company.outreach_content_items.approved.exists?,
         playbook: Array(to_h['playbook']).any?,
-        product_facts: to_h['product_facts'].present?
+        product_facts: to_h['product_facts'].present?,
+        postal_address: to_h['postal_address'].present?
       }
     end
 

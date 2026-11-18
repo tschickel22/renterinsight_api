@@ -25,6 +25,8 @@ module Assistant
     def self.next_due(conversation)
       return nil unless conversation.assistant_answering?
       return nil unless conversation.conversable.is_a?(Lead)
+      # Proactive Outreach (E105) runs its own follow-ups.
+      return nil if Outreach::Inbound.owns?(conversation)
       # A booked visit is what the follow-ups were for.
       return nil if Assistant::Appointments.upcoming_for(conversation.conversable, limit: 1).any?
 

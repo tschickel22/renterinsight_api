@@ -18,7 +18,7 @@ module Api
         return unless outreach_allowed!
 
         attrs = params.require(:settings).permit(
-          :enabled, :persona_name, :persona_title, :sender_user_id, :demo_minutes, :product_facts,
+          :enabled, :persona_name, :persona_title, :sender_user_id, :demo_minutes, :product_facts, :postal_address,
           playbook: %i[objection answer action share_hint]
         ).to_h
         attrs['playbook'] = [] if params[:settings].key?(:playbook) && params[:settings][:playbook].blank?

@@ -68,7 +68,9 @@ module Assistant
         # By the dealer's choice Quinn answers the email (or drafts the answer
         # for a rep), or a person takes it. The rep is already told by
         # InboundEmail::ReplyNotifier, so no second notice for a handoff.
-        if conversation.assistant_answering? && Assistant::Settings.for(conversation.company).email_replies != 'rep'
+        if Outreach::Inbound.owns?(conversation)
+          Assistant::Inbound.received(conversation, communication)
+        elsif conversation.assistant_answering? && Assistant::Settings.for(conversation.company).email_replies != 'rep'
           answering = Assistant::Inbound.received(conversation, communication)
           unless answering
             conversation.update!(status: 'handed_off', handoff_reason: 'email_reply', handed_off_at: Time.current,
