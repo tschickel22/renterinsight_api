@@ -713,12 +713,7 @@ class Public::InventoryController < ApplicationController
   
   # Format status label for display (convert underscores to title case)
   def format_status_label(status)
-    return nil if status.blank?
-    
-    status.to_s
-          .split('_')
-          .map(&:capitalize)
-          .join(' ')
+    (@status_names ||= InventoryStatusNames.new(@company)).for(status)
   end
   
   # Resolve branding with Location → Company → Platform hierarchy

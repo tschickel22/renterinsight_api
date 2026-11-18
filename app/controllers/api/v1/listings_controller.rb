@@ -493,7 +493,7 @@ module Api
             sections: vehicle.sections,
             homeType: vehicle.home_type,
             condition: vehicle.condition,
-            statusLabel: vehicle.status&.titleize,
+            statusLabel: InventoryStatusNames.new(vehicle.company).for(vehicle.status),
             images: convert_image_urls_to_https(vehicle.images),
             # Normalize floor plan images — handle both string and hash shapes
             # (Champion IMS catalog/clones store as { "url" => "...", "alt" => "" })

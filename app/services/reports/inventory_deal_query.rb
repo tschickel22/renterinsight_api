@@ -400,7 +400,9 @@ module Reports
     end
 
     def status_label(vehicle, deal, assigned)
-      (assigned ? deal.stage : vehicle.status).to_s.titleize
+      return deal.stage.to_s.titleize if assigned
+
+      (@status_names ||= InventoryStatusNames.new(@company)).for(vehicle.status).to_s
     end
   end
 end

@@ -162,7 +162,7 @@ module Websites
     end
 
     def status_label(status)
-      status.to_s.tr('_', ' ').capitalize
+      (@status_names ||= InventoryStatusNames.new(@company)).for(status).to_s
     end
   end
 end

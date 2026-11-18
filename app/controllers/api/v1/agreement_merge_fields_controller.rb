@@ -268,7 +268,7 @@ module Api
               { key: 'vehicle.is_multi_section', label: 'Multi Section (checkbox)', type: 'checkbox', value: @vehicle.try(:sections).to_i >= 2 ? 'true' : nil },
               { key: 'vehicle.year_size', label: 'Home Year / Size', type: 'text', value: vehicle_year_size },
               { key: 'vehicle.home_description', label: 'Home: Year, Size, Manufacturer, Serial', type: 'text', value: vehicle_home_description },
-              { key: 'vehicle.status', label: 'Status', type: 'text', value: @vehicle.try(:status)&.titleize },
+              { key: 'vehicle.status', label: 'Status', type: 'text', value: InventoryStatusNames.new(@vehicle.try(:company)).for(@vehicle.try(:status)) },
               # Dimensions & layout
               { key: 'vehicle.sections', label: 'Sections (Single/Double)', type: 'text', value: @vehicle.try(:sections)&.to_s },
               { key: 'vehicle.bedrooms', label: 'Bedrooms', type: 'text', value: @vehicle.try(:bedrooms)&.to_s },
