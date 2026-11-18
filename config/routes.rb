@@ -1606,6 +1606,9 @@ Rails.application.routes.draw do
           post :add_component, path: 'add-component'
           delete 'remove-component/:component_id', to: 'commission_plans#remove_component'
           patch :reorder_components, path: 'reorder-components'
+          get :guide
+          get :test_options, path: 'test-options'
+          post :test_deal, path: 'test-deal'
         end
         
         collection do
