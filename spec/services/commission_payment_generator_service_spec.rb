@@ -76,8 +76,6 @@ RSpec.describe CommissionPaymentGeneratorService do
   describe 'split deals' do
     before do
       component!(name: 'Front', component_type: 'percent_of_gross', gross_type: 'front', rate: 0.25)
-      component!(name: 'Second only', component_type: 'flat_per_unit', flat_amount: 100,
-                 applies_to_role: 'secondary_salesperson')
       component!(name: 'Everyone', component_type: 'flat_per_unit', flat_amount: 50, applies_to_role: 'all_participants')
     end
 
@@ -88,9 +86,20 @@ RSpec.describe CommissionPaymentGeneratorService do
 
       payments = described_class.generate_for_deal(deal.reload).index_by(&:payee_user_id)
       expect(payments[rep.id].amount).to eq(front_share - half + 50)
-      expect(payments[partner.id].amount).to eq(half + 100 + 50)
+      expect(payments[partner.id].amount).to eq(half + 50)
       expect(payments.values.map(&:commission_plan_id).uniq).to eq([plan.id])
       expect(payments[rep.id].calculation_details['line_items'].map { |l| l['component_id'] }).to all(be_present)
+    end
+
+    it 'splits nothing when the plan says what the secondary earns' do
+      component!(name: 'Second only', component_type: 'flat_per_unit', flat_amount: 100,
+                 applies_to_role: 'secondary_salesperson')
+      deal = deal!(secondary_salesperson_id: partner.id)
+      front_share = (deal.front_gross.to_d * BigDecimal('0.25')).round(2)
+
+      payments = described_class.generate_for_deal(deal.reload).index_by(&:payee_user_id)
+      expect(payments[rep.id].amount).to eq(front_share + 50)
+      expect(payments[partner.id].amount).to eq(150)
     end
 
     it 'pays a volume bonus in full to the primary on a split deal and says it was not split' do

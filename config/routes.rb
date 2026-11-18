@@ -1610,6 +1610,8 @@ Rails.application.routes.draw do
         
         collection do
           get :stats
+          get :settings
+          put :settings, action: :update_settings
         end
       end
       
@@ -3227,6 +3229,7 @@ Rails.application.routes.draw do
         resources :commission_payments, only: [:index], controller: 'commission_payments', path: 'commissions' do
           collection do
             post :preview
+            post :refresh
           end
         end
         

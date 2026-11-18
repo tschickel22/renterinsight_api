@@ -18,11 +18,16 @@
 # known to be that kind (Deal#commission_deal_type, #commission_vertical); a
 # deal whose kind is unknown gets only the components meant for all deals.
 #
-# Split deals: when a secondary salesperson is on the deal, the primary
-# salesperson's components (role primary_salesperson, or none) are split
-# 50/50, cents left over going to the primary. Volume bonuses are personal and
-# never split. The secondary is also paid components set for the secondary
-# role, and everyone on the deal is paid all_participants components in full.
+# Split deals: when a secondary salesperson is on the deal and the plan says
+# nothing about what the secondary earns, the primary salesperson's components
+# (role primary_salesperson, or none) are split 50/50, cents left over going to
+# the primary. A plan with its own secondary_salesperson component has already
+# said what each person earns, so each is paid that and nothing is split. Volume
+# bonuses are personal and never split. Everyone on the deal is paid
+# all_participants components in full, once per person.
+#
+# One person can hold two positions on a deal. They get one payment, carrying
+# what both positions earn.
 class CommissionPaymentGeneratorService
   ROLE_FIELDS = {
     primary_salesperson: :primary_salesperson_id,
@@ -55,7 +60,8 @@ class CommissionPaymentGeneratorService
     return nil unless @deal.commission_plan.present?
 
     payments = []
-    ROLE_FIELDS.each { |role, field| process_participant(role, @deal.public_send(field), payments) }
+    positions_by_person.each { |user_id, roles| process_person(user_id, roles, payments) }
+    sync_deal_commission_amount
     payments.compact
   end
 
@@ -67,27 +73,32 @@ class CommissionPaymentGeneratorService
   def recalculate
     return unless @deal.stage_is_won? && @deal.commission_plan.present?
 
-    ROLE_FIELDS.each do |role, field|
-      user_id = @deal.public_send(field)
-      next if user_id.blank?
-
+    people = positions_by_person
+    people.each do |user_id, roles|
       payments = CommissionPayment.where(deal_id: @deal.id, payee_user_id: user_id, is_deleted: [false, nil]).where.not(status: %w[reversed cancelled]).order(:id).to_a
       if payments.empty?
-        process_participant(role, user_id, []) if @deal.gl_posted?
+        process_person(user_id, roles, []) if @deal.commissions_payable?
         next
       end
-      recalculate_participant(role, user_id, payments)
+      recalculate_person(roles, user_id, payments)
     end
+    cancel_unpaid_for_people_off_the_deal(people.keys)
+    sync_deal_commission_amount
   end
 
   def preview
     previews = []
-    ROLE_FIELDS.each { |role, field| preview_participant(role, @deal.public_send(field), previews) }
+    unpaid = []
+    positions_by_person.each do |user_id, roles|
+      seen = {}
+      roles.each { |role| preview_position(role, user_id, seen, previews, unpaid) }
+    end
 
     {
       can_generate: can_generate?,
       reasons: generation_reasons,
       participants: previews,
+      unpaid_positions: unpaid,
       total_commission: previews.sum { |p| p[:estimated_amount] },
       deal_economics: build_deal_economics
     }
@@ -147,7 +158,56 @@ class CommissionPaymentGeneratorService
 
   def split?
     secondary = @deal.try(:secondary_salesperson_id)
-    secondary.present? && secondary != @deal.try(:primary_salesperson_id)
+    return false unless secondary.present? && secondary != @deal.try(:primary_salesperson_id)
+
+    !plan_pays_secondary?
+  end
+
+  # The plan names what the secondary earns on this deal, so nothing is split.
+  def plan_pays_secondary?
+    return @plan_pays_secondary if defined?(@plan_pays_secondary)
+
+    components = @deal.commission_plan&.commission_components&.where(is_active: true, applies_to_role: 'secondary_salesperson').to_a
+    @plan_pays_secondary = components.any? { |c| c.applies_to_deal?(@deal) }
+  end
+
+  # { user_id => [roles they hold on this deal] }
+  def positions_by_person
+    ROLE_FIELDS.each_with_object({}) do |(role, field), people|
+      user_id = @deal.public_send(field)
+      (people[user_id] ||= []) << role if user_id.present?
+    end
+  end
+
+  # Everything the person earns across their positions. A component paid to
+  # all participants is paid to a person once, however many seats they hold.
+  def lines_for_person(roles)
+    seen = {}
+    roles.flat_map { |role| lines_for_role(role) }.reject { |l| repeat_for_person?(l, seen) }
+  end
+
+  def repeat_for_person?(line, seen)
+    component = line[:component]
+    return false unless component.applies_to_role == 'all_participants'
+    return true if seen[component.id]
+
+    seen[component.id] = true
+    false
+  end
+
+  # The deal's commission figure follows what its payments add up to, so the
+  # accrual and net profit see real commissions. Once accrued it stays put.
+  def sync_deal_commission_amount
+    return unless @deal.is_a?(Deal) && @deal.persisted? && !@deal.commission_posted
+
+    total = CommissionPayment.where(deal_id: @deal.id, is_deleted: [false, nil]).where.not(status: %w[reversed cancelled]).sum(:amount)
+    @deal.update_columns(commission_amount: total) if total.positive?
+  end
+
+  def cancel_unpaid_for_people_off_the_deal(user_ids)
+    CommissionPayment.where(deal_id: @deal.id, status: %w[pending approved], is_deleted: [false, nil])
+                     .where.not(payee_user_id: user_ids)
+                     .update_all(status: 'cancelled', updated_at: Time.current)
   end
 
   # Volume bonuses belong to the person and are never split. The note says
@@ -230,17 +290,16 @@ class CommissionPaymentGeneratorService
     deal.actual_close_date || deal.try(:delivery_date) || deal.updated_at&.to_date || Date.current
   end
 
-  def process_participant(role, user_id, payments)
-    return unless user_id.present?
-    return if CommissionPayment.exists?(deal_id: @deal.id, payee_user_id: user_id, is_deleted: [false, nil])
+  def process_person(user_id, roles, payments)
+    return if CommissionPayment.where(deal_id: @deal.id, payee_user_id: user_id, is_deleted: [false, nil]).where.not(status: 'cancelled').exists?
 
-    lines = lines_for_role(role)
+    lines = lines_for_person(roles)
     return if lines.empty?
 
     commission_amount = lines.sum(BigDecimal('0')) { |l| l[:amount] }.round(2)
     return if commission_amount <= 0
 
-    calculation_data = build_calculation_details_for_role(role, lines)
+    calculation_data = build_calculation_details_for_person(roles, lines)
     calculation_data[:line_items] = build_line_items(lines)
     calculation_data[:deal_economics] = build_deal_economics
 
@@ -255,12 +314,12 @@ class CommissionPaymentGeneratorService
     )
   end
 
-  def recalculate_participant(role, user_id, payments)
-    lines = lines_for_role(role)
+  def recalculate_person(roles, user_id, payments)
+    lines = lines_for_person(roles)
     target = lines.sum(BigDecimal('0')) { |l| l[:amount] }.round(2)
     paid, open = payments.partition { |p| %w[paid partially_paid].include?(p.status) }
     owed = (target - paid.sum { |p| p.amount.to_d }).round(2)
-    details = build_calculation_details_for_role(role, lines).merge(line_items: build_line_items(lines), deal_economics: build_deal_economics,
+    details = build_calculation_details_for_person(roles, lines).merge(line_items: build_line_items(lines), deal_economics: build_deal_economics,
                                                                     recalculated_at: Time.current.iso8601).deep_stringify_keys
     first, *rest = open
     rest.each { |p| p.update_columns(status: 'cancelled', updated_at: Time.current) }
@@ -285,14 +344,15 @@ class CommissionPaymentGeneratorService
     end
   end
 
-  def preview_participant(role, user_id, previews)
-    return unless user_id.present?
-
+  def preview_position(role, user_id, seen, previews, unpaid)
     user = User.find_by(id: user_id)
     return unless user
 
-    lines = lines_for_role(role)
-    return if lines.empty?
+    lines = lines_for_role(role).reject { |l| repeat_for_person?(l, seen) }
+    if lines.empty?
+      unpaid << { role: role.to_s, user_id: user_id, user_name: user.name }
+      return
+    end
 
     previews << {
       role: role.to_s,
@@ -331,10 +391,11 @@ class CommissionPaymentGeneratorService
     }.compact
   end
 
-  def build_calculation_details_for_role(role, lines)
+  def build_calculation_details_for_person(roles, lines)
     plan = @deal.commission_plan
     {
-      role: role.to_s,
+      role: roles.first.to_s,
+      roles: roles.map(&:to_s),
       plan_name: plan&.name,
       plan_id: plan&.id,
       split: split?,

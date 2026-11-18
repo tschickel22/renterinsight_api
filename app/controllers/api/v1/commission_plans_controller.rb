@@ -153,6 +153,25 @@ module Api
         }
       end
 
+      # GET /api/v1/commission-plans/settings
+      def settings
+        return unless authorize_action!('commission_plans', 'read')
+
+        render json: { payableAt: CommissionSettings.payable_at(@company), options: CommissionSettings::PAYABLE_AT }
+      end
+
+      # PUT /api/v1/commission-plans/settings  { payable_at: 'deal_closed' }
+      def update_settings
+        return unless authorize_action!('commission_plans', 'update')
+
+        unless CommissionSettings::PAYABLE_AT.include?(params[:payable_at])
+          return render json: { error: 'Choose when commissions become payable' }, status: :unprocessable_entity
+        end
+
+        CommissionSettings.set_payable_at(@company, params[:payable_at])
+        render json: { payableAt: CommissionSettings.payable_at(@company), options: CommissionSettings::PAYABLE_AT }
+      end
+
       # GET /api/v1/commission-plans/:id/components
       # Returns all components linked to this plan
       def components
@@ -170,14 +189,15 @@ module Api
       end
 
       # GET /api/v1/commission-plans/:id/available_components
-      # Returns components NOT yet linked to this plan
+      # Returns components not on any plan. A component belongs to one plan, so
+      # offering another plan's would quietly take it off that plan.
       def available_components
         return unless authorize_action!('commission_plans', 'read')
 
         # Get all active components not linked to this plan
         available = @company.commission_components
           .where(is_active: true)
-          .where('commission_plan_id IS NULL OR commission_plan_id != ?', @plan.id)
+          .where(commission_plan_id: nil)
           .order(:name)
 
         # Apply location filter if present
@@ -208,7 +228,7 @@ module Api
         end
 
         components = @company.commission_components
-          .where(id: component_ids, is_active: true)
+          .where(id: component_ids, is_active: true, commission_plan_id: [nil, @plan.id])
 
         if components.empty?
           return render json: { error: 'No valid components found' }, status: :not_found
