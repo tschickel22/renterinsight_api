@@ -68,6 +68,45 @@ RSpec.describe 'Deal commissions', type: :request do
       expect(body['totalCommission']).to eq(0.0)
     end
 
+    context 'when fees come off before commission' do
+      let(:house) { company.commission_plans.create!(name: 'House', is_active: true) }
+      let!(:processor) do
+        company.commission_components.create!(name: 'financing fee', component_type: 'flat_per_unit', flat_amount: 1000, commission_plan: house,
+                                              is_active: true, applies_to_role: 'finance_manager')
+      end
+      let(:deal) do
+        company.commission_components.create!(name: 'Agent', component_type: 'percent_of_gross', gross_type: 'house_profit', rate: 0.2,
+                                              commission_plan: house, is_active: true, applies_to_role: 'primary_salesperson')
+        house.update!(metadata: { before_commission: { company_fee_percent: 5, fee_component_ids: [processor.id] } })
+        deal!(commission_plan_id: house.id, stage: 'proposal', pack_amount: 0)
+      end
+      let(:amounts) { ->(body) { body['participants'].to_h { |p| [p['role'], p['estimatedAmount']] } } }
+
+      it 'pays the agent 20% of what is left after both fees' do
+        body = preview(deal, finance_manager_id: partner.id)
+
+        expect(amounts[body]).to eq('primary_salesperson' => 5500.0, 'finance_manager' => 1000.0)
+        expect(body['participants'].first['components'].first['note'])
+          .to eq('paid on $27,500.00: $30,000.00 less $1,500.00 5% admin fee and $1,000.00 financing fee')
+      end
+
+      it 'takes off only the admin fee when the processor is not on the deal' do
+        expect(amounts[preview(deal)]).to eq('primary_salesperson' => 5700.0)
+      end
+
+      it 'splits what is left evenly between two agents' do
+        body = preview(deal, finance_manager_id: admin.id, secondary_salesperson_id: partner.id)
+        expect(amounts[body]).to include('primary_salesperson' => 2750.0, 'secondary_salesperson' => 2750.0)
+      end
+
+      it 'keeps these settings when another screen saves the plan' do
+        deal
+        patch "/api/v1/commission-plans/#{house.id}", params: { commission_plan: { name: 'Renamed', metadata: { other: 1 } } }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(house.reload.company_fee_percent).to eq(5)
+      end
+    end
+
     it 'follows the pack and trade on screen before they are saved' do
       deal = deal!(stage: 'proposal', pack_amount: 0)
       expect(preview(deal, trade_payoff: 10_000)['totalCommission']).to eq(4000.0)
