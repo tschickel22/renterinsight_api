@@ -162,7 +162,7 @@ module Outreach
           reach = @eligibility.reach(lead)
           @wave.outreach_targets.create!(
             company_id: @company.id, lead_id: lead.id, rank: index + 1, ai_reason: Assistant::Rules.tidy(reason).truncate(160),
-            test_group: index < contact_count ? 'contact' : 'holdout', channel: reach.text ? 'text' : 'email'
+            test_group: index < contact_count ? 'contact' : 'holdout', channel: reach.email ? 'email' : 'text'
           )
         end
       end

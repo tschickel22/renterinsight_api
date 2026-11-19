@@ -79,6 +79,7 @@ RSpec.describe 'Proactive Outreach pilot' do
 
       expect(building.reload.filter_tree['children']).to eq([tree['children'].first])
       expect(building.outreach_targets.pluck(:lead_id)).to eq([retailer.id])
+      expect(building.outreach_targets.first.channel).to eq('email')
       expect(building.status).to eq('audience_ready')
     end
 
@@ -89,6 +90,25 @@ RSpec.describe 'Proactive Outreach pilot' do
 
       building = company.outreach_waves.create!(name: 'Build', status: 'building', prompt: 'Retailers')
       expect { described_class.new(building, user: tom).call }.to raise_error(Outreach::AiClient::Error, /1 lead match that description, but none can be contacted/)
+    end
+  end
+
+  describe 'sender' do
+    it 'can be someone outside the company whose mailbox is connected for it, never anyone else' do
+      outside = Company.create!(name: "Platform-#{SecureRandom.hex(3)}")
+      admin = User.create!(email: "pa-#{SecureRandom.hex(3)}@example.com", first_name: 'Tom', last_name: 'Admin', password: 'Pass1234!',
+                           company_id: outside.id, role: 'platform_admin', status: 'active')
+      stranger = User.create!(email: "s-#{SecureRandom.hex(3)}@example.com", first_name: 'Sam', last_name: 'Else', password: 'Pass1234!',
+                              company_id: outside.id, role: 'company_admin', status: 'active')
+      UserEmailConnection.create!(user_id: admin.id, company_id: company.id, provider: 'oauth_gmail', email_address: admin.email, is_active: true)
+
+      settings.update!('sender_user_id' => admin.id)
+      expect(settings.sender).to eq(admin)
+      expect(settings.readiness[:mailbox]).to be(true)
+      expect(settings.sender_choices.map { |c| c[:id] }).to include(admin.id, tom.id)
+
+      settings.update!('sender_user_id' => stranger.id)
+      expect(settings.sender).to be_nil
     end
   end
 

@@ -127,7 +127,7 @@ module Outreach
       Sender.new(target).deliver!(body: result.body, subject: result.subject, channel: channel, kind: 'follow_up', content_item: result.content_item)
     end
 
-    # Takes turns between text and email where both are allowed.
+    # Opens by email (AudienceBuilder), then takes turns where both are allowed.
     def next_channel(target)
       reach = @eligibility.reach(target.lead)
       return 'email' unless reach.text

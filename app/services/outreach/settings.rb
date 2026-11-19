@@ -57,7 +57,24 @@ module Outreach
     def sender
       return nil if to_h['sender_user_id'].blank?
 
-      company.users.find_by(id: to_h['sender_user_id'])
+      sender_scope.find_by(id: to_h['sender_user_id'])
+    end
+
+    # Who may send: the company's own people, plus anyone whose mailbox is
+    # connected for this company. Tom signs in as a platform admin that lives
+    # outside DealerTide and sends from a mailbox connected for it.
+    def sender_scope
+      connected = UserEmailConnection.where(company_id: company.id, is_active: true).select(:user_id)
+      User.where(company_id: company.id).or(User.where(id: connected))
+    end
+
+    def sender_choices
+      people = sender_scope.order(:first_name, :last_name).limit(300).to_a
+      mailboxes = UserEmailConnection.where(company_id: company.id, is_active: true, user_id: people.map(&:id)).pluck(:user_id).to_set
+      people.map do |person|
+        { id: person.id, name: [person.first_name, person.last_name].compact_blank.join(' ').presence || person.email, email: person.email,
+          meeting_link: person.meeting_url.present?, mailbox: mailboxes.include?(person.id) }
+      end
     end
 
     def update!(attrs)
@@ -68,7 +85,7 @@ module Outreach
       end
       clean['product_facts'] = clean_block(clean['product_facts']).truncate(8000) if clean.key?('product_facts')
       clean['postal_address'] = Assistant::Rules.tidy(clean['postal_address']).truncate(200) if clean.key?('postal_address')
-      clean['sender_user_id'] = company.users.find_by(id: clean['sender_user_id'])&.id if clean.key?('sender_user_id')
+      clean['sender_user_id'] = sender_scope.find_by(id: clean['sender_user_id'])&.id if clean.key?('sender_user_id')
       if clean.key?('demo_minutes')
         minutes = clean['demo_minutes'].to_i
         clean['demo_minutes'] = DEMO_MINUTES.include?(minutes) ? minutes : DEFAULTS['demo_minutes']

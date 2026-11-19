@@ -59,6 +59,7 @@ module Api
         {
           settings: settings.to_h,
           readiness: settings.readiness,
+          senders: settings.sender_choices,
           starter_available: Outreach::StarterContent.available_for?(@company),
           demo_minutes_options: Outreach::Settings::DEMO_MINUTES,
           content: @company.outreach_content_items.where.not(status: 'archived').order(:status, :title).map { |item| Api::Crm::OutreachContentItemsController.item_json(item) },
