@@ -120,7 +120,7 @@ module Automations
         parts = runs.map { |r| [:workflow, r.id] } + seqs.map { |e| [:nurture, e.id] } + camps.map { |e| [:campaign, e.id] }
         bits = [("#{runs.size} #{'workflow'.pluralize(runs.size)}" if runs.any?), ("follow-up emails" if seqs.any?),
                 ("#{camps.size} #{'campaign'.pluralize(camps.size)}" if camps.any?)].compact
-        next_at = (runs.map(&:wait_until) + camps.map(&:next_send_at)).compact.min
+        next_at = (runs.map(&:wait_until) + camps.map { |e| campaign_next_at(e) }).compact.select { |t| t > Time.current }.min
         last_at = camps.map(&:last_sent_at).compact.max
         item = Item.new(kind: 'play', id: installation.id, name: play::NAME, kind_label: 'Starter play', status: 'active', status_label: 'Running',
                         detail: "Includes #{bits.to_sentence}. Started #{(runs + seqs + camps).map(&:created_at).min.strftime('%b %-d')}.",
@@ -151,9 +151,18 @@ module Automations
                status_label: between ? 'Between sends' : (campaign.status == 'running' ? 'Active' : "Campaign #{campaign.status}"),
                detail: "Added #{enrollment.created_at.strftime('%b %-d')}.#{' Repeats each cycle.' if campaign.recurring?}",
                last_at: enrollment.last_sent_at,
-               next_at: between ? campaign.next_recurrence_at : (enrollment.next_send_at if campaign.status.in?(%w[running scheduled])),
+               next_at: campaign_next_at(enrollment),
                link: "/campaigns/#{campaign.id}", can_stop: true,
                stop_effect: 'They are taken out of this campaign. They are not unsubscribed and can be added to another campaign.')
+    end
+
+    # Between cycles of a weekly digest the next send is the campaign's next run,
+    # not the person's last (stale) send time.
+    def campaign_next_at(enrollment)
+      campaign = enrollment.campaign
+      return campaign.next_recurrence_at if enrollment.status == 'completed'
+
+      enrollment.next_send_at if campaign.status.in?(%w[running scheduled])
     end
 
     def workflow_item(run)

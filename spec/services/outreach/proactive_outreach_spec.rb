@@ -119,7 +119,7 @@ RSpec.describe 'Proactive Outreach pilot' do
       allow_any_instance_of(Audiences::AiBuilder).to receive(:generate).and_return(instance_double(AudienceAiGeneration, generated_filter_tree: tree))
 
       building = company.outreach_waves.create!(name: 'Build', status: 'building', prompt: 'Retailers')
-      expect { described_class.new(building, user: tom).call }.to raise_error(Outreach::AiClient::Error, /1 lead match that description, but none can be contacted/)
+      expect { described_class.new(building, user: tom).call }.to raise_error(Outreach::AiClient::Error, /1 lead matches that description, but none can be contacted/)
     end
   end
 

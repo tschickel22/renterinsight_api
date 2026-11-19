@@ -108,7 +108,7 @@ RSpec.describe 'Automations on a record', type: :request do
 
     row = list['items'].find { |i| i['kind'] == 'campaign' }
     expect(row).to include('name' => 'Weekly homes email', 'status_label' => 'Between sends')
-    expect(row['next_at']).to be_present
+    expect(Time.zone.parse(row['next_at'])).to be > Time.current
 
     post '/api/crm/automations/stop', params: { record_type: 'Lead', record_id: lead.id, kind: 'campaign', id: enrollment.id }, headers: headers
     expect(enrollment.reload.status).to eq('paused')

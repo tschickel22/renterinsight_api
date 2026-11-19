@@ -95,7 +95,7 @@ module Outreach
       described = matching_scope(tree).count
       return 'No leads match that description' if described.zero?
 
-      "#{described} #{'lead'.pluralize(described)} match that description, but none can be contacted now: each is already being " \
+      "#{described} #{described == 1 ? 'lead matches' : 'leads match'} that description, but none can be contacted now: each is already being " \
         'worked (not New, no owner, on a campaign, nurture or workflow, in a conversation, or active in the last 30 days), ' \
         'or has no usable email and no text consent'
     end
