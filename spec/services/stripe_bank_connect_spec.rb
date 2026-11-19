@@ -64,6 +64,33 @@ RSpec.describe StripeBankFeedService do
     expect(held.reload.stripe_fc_status).to eq('active')
   end
 
+  describe 'the location a new bank lands on' do
+    # A new company comes with Corporate; Easy Homesource turned theirs off.
+    before { company.locations.where(is_corporate: true).update_all(active: false) }
+    let(:main) { company.locations.find_by!(is_corporate: false) } # and Main Location
+    let(:new_banks) { company.bank_accounts.where.not(stripe_fc_account_id: nil) }
+
+    after { Current.reset }
+
+    it "goes to the company's only store when none is chosen" do
+      described_class.new(company).connect_session_accounts!('fcsess_1')
+      expect(new_banks.pluck(:location_id).uniq).to eq([main.id])
+    end
+
+    it 'goes to the location being worked in' do
+      other = company.locations.create!(name: 'North', timezone: 'UTC')
+      Current.location_id = other.id
+      described_class.new(company).connect_session_accounts!('fcsess_1')
+      expect(new_banks.pluck(:location_id).uniq).to eq([other.id])
+    end
+
+    it 'stays unassigned with several stores and none chosen' do
+      company.locations.create!(name: 'North', timezone: 'UTC')
+      described_class.new(company).connect_session_accounts!('fcsess_1')
+      expect(new_banks.pluck(:location_id).uniq).to eq([nil])
+    end
+  end
+
   it "refuses another company's connection" do
     allow(Stripe::Customer).to receive(:retrieve).with('cus_1')
       .and_return(Struct.new(:metadata).new({ 'ri_company_id' => '999999' }))

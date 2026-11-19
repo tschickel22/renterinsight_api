@@ -20,6 +20,12 @@ default: &default
     class: OnboardingDailySummaryJob
     queue: low
     schedule: every day at 7am America/Denver
+  # Bank feeds: read new lines every hour, so a feed does not depend on
+  # Stripe's webhook alone.
+  bank_feed_poll:
+    class: BankFeedPollJob
+    queue: low
+    schedule: every hour at minute 40
   # Dealers' own texting registrations under carrier review (E96 phase 4).
   sms_registration_poll:
     class: SmsRegistrationPollJob

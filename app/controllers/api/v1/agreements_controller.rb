@@ -152,13 +152,23 @@ module Api
           agreement.stamp_deal_sheet!
         end
 
-        if agreement.save
+        # All or nothing: when a signer will not save (the builder auto-saves
+        # while signer slots are still blank) the 422 must not leave the
+        # agreement behind, or the builder, which never learns its id, makes a
+        # second one on the next save and the deal keeps an empty Draft.
+        saved = false
+        Agreement.transaction do
+          saved = agreement.save
+          raise ActiveRecord::Rollback unless saved
+
           # Copy template's custom_field_definitions to the agreement
           agreement.initialize_field_definitions_from_template!
 
           # Create initial signers if provided
           sync_signers(agreement) if params.dig(:agreement, :signers).present?
+        end
 
+        if saved
           render json: agreement_json(agreement.reload, detailed: true), status: :created
         else
           render json: { errors: agreement.errors.full_messages }, status: :unprocessable_entity

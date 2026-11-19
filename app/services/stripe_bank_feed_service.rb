@@ -76,17 +76,22 @@ class StripeBankFeedService
     sync_transactions(bank_account)
   end
 
-  def sync_transactions(bank_account)
+  # refresh: false only reads what Stripe already holds. The scheduled pull
+  # (BankFeedPollJob) uses it: subscribed accounts are fetched by Stripe on
+  # its own, so asking the bank again every hour would only add calls.
+  def sync_transactions(bank_account, refresh: true)
     return { error: 'No FC account linked' } unless bank_account.stripe_fc_account_id.present?
     return { error: 'Account disconnected' } unless bank_account.stripe_fc_status == 'active'
 
-    begin
-      Stripe::FinancialConnections::Account.refresh_account(
-        bank_account.stripe_fc_account_id,
-        { features: ['transactions'] }
-      )
-    rescue => e
-      Rails.logger.warn("[StripeBankFeed] Refresh failed (non-fatal): #{e.message}")
+    if refresh
+      begin
+        Stripe::FinancialConnections::Account.refresh_account(
+          bank_account.stripe_fc_account_id,
+          { features: ['transactions'] }
+        )
+      rescue => e
+        Rails.logger.warn("[StripeBankFeed] Refresh failed (non-fatal): #{e.message}")
+      end
     end
 
     since = bank_account.stripe_fc_last_synced_at || 90.days.ago
@@ -329,7 +334,7 @@ class StripeBankFeedService
     end
     unless bank
       bank = scope.create!(bank_name: fc_name(fc), account_type: type, account_purpose: BankAccount::ACCOUNT_PURPOSE_SYNC_ONLY,
-                           stripe_customer_id: customer_id)
+                           stripe_customer_id: customer_id, location_id: new_bank_location_id)
       status = 'created'
     end
 
@@ -349,6 +354,20 @@ class StripeBankFeedService
       Rails.logger.warn("[StripeBankFeed] First sync failed for bank account #{bank.id}: #{e.message}")
     end
     { bank_account: bank.reload, status: status, name: bank.bank_name }
+  end
+
+  # A bank connected here belongs to the location the person is working in,
+  # else to the company's only store. With several stores and none chosen it
+  # stays unassigned, which Bank Transactions shows under Corporate.
+  # (Easy Homesource connected nine banks with none, and once Corporate was
+  # turned off they showed only under All Locations.)
+  def new_bank_location_id
+    @new_bank_location_id ||= begin
+      active = @company.locations.where(active: true, is_deleted: [false, nil])
+      chosen = Current.location_id.presence && active.where(id: Current.location_id).pick(:id)
+      stores = chosen ? [] : active.where(is_corporate: [false, nil]).limit(2).pluck(:id)
+      chosen || (stores.one? ? stores.first : nil)
+    end
   end
 
   # cash/checking, cash/savings and credit/credit_card have feeds; anything
