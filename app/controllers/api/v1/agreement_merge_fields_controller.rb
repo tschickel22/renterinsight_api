@@ -212,7 +212,8 @@ module Api
               # deal.subtotal_1 / subtotal_2 removed — no longer on the DealForm.
               { key: 'deal.tax_amount', label: 'Tax Amount', type: 'currency', value: @deal.try(:tax_amount) },
               { key: 'deal.total_amount', label: 'Total Amount', type: 'currency', value: @deal.try(:total_amount) },
-              { key: 'deal.down_payment', label: 'Down Payment', type: 'currency', value: @deal.try(:down_payment) },
+              { key: 'deal.contract_down_payment', label: 'Down Payment', type: 'currency', value: @deal.try(:contract_down_payment) },
+              { key: 'deal.down_payment', label: 'Deposit', type: 'currency', value: @deal.try(:down_payment) },
               { key: 'deal.additional_payment', label: 'Additional Payment', type: 'currency', value: @deal.try(:additional_payment) },
               { key: 'deal.unpaid_balance', label: 'Unpaid Balance', type: 'currency', value: @deal.try(:unpaid_balance) },
               # deal.addendum_items / deal.addendum_total removed — superseded by

@@ -650,7 +650,7 @@ module Api
         problem = build && Agreements::DealSheetLock.edit_problem(build)
         return nil unless problem
 
-        changed = deal_params.to_h.slice('trade_allowance', 'trade_payoff', 'down_payment', 'additional_payment')
+        changed = deal_params.to_h.slice('trade_allowance', 'trade_payoff', 'down_payment', 'contract_down_payment', 'additional_payment')
                              .any? { |key, value| value.to_d != @deal[key].to_d }
         changed ? "#{problem} Trade and payments are on the contract: unlock the sheet to change them." : nil
       end
@@ -831,6 +831,8 @@ module Api
           # toward the purchase. Reports read this column ("Deposit" in
           # Sales GP and Inventory reports).
           :down_payment, :down_payment_due_date,
+          # The down payment written on the contract (Form 500). Not the deposit above.
+          :contract_down_payment,
           # Lender: lender_id references the managed list and denormalizes to lender_name
           # (see Deal#denormalize_lender_name); lender_name still accepted as a free string.
           :lender_id, :lender_name, :payment_type,
@@ -1007,6 +1009,7 @@ module Api
           # Reports also read `down_payment` — this is the single source of truth.
           downPayment: deal.down_payment,
           downPaymentDueDate: deal.down_payment_due_date&.iso8601,
+          contractDownPayment: deal.contract_down_payment,
           dealType: deal.deal_type,
           vertical: deal.vertical,
           quantity: deal.quantity,

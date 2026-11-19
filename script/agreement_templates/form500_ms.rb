@@ -162,7 +162,7 @@ price 'cash_purchase_price', 'Cash purchase price', 291.4,
 price 'trade_in_allowance', 'Trade-in allowance', 303.7, x: 460.0, w: 58.9, merge_from: 'deal.trade_allowance'
 price 'less_balance_due', 'Less bal. due on trade', 315.5, x: 460.0, w: 58.9, merge_from: 'deal.trade_payoff'
 price 'net_allowance', 'Net allowance', 327.6, x: 460.0, w: 58.9, formula: '=trade_in_allowance - less_balance_due'
-price 'cash_down_payment', 'Cash down payment', 339.7, x: 460.0, w: 58.9, merge_from: 'deal.down_payment'
+price 'cash_down_payment', 'Cash down payment', 339.7, x: 460.0, w: 58.9, merge_from: 'deal.contract_down_payment'
 price 'cash_as_agreed', 'Cash as agreed', 351.7, x: 460.0, w: 58.9, merge_from: 'deal.additional_payment'
 price 'less_total_credits', 'Less total credits', 363.4, formula: '=net_allowance + cash_down_payment + cash_as_agreed'
 price 'sub_total_2', 'Sub-total after credits', 375.7, formula: '=cash_purchase_price - less_total_credits'

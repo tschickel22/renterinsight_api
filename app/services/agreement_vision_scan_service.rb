@@ -1224,7 +1224,7 @@ class AgreementVisionScanService
     [/\Ayour\s+discounted\s+price\z/,                                     'deal.discounted_price'],
     [/\Atotal\s+home\s+price\z/,                                          'deal.total_home_price'],
     [/\A(?:total\s+amount\s+due|grand\s+total|total\s+due)\z/,            'deal.total_amount'],
-    [/\A(?:cash\s+down\s+payment|down\s+payment)\z/,                      'deal.down_payment'],
+    [/\A(?:cash\s+down\s+payment|down\s+payment)\z/,                      'deal.contract_down_payment'],
     [/\Aadditional\s+payment\z/,                                          'deal.additional_payment'],
     [/\A(?:trade[\-\s]?in\s+credit|trade[\-\s]?in\s+allowance|trade[\-\s]?in\s+value|trade[\-\s]?in)\z/, 'deal.trade_allowance'],
     [/\Atrade[\-\s]?in\s+payoff\z/,                                       'deal.trade_payoff'],
@@ -3207,7 +3207,7 @@ class AgreementVisionScanService
       /document\s*fee/i            => { merge: 'deal.doc_fee',                  type: 'currency' },
       /\btaxe?s\b/i                => { merge: 'deal.tax_amount',               type: 'currency' },
       /\btotal\b/i                 => { merge: 'deal.total_amount',             type: 'currency' },
-      /down\s*payment/i            => { merge: 'deal.down_payment',             type: 'currency' },
+      /down\s*payment/i            => { merge: 'deal.contract_down_payment',    type: 'currency' },
       /additional\s*payment/i      => { merge: 'deal.additional_payment',       type: 'currency' },
       /unpaid\s*balance/i          => { merge: 'deal.unpaid_balance',           type: 'currency' },
     }
@@ -3224,7 +3224,7 @@ class AgreementVisionScanService
       { y_min: 33.0, y_max: 35.0, merge: 'deal.multi_unit_discount',         label: 'Multi-Unit Discount' },
       { y_min: 45.0, y_max: 48.0, merge: 'deal.accessories_total',           label: 'Extended Service' },
       { y_min: 56.0, y_max: 59.0, merge: 'deal.total_amount',                label: 'Total' },
-      { y_min: 59.0, y_max: 61.0, merge: 'deal.down_payment',                label: 'Down Payment' },
+      { y_min: 59.0, y_max: 61.0, merge: 'deal.contract_down_payment',       label: 'Down Payment' },
       { y_min: 61.0, y_max: 63.0, merge: 'deal.additional_payment',          label: 'Additional Payment' },
     ]
 
