@@ -57,6 +57,41 @@ RSpec.describe 'Proactive Outreach pilot' do
     end
   end
 
+  describe Outreach::AudienceBuilder do
+    before do
+      CustomField.create!(company: company, module: 'leads', name: 'Category', field_key: 'category', field_type: 'text')
+    end
+
+    it 'drops AI rules no lead could pass, so one invented tag does not empty the audience' do
+      retailer = lead!(custom_field_values: { 'category' => 'Retailer' })
+      lead!(custom_field_values: { 'category' => 'Supplier' })
+      tree = { 'type' => 'and', 'children' => [
+        { 'field' => 'custom:category', 'operator' => 'equals', 'value' => 'Retailer' },
+        { 'field' => 'source_name', 'operator' => 'equals', 'value' => 'Trade Show' },
+        { 'type' => 'or', 'children' => [{ 'field' => 'tags', 'operator' => 'tags_include', 'value' => 'email_opened' }] }
+      ] }
+      generation = instance_double(AudienceAiGeneration, generated_filter_tree: tree)
+      allow_any_instance_of(Audiences::AiBuilder).to receive(:generate).and_return(generation)
+      allow(Outreach::AiClient).to receive(:call).and_return('picks' => [])
+
+      building = company.outreach_waves.create!(name: 'Build', status: 'building', prompt: 'Retailers from trade shows who opened emails', target_size: 1)
+      described_class.new(building, user: tom).call
+
+      expect(building.reload.filter_tree['children']).to eq([tree['children'].first])
+      expect(building.outreach_targets.pluck(:lead_id)).to eq([retailer.id])
+      expect(building.status).to eq('audience_ready')
+    end
+
+    it 'says when leads match but none can be contacted' do
+      lead!(custom_field_values: { 'category' => 'Retailer' }, status: 'contacted')
+      tree = { 'type' => 'and', 'children' => [{ 'field' => 'custom:category', 'operator' => 'equals', 'value' => 'Retailer' }] }
+      allow_any_instance_of(Audiences::AiBuilder).to receive(:generate).and_return(instance_double(AudienceAiGeneration, generated_filter_tree: tree))
+
+      building = company.outreach_waves.create!(name: 'Build', status: 'building', prompt: 'Retailers')
+      expect { described_class.new(building, user: tom).call }.to raise_error(Outreach::AiClient::Error, /1 lead match that description, but none can be contacted/)
+    end
+  end
+
   describe Outreach::Guard do
     let(:lead) { lead! }
 

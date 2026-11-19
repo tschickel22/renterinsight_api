@@ -8,6 +8,10 @@ module Outreach
   class AudienceBuilder
     MAX_CANDIDATES = 120
     REQUIRED_FILTER = { 'field' => 'custom:category', 'operator' => 'equals', 'value' => 'MH Retailer' }.freeze
+    # Engagement and "if possible" wishes decide the ranking, not who is allowed in.
+    FILTER_NOTE = 'Filter only on facts a lead record must have, using values that exist in the context. Leave out wishes about ' \
+                  'opened or clicked emails, number of locations, and anything described as preferred or "if possible": ' \
+                  'they are used later to rank the matches, so filtering on them would wrongly shut leads out.'
 
     RANK_TOOL = {
       name: 'rank_leads',
@@ -34,7 +38,7 @@ module Outreach
       tree = filter_tree
       leads = candidates(tree)
       @wave.update!(filter_tree: tree, eligible_count: leads.size)
-      raise AiClient::Error, 'No eligible leads match that description' if leads.empty?
+      raise AiClient::Error, empty_message(tree) if leads.empty?
 
       picks = ranked(leads).first(@wave.target_size * 2)
       save_targets(picks)
@@ -45,13 +49,50 @@ module Outreach
 
     def filter_tree
       described = if @wave.prompt.present?
-                    Audiences::AiBuilder.new(company: @company, user: @user).generate(prompt: @wave.prompt, source_type: 'Lead').generated_filter_tree
+                    generated = Audiences::AiBuilder.new(company: @company, user: @user)
+                                                    .generate(prompt: "#{@wave.prompt}\n\n#{FILTER_NOTE}", source_type: 'Lead').generated_filter_tree
+                    prune(generated) || { 'type' => 'and', 'children' => [] }
                   else
                     { 'type' => 'and', 'children' => [] }
                   end
       return described unless StarterContent.available_for?(@company)
 
       { 'type' => 'and', 'children' => [REQUIRED_FILTER, described] }
+    end
+
+    # The AI sometimes names a tag or source the company has never used. A rule
+    # no lead could pass would empty the whole audience, so it is dropped.
+    def prune(node)
+      return nil unless node.is_a?(Hash)
+
+      if node['children'].is_a?(Array)
+        children = node['children'].filter_map { |child| prune(child) }
+        return nil if children.empty?
+
+        return node.merge('children' => children)
+      end
+
+      any_lead_passes?(node) ? node : nil
+    end
+
+    def any_lead_passes?(leaf)
+      Audiences::FilterCompiler.new(company: @company, source_type: 'Lead', filter_tree: { 'type' => 'and', 'children' => [leaf] }).scope.exists?
+    rescue StandardError => e
+      Rails.logger.info("[Outreach::AudienceBuilder] dropped rule #{leaf.to_json}: #{e.class}")
+      false
+    end
+
+    def matching_scope(tree)
+      Audiences::FilterCompiler.new(company: @company, source_type: 'Lead', filter_tree: tree).scope
+    end
+
+    def empty_message(tree)
+      described = matching_scope(tree).count
+      return 'No leads match that description' if described.zero?
+
+      "#{described} #{'lead'.pluralize(described)} match that description, but none can be contacted now: each is already being " \
+        'worked (not New, no owner, on a campaign, nurture or workflow, in a conversation, or active in the last 30 days), ' \
+        'or has no usable email and no text consent'
     end
 
     def candidates(tree)
