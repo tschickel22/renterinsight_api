@@ -181,7 +181,7 @@ price 'taxes', 'Taxes', 54.71, merge_from: 'deal.tax_amount'
 price 'total', 'Total', 57.93,
       formula: '=sub_total_2 + freight + setup_charges + extended_service + document_fee + taxes + ' +
                (1..6).map { |n| "other_charge_#{n}" }.join(' + ')
-price 'down_payment', 'Down Payment', 59.53, merge_from: 'deal.down_payment'
+price 'down_payment', 'Down Payment', 59.53, merge_from: 'deal.contract_down_payment'
 price 'additional_payment', 'Additional Payment as Agreed', 61.14, merge_from: 'deal.additional_payment'
 price 'unpaid_balance', 'Unpaid Balance', 62.75, formula: '=total - down_payment - additional_payment'
 

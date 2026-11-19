@@ -166,7 +166,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       # The sale terms the sheet shows live on the deal: trade-in, down
       # payment, and where the buyer takes the home (which state taxes it).
       if params[:deal].present?
-        attrs = params.require(:deal).permit(:trade_allowance, :trade_payoff, :down_payment, :additional_payment,
+        attrs = params.require(:deal).permit(:trade_allowance, :trade_payoff, :contract_down_payment, :additional_payment,
                                              :delivery_point, :delivery_street, :delivery_city, :delivery_state,
                                              :delivery_zip).to_h
         if attrs.key?('delivery_point') && !%w[deliver lot].include?(attrs['delivery_point'])

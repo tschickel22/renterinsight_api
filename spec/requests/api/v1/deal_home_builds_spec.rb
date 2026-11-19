@@ -245,7 +245,7 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     get path, headers: headers
     expect(body.dig('build', 'warnings').join).to include('No delivery state yet')
 
-    patch path, headers: headers, params: { deal: { delivery_state: 'IN', trade_allowance: 4000, down_payment: 1000 } }.to_json
+    patch path, headers: headers, params: { deal: { delivery_state: 'IN', trade_allowance: 4000, contract_down_payment: 1000 } }.to_json
     t = body.dig('build', 'totals')
     # Selling price 64,036.25 less 4,000 trade = 60,036.25; Indiana taxes 65% of it at 7%.
     expect(t['tax']).to include('state' => 'IN', 'base' => 39_023.56, 'collected' => 2731.65)

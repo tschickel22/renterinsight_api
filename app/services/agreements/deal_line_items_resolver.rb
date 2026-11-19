@@ -28,6 +28,7 @@ module Agreements
   #     line_total:        Float    # (amount * quantity)
   #     total:             Float    # alias for line_total
   #     category:          String   # 'home'|'land'|'fee'|'accessory'|'product'|'service'|'other'|nil
+  #     tax:               Float    # sales tax on the line (0 when none)
   #     taxable:           Boolean
   #     source:            String   # 'home'|'deal'|'package'|'manual'|nil (from scenario)
   #     source_vehicle_id: Integer  # nil when the row isn't backed by a Vehicle record
@@ -77,6 +78,7 @@ module Agreements
           quantity: qty,
           line_total: (price * qty).round(2),
           total: dp.total.to_f,
+          tax: dp.tax.to_f,
           category: nil, # deal_products has no category — leave nil for the caller to bucket
           taxable: dp.tax.to_f > 0,
           source: source.presence,
@@ -103,6 +105,7 @@ module Agreements
         quantity: qty,
         line_total: (price * qty).round(2),
         total: (price * qty).round(2),
+        tax: h['tax'].to_f,
         category: h['category'].presence,
         taxable: h['taxable'] == true,
         source: source.presence,
