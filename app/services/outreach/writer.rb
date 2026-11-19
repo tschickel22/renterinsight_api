@@ -4,8 +4,11 @@ module Outreach
   # Writes the opening message, follow-ups and replies in the sender's name
   # (backlog E105). Only from approved facts, playbook answers and content.
   class Writer
-    Result = Struct.new(:body, :subject, :content_item, :book_slot, :handoff, :handoff_reason, :stop, :summary, :problem, keyword_init: true)
-    HANDOFF_REASONS = %w[asked_for_person upset legal_or_warranty ready_to_buy unsure appointment other].freeze
+    Result = Struct.new(:body, :subject, :content_item, :book_slot, :handoff, :handoff_reason, :stop, :summary, :problem, :share_report,
+                        keyword_init: true)
+    HANDOFF_REASONS = %w[asked_for_person upset legal_or_warranty ready_to_buy unsure appointment wants_site_scan other].freeze
+    # Early messages share the TrueBuild video (Tom, 2026-11-19).
+    OPENER_VIDEO = /true\s*build/i
     HISTORY = 14
 
     TOOL = {
@@ -18,6 +21,7 @@ module Outreach
           subject: { type: 'string', description: 'Email only: a plain subject under 60 characters.' },
           content_id: { type: 'string', description: 'The [C number] of one video to share, or omit.' },
           book_slot: { type: 'string', description: 'The [id] from OPEN TIMES they clearly accepted. Omit otherwise.' },
+          share_report: { type: 'boolean', description: 'True to attach their free website checkup link. Only when WEBSITE CHECKUP says you may.' },
           handoff: { type: 'boolean', description: 'True when the real sender should take over.' },
           handoff_reason: { type: 'string', enum: HANDOFF_REASONS },
           summary: { type: 'string', description: 'One sentence for the sender about where this stands. Use "they".' }
@@ -35,7 +39,7 @@ module Outreach
 
     def opener(channel)
       write(channel, 'opener', task: 'This is your FIRST message to them. Say who you are and why you are reaching out, tie it to the show or list they came from, ' \
-                                     'share the one video most likely to matter to them, and ask one easy question. Do not offer times yet. ' \
+                                     'share the TrueBuild video if it is listed (otherwise the one most likely to matter), and ask one easy question. Do not offer times yet. ' \
                                      'If FROM THEIR WEBSITE is given, mention exactly one fact from it in your own words, naturally and without flattery, ' \
                                      'and connect it to how we could help. Never mention a search score or say their website is bad.')
     end
@@ -57,6 +61,7 @@ module Outreach
     private
 
     def write(channel, feature, task:)
+      @task_kind = feature
       feedback = nil
       result = nil
       2.times do
@@ -71,8 +76,9 @@ module Outreach
 
     def build(input)
       item = content.detect { |c| "C#{c.id}" == input['content_id'].to_s.strip.upcase }
+      item = opener_video || item if @task_kind == 'opener'
       Result.new(body: Assistant::Rules.tidy(input['body']), subject: Assistant::Rules.tidy(input['subject']).truncate(80).presence,
-                 content_item: item, book_slot: input['book_slot'].to_s.strip.upcase.presence, handoff: input['handoff'] == true,
+                 content_item: item, share_report: input['share_report'] == true && report_offerable?, book_slot: input['book_slot'].to_s.strip.upcase.presence, handoff: input['handoff'] == true,
                  handoff_reason: HANDOFF_REASONS.include?(input['handoff_reason']) ? input['handoff_reason'] : 'other',
                  summary: Assistant::Rules.tidy(input['summary']).truncate(300))
     end
@@ -111,6 +117,7 @@ module Outreach
         THIS PERSON
         #{lead_facts}
         #{website_facts}
+        #{report_lines}
 
         RIGHT NOW: #{Time.current.in_time_zone(Clock.lead_zone(@lead, @company)).strftime('%A, %B %-d, %Y %-I:%M %p %Z')}
         #{"\nOPEN TIMES\n#{@booking.prompt_lines}" if @booking}
@@ -152,6 +159,32 @@ module Outreach
 
     def content_lines
       content.map { |c| "[C#{c.id}] #{c.title}#{" (#{c.topic})" if c.topic.present?}#{". Use when: #{c.use_when}" if c.use_when.present?}" }.join("\n")
+    end
+
+    def opener_video
+      content.detect { |c| c.title.to_s.match?(OPENER_VIDEO) }
+    end
+
+    # Their checkup can be offered once, after the opener, when their site was read.
+    def report_offerable?
+      @task_kind != 'opener' && @target.site_research.to_h['report'].present? && @target.site_research.to_h['report_shared_at'].blank?
+    end
+
+    def report_lines
+      return '' unless @target.site_research.to_h['report'].present?
+
+      if report_offerable?
+        <<~TEXT.strip
+          WEBSITE CHECKUP
+          A short checkup of how their website shows up in Google and AI search is ready. You may offer it once: say it is a quick, free look at how their
+          site shows up in search, set share_report true, and never write the link, the score or the findings. If they ask for the full report, a full scan,
+          or to see their own site with TrueBuild on it, say #{@settings['persona_name'].presence || 'we'} will put it together personally, and hand off with
+          handoff_reason wants_site_scan.
+        TEXT
+      else
+        "WEBSITE CHECKUP\nAlready shared. If they ask for the full report, a full scan, or to see their own site with TrueBuild on it, say it will be " \
+          'put together personally, and hand off with handoff_reason wants_site_scan.'
+      end
     end
 
     # From Outreach::SiteResearch. Only facts read off their own site.

@@ -2781,6 +2781,7 @@ Rails.application.routes.draw do
   post '/u/:token',  to: 'campaign_tracking#unsubscribe_confirm', as: :campaign_unsubscribe_confirm
   # Proactive Outreach links (E105).
   get  '/o/v/:token', to: 'outreach_tracking#video', as: :outreach_video
+  get  '/o/r/:token', to: 'outreach_tracking#report', as: :outreach_report
   get  '/o/u/:token', to: 'outreach_tracking#unsubscribe_page', as: :outreach_unsubscribe_page
   post '/o/u/:token', to: 'outreach_tracking#unsubscribe', as: :outreach_unsubscribe
 

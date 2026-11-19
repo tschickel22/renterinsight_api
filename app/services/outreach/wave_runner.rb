@@ -124,7 +124,8 @@ module Outreach
       result = Writer.new(target).follow_up(channel, number: target.touch_count, of: plan - 1)
       return target.update!(next_touch_at: 1.day.from_now) if result.problem
 
-      Sender.new(target).deliver!(body: result.body, subject: result.subject, channel: channel, kind: 'follow_up', content_item: result.content_item)
+      Sender.new(target).deliver!(body: result.body, subject: result.subject, channel: channel, kind: 'follow_up', content_item: result.content_item,
+                                  report: result.share_report)
     end
 
     # Opens by email (AudienceBuilder), then takes turns where both are allowed.

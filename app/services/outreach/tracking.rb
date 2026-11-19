@@ -16,6 +16,11 @@ module Outreach
       "#{Messaging::TrackingUrl.base}/o/v/#{sign([target.id, item.id])}"
     end
 
+    # Their website checkup (OutreachTrackingController#report).
+    def report_url(target)
+      "#{Messaging::TrackingUrl.base}/o/r/#{sign([target.id, 'report'])}"
+    end
+
     def unsubscribe_url(target)
       "#{Messaging::TrackingUrl.base}/o/u/#{sign([target.id, 'unsubscribe'])}"
     end

@@ -4,7 +4,7 @@
 # are counted from these.
 class OutreachEvent < ApplicationRecord
   TYPES = %w[sent delivered opened clicked replied booked held no_show converted unsubscribed bounced undelivered
-             complained handed_off skipped].freeze
+             complained handed_off skipped report_viewed scan_requested].freeze
 
   belongs_to :outreach_wave
   belongs_to :outreach_target

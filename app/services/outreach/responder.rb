@@ -64,7 +64,7 @@ module Outreach
         body = outcome.ok ? Assistant::Booking.combine(body, outcome) : outcome.text.presence || body
         note_booked(outcome.activity) if outcome.ok && outcome.kind == 'booked'
       end
-      sender.deliver!(body: body, channel: channel, kind: 'reply', subject: subject, content_item: result.content_item)
+      sender.deliver!(body: body, channel: channel, kind: 'reply', subject: subject, content_item: result.content_item, report: result.share_report)
       Handoff.perform!(@target, reason: result.handoff_reason, summary: result.summary) if result.handoff
       @target.update!(next_touch_at: 3.days.from_now) unless result.handoff || @target.reload.booked_at || @target.status == 'stopped'
     end

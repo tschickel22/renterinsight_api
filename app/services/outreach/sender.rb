@@ -15,7 +15,8 @@ module Outreach
     end
 
     # kind: opener, follow_up or reply.
-    def deliver!(body:, channel:, kind:, subject: nil, content_item: nil)
+    def deliver!(body:, channel:, kind:, subject: nil, content_item: nil, report: false)
+      @report = report && @target.site_research.to_h['report'].present?
       raise NotAllowed, 'Proactive Outreach is off for this company' unless @settings.active?
 
       conversation = conversation!
@@ -23,6 +24,7 @@ module Outreach
       @target.record!('sent', channel: channel, communication_id: communication&.id,
                               metadata: { kind: kind, content_item_id: content_item&.id }.compact)
       note_sent(channel, kind)
+      @target.update!(site_research: @target.site_research.merge('report_shared_at' => Time.current.iso8601)) if @report
       communication
     end
 
@@ -43,7 +45,7 @@ module Outreach
     private
 
     def text!(conversation, body, kind, item)
-      message = [body, item && Tracking.video_url(@target, item)].compact.join(' ')
+      message = [body, item && Tracking.video_url(@target, item), (@report ? "Your website checkup: #{Tracking.report_url(@target)}" : nil)].compact.join(' ')
       message = "#{message} Reply STOP to opt out." if kind == 'opener'
       result = Assistant::Messenger.deliver!(conversation, body: message, sent_by: 'assistant', extra_metadata: { outreach_target_id: @target.id })
       raise NotAllowed, result[:error].to_s unless result[:success]
@@ -74,6 +76,7 @@ module Outreach
       first = '' if first.match?(Assistant::Learn::PLACEHOLDER_NAME)
       paragraphs = body.to_s.split(/\n{2,}/).map { |p| "<p>#{esc.call(p).gsub("\n", '<br>')}</p>" }.join
       video = item ? %(<p><a href="#{esc.call(Tracking.video_url(@target, item))}">Watch: #{esc.call(item.title)}</a></p>) : ''
+      video += %(<p><a href="#{esc.call(Tracking.report_url(@target))}">See your website checkup</a></p>) if @report
       signature = [@settings['persona_name'], @settings['persona_title'], @company.name].compact_blank.map { |l| esc.call(l) }.join('<br>')
       footer = %(<p style="margin-top:24px;font-size:12px;color:#6b7280;">#{esc.call(@company.name)}, #{esc.call(@settings['postal_address'])}<br>) +
                %(<a href="#{esc.call(Tracking.unsubscribe_url(@target))}" style="color:#6b7280;">Unsubscribe</a></p>)

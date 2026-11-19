@@ -122,10 +122,30 @@ module Outreach
         'site_platform' => vendor_names(vendors),
         'seo_score' => seo['score'],
         'seo_gaps' => Array(seo['checks']).reject { |c| c['status'] == 'pass' || c['category'] == 'tracking' }.first(3).map { |c| c['headline'] },
+        'report' => shareable_report(seo),
         'pages_read' => pages.size
       )
     ensure
       fetcher&.close
+    end
+
+    # What the retailer may see (Outreach::Tracking.report_url): the score, the
+    # areas with problems, how many pages each touches, and what it costs them.
+    # Never which pages or how to fix them: that is a work order their web
+    # person could finish for free (see SiteProfiles::SeoReportView). Tom runs
+    # the full scan himself when they ask.
+    def shareable_report(seo)
+      return nil if seo['score'].nil?
+
+      scored = Array(seo['checks']).reject { |c| c['category'] == 'tracking' }
+      areas = scored.reject { |c| c['status'] == 'pass' }.first(6).map do |check|
+        { 'label' => check['label'], 'status' => check['status'], 'affected_count' => Array(check['urls']).size,
+          'consequence' => SiteProfiles::SeoReportSummary::CONSEQUENCES[check['key'].to_s] }.compact
+      end
+      { 'score' => seo['score'], 'ai_score' => seo['ai_score'], 'pages_checked' => seo['pages_checked'],
+        'passed' => scored.count { |c| c['status'] == 'pass' }, 'areas' => areas,
+        'meaning' => SiteProfiles::SeoReportSummary::MEANING[areas.first && scored.find { |c| c['label'] == areas.first['label'] }&.dig('key').to_s] ||
+                     SiteProfiles::SeoReportSummary::DEFAULT_MEANING }
     end
 
     def outcome(status, url: nil, from: nil)

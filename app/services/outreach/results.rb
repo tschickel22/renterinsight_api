@@ -4,7 +4,7 @@ module Outreach
   # The numbers for the results page (backlog E105). Daily rows count what
   # happened that day in the company's time zone; totals count people.
   class Results
-    METRICS = %w[sent delivered opened clicked replied booked held no_show unsubscribed bounced undelivered handed_off].freeze
+    METRICS = %w[sent delivered opened clicked report_viewed replied scan_requested booked held no_show unsubscribed bounced undelivered handed_off].freeze
     DAYS = 45
 
     def initialize(wave)
