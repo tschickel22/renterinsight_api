@@ -210,7 +210,7 @@ module Api
               { key: 'deal.preferred_payment_discount', label: 'Preferred Payment Discount', type: 'currency', value: @deal.try(:preferred_payment_discount) },
               { key: 'deal.multi_unit_discount', label: 'Multi-Unit Discount', type: 'currency', value: @deal.try(:multi_unit_discount) },
               # deal.subtotal_1 / subtotal_2 removed — no longer on the DealForm.
-              { key: 'deal.tax_amount', label: 'Tax Amount', type: 'currency', value: @deal.try(:tax_amount) },
+              { key: 'deal.tax_amount', label: 'Tax Amount', type: 'currency', value: deal_tax_amount },
               { key: 'deal.total_amount', label: 'Total Amount', type: 'currency', value: @deal.try(:total_amount) },
               { key: 'deal.contract_down_payment', label: 'Down Payment', type: 'currency', value: @deal.try(:contract_down_payment) },
               { key: 'deal.down_payment', label: 'Deposit', type: 'currency', value: @deal.try(:down_payment) },
@@ -408,6 +408,15 @@ module Api
             ]
           }
         }
+      end
+
+      # The sale's tax. Deals priced on line items carry it on the lines and never
+      # write deals.tax_amount (only the TrueBuild Deal Sheet does), so the lines win
+      # when they have any.
+      def deal_tax_amount
+        return nil unless @deal
+        lines = deal_line_items_data.sum { |li| li[:tax].to_f }.round(2)
+        lines.positive? ? lines : @deal.try(:tax_amount)
       end
 
       # Memoized normalized line items for @deal (from the selected desk scenario,

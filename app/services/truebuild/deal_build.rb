@@ -101,7 +101,7 @@ module Truebuild
     def self.terms_moved?(build)
       t = build.totals.to_h
       deal = build.deal
-      t['trade_allowance'].to_f != deal.trade_allowance.to_f || t['down_payment'].to_f != deal.down_payment.to_f ||
+      t['trade_allowance'].to_f != deal.trade_allowance.to_f || t['down_payment'].to_f != deal.contract_down_payment.to_f ||
         t['additional_payment'].to_f != deal.try(:additional_payment).to_f || t['site'] != site_of(deal)
     end
 
@@ -786,7 +786,8 @@ module Truebuild
       cost += tax[:use_tax].to_d
       deal = @build.deal
       contract_total = selling && ([selling - deal.trade_allowance.to_d, 0].max + tax[:collected].to_d)
-      unpaid = contract_total && (contract_total - deal.down_payment.to_d - deal.try(:additional_payment).to_d)
+      # The contract's Down Payment, never the deposit (deals.down_payment).
+      unpaid = contract_total && (contract_total - deal.contract_down_payment.to_d - deal.try(:additional_payment).to_d)
       @warnings << tax[:note] if tax[:note]
       margin = selling && (selling - cost)
       margin_pct = selling&.positive? ? (margin / selling * 100).round(1) : nil
@@ -807,7 +808,7 @@ module Truebuild
         other_lines_total: other_net.round(2).to_f,
         margin: margin&.round(2)&.to_f, margin_pct: margin_pct&.to_f,
         trade_allowance: deal.trade_allowance.to_f, trade_payoff: deal.trade_payoff.to_f, tax: tax.except(:rules, :note),
-        contract_total: contract_total&.round(2)&.to_f, down_payment: deal.down_payment.to_f,
+        contract_total: contract_total&.round(2)&.to_f, down_payment: deal.contract_down_payment.to_f,
         additional_payment: deal.try(:additional_payment).to_f, unpaid_balance: unpaid&.round(2)&.to_f,
         home_cost: lot&.to_f, site: self.class.site_of(deal), delivery_point: deal.try(:delivery_point), freight_miles: @build.freight_miles,
         freight_miles_note: @freight_note, tbd_count: lines.count(&:tbd), rounded_to: terms.round_retail_to&.to_f, warnings: @warnings.uniq }
