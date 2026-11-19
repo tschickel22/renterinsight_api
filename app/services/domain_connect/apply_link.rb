@@ -67,7 +67,7 @@ module DomainConnect
     def template_params
       tokens = Array(@domain.ses_dkim_tokens)
       params = {
-        'domain' => @domain.hostname,
+        'domain' => @domain.email_domain,
         'dkim1' => tokens[0],
         'dkim2' => tokens[1],
         'dkim3' => tokens[2],
@@ -84,7 +84,7 @@ module DomainConnect
       from = @domain.ses_mail_from_domain.to_s
       return 'mail' if from.blank?
 
-      from.delete_suffix(".#{@domain.hostname}").presence || 'mail'
+      from.delete_suffix(".#{@domain.email_domain}").presence || 'mail'
     end
 
     def ses_region

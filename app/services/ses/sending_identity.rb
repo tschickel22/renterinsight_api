@@ -37,7 +37,7 @@ module Ses
     end
 
     def hostname
-      company_domain.hostname
+      company_domain.email_domain
     end
 
     # Deliberately nil even when user_id is set. CampaignSender passes this straight to

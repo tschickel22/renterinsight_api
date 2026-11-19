@@ -442,7 +442,7 @@ class Campaign < ApplicationRecord
     return nil if host.blank?
 
     CompanyDomain.email_verified.where(company_id: company_id).find do |d|
-      host == d.hostname || host.end_with?(".#{d.hostname}")
+      host == d.email_domain || host.end_with?(".#{d.email_domain}")
     end
   end
 
