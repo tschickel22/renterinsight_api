@@ -237,6 +237,7 @@ module Leads
 
             if deal.save
               Rails.logger.info "✅ [ConvertLead] Deal created: #{deal.id}"
+              add_home_line(deal)
             else
               deal_error = deal.errors.full_messages.join(', ')
               Rails.logger.warn "⚠️  [ConvertLead] Deal creation failed: #{deal_error}"
@@ -292,6 +293,36 @@ module Leads
 
       Result.new(account: account, contact: contact, co_applicant: co_applicant, deal: deal,
                  deal_error: deal_error, custom_field_gaps: cf_result[:gaps])
+    end
+
+    private
+
+    # The home chosen on the lead becomes the deal's home line, priced the way
+    # the inventory list prices it. Linking deal.vehicle_id alone left the deal
+    # with no line items, so the home and its price never showed on the deal.
+    # A problem here must not stop the conversion: the rep can still add the home.
+    def add_home_line(deal)
+      vehicle = deal.vehicle_id && @company.vehicles.find_by(id: deal.vehicle_id)
+      return unless vehicle
+
+      price = Truebuild::InventoryPricing.new(@company).list_price(vehicle)&.dig(:amount).to_f
+      ActiveRecord::Base.transaction(requires_new: true) do
+        deal.deal_products.create!(
+          product_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".squish,
+          product_sku: "VEHICLE-#{vehicle.id}",
+          product_id: vehicle.id,
+          source_type: 'home',
+          quantity: 1,
+          unit_price: price,
+          cost: vehicle.structured_cost.to_f,
+          discount: 0,
+          discount_type: 'fixed',
+          tax: 0,
+          notes: 'category:home, source:home, taxable:no'
+        )
+      end
+    rescue StandardError => e
+      Rails.logger.error("[ConvertLead] Home line for deal #{deal.id}: #{e.class} #{e.message}")
     end
   end
 end
