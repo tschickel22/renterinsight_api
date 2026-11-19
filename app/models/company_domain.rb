@@ -63,8 +63,9 @@ class CompanyDomain < ApplicationRecord
   scope :email_pending, -> { email_enabled.where(email_verified_at: nil) }
   
   # Callbacks
-  before_validation :extract_domain_root
+  # Normalize first, so the root is taken from the cleaned hostname ("example.com", not "example.com/").
   before_validation :normalize_hostname
+  before_validation :extract_domain_root
   
   # Status checks
   def pending?
@@ -303,11 +304,19 @@ class CompanyDomain < ApplicationRecord
   
   def normalize_hostname
     return if hostname.blank?
-    
-    # Remove protocol, trailing slashes, convert to lowercase
-    self.hostname = hostname.downcase
-                            .gsub(/^https?:\/\//, '')
-                            .gsub(/\/$/, '')
-                            .strip
+
+    self.hostname = self.class.normalize_hostname(hostname)
+  end
+
+  # What a person pastes from their browser bar ("https://www.example.com/", "Example.com/about")
+  # reduced to the bare hostname. The controller calls this too: it used to hand the raw text
+  # to Cloudflare, which rejects a trailing slash as an invalid custom hostname.
+  def self.normalize_hostname(raw)
+    raw.to_s.strip.downcase
+       .sub(%r{\A[a-z][a-z0-9+.\-]*://}, '')
+       .split(%r{[/?#]}, 2).first.to_s
+       .sub(/:\d+\z/, '')
+       .chomp('.')
+       .strip
   end
 end
