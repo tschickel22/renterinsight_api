@@ -706,7 +706,7 @@
   "isCustomField": false,
   "isSignerField": true,
   "signerIndex": 0,
-  "prefillFrom": "{deal.down_payment:money}",
+  "prefillFrom": "{deal.contract_down_payment:money}",
   "section": "The home and where it goes",
   "inputType": "money"
  },

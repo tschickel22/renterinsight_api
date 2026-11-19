@@ -374,7 +374,7 @@ PREFILL = {
     'site_city': '{deal.delivery_city|contact.delivery_city}',
     'site_state': '{deal.delivery_state|contact.delivery_state}',
     'site_zip': '{deal.delivery_zip|contact.delivery_zip}',
-    'down_payment': '{deal.down_payment:money}',
+    'down_payment': '{deal.contract_down_payment:money}',
 }
 for p in OUT:
     rule = PREFILL.pop(p['fieldKey'].removeprefix('credit_app.'), None)
