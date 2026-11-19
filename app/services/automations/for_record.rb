@@ -75,10 +75,18 @@ module Automations
       end
     end
 
+    # A recurring digest marks each person completed between sends and starts
+    # them again next cycle, so a completed enrollment in a live recurring
+    # campaign is still running.
     def campaigns
-      @campaigns ||= CampaignEnrollment.where(company_id: @company.id, recipient_type: type, recipient_id: @record.id, status: CAMPAIGN_LIVE)
+      @campaigns ||= CampaignEnrollment.where(company_id: @company.id, recipient_type: type, recipient_id: @record.id, status: CAMPAIGN_LIVE + ['completed'])
                                        .includes(:campaign).order(:created_at).to_a
                                        .reject { |e| e.campaign.nil? || e.campaign.try(:is_deleted) }
+                                       .select { |e| e.status.in?(CAMPAIGN_LIVE) || self.class.recurring_live?(e.campaign) }
+    end
+
+    def self.recurring_live?(campaign)
+      campaign.recurring? && campaign.status.in?(%w[scheduled running])
     end
 
     def workflows
@@ -138,10 +146,13 @@ module Automations
 
     def campaign_item(enrollment)
       campaign = enrollment.campaign
+      between = enrollment.status == 'completed'
       Item.new(kind: 'campaign', id: enrollment.id, name: campaign.name, kind_label: 'Campaign', status: enrollment.status,
-               status_label: campaign.status == 'running' ? 'Active' : "Campaign #{campaign.status}",
-               detail: "Added #{enrollment.created_at.strftime('%b %-d')}.", last_at: enrollment.last_sent_at,
-               next_at: (enrollment.next_send_at if campaign.status == 'running'), link: "/campaigns/#{campaign.id}", can_stop: true,
+               status_label: between ? 'Between sends' : (campaign.status == 'running' ? 'Active' : "Campaign #{campaign.status}"),
+               detail: "Added #{enrollment.created_at.strftime('%b %-d')}.#{' Repeats each cycle.' if campaign.recurring?}",
+               last_at: enrollment.last_sent_at,
+               next_at: between ? campaign.next_recurrence_at : (enrollment.next_send_at if campaign.status.in?(%w[running scheduled])),
+               link: "/campaigns/#{campaign.id}", can_stop: true,
                stop_effect: 'They are taken out of this campaign. They are not unsubscribed and can be added to another campaign.')
     end
 

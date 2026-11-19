@@ -58,7 +58,8 @@ module Outreach
       return 'Has no owner' if lead.owner_id.nil?
 
       enrollment = CampaignEnrollment.where(company_id: @company.id, recipient_type: 'Lead', recipient_id: lead.id,
-                                            status: %w[pending active unsubscribed complained]).order(updated_at: :desc).first
+                                            status: %w[pending active unsubscribed complained]).order(updated_at: :desc).first ||
+                   recurring_enrollments.where(recipient_id: lead.id).first
       if enrollment
         return 'Unsubscribed from a campaign' if enrollment.status.in?(%w[unsubscribed complained])
 
@@ -93,16 +94,25 @@ module Outreach
 
     def on_automation?(lead)
       CampaignEnrollment.where(company_id: @company.id, recipient_type: 'Lead', recipient_id: lead.id, status: %w[pending active]).exists? ||
+        recurring_enrollments.where(recipient_id: lead.id).exists? ||
         NurtureEnrollment.where(enrollable_type: 'Lead', enrollable_id: lead.id, status: %w[running paused]).exists? ||
         WorkflowRun.where(company_id: @company.id, entity_type: 'Lead', entity_id: lead.id, status: %w[pending running waiting paused]).exists?
     end
 
     private
 
+    # Finished last cycle of a live recurring digest: it starts them again.
+    def recurring_enrollments
+      live = Campaign.where(company_id: @company.id, campaign_type: 'recurring_digest', status: %w[scheduled running])
+                     .where.not(recurrence_cron: [nil, '']).where(is_deleted: [false, nil])
+      CampaignEnrollment.where(company_id: @company.id, recipient_type: 'Lead', status: 'completed', campaign_id: live.select(:id))
+    end
+
     def blocked_lead_ids
       [
         # A paused enrollment is not sending: that is how a person is taken out of a campaign.
         CampaignEnrollment.where(company_id: @company.id, recipient_type: 'Lead', status: %w[pending active unsubscribed complained]).select(:recipient_id),
+        recurring_enrollments.select(:recipient_id),
         NurtureEnrollment.where(enrollable_type: 'Lead', status: %w[running paused]).select(:enrollable_id),
         WorkflowRun.where(company_id: @company.id, entity_type: 'Lead', status: %w[pending running waiting paused]).select(:entity_id),
         Conversation.open_now.where(company_id: @company.id, conversable_type: 'Lead').select(:conversable_id),

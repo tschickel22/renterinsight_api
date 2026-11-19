@@ -97,6 +97,25 @@ RSpec.describe 'Automations on a record', type: :request do
     expect(rule.reload.status).to eq('active')
   end
 
+  it 'counts a weekly digest between sends as running, and Stop keeps the next cycle from restarting it' do
+    weekly = Campaign.create!(company_id: company.id, created_by_user_id: rep.id, name: 'Weekly homes email', campaign_type: 'recurring_digest',
+                              recurrence_cron: '0 14 * * 1', status: 'scheduled', from_identity_type: 'User', from_identity_id: rep.id, throttle_per_day: 10)
+    enrollment = CampaignEnrollment.create!(company_id: company.id, campaign_id: weekly.id, recipient_type: 'Lead', recipient_id: lead.id,
+                                            status: 'completed', email_address_snapshot: lead.email)
+    eligibility = Outreach::Eligibility.new(company)
+    expect(eligibility.on_automation?(lead)).to be(true)
+    expect(eligibility.skip_reason(lead)).to eq('On the campaign Weekly homes email')
+
+    row = list['items'].find { |i| i['kind'] == 'campaign' }
+    expect(row).to include('name' => 'Weekly homes email', 'status_label' => 'Between sends')
+    expect(row['next_at']).to be_present
+
+    post '/api/crm/automations/stop', params: { record_type: 'Lead', record_id: lead.id, kind: 'campaign', id: enrollment.id }, headers: headers
+    expect(enrollment.reload.status).to eq('paused')
+    expect(Campaigns::RecurringCycle::RESETTABLE_STATUSES).not_to include('paused')
+    expect(eligibility.on_automation?(lead)).to be(false)
+  end
+
   it 'refuses something that is no longer running' do
     post '/api/crm/automations/stop', params: { record_type: 'Lead', record_id: lead.id, kind: 'nurture', id: 999_999 }, headers: headers
     expect(response).to have_http_status(:unprocessable_entity)
