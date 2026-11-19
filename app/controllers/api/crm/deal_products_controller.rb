@@ -12,6 +12,14 @@ module Api
       before_action :set_company_scope
       before_action :set_deal
       before_action :set_deal_product, only: [:show, :update, :destroy]
+
+      # The deal fields people edit on the Edit Deal page. Together with the
+      # lines they say whether a page still holds the current deal.
+      VERSIONED_DEAL_FIELDS = %w[
+        name stage probability account_id contact_id owner_id primary_salesperson_id customer_name
+        source_id description notes expected_close_date actual_close_date delivery_date payment_type
+        lender_id lender_name down_payment down_payment_due_date trade_allowance trade_payoff
+      ].freeze
       before_action :refuse_when_sheet_signed, only: [:create, :update, :destroy, :bulk_create]
       include PostedDealChanges
       around_action :keep_posted_deal_in_step, only: [:create, :update, :destroy, :bulk_create]
@@ -26,7 +34,8 @@ module Api
           total_cost: products.sum { |p| p.line_cost_total }.round(2),
           total_profit: products.sum { |p| p.line_profit }.round(2),
           # The deal sheet version these lines were written from (the LIVE badge).
-          deal_sheet: deal_sheet_json
+          deal_sheet: deal_sheet_json,
+          lines_version: lines_version
         }
       end
 
@@ -83,13 +92,25 @@ module Api
         created_products = []
         errors = []
         vehicle_ids_in_batch = []
+        replace = ActiveModel::Type::Boolean.new.cast(params[:replace])
+        changed_elsewhere = false
 
         ActiveRecord::Base.transaction do
+          # A page that says which copy it holds is refused when that copy is
+          # out of date, so it cannot put old lines over someone else's save.
+          if replace && params[:lines_version].present?
+            @deal.lock!
+            if lines_version != params[:lines_version]
+              changed_elsewhere = true
+              raise ActiveRecord::Rollback
+            end
+          end
+
           # replace: the Edit Deal form's save. It used to delete every line
           # with separate requests and then add them back, which on an
           # approved deal posted an entry per line; one request posts at most
           # one entry, for what actually changed.
-          @deal.deal_products.reload.each(&:destroy!) if ActiveModel::Type::Boolean.new.cast(params[:replace])
+          @deal.deal_products.reload.each(&:destroy!) if replace
           products_data.each_with_index do |product_params, index|
             transformed = transform_unified_item(product_params)
             vehicle_id = extract_vehicle_id_from_item(product_params, transformed)
@@ -122,11 +143,17 @@ module Api
           end
         end
 
+        if changed_elsewhere
+          return render json: { error: 'Someone else changed this deal. Reload to see the latest.', code: 'deal_changed' },
+                        status: :conflict
+        end
+
         if errors.empty?
           resync_deal_sheet
           render json: {
             products: created_products,
-            total: @deal.deal_products.sum(:total)
+            total: @deal.deal_products.sum(:total),
+            lines_version: lines_version
           }, status: :created
         else
           render json: {
@@ -139,6 +166,21 @@ module Api
       private
 
       def posted_deal = @deal
+
+      # Identifies the deal by what it says, not when it was written: the lines
+      # are recreated on every save, so an identical save keeps the same version.
+      def lines_version
+        deal = Deal.find(@deal.id)
+        lines = deal.deal_products.order(:created_at, :id).map do |line|
+          [line.product_name, line.product_id, line.product_sku.to_s.start_with?('VEHICLE-') ? line.product_sku : nil,
+           line.quantity, line.unit_price, line.cost, line.discount, line.discount_type, line.tax, line.notes,
+           line.source_type].map { |value| value.is_a?(BigDecimal) ? value.to_s('F') : value.to_s }
+        end
+        fields = deal.attributes.slice(*VERSIONED_DEAL_FIELDS).sort.map do |key, value|
+          [key, value.is_a?(BigDecimal) ? value.to_s('F') : value.to_s]
+        end
+        Digest::SHA256.hexdigest([lines, fields].to_json)
+      end
 
 
       def deal_sheet_json
