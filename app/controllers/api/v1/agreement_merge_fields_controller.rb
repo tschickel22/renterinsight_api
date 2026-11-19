@@ -366,9 +366,9 @@ module Api
             fields: [
               { key: 'company.name', label: 'Company Name', type: 'text', value: @company.name },
               { key: 'company.email', label: 'Company Email', type: 'text', value: @company.respond_to?(:email) ? @company.email : nil },
-              { key: 'company.phone', label: 'Company Phone', type: 'text', value: @company.respond_to?(:phone) ? @company.phone : nil },
+              { key: 'company.phone', label: 'Company Phone', type: 'text', value: ::Agreements::DealerContact.phone(@company, location_id: logo_location_id) },
               { key: 'company.website', label: 'Company Website', type: 'text', value: @company.respond_to?(:website) ? @company.website : nil },
-              { key: 'company.address', label: 'Company Address', type: 'text', value: [@company.try(:street), @company.try(:city), @company.try(:state), @company.try(:zip)].compact.join(', ').presence },
+              { key: 'company.address', label: 'Company Address', type: 'text', value: ::Agreements::DealerContact.address(@company, location_id: logo_location_id) },
               { key: ::Agreements::DealerLogo::KEY, label: 'Dealer Logo', type: 'image', value: ::Agreements::DealerLogo.url(@company, location_id: logo_location_id) }
             ]
           },
