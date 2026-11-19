@@ -18,9 +18,9 @@ require 'tempfile'
 # How a blank in the package gets filled:
 #   - The preparer sees it on the Fill Form step, already filled from the deal,
 #     contact or home when we hold the value (merge_from), and can change it.
-#   - The buyer sees that value in the box at signing and can correct it.
-#   - A value repeated across forms has ONE editable box, the first place it
-#     appears. The signing page saves answers by field key, so two editable boxes
+#   - The buyers type only their own driver's license numbers at signing.
+#   - A license number repeated across forms has ONE editable box, the first place
+#     it appears. The signing page saves answers by field key, so two editable boxes
 #     sharing a key would overwrite each other. The repeats print the same answer.
 # Page 1 is the dealer's internal checklist, so nothing on it is buyer-editable.
 # The notary block on the last page is completed by hand.
@@ -75,17 +75,18 @@ end
 # Boxes sit on a printed rule: from x0 to x1, with the rule at y `line`.
 def on_line(x0, x1, line) = [x0 + 2, line - 12.5, x1 - x0 - 4, 12]
 
-def define(page, key, label, merge_from, type: 'text', group: 'closing_package')
+def define(page, key, label, merge_from, type: 'text', group: 'closing_package', filled_by: 'preparer')
   @definitions[key] ||= {
     'key' => key, 'label' => label, 'type' => type, 'group' => group, 'page' => FIRST_PAGE + page,
-    'required' => false, 'position' => @definitions.size + 1, 'filled_by' => 'preparer'
+    'required' => false, 'position' => @definitions.size + 1, 'filled_by' => filled_by
   }.tap { |d| d['merge_from'] = merge_from if merge_from }
 end
 
-# Preparer or buyer: editable by `owner` where it first appears, printed elsewhere.
-def blank(page, key, label, x0, x1, line, section, from: nil, owner: BUYER_1)
-  define(page, key, label, from)
-  if @editable[key]
+# Filled by the preparer and printed, unless an `owner` signer types it at signing:
+# editable by that signer where it first appears, printed elsewhere.
+def blank(page, key, label, x0, x1, line, section, from: nil, owner: nil)
+  define(page, key, label, from, filled_by: owner ? 'signer' : 'preparer')
+  if owner.nil? || @editable[key]
     place(page, "custom.#{key}", label, 'text', on_line(x0, x1, line), 'isCustomField' => true, 'isSignerField' => false)
   else
     @editable[key] = true
