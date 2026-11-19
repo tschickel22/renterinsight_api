@@ -54,7 +54,9 @@ module Plays
                         title: TRIGGER_TITLES.fetch(run.workflow_rule&.trigger&.dig('event_type'), 'Started the play'))]
       run.workflow_run_steps.sort_by(&:created_at).each { |step| list.concat(step_events(run, step)) }
       if run.status == 'cancelled'
-        list << Event.new(at: run.completed_at || run.updated_at, kind: 'stopped', title: 'Stopped: the play was turned off')
+        staff = run.error_details.to_h.stringify_keys['reason'] == Automations::ForRecord::STAFF_REASON
+        list << Event.new(at: run.completed_at || run.updated_at, kind: 'stopped',
+                          title: staff ? 'Stopped for this lead by your team' : 'Stopped: the play was turned off')
       end
       list
     end

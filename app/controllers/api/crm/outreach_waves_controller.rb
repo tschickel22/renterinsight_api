@@ -37,6 +37,28 @@ module Api
         render json: { wave: wave_json(wave) }, status: :created
       end
 
+      # Leads that match the audience description but were left out, and why.
+      def skipped
+        return unless authorize_action!('company_settings', 'read')
+        return unless outreach_allowed!
+        return if performed?
+        return render(json: { skipped: [], total: 0 }) if @wave.filter_tree.blank?
+
+        chosen = @wave.outreach_targets.select(:lead_id)
+        matching = Audiences::FilterCompiler.new(company: @company, source_type: 'Lead', filter_tree: @wave.filter_tree).scope.where.not(id: chosen)
+        eligibility = Outreach::Eligibility.new(@company)
+        leads = matching.order(updated_at: :desc).limit(100).to_a
+        render json: {
+          total: matching.count,
+          skipped: leads.map do |lead|
+            { lead_id: lead.id, name: lead.full_name.presence || lead.email, company_name: lead.company_name,
+              reason: eligibility.skip_reason(lead) || 'Could be contacted, but was not picked this time' }
+          end
+        }
+      rescue Audiences::FilterCompiler::CompilationError => e
+        render json: { skipped: [], total: 0, error: e.message }
+      end
+
       # Takes a person out before messages are written.
       def remove_target
         return unless authorize_action!('company_settings', 'update')

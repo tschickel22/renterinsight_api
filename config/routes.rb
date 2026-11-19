@@ -2975,6 +2975,10 @@ Rails.application.routes.draw do
       resources :outreach_content_items, only: %i[create update destroy] do
         collection { post :import_from_campaigns }
       end
+      # Everything messaging one lead or contact, with Stop (E105 follow-up).
+      get  'automations', to: 'automations#index'
+      post 'automations/stop', to: 'automations#stop'
+      post 'automations/stop_all', to: 'automations#stop_all'
       resources :outreach_waves, only: %i[index show create] do
         member do
           post :draft
@@ -2982,6 +2986,7 @@ Rails.application.routes.draw do
           post :pause
           post :resume
           get :results
+          get :skipped
           delete 'targets/:target_id', action: :remove_target
           patch 'targets/:target_id', action: :review_target
         end

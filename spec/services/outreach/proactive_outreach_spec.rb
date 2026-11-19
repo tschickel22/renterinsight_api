@@ -47,6 +47,22 @@ RSpec.describe 'Proactive Outreach pilot' do
       expect(ids).not_to include(converted.id, working.id, nurtured.id, already.id)
     end
 
+    it 'says in plain words why a lead was left out' do
+      expect(eligibility.skip_reason(lead!)).to be_nil
+      expect(eligibility.skip_reason(lead!(status: 'contacted'))).to eq('Status is Contacted, not New')
+
+      nurtured = lead!
+      sequence = NurtureSequence.create!(name: 'New lead follow-up', company_id: company.id)
+      NurtureEnrollment.create!(enrollable: nurtured, company_id: company.id, nurture_sequence_id: sequence.id, status: 'paused')
+      expect(eligibility.skip_reason(nurtured)).to eq('On the nurture New lead follow-up (paused, which still counts)')
+
+      called = lead!
+      LeadActivity.create!(lead: called, user: tom, activity_type: 'task', subject: 'Call', created_at: 3.days.ago)
+      expect(eligibility.skip_reason(called)).to match(/\ATask logged .+, within 30 days\z/)
+
+      expect(eligibility.skip_reason(lead!(email: nil, sms_inquiry_consent: false))).to eq('No usable email and no text consent')
+    end
+
     it 'never texts without consent or after an opt out' do
       no_consent = lead!(sms_inquiry_consent: false)
       expect(eligibility.reach(no_consent)).to have_attributes(text: false, email: true)
