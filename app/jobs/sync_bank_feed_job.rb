@@ -10,6 +10,8 @@ class SyncBankFeedJob < ApplicationJob
 
     service = StripeBankFeedService.new(bank_account.company)
     result = service.sync_transactions(bank_account, refresh: refresh)
+    # The hourly pull also asks for the day's balance (at most once a day).
+    service.request_daily_balance!(bank_account) unless refresh
 
     Rails.logger.info("[BankFeed] Synced bank_account #{bank_account_id}: #{result.inspect}")
   rescue => e

@@ -23,12 +23,13 @@ RSpec.describe BankFeedPollJob do
     expect(SyncBankFeedJob).to have_been_enqueued.with(live.id, refresh: false)
   end
 
-  it 'reads lines without asking Stripe to refresh' do
+  it 'reads lines without asking Stripe to refresh, and asks for the day\'s balance' do
     live = bank(stripe_fc_account_id: 'fca_1', stripe_fc_status: 'active')
-    service = instance_double(StripeBankFeedService, sync_transactions: { imported: 0, skipped: 0 })
+    service = instance_double(StripeBankFeedService, sync_transactions: { imported: 0, skipped: 0 }, request_daily_balance!: nil)
     allow(StripeBankFeedService).to receive(:new).and_return(service)
 
     SyncBankFeedJob.perform_now(live.id, refresh: false)
     expect(service).to have_received(:sync_transactions).with(live, refresh: false)
+    expect(service).to have_received(:request_daily_balance!).with(live)
   end
 end

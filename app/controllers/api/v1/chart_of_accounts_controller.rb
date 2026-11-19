@@ -198,10 +198,10 @@ class Api::V1::ChartOfAccountsController < ApplicationController
 
   # Get bank balances for accounts linked to bank_accounts
   def bank_account_balances
-    bank_accounts = @company.bank_accounts.where.not(chart_of_account_id: nil)
+    bank_accounts = @company.bank_accounts.where(is_deleted: [false, nil]).where.not(chart_of_account_id: nil)
     result = {}
     bank_accounts.each do |ba|
-      result[ba.chart_of_account_id] = ba.current_balance if ba.respond_to?(:current_balance)
+      result[ba.chart_of_account_id] = ba.bank_balance unless ba.bank_balance.nil?
     end
     result
   end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_19_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_19_213000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -852,6 +852,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_19_190000) do
     t.string "check_aba_fractional_number"
     t.string "check_signature_heading"
     t.date "feed_start_date"
+    t.decimal "feed_balance", precision: 15, scale: 2
+    t.datetime "feed_balance_as_of"
+    t.datetime "feed_balance_requested_at"
     t.index ["chart_of_account_id"], name: "index_bank_accounts_on_chart_of_account_id"
     t.index ["company_id", "location_id"], name: "index_bank_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_bank_accounts_on_company_id"

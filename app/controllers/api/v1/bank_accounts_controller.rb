@@ -21,7 +21,11 @@ class Api::V1::BankAccountsController < ApplicationController
                    .includes(:location, :chart_of_account)
                    .order(:bank_name)
 
-      render json: { bank_accounts: accounts.map { |ba| bank_account_json(ba) } }
+      to_review = @company.bank_transactions.where(status: 'unmatched').group(:bank_account_id).count
+      balances = AccountBalanceService.new(@company)
+      render json: { bank_accounts: accounts.map { |ba|
+        bank_account_json(ba).merge(balance_json(ba, balances, to_review[ba.id] || 0))
+      } }
     end
   end
 
@@ -270,6 +274,22 @@ class Api::V1::BankAccountsController < ApplicationController
     end
 
     true
+  end
+
+  # The card's two figures, side by side as on QuickBooks' Banking page:
+  # the bank's balance and the books' balance for the linked account, plus
+  # how many feed lines still wait for review. A card's books balance is what
+  # is owed (credit normal), the same terms as the bank's figure.
+  def balance_json(ba, balances, to_review)
+    book = ba.chart_of_account ? balances.balance_as_of(ba.chart_of_account, Date.current) : nil
+    bank = ba.bank_balance
+    {
+      bank_balance: bank&.to_f,
+      bank_balance_as_of: ba.bank_balance_as_of,
+      book_balance: book&.to_f,
+      balance_difference: bank && book ? (bank - book).round(2).to_f : nil,
+      to_review: to_review
+    }
   end
 
   # Top-level (company-wide) JSON shape, including Stripe feed fields and

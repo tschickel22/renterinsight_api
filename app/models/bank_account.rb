@@ -69,6 +69,17 @@ class BankAccount < ApplicationRecord
   end
 
   # Alias matching the spec naming used by the bank-feed webhook + sync job.
+  # What the bank says the account holds (a card: what is owed), from the
+  # feed when it has sent one. current_balance is an older hand-set figure
+  # some banks without a feed carry.
+  def bank_balance
+    feed_balance.nil? ? current_balance : feed_balance
+  end
+
+  def bank_balance_as_of
+    feed_balance.nil? ? nil : feed_balance_as_of
+  end
+
   # Same semantics as feed_connected? but also requires the FC account ID to
   # be present so callers can rely on stripe_fc_account_id without a nil check.
   def stripe_connected?

@@ -157,7 +157,44 @@ class StripeBankFeedService
       matcher.auto_match_all(bank_account)
     end
 
+    read_feed_balance!(bank_account)
+
     { imported: imported, skipped: skipped }
+  end
+
+  # Ask the bank for a new balance at most once a day. Stripe fetches
+  # transactions for a subscribed account by itself but never its balance,
+  # so without this the bank balance on the cards and the chart of accounts
+  # would stay at whatever was fetched when the bank was connected. The
+  # answer is read on the next sync (BankFeedPollJob, an hour later).
+  BALANCE_REQUEST_EVERY = 20.hours
+
+  def request_daily_balance!(bank_account)
+    return unless bank_account.stripe_connected?
+    return if bank_account.feed_balance_requested_at && bank_account.feed_balance_requested_at > BALANCE_REQUEST_EVERY.ago
+
+    bank_account.update_columns(feed_balance_requested_at: Time.current)
+    Stripe::FinancialConnections::Account.refresh_account(bank_account.stripe_fc_account_id, { features: ['balance'] })
+  rescue Stripe::StripeError => e
+    Rails.logger.warn("[StripeBankFeed] Balance request for bank account #{bank_account.id}: #{e.message}")
+  end
+
+  # Keeps the balance Stripe holds for the account on the bank account, in
+  # statement terms (Stripe signs a card's debt negative; we keep what is
+  # owed). One read, no fetch from the bank. Never fails a sync.
+  def read_feed_balance!(bank_account)
+    fc = Stripe::FinancialConnections::Account.retrieve(bank_account.stripe_fc_account_id)
+    balance = fc.try(:balance)
+    cents = balance && balance.current.to_h.with_indifferent_access[:usd]
+    return if cents.nil?
+
+    sign = bank_account.account_type == 'credit_card' ? -1 : 1
+    as_of = Time.at(balance.as_of)
+    return if bank_account.feed_balance_as_of && bank_account.feed_balance_as_of > as_of
+
+    bank_account.update_columns(feed_balance: BigDecimal(cents * sign) / 100, feed_balance_as_of: as_of)
+  rescue StandardError => e
+    Rails.logger.warn("[StripeBankFeed] Balance read for bank account #{bank_account.id}: #{e.message}")
   end
 
   # How long a balance from the bank counts as today's.
