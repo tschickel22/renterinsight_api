@@ -19,6 +19,7 @@ class OutreachDraftOpenersJob < ApplicationJob
   private
 
   def draft(target)
+    Outreach::SiteResearch.for(target)
     result = Outreach::Writer.new(target).opener(target.channel)
     target.update!(status: 'drafted', draft_body: result.body, draft_subject: result.subject,
                    draft_content_item_id: result.content_item&.id, draft_error: result.problem)

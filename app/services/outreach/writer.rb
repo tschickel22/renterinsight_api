@@ -35,7 +35,9 @@ module Outreach
 
     def opener(channel)
       write(channel, 'opener', task: 'This is your FIRST message to them. Say who you are and why you are reaching out, tie it to the show or list they came from, ' \
-                                     'share the one video most likely to matter to them, and ask one easy question. Do not offer times yet.')
+                                     'share the one video most likely to matter to them, and ask one easy question. Do not offer times yet. ' \
+                                     'If FROM THEIR WEBSITE is given, mention exactly one fact from it in your own words, naturally and without flattery, ' \
+                                     'and connect it to how we could help. Never mention a search score or say their website is bad.')
     end
 
     def follow_up(channel, number:, of:)
@@ -108,6 +110,7 @@ module Outreach
 
         THIS PERSON
         #{lead_facts}
+        #{website_facts}
 
         RIGHT NOW: #{Time.current.in_time_zone(Clock.lead_zone(@lead, @company)).strftime('%A, %B %-d, %Y %-I:%M %p %Z')}
         #{"\nOPEN TIMES\n#{@booking.prompt_lines}" if @booking}
@@ -149,6 +152,19 @@ module Outreach
 
     def content_lines
       content.map { |c| "[C#{c.id}] #{c.title}#{" (#{c.topic})" if c.topic.present?}#{". Use when: #{c.use_when}" if c.use_when.present?}" }.join("\n")
+    end
+
+    # From Outreach::SiteResearch. Only facts read off their own site.
+    def website_facts
+      research = @target.site_research.to_h
+      return '' unless research['status'] == 'found'
+
+      lines = ['FROM THEIR WEBSITE (you may mention one of these; nothing else about their site)']
+      lines << "Fact to open with: #{research['opener_fact']}" if research['opener_fact'].present?
+      lines << "Summary: #{research['summary']}" if research['summary'].present?
+      lines << "Brands they sell: #{research['brands'].join(', ')}" if research['brands'].present?
+      lines << "Ways we could help: #{research['talking_points'].join(' | ')}" if research['talking_points'].present?
+      lines.join("\n")
     end
 
     def lead_facts

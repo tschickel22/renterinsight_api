@@ -210,6 +210,15 @@ module Api
 
       ADDABLE = %w[failed audience_ready review].freeze
 
+      # What the review screen shows about the site read before the opener.
+      def website_json(research)
+        research = research.to_h
+        return nil if research.blank?
+
+        { 'status' => research['status'], 'url' => research['url'], 'opener_fact' => research['opener_fact'],
+          'summary' => research['summary'], 'seo_score' => research['seo_score'] }.compact
+      end
+
       # Nothing rules this lead out now: say why they are not in the wave.
       def ready_reason(lead)
         if [lead.created_at, lead.updated_at].compact.max > @wave.created_at
@@ -239,7 +248,8 @@ module Api
         item = target.draft_content_item_id && @company.outreach_content_items.find_by(id: target.draft_content_item_id)
         target.as_json(only: %i[id lead_id test_group status rank ai_reason channel draft_subject draft_body draft_error stop_reason override_reason]).merge(
           'name' => Assistant::Learn.display_name(lead), 'company' => lead.company_name, 'state' => lead.state, 'source' => lead.source&.name,
-          'video_title' => item&.title
+          'video_title' => item&.title,
+          'website' => website_json(target.site_research)
         )
       end
     end

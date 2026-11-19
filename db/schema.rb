@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_19_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_19_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5544,6 +5544,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_19_170000) do
     t.datetime "updated_at", null: false
     t.string "override_reason"
     t.bigint "overridden_by_user_id"
+    t.jsonb "site_research"
     t.index ["company_id", "lead_id"], name: "index_outreach_targets_on_company_id_and_lead_id"
     t.index ["conversation_id"], name: "index_outreach_targets_on_conversation_id"
     t.index ["outreach_wave_id", "lead_id"], name: "index_outreach_targets_on_outreach_wave_id_and_lead_id", unique: true
