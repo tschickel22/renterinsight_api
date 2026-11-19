@@ -2659,6 +2659,8 @@ Rails.application.routes.draw do
         post :sync
         post :disconnect
         get  :status
+        post :request_balance
+        get  :balance
       end
 
       resources :bank_rules do

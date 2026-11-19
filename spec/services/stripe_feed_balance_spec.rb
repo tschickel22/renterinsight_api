@@ -51,14 +51,35 @@ RSpec.describe StripeBankFeedService, 'feed balance' do
     expect(checking.reload.feed_balance).to eq(10)
   end
 
-  it 'asks the bank for a balance at most once a day' do
+  it 'asks the bank only when pressed, and a second press within 10 minutes reuses the first' do
     checking = bank('checking')
     allow(Stripe::FinancialConnections::Account).to receive(:refresh_account)
 
-    service.request_daily_balance!(checking)
-    travel(5.hours) { service.request_daily_balance!(checking.reload) }
-    travel(21.hours) { service.request_daily_balance!(checking.reload) }
+    expect(service.request_balance!(checking)).to include(status: 'requested')
+    travel(5.minutes) { expect(service.request_balance!(checking.reload)).to include(status: 'requested') }
+    travel(11.minutes) { service.request_balance!(checking.reload) }
 
     expect(Stripe::FinancialConnections::Account).to have_received(:refresh_account).with('fca_checking', { features: ['balance'] }).twice
+  end
+
+  it 'says why when the bank refuses' do
+    checking = bank('checking')
+    allow(Stripe::FinancialConnections::Account).to receive(:refresh_account)
+      .and_raise(Stripe::InvalidRequestError.new('Data cannot be refreshed on inactive accounts.', nil))
+    expect(service.request_balance!(checking)).to eq(status: 'unavailable', reason: 'The bank connection is no longer active. Reconnect it')
+    expect(checking.reload.feed_balance_requested_at).to be_nil
+  end
+
+  it 'reports pending while the bank answers, then keeps the balance' do
+    checking = bank('checking')
+    as_of = Time.utc(2026, 11, 19, 15)
+    pending = Stripe::StripeObject.construct_from(id: 'fca', balance: nil, balance_refresh: { status: 'pending' })
+    done = Stripe::StripeObject.construct_from(id: 'fca', balance: { as_of: as_of.to_i, current: { usd: 7_00 } },
+                                               balance_refresh: { status: 'succeeded' })
+    allow(Stripe::FinancialConnections::Account).to receive(:retrieve).and_return(pending, done)
+
+    expect(service.balance_status(checking)).to eq(status: 'pending')
+    expect(service.balance_status(checking)).to eq(status: 'ready')
+    expect(checking.reload.feed_balance).to eq(7)
   end
 end

@@ -112,4 +112,21 @@ RSpec.describe 'Api::V1 account register and bank balances', type: :request do
       expect(flat.call(json['tree']).find { |a| a['id'] == checking.id }['bank_balance'].to_f).to eq(1040.5)
     end
   end
+
+  describe 'Get bank balance' do
+    it 'asks the bank, then answers pending until the balance is in' do
+      bank = company.bank_accounts.create!(bank_name: 'Chase', account_type: 'checking', account_purpose: 'sync_only',
+                                           stripe_fc_account_id: 'fca_x', stripe_fc_status: 'active')
+      service = instance_double(StripeBankFeedService)
+      allow(StripeBankFeedService).to receive(:new).and_return(service)
+      allow(service).to receive(:request_balance!).with(bank).and_return(status: 'requested')
+      allow(service).to receive(:balance_status) { |ba| ba.update_columns(feed_balance: 12.5, feed_balance_as_of: Time.current); { status: 'ready' } }
+
+      post "/api/v1/bank_accounts/#{bank.id}/feed/request_balance", headers: headers
+      expect(json).to include('status' => 'requested')
+
+      get "/api/v1/bank_accounts/#{bank.id}/feed/balance", headers: headers
+      expect(json).to include('status' => 'ready', 'bank_balance' => 12.5)
+    end
+  end
 end
