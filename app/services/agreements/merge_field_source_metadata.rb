@@ -98,7 +98,8 @@ module Agreements
       # Removed: subtotal_1, subtotal_2 — no longer on DealForm.
       'deal.tax_amount'                 => { section: 'deal_economics', field_id: 'tax_amount', path: ['Deal', 'Economics', 'Tax'] },
       'deal.total_amount'               => { section: 'deal_economics', field_id: 'total_amount', path: ['Deal', 'Economics', 'Total Amount'] },
-      'deal.down_payment'               => { section: 'deal_economics', field_id: 'down_payment', path: ['Deal', 'Economics', 'Down Payment'] },
+      'deal.contract_down_payment'      => { section: 'deal_economics', field_id: 'contract_down_payment', path: ['Deal', 'Economics', 'Down Payment'] },
+      'deal.down_payment'               => { section: 'deal_economics', field_id: 'down_payment', path: ['Deal', 'Economics', 'Deposit'] },
       'deal.additional_payment'         => { section: 'deal_economics', field_id: 'additional_payment', path: ['Deal', 'Economics', 'Additional Payment'] },
       'deal.unpaid_balance'             => { section: 'deal_economics', field_id: 'unpaid_balance', path: ['Deal', 'Economics', 'Unpaid Balance'] },
       'deal.discounted_price'           => { section: 'deal_economics', field_id: nil, path: ['Deal', 'Economics', 'Discounted Price (derived)'] },

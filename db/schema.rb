@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_17_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_19_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3482,6 +3482,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_17_200000) do
     t.bigint "co_applicant_contact_id"
     t.string "delivery_point", default: "deliver", null: false
     t.jsonb "sale_details", default: {}, null: false
+    t.decimal "contract_down_payment", precision: 15, scale: 2
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"

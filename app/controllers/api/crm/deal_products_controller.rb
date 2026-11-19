@@ -18,7 +18,7 @@ module Api
       VERSIONED_DEAL_FIELDS = %w[
         name stage probability account_id contact_id owner_id primary_salesperson_id customer_name
         source_id description notes expected_close_date actual_close_date delivery_date payment_type
-        lender_id lender_name down_payment down_payment_due_date trade_allowance trade_payoff
+        lender_id lender_name down_payment contract_down_payment down_payment_due_date trade_allowance trade_payoff
       ].freeze
       before_action :refuse_when_sheet_signed, only: [:create, :update, :destroy, :bulk_create]
       include PostedDealChanges
