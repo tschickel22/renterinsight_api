@@ -7,7 +7,9 @@ module Outreach
   # back so the comparison between them stays fair.
   class AudienceBuilder
     MAX_CANDIDATES = 120
-    REQUIRED_FILTER = { 'field' => 'custom:category', 'operator' => 'equals', 'value' => 'MH Retailer' }.freeze
+    # Retailers only on DealerTide. Production says "MH Retailer", staging
+    # "Retailer"; nothing else in either contains the word.
+    REQUIRED_FILTER = { 'field' => 'custom:category', 'operator' => 'contains', 'value' => 'retailer' }.freeze
     # Engagement and "if possible" wishes decide the ranking, not who is allowed in.
     FILTER_NOTE = 'Filter only on facts a lead record must have, using values that exist in the context. Leave out wishes about ' \
                   'opened or clicked emails, number of locations, and anything described as preferred or "if possible": ' \
@@ -56,6 +58,9 @@ module Outreach
                     { 'type' => 'and', 'children' => [] }
                   end
       return described unless StarterContent.available_for?(@company)
+      unless Audiences::FieldSchema.custom_field_definitions('Lead', @company).any? { |field| field.field_key == 'category' }
+        raise AiClient::Error, 'Leads need a Category field to pick out retailers. Add one under Company Settings, Custom Fields.'
+      end
 
       { 'type' => 'and', 'children' => [REQUIRED_FILTER, described] }
     end

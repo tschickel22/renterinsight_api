@@ -83,6 +83,20 @@ RSpec.describe 'Proactive Outreach pilot' do
       expect(building.status).to eq('audience_ready')
     end
 
+    it 'on DealerTide keeps only retailers, whether labeled MH Retailer or Retailer' do
+      company.update!(name: 'DealerTide Test')
+      mh = lead!(custom_field_values: { 'category' => 'MH Retailer' })
+      plain = lead!(custom_field_values: { 'category' => 'Retailer' })
+      lead!(custom_field_values: { 'category' => 'Supplier' })
+      allow_any_instance_of(Audiences::AiBuilder).to receive(:generate)
+        .and_return(instance_double(AudienceAiGeneration, generated_filter_tree: { 'type' => 'and', 'children' => [] }))
+      allow(Outreach::AiClient).to receive(:call).and_return('picks' => [])
+
+      building = company.outreach_waves.create!(name: 'Build', status: 'building', prompt: 'Retailers', target_size: 5)
+      described_class.new(building, user: tom).call
+      expect(building.outreach_targets.pluck(:lead_id)).to contain_exactly(mh.id, plain.id)
+    end
+
     it 'says when leads match but none can be contacted' do
       lead!(custom_field_values: { 'category' => 'Retailer' }, status: 'contacted')
       tree = { 'type' => 'and', 'children' => [{ 'field' => 'custom:category', 'operator' => 'equals', 'value' => 'Retailer' }] }
