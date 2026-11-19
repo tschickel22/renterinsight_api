@@ -266,8 +266,9 @@ class AgreementPdfService
 
     values['company.name'] = @company.name.to_s
     values['company.email'] = @company.try(:email).to_s
-    values['company.phone'] = @company.try(:phone).to_s
-    values['company.address'] = [@company.try(:street), @company.try(:city), @company.try(:state), @company.try(:zip)].compact_blank.join(', ')
+    dealer_location = ::Agreements::DealerContact.location_id_for(@agreement, deal: deal)
+    values['company.phone'] = ::Agreements::DealerContact.phone(@company, location_id: dealer_location).to_s
+    values['company.address'] = ::Agreements::DealerContact.address(@company, location_id: dealer_location).to_s
     values['date.today'] = Date.today.strftime('%m/%d/%Y')
     values['date.current_year'] = Date.today.year.to_s
 

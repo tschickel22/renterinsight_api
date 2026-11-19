@@ -309,8 +309,9 @@ module Public
 
       combined['company.name'] = company.name.to_s
       combined['company.email'] = company.try(:email).to_s
-      combined['company.phone'] = company.try(:phone).to_s
-      combined['company.address'] = [company.try(:street), company.try(:city), company.try(:state), company.try(:zip)].compact_blank.join(', ')
+      dealer_location = ::Agreements::DealerContact.location_id_for(@agreement, deal: deal)
+      combined['company.phone'] = ::Agreements::DealerContact.phone(company, location_id: dealer_location).to_s
+      combined['company.address'] = ::Agreements::DealerContact.address(company, location_id: dealer_location).to_s
       combined['date.today'] = Date.today.strftime('%m/%d/%Y')
       combined['date.current_year'] = Date.today.year.to_s
 
