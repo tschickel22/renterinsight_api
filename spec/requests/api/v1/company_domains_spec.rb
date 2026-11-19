@@ -76,6 +76,29 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       expect(domain.ssl_status).to eq('initializing')
     end
 
+    # Pasted from a browser bar, "www.keysteadwheatland.com/" reached Cloudflare with its
+    # slash and came back as an invalid custom hostname.
+    it 'sends Cloudflare the bare hostname when a URL is pasted' do
+      service = instance_double(CloudflareSaasService)
+      allow(CloudflareSaasService).to receive(:new).and_return(service)
+      allow(service).to receive(:cname_target).and_return('connect.mydealertide.com')
+      allow(service).to receive(:create_worker_route)
+      allow(service).to receive(:parse_custom_hostname_response).and_return(
+        custom_hostname_id: 'cf-pasted', verification_status: 'pending',
+        verification_records: [], ssl_status: 'pending', cname_target: nil
+      )
+      expect(service).to receive(:add_custom_hostname)
+        .with('www.pasted.example', ssl_method: anything).and_return({})
+      expect(service).to receive(:create_worker_route).with('www.pasted.example')
+
+      post '/api/v1/company-domains',
+           params: { hostname: ' HTTPS://www.Pasted.example/about?x=1 ', purpose: 'web' }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:created)
+      expect(CompanyDomain.find_by(hostname: 'www.pasted.example').domain_root).to eq('pasted.example')
+    end
+
     it 'leaves nothing behind when the write fails after provisioning' do
       service = instance_double(CloudflareSaasService)
       allow(CloudflareSaasService).to receive(:new).and_return(service)

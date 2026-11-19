@@ -56,7 +56,9 @@ class Api::V1::CompanyDomainsController < ApplicationController
       }, status: :forbidden
     end
 
-    hostname = params[:hostname]&.strip
+    # Cleaned here, not only in the model, because this value is also what goes to
+    # Cloudflare, the Worker route and Turnstile below ("www.example.com/" was rejected).
+    hostname = CompanyDomain.normalize_hostname(params[:hostname])
 
     if hostname.blank?
       return render json: { error: 'Hostname is required' }, status: :unprocessable_entity
@@ -419,10 +421,11 @@ class Api::V1::CompanyDomainsController < ApplicationController
   def hostname_advice
     return unless authorize_action!('company_settings', 'read')
 
-    advice = Dns::ApexAdvisor.for(params[:hostname])
+    requested = CompanyDomain.normalize_hostname(params[:hostname])
+    advice = Dns::ApexAdvisor.for(requested)
     # Checked on the hostname they will actually end up using: a bare domain that cannot
     # work here is going to be replaced by its www suggestion.
-    preflight_host = advice.workable? ? params[:hostname] : advice.suggested_hostname
+    preflight_host = advice.workable? ? requested : advice.suggested_hostname
     our_target = cloudflare_enabled? ? CloudflareSaasService.new.cname_target : nil
 
     render json: {
