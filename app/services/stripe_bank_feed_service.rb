@@ -157,7 +157,79 @@ class StripeBankFeedService
       matcher.auto_match_all(bank_account)
     end
 
+    read_feed_balance!(bank_account)
+
     { imported: imported, skipped: skipped }
+  end
+
+  # Asks the bank for a new balance when someone presses Get bank balance.
+  # Stripe charges for each successful balance fetch ($0.10 at 2026-11-19
+  # prices), so nothing asks on a schedule: syncs only read the last balance
+  # Stripe holds, which is free. A second press within BALANCE_REQUEST_GAP
+  # reuses the request already made instead of paying again.
+  BALANCE_REQUEST_GAP = 10.minutes
+
+  def request_balance!(bank_account)
+    return { status: 'not_connected' } unless bank_account.stripe_connected?
+    if bank_account.feed_balance_requested_at && bank_account.feed_balance_requested_at > BALANCE_REQUEST_GAP.ago
+      return { status: 'requested', requested_at: bank_account.feed_balance_requested_at }
+    end
+
+    Stripe::FinancialConnections::Account.refresh_account(bank_account.stripe_fc_account_id, { features: ['balance'] })
+    bank_account.update_columns(feed_balance_requested_at: Time.current)
+    { status: 'requested', requested_at: bank_account.feed_balance_requested_at }
+  rescue Stripe::StripeError => e
+    Rails.logger.warn("[StripeBankFeed] Balance request for bank account #{bank_account.id}: #{e.message}")
+    { status: 'unavailable', reason: balance_refusal(e) }
+  end
+
+  # Where a balance request stands: pending while the bank answers, else
+  # the balance now kept (read_feed_balance!). Reading is free.
+  def balance_status(bank_account)
+    return { status: 'not_connected' } unless bank_account.stripe_connected?
+
+    fc = Stripe::FinancialConnections::Account.retrieve(bank_account.stripe_fc_account_id)
+    store_feed_balance!(bank_account, fc)
+    refresh = fc.try(:balance_refresh)
+    status = case refresh&.status
+             when 'pending' then 'pending'
+             when 'failed' then 'failed'
+             else 'ready'
+             end
+    { status: status }
+  rescue Stripe::StripeError => e
+    Rails.logger.warn("[StripeBankFeed] Balance status for bank account #{bank_account.id}: #{e.message}")
+    { status: 'unavailable', reason: 'Stripe did not answer. Try again in a minute' }
+  end
+
+  # Keeps the balance Stripe holds for the account on the bank account, in
+  # statement terms (Stripe signs a card's debt negative; we keep what is
+  # owed). One read, no fetch from the bank. Never fails a sync.
+  def read_feed_balance!(bank_account)
+    store_feed_balance!(bank_account, Stripe::FinancialConnections::Account.retrieve(bank_account.stripe_fc_account_id))
+  rescue StandardError => e
+    Rails.logger.warn("[StripeBankFeed] Balance read for bank account #{bank_account.id}: #{e.message}")
+  end
+
+  def store_feed_balance!(bank_account, fc)
+    balance = fc.try(:balance)
+    cents = balance && balance.current.to_h.with_indifferent_access[:usd]
+    return if cents.nil?
+
+    sign = bank_account.account_type == 'credit_card' ? -1 : 1
+    as_of = Time.at(balance.as_of)
+    return if bank_account.feed_balance_as_of && bank_account.feed_balance_as_of > as_of
+
+    bank_account.update_columns(feed_balance: BigDecimal(cents * sign) / 100, feed_balance_as_of: as_of)
+  end
+
+  def balance_refusal(error)
+    msg = error.message.to_s
+    return 'The bank connection is no longer active. Reconnect it' if msg =~ /inactive|disconnected/i
+    return 'The bank was connected without balance access. Reconnect it to get balances' if msg =~ /permission|balances/i
+    return 'A balance is already on its way from the bank' if msg =~ /pending/i
+
+    'The bank did not answer. Try again later'
   end
 
   # How long a balance from the bank counts as today's.

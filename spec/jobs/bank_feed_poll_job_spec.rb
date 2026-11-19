@@ -23,7 +23,7 @@ RSpec.describe BankFeedPollJob do
     expect(SyncBankFeedJob).to have_been_enqueued.with(live.id, refresh: false)
   end
 
-  it 'reads lines without asking Stripe to refresh' do
+  it 'reads lines without asking Stripe to refresh or for a balance (both are billed)' do
     live = bank(stripe_fc_account_id: 'fca_1', stripe_fc_status: 'active')
     service = instance_double(StripeBankFeedService, sync_transactions: { imported: 0, skipped: 0 })
     allow(StripeBankFeedService).to receive(:new).and_return(service)

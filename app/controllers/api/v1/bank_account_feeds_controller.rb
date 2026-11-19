@@ -71,6 +71,25 @@ class Api::V1::BankAccountFeedsController < ApplicationController
     }
   end
 
+  # POST /api/v1/bank_accounts/:bank_account_id/feed/request_balance
+  # Get bank balance: asks the bank (Stripe charges per successful fetch).
+  def request_balance
+    return unless authorize_action!('bank_accounts_accounting', 'update')
+
+    render json: StripeBankFeedService.new(@company).request_balance!(@bank_account)
+  end
+
+  # GET /api/v1/bank_accounts/:bank_account_id/feed/balance
+  # Whether the bank has answered, and the balance kept. Free to ask.
+  def balance
+    return unless authorize_action!('bank_accounts_accounting', 'read')
+
+    result = StripeBankFeedService.new(@company).balance_status(@bank_account)
+    @bank_account.reload
+    render json: result.merge(bank_balance: @bank_account.bank_balance&.to_f,
+                              bank_balance_as_of: @bank_account.bank_balance_as_of)
+  end
+
   private
 
   def set_bank_account

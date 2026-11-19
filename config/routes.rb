@@ -2597,6 +2597,7 @@ Rails.application.routes.draw do
       get 'accounting/reports/cash_flow_forecast', to: 'accounting_reports#cash_flow_forecast'
       get 'accounting/dashboard', to: 'accounting_reports#dashboard'
       get 'accounting/locations', to: 'accounting_reports#accounting_locations'
+      get 'accounting/register', to: 'account_registers#show'
 
       # Inventory Stock List & GP Snapshot (read-only)
       get 'inventory/reports/stock_list', to: 'inventory_reports#stock_list'
@@ -2658,6 +2659,8 @@ Rails.application.routes.draw do
         post :sync
         post :disconnect
         get  :status
+        post :request_balance
+        get  :balance
       end
 
       resources :bank_rules do
