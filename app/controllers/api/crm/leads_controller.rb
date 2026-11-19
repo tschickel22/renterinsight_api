@@ -9,7 +9,7 @@ module Api
       include AccountNameMatches
 
       before_action :set_company_scope
-      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent]
+      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent, :text_consent]
 
       # ==== Lead cloning ====
       #
@@ -677,6 +677,42 @@ module Api
         end
       end
 
+      # PATCH /api/crm/leads/:id/text-consent
+      #
+      # Consent to texts about the inquiry, recorded by staff when the person
+      # agreed somewhere we cannot capture it (a trade show, a call, a signed
+      # form). The Lead Assistant, plays and Proactive Outreach text only when
+      # it is set. A note names who recorded it and on what basis, and a number
+      # that texted STOP stays stopped: only the person can undo that.
+      def text_consent
+        return unless authorize_action!('leads', 'update')
+
+        consented = ActiveModel::Type::Boolean.new.cast(params[:consented])
+        basis = params[:basis].to_s.strip.truncate(300)
+        who = InquiryTextConsent.name_of(current_user)
+        on = Date.current.strftime('%b %-d, %Y')
+
+        if consented
+          if basis.blank?
+            return render json: { success: false, error: 'Say where the consent came from.' }, status: :unprocessable_entity
+          end
+          if @lead.phone.present? && CommunicationOptOut.check(channel: 'sms', company: @company, record: @lead, address: @lead.phone).opted_out?
+            return render json: { success: false, error: 'This number texted STOP. Texts can resume only after they text START.' },
+                          status: :unprocessable_entity
+          end
+
+          InquiryTextConsent.record!(@lead, user: current_user, basis: basis)
+          content = "Text consent recorded by #{who} on #{on}. Basis: #{basis}."
+        else
+          InquiryTextConsent.remove!(@lead, user: current_user, reason: basis)
+          content = "Text consent removed by #{who} on #{on}.#{" Reason: #{basis}." if basis.present?}"
+        end
+        Note.create!(content: content, entity_type: 'lead', entity_id: @lead.id.to_s, user_id: current_user&.id,
+                     created_by_name: who, category: 'general', author_type: 'staff')
+
+        render json: { success: true, textConsent: text_consent_json(@lead.reload) }, status: :ok
+      end
+
       def convert
         return unless authorize_action!('leads', 'update')
         
@@ -1275,6 +1311,10 @@ module Api
         }
       end
 
+      def text_consent_json(l)
+        InquiryTextConsent.json(l)
+      end
+
       def lead_json(l)
         owner_data = if l.owner
           {
@@ -1301,6 +1341,7 @@ module Api
           # (Campaigns::CampaignSender#marketing_consent_ok?), so what the page
           # shows is what the sender enforces.
           marketingConsent: marketing_consent_json(l),
+          textConsent: text_consent_json(l),
           phone:     l.phone,
           notes:     l.notes,
           status:    l.status,

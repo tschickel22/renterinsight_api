@@ -75,6 +75,9 @@ class PlatformModule
     # Paid add-on (backlog E96), same shape as marketing.text_us: absent from
     # every PLAN_TEMPLATE, attached per tenant with a TenantModuleOverride.
     'marketing.lead_assistant' => { name: 'Quinn AI: Texting and Email', category: 'Marketing', icon: 'Bot', description: 'Quinn AI texts new leads within minutes, answers texts and emails from your own homes and facts, books visits, follows up until a visit is set and hands the conversation to your team' },
+    # Not sold (E105): in no PLAN_TEMPLATE, attached only to DealerTide's and
+    # Renter Insight's own accounts with a TenantModuleOverride.
+    'marketing.proactive_outreach' => { name: 'Proactive Outreach', category: 'Marketing', icon: 'Send', description: 'Starts conversations with selected leads by email and text, shares approved videos, answers questions and books demos' },
     # Paid add-on, same shape as text_us and automation: absent from every
     # PLAN_TEMPLATE on purpose, so no tier grants it free and it can be sold to a
     # dealer who is on neither our website builder nor Text Us.

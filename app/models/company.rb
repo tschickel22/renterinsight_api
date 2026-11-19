@@ -22,6 +22,9 @@ class Company < ApplicationRecord
   has_many :leads, dependent: :destroy
   has_many :conversations, dependent: :destroy
   has_many :assistant_questions, dependent: :destroy
+  has_many :outreach_content_items, dependent: :destroy
+  # Named outright: Rails would otherwise read "waves" as the plural of "wafe".
+  has_many :outreach_waves, class_name: 'OutreachWave', inverse_of: :company, dependent: :destroy
   has_many :vehicles, dependent: :destroy
   has_many :dealer_catalog_subscriptions, dependent: :destroy
   # The factories a platform admin gave this dealer for TrueBuild (backlog E64).

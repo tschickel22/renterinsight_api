@@ -2779,6 +2779,11 @@ Rails.application.routes.draw do
   get  '/t/:token',  to: 'campaign_tracking#click', as: :campaign_click
   get  '/u/:token',  to: 'campaign_tracking#unsubscribe_show', as: :campaign_unsubscribe_show
   post '/u/:token',  to: 'campaign_tracking#unsubscribe_confirm', as: :campaign_unsubscribe_confirm
+  # Proactive Outreach links (E105).
+  get  '/o/v/:token', to: 'outreach_tracking#video', as: :outreach_video
+  get  '/o/r/:token', to: 'outreach_tracking#report', as: :outreach_report
+  get  '/o/u/:token', to: 'outreach_tracking#unsubscribe_page', as: :outreach_unsubscribe_page
+  post '/o/u/:token', to: 'outreach_tracking#unsubscribe', as: :outreach_unsubscribe
 
   # A rep's contact card, linked from play texts and emails ({{contact_card_link}}).
   get  '/vc/:token', to: 'contact_cards#show', as: :contact_card, constraints: { token: %r{[^/]+} }
@@ -2964,6 +2969,30 @@ Rails.application.routes.draw do
       resource :sms_registration, only: %i[show update] do
         post :submit
       end
+      # Proactive Outreach (E105): DealerTide and Renter Insight only.
+      resource :proactive_outreach, only: %i[show update], controller: 'proactive_outreach' do
+        post :load_starter
+      end
+      resources :outreach_content_items, only: %i[create update destroy] do
+        collection { post :import_from_campaigns }
+      end
+      # Everything messaging one lead or contact, with Stop (E105 follow-up).
+      get  'automations', to: 'automations#index'
+      post 'automations/stop', to: 'automations#stop'
+      post 'automations/stop_all', to: 'automations#stop_all'
+      resources :outreach_waves, only: %i[index show create] do
+        member do
+          post :draft
+          post :start
+          post :pause
+          post :resume
+          get :results
+          get :skipped
+          post :add_targets
+          delete 'targets/:target_id', action: :remove_target
+          patch 'targets/:target_id', action: :review_target
+        end
+      end
       resources :assistant_questions, only: %i[index] do
         member do
           post :answer
@@ -3043,6 +3072,8 @@ Rails.application.routes.draw do
           # Stored with its own source so it never masquerades as a consent the
           # person gave us on a form.
           patch :marketing_consent, path: 'marketing-consent'
+          # Consent to texts about the inquiry, entered by staff (E105).
+          patch :text_consent, path: 'text-consent'
         end
 
         collection do

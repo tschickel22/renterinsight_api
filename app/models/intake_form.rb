@@ -148,6 +148,9 @@ class IntakeForm < ApplicationRecord
     json['autoCreateActivity'] = json['auto_create_activity']
     json['fieldMappings'] = json['field_mappings']
     json['captchaRequired'] = json['captcha_required']
+    # The builder reads redirectUrl. Missing, the box opened empty and the next
+    # Save sent null, wiping the address (EHS's Cascade link, 2026-11-10).
+    json['redirectUrl'] = json['redirect_url']
     # Site key travels with the form so the public page can render the widget
     # without any FE ENV wiring. Site keys are public by design (Cloudflare
     # binds them to allowlisted domains at their edge).

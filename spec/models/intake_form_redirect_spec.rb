@@ -27,4 +27,12 @@ RSpec.describe IntakeForm, 'redirect after submit', type: :model do
       expect(form_with(url)).not_to be_valid, url
     end
   end
+
+  # The form builder reads redirectUrl. Without it the box opened empty and the
+  # next Save sent null, which silently wiped Easy Homesource's link to Cascade.
+  it 'hands the builder the address under both spellings' do
+    json = form_with('https://askcade.cascadeloans.com/dealer/352-558-8888/applyprocess/steps').as_json
+    expect(json['redirectUrl']).to eq(json['redirect_url'])
+    expect(json['redirectUrl']).to start_with('https://askcade.cascadeloans.com')
+  end
 end

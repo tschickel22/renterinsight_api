@@ -274,6 +274,8 @@ module Leads
           carried = MarketingConsentTransfer.call(from: @lead, to: contact) +
                     MarketingConsentTransfer.call(from: @lead, to: account)
           Rails.logger.info "🔄 [ConvertLead] Marketing consent carried forward: #{carried} preference(s)"
+          # Consent to texts about the inquiry follows the person too (E105).
+          InquiryTextConsent.carry!(@lead, to: contact)
 
           # 5c. CARRY TRUEBUILD DESIGNS AND THE BUYER'S PORTAL LOGIN FORWARD
           Truebuild::ConversionCarry.call(lead: @lead, contact: contact, account: account, deal: deal)
