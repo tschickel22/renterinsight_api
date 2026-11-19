@@ -40,7 +40,7 @@ module Ses
     # them, so a retry does not invalidate records a tenant has already published.
     def create_identity!
       response = client.create_email_identity(
-        email_identity: domain.hostname,
+        email_identity: domain.email_domain,
         dkim_signing_attributes: { next_signing_key_length: 'RSA_2048_BIT' }
       )
       tokens = Array(response.dkim_attributes&.tokens)
@@ -65,7 +65,7 @@ module Ses
       domain
     rescue Aws::SESV2::Errors::ServiceError => e
       record_error(e)
-      raise SesError, "Could not create SES identity for #{domain.hostname}: #{e.message}"
+      raise SesError, "Could not create SES identity for #{domain.email_domain}: #{e.message}"
     end
 
     # Applies the custom MAIL FROM to an identity that never got one.
@@ -93,7 +93,7 @@ module Ses
     # once SES itself reports success. Verification is never inferred from our own DNS
     # lookups: SES is the only authority on whether it will sign for this domain.
     def refresh_status!
-      response = client.get_email_identity(email_identity: domain.hostname)
+      response = client.get_email_identity(email_identity: domain.email_domain)
 
       dkim = response.dkim_attributes
       verified = dkim&.status == 'SUCCESS'
@@ -118,16 +118,16 @@ module Ses
       domain
     rescue Aws::SESV2::Errors::ServiceError => e
       record_error(e)
-      raise SesError, "Could not read SES identity for #{domain.hostname}: #{e.message}"
+      raise SesError, "Could not read SES identity for #{domain.email_domain}: #{e.message}"
     end
 
     def delete_identity!
-      client.delete_email_identity(email_identity: domain.hostname)
+      client.delete_email_identity(email_identity: domain.email_domain)
       true
     rescue Aws::SESV2::Errors::NotFoundException
       true
     rescue Aws::SESV2::Errors::ServiceError => e
-      Rails.logger.warn("[Ses::IdentityManager] delete failed for #{domain.hostname}: #{e.message}")
+      Rails.logger.warn("[Ses::IdentityManager] delete failed for #{domain.email_domain}: #{e.message}")
       false
     end
 
@@ -161,7 +161,7 @@ module Ses
       end
 
       client.put_email_identity_mail_from_attributes(
-        email_identity: domain.hostname,
+        email_identity: domain.email_domain,
         mail_from_domain: mail_from_domain,
         # Reject rather than fall back to amazonses.com. A silent fallback would break the
         # SPF alignment the custom MAIL FROM exists to provide, without telling anyone.
@@ -171,14 +171,18 @@ module Ses
     rescue Aws::SESV2::Errors::ServiceError => e
       # A missing MAIL FROM weakens alignment but does not stop DKIM verification, so this
       # is logged rather than fatal. DKIM alone still lets the domain send.
-      Rails.logger.warn("[Ses::IdentityManager] MAIL FROM setup failed for #{domain.hostname}: #{e.message}")
+      Rails.logger.warn("[Ses::IdentityManager] MAIL FROM setup failed for #{domain.email_domain}: #{e.message}")
       false
     end
 
     def subdomain_already_receives_mail?
       # resolve! rather than the forgiving wrapper: an unanswered query is not the same as a
       # free name, and treating it as free is how we would overwrite a tenant's MX.
-      Dns::Lookup.resolve!(mail_from_domain, Resolv::DNS::Resource::IN::MX) { |r| r.exchange.to_s }.any?
+      exchanges = Dns::Lookup.resolve!(mail_from_domain, Resolv::DNS::Resource::IN::MX) { |r| r.exchange.to_s }
+      # Our own SES feedback MX is not a collision: it is what a tenant publishes when an
+      # earlier identity was set up for this subdomain, and refusing it would make them
+      # publish nothing different and still get no MAIL FROM.
+      exchanges.any? { |mx| !mx.to_s.downcase.chomp('.').match?(/\Afeedback-smtp\.[a-z0-9-]+\.amazonses\.com\z/) }
     rescue StandardError => e
       # An unresolvable lookup must not read as "safe to overwrite". Treat it as occupied
       # so the worst case is a weaker MAIL FROM, never a broken inbound mail flow.
@@ -187,7 +191,7 @@ module Ses
     end
 
     def mail_from_domain
-      "#{self.class.mail_from_prefix}.#{domain.hostname}"
+      "#{self.class.mail_from_prefix}.#{domain.email_domain}"
     end
 
     # ses_mail_from_domain is only recorded when SES actually accepted it, because the DNS

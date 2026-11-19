@@ -146,6 +146,50 @@ RSpec.describe Ses::IdentityManager do
   # mail.dealertide.com already carries the inbound campaign reply MX. Following the
   # generated records would have replaced it and silently killed inbound replies. Dealers
   # commonly point mail.<domain> at webmail, so this is not specific to us.
+  # Keystead, 2026-11-19: sending was turned on for www.keysteadwheatland.com. SES got an
+  # identity no info@keysteadwheatland.com address could use, and the screen gave hosts that
+  # landed on the root zone, so DKIM never verified.
+  describe 'a www website domain' do
+    let(:domain) { company.company_domains.create!(hostname: "www.ks#{SecureRandom.hex(3)}.example") }
+    let(:root) { domain.hostname.delete_prefix('www.') }
+
+    before do
+      allow(client).to receive(:create_email_identity)
+        .and_return(double(dkim_attributes: dkim_attributes(status: 'PENDING', tokens: tokens)))
+      allow(client).to receive(:put_email_identity_mail_from_attributes)
+    end
+
+    it 'registers the bare domain with SES, with its MAIL FROM under it' do
+      expect(client).to receive(:create_email_identity).with(hash_including(email_identity: root))
+      expect(client).to receive(:put_email_identity_mail_from_attributes)
+        .with(hash_including(email_identity: root, mail_from_domain: "bounce.#{root}"))
+
+      described_class.new(domain, client: client).create_identity!
+    end
+
+    it 'gives DNS hosts that land where SES looks when typed into the root zone' do
+      described_class.new(domain, client: client).create_identity!
+
+      records = domain.reload.email_dns_records
+      expect(records.first).to include(name: "tokenaaa._domainkey.#{root}", host: 'tokenaaa._domainkey')
+      expect(records.find { |r| r[:type] == 'MX' }).to include(name: "bounce.#{root}", host: 'bounce')
+    end
+  end
+
+  describe 'when the MAIL FROM subdomain already has our own SES feedback MX' do
+    before do
+      allow(client).to receive(:create_email_identity)
+        .and_return(double(dkim_attributes: dkim_attributes(status: 'PENDING', tokens: tokens)))
+      allow(Dns::Lookup).to receive(:resolve!).and_return(['feedback-smtp.us-west-2.amazonses.com.'])
+    end
+
+    it 'claims it, since that record is what we asked for' do
+      expect(client).to receive(:put_email_identity_mail_from_attributes)
+
+      described_class.new(domain, client: client).create_identity!
+    end
+  end
+
   describe 'when the MAIL FROM subdomain already receives mail' do
     before do
       allow(client).to receive(:create_email_identity)

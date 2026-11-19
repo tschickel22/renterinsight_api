@@ -731,6 +731,8 @@ class Api::V1::CompanyDomainsController < ApplicationController
       email_verified: domain.email_verified?,
       email_verified_at: domain.email_verified_at,
       email_dns_records: domain.email_dns_records,
+      # What the address after @ can be. Differs from hostname on a www domain.
+      email_domain: domain.email_domain,
       # Where this domain's DNS is actually managed, so the screen can give instructions for
       # that provider rather than generic ones. Only looked up when there are records to
       # publish; it costs an NS query and is useless otherwise.

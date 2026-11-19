@@ -211,6 +211,14 @@ class CompanyDomain < ApplicationRecord
     email_enabled? && email_verified_at.nil?
   end
 
+  # The domain SES signs for. The website lives on www, but mail goes out as
+  # info@example.com, and an SES identity for www.example.com can only sign for addresses
+  # at www.example.com. Keystead (2026-11-19) turned sending on for their www domain, got an
+  # identity no From address could use, and DKIM records written for the wrong zone.
+  def email_domain
+    hostname.to_s.delete_prefix('www.')
+  end
+
   # The records a tenant publishes to let us sign as them. Three DKIM CNAMEs from SES,
   # plus the MAIL FROM MX and SPF pair that make SPF align with the From header instead of
   # falling through to amazonses.com.
@@ -220,8 +228,8 @@ class CompanyDomain < ApplicationRecord
     records = Array(ses_dkim_tokens).map do |token|
       {
         type: 'CNAME',
-        name: "#{token}._domainkey.#{hostname}",
-        host: "#{token}._domainkey",
+        name: "#{token}._domainkey.#{email_domain}",
+        host: relative_host("#{token}._domainkey.#{email_domain}"),
         value: "#{token}.dkim.amazonses.com",
         ttl: 1800,
         purpose: 'DKIM signature. Required before any mail can be sent from this domain.',
@@ -278,12 +286,19 @@ class CompanyDomain < ApplicationRecord
 
   private
 
+  # Relative to domain_root, the zone the tenant edits at their DNS provider. Relative to the
+  # hostname, a www domain's records were shown as "token._domainkey", which lands on the
+  # root zone and never matched what SES was looking for.
+  #
   # Nearly every DNS provider treats the host field as relative to the zone, so pasting the
   # fully qualified name creates token._domainkey.example.com.example.com and the record
   # never verifies. Both spellings are exposed so the UI can show whichever the tenant's
   # provider actually wants.
   def relative_host(fqdn)
-    fqdn.to_s.delete_suffix(".#{hostname}").presence || '@'
+    zone = domain_root.presence || email_domain
+    return '@' if fqdn.to_s == zone
+
+    fqdn.to_s.delete_suffix(".#{zone}")
   end
 
   def ses_region

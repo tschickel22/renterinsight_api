@@ -50,7 +50,7 @@ class Api::Platform::EmailUsageController < ApplicationController
         # here because Gmail and Graph give no positive receipt, which is not a fault.
         delivered: delivered[company_id].to_i,
         bounced: bounced[company_id].to_i,
-        verified_sending_domains: CompanyDomain.email_verified.where(company_id: company.id).pluck(:hostname),
+        verified_sending_domains: CompanyDomain.email_verified.where(company_id: company.id).map(&:email_domain),
         status: cap_status(pct)
       }
     end.compact.sort_by { |r| -r[:total_emails] }
