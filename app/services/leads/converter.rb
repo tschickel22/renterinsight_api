@@ -308,6 +308,10 @@ module Leads
       return unless vehicle
 
       price = Truebuild::InventoryPricing.new(@company).list_price(vehicle)&.dig(:amount).to_f
+      # Taxed the way the deal form taxes a home added from inventory: the dealer's
+      # rate for the buyer's state, else the company default.
+      rate = AccountingSettings.for_company(@company).combined_tax_rate(home_tax_state(deal))[:combined].to_d
+      tax = (price.to_d * rate / 100).round(2)
       ActiveRecord::Base.transaction(requires_new: true) do
         deal.deal_products.create!(
           product_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".squish,
@@ -319,12 +323,23 @@ module Leads
           cost: vehicle.structured_cost.to_f,
           discount: 0,
           discount_type: 'fixed',
-          tax: 0,
-          notes: 'category:home, source:home, taxable:no'
+          tax: tax,
+          total: price.to_d + tax,
+          notes: tax.positive? ? 'category:home, source:home' : 'category:home, source:home, taxable:no'
         )
       end
     rescue StandardError => e
       Rails.logger.error("[ConvertLead] Home line for deal #{deal.id}: #{e.class} #{e.message}")
+    end
+
+    # Same order the deal form looks: the deal's delivery then billing state, the
+    # contact's delivery then main address, then the account's shipping then billing.
+    def home_tax_state(deal)
+      contact = deal.contact
+      account = deal.try(:account)
+      [deal.try(:delivery_state), deal.try(:billing_state), contact.try(:delivery_state), contact.try(:state),
+       account.try(:shipping_state), account.try(:billing_state)]
+        .map { |s| s.to_s.strip.upcase }.find { |s| s.match?(/\A[A-Z]{2}\z/) }.to_s
     end
   end
 end

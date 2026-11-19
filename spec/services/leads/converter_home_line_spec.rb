@@ -32,6 +32,26 @@ RSpec.describe Leads::Converter, 'home chosen on the lead' do
     expect(deal.reload.value).to eq(161_000)
   end
 
+  it "taxes the home at the dealer's rate for the buyer's state, like a home added from inventory" do
+    AccountingSettings.for_company(company).update!(default_state_tax_rate: 3, default_county_tax_rate: 1, default_city_tax_rate: 1,
+                                                    tax_rates_by_state: { 'MS' => { 'state' => 7, 'county' => 0, 'city' => 0 } })
+    lead = lead_with(home.id)
+    lead.update!(state: 'MS') if lead.respond_to?(:state)
+    line = convert(lead).deal_products.reload.sole
+
+    expect(line.tax).to eq(11_270)
+    expect(line.total).to eq(172_270)
+    expect(line.notes).not_to include('taxable:no')
+  end
+
+  it 'marks the home untaxed when the dealer charges no tax' do
+    AccountingSettings.for_company(company).update!(default_state_tax_rate: 0, default_county_tax_rate: 0, default_city_tax_rate: 0)
+    line = convert(lead_with(home.id)).deal_products.reload.sole
+
+    expect(line.tax).to eq(0)
+    expect(line.notes).to include('taxable:no')
+  end
+
   it 'adds no line when the lead has no home' do
     expect(convert(lead_with(nil)).deal_products.reload).to be_empty
   end
