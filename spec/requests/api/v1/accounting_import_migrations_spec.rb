@@ -476,6 +476,38 @@ RSpec.describe 'Api::V1 accounting import migrations', type: :request do
       expect(json['banks'].first['statement_from_bank']).to be(true)
     end
 
+    it 'stops waiting on a bank that stays pending, and waits afresh on a later ask' do
+      allow(service).to receive(:balance_on) { |ba, *_| ba.account_type == 'credit_card' ? { status: 'pending' } : ready.call('100') }
+      id = start_migration
+      match_all(id)
+      amex = -> { json['banks'].find { |b| b['qbo_account_id'] == '14' }['bank_balance'] }
+
+      post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+      expect(amex.call).to include('status' => 'pending')
+
+      travel 50.seconds do
+        post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+        expect(amex.call).to include('status' => 'unavailable', 'reason' => /has not sent it yet/)
+        expect(json['banks'].first['bank_balance']).to include('status' => 'ready')
+      end
+
+      travel 5.minutes do
+        post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+        expect(amex.call).to include('status' => 'unavailable')
+      end
+
+      travel 20.minutes do
+        post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+        expect(amex.call).to include('status' => 'pending')
+      end
+
+      allow(service).to receive(:balance_on) { |ba, *_| ready.call(ba.account_type == 'credit_card' ? '-50' : '100') }
+      travel 21.minutes do
+        post "#{base}/#{id}/uncleared/bank_balances", headers: headers, as: :json
+        expect(amex.call).to include('status' => 'ready', 'amount' => 50.0)
+      end
+    end
+
     it 'keeps going when bank balances are not set up at all' do
       allow(StripeBankFeedService).to receive(:new).and_raise('Stripe secret key not configured')
       id = start_migration

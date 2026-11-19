@@ -860,7 +860,10 @@ module Accounting
                 { status: 'unavailable', reason: 'Bank balances are not available right now' }
               end
             end
+          waiting_since = bank_waiting_since(state['bank_balance'], result)
+          result = BANK_GAVE_UP if waiting_since && waiting_since < BANK_WAIT_LIMIT.ago
           state['bank_balance'] = bank_balance_state(bank, result)
+          state['bank_balance']['waiting_since'] = waiting_since.iso8601 if waiting_since
           next unless result[:status] == 'ready'
 
           amount = state['bank_balance']['amount']
@@ -874,6 +877,29 @@ module Accounting
 
         config.delete('preview_viewed_at') if changed
         save!
+      end
+
+      # A bank can stay 'pending' for hours (Easy Homesource's nine did on
+      # 2026-11-19 and the screen spun the whole time). After BANK_WAIT_LIMIT
+      # the answer becomes unavailable so the person types the balance from
+      # the statement. A new ask after BANK_WAIT_RESET waits afresh.
+      BANK_WAIT_LIMIT = 40.seconds
+      BANK_WAIT_RESET = 15.minutes
+      BANK_GAVE_UP = {
+        status: 'unavailable',
+        reason: 'The bank has not sent it yet. You can ask again in 15 minutes'
+      }.freeze
+
+      # When this bank started waiting, or nil once it has an answer.
+      def bank_waiting_since(previous, result)
+        return nil unless result[:status] == 'pending'
+
+        since = begin
+          Time.zone.parse(previous['waiting_since'].to_s) if previous.is_a?(Hash) && previous['waiting_since'].present?
+        rescue ArgumentError
+          nil
+        end
+        since.nil? || since < BANK_WAIT_RESET.ago ? Time.current : since
       end
 
       # Money in the statement's own terms: what the bank holds, or for a
