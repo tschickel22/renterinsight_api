@@ -1139,6 +1139,8 @@ module Api
           # forward from the lead on conversion (MarketingConsentTransfer), so a
           # converted contact still shows the evidence behind their consent.
           marketingConsent: marketing_consent_json(contact),
+          # Consent to texts about the inquiry, carried from the lead (E105).
+          textConsent: InquiryTextConsent.json(contact),
           optOutEmail: contact.opt_out_email,
           optOutEmailAt: contact.opt_out_email_at,
           optOutSms: contact.opt_out_sms,

@@ -3065,6 +3065,8 @@ Rails.application.routes.draw do
           # Stored with its own source so it never masquerades as a consent the
           # person gave us on a form.
           patch :marketing_consent, path: 'marketing-consent'
+          # Consent to texts about the inquiry, entered by staff (E105).
+          patch :text_consent, path: 'text-consent'
         end
 
         collection do
