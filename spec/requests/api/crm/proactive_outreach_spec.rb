@@ -228,7 +228,7 @@ RSpec.describe 'Proactive Outreach waves', type: :request do
     expect(body['refused'].map { |r| r['lead_id'] }).to eq([unreachable.id])
     expect(wave.reload.status).to eq('audience_ready')
     added = wave.outreach_targets.find_by(lead_id: nurtured.id)
-    expect(added).to have_attributes(test_group: 'contact', override_reason: 'On the nurture Follow', overridden_by_user_id: admin.id)
+    expect(added).to have_attributes(ai_reason: 'Added by you', test_group: 'contact', override_reason: 'On the nurture Follow', overridden_by_user_id: admin.id)
     expect(wave.outreach_targets.find_by(lead_id: fresh.id).override_reason).to be_nil
   end
 

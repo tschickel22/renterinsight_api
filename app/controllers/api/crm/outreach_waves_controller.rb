@@ -88,7 +88,7 @@ module Api
           rank += 1
           @wave.outreach_targets.create!(
             company_id: @company.id, lead_id: lead.id, rank: rank, test_group: 'contact', channel: reach.email ? 'email' : 'text',
-            ai_reason: info ? "Added by you. #{info[:reason]}".truncate(160) : 'Added by you',
+            ai_reason: 'Added by you',
             override_reason: info&.dig(:reason), overridden_by_user_id: (current_user.id if info)
           )
           added << lead.id
