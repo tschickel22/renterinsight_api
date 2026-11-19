@@ -206,6 +206,32 @@ RSpec.describe 'Proactive Outreach waves', type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
+  it 'shows who was left out, adds them by hand past soft rules, and keeps hard ones locked' do
+    grant!
+    tree = { 'type' => 'and', 'children' => [{ 'field' => 'status', 'operator' => 'equals', 'value' => 'new' }] }
+    wave = company.outreach_waves.create!(name: 'W', status: 'failed', build_error: 'none', filter_tree: tree, target_size: 5)
+    nurtured = company.leads.create!(first_name: 'N', last_name: 'Ur', email: 'n@example.com', owner_id: admin.id, status: 'new')
+    NurtureEnrollment.create!(enrollable: nurtured, company_id: company.id, nurture_sequence_id: NurtureSequence.create!(name: 'Follow', company_id: company.id).id, status: 'running')
+    unreachable = company.leads.create!(first_name: 'U', last_name: 'Nr', email: 'u@example.com', owner_id: admin.id, status: 'new')
+    CommunicationPreference.find_or_create_for(recipient: unreachable, channel: 'email').opt_out!('Unsubscribed')
+    fresh = lead
+
+    get "/api/crm/outreach_waves/#{wave.id}/skipped", headers: headers
+    rows = JSON.parse(response.body)['skipped'].index_by { |r| r['lead_id'] }
+    expect(rows[nurtured.id]).to include('reason' => 'On the nurture Follow', 'can_add' => true)
+    expect(rows[unreachable.id]).to include('can_add' => false)
+    expect(rows[fresh.id]['reason']).to start_with('Ready to contact.')
+
+    post "/api/crm/outreach_waves/#{wave.id}/add_targets", headers: headers, params: { lead_ids: [nurtured.id, unreachable.id, fresh.id] }.to_json
+    body = JSON.parse(response.body)
+    expect(body['added']).to eq(2)
+    expect(body['refused'].map { |r| r['lead_id'] }).to eq([unreachable.id])
+    expect(wave.reload.status).to eq('audience_ready')
+    added = wave.outreach_targets.find_by(lead_id: nurtured.id)
+    expect(added).to have_attributes(test_group: 'contact', override_reason: 'On the nurture Follow', overridden_by_user_id: admin.id)
+    expect(wave.outreach_targets.find_by(lead_id: fresh.id).override_reason).to be_nil
+  end
+
   it 'will not show another company\'s wave' do
     grant!
     other = Company.create!(name: "Other-#{SecureRandom.hex(4)}")

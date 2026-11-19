@@ -74,7 +74,7 @@ module Outreach
     end
 
     def send_opener(target)
-      reason = @eligibility.blocked_reason(target.lead)
+      reason = @eligibility.blocked_reason(target.lead, override: target.override_reason.present?)
       if reason
         target.record!('skipped', metadata: { reason: reason })
         target.stop!(reason)
@@ -116,7 +116,7 @@ module Outreach
     def send_follow_up(target)
       return target.update!(next_touch_at: nil) unless target.conversation&.assistant_answering?
 
-      reason = @eligibility.stop_reason(target.lead)
+      reason = @eligibility.stop_reason(target.lead, override: target.override_reason.present?)
       return target.stop!(reason) if reason
 
       channel = next_channel(target)

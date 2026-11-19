@@ -63,6 +63,22 @@ RSpec.describe 'Proactive Outreach pilot' do
       expect(eligibility.skip_reason(lead!(email: nil, sms_inquiry_consent: false))).to eq('No usable email and no text consent')
     end
 
+    it 'lets soft reasons be overridden and keeps hard ones locked' do
+      nurtured = lead!
+      NurtureEnrollment.create!(enrollable: nurtured, company_id: company.id, nurture_sequence_id: NurtureSequence.create!(name: 'N', company_id: company.id).id, status: 'running')
+      expect(eligibility.skip_info(nurtured)).to eq(reason: 'On the nurture N', can_add: true)
+      expect(eligibility.blocked_reason(nurtured)).to be_present
+      expect(eligibility.blocked_reason(nurtured, override: true)).to be_nil
+
+      worked = lead!(status: 'contacted')
+      expect(eligibility.blocked_reason(worked, override: true)).to be_nil
+
+      unreachable = lead!(email: nil, sms_inquiry_consent: false)
+      expect(eligibility.skip_info(unreachable)).to eq(reason: 'No usable email and no text consent', can_add: false)
+      expect(eligibility.blocked_reason(unreachable, override: true)).to eq('cannot be reached')
+      expect(eligibility.blocked_reason(lead!(is_converted: true), override: true)).to eq('became a customer')
+    end
+
     it 'never texts without consent or after an opt out' do
       no_consent = lead!(sms_inquiry_consent: false)
       expect(eligibility.reach(no_consent)).to have_attributes(text: false, email: true)

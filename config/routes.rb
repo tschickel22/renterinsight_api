@@ -2987,6 +2987,7 @@ Rails.application.routes.draw do
           post :resume
           get :results
           get :skipped
+          post :add_targets
           delete 'targets/:target_id', action: :remove_target
           patch 'targets/:target_id', action: :review_target
         end

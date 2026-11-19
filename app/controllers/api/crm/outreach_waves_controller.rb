@@ -47,16 +47,64 @@ module Api
         chosen = @wave.outreach_targets.select(:lead_id)
         matching = Audiences::FilterCompiler.new(company: @company, source_type: 'Lead', filter_tree: @wave.filter_tree).scope.where.not(id: chosen)
         eligibility = Outreach::Eligibility.new(@company)
-        leads = matching.order(updated_at: :desc).limit(100).to_a
+        leads = matching.order(updated_at: :desc).limit(200).to_a
         render json: {
           total: matching.count,
+          can_add: ADDABLE.include?(@wave.status),
           skipped: leads.map do |lead|
+            found = eligibility.skip_info(lead)
+            info = found || { reason: ready_reason(lead), can_add: true }
             { lead_id: lead.id, name: lead.full_name.presence || lead.email, company_name: lead.company_name,
-              reason: eligibility.skip_reason(lead) || 'Could be contacted, but was not picked this time' }
+              reason: info[:reason], can_add: info[:can_add], ready: found.nil? }
           end
         }
       rescue Audiences::FilterCompiler::CompilationError => e
         render json: { skipped: [], total: 0, error: e.message }
+      end
+
+      # Adds left-out leads by hand. Soft rules (on a nurture, recently active,
+      # not New) are overridden and recorded on the target; hard ones (no
+      # consent, unsubscribed, an open Quinn conversation, a demo booked, another
+      # live wave) still refuse. Added people are always contacted, not held back.
+      def add_targets
+        return unless authorize_action!('company_settings', 'update')
+        return unless outreach_allowed!
+        return if performed?
+        unless ADDABLE.include?(@wave.status)
+          return render(json: { error: 'People can be added only before the wave starts.' }, status: :unprocessable_entity)
+        end
+
+        eligibility = Outreach::Eligibility.new(@company)
+        matching = Audiences::FilterCompiler.new(company: @company, source_type: 'Lead', filter_tree: @wave.filter_tree).scope
+        ids = Array(params[:lead_ids]).map(&:to_i).uniq.first(200)
+        added = []
+        refused = []
+        rank = @wave.outreach_targets.maximum(:rank).to_i
+        matching.where(id: ids).where.not(id: @wave.outreach_targets.select(:lead_id)).find_each do |lead|
+          info = eligibility.skip_info(lead)
+          next refused << { lead_id: lead.id, reason: info[:reason] } if info && !info[:can_add]
+
+          reach = eligibility.reach(lead)
+          rank += 1
+          @wave.outreach_targets.create!(
+            company_id: @company.id, lead_id: lead.id, rank: rank, test_group: 'contact', channel: reach.email ? 'email' : 'text',
+            ai_reason: info ? "Added by you. #{info[:reason]}".truncate(160) : 'Added by you',
+            override_reason: info&.dig(:reason), overridden_by_user_id: (current_user.id if info)
+          )
+          added << lead.id
+        end
+
+        if added.any?
+          case @wave.status
+          when 'failed' then @wave.update!(status: 'audience_ready', build_error: nil)
+          when 'review'
+            @wave.update!(status: 'drafting')
+            OutreachDraftOpenersJob.perform_later(@wave.id)
+          end
+        end
+        render json: { added: added.size, refused: refused, wave: wave_json(@wave.reload) }
+      rescue Audiences::FilterCompiler::CompilationError => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # Takes a person out before messages are written.
@@ -160,6 +208,17 @@ module Api
         false
       end
 
+      ADDABLE = %w[failed audience_ready review].freeze
+
+      # Nothing rules this lead out now: say why they are not in the wave.
+      def ready_reason(lead)
+        if [lead.created_at, lead.updated_at].compact.max > @wave.created_at
+          'Ready to contact. Added or changed after this audience was built'
+        else
+          "Ready to contact. Not picked because the wave was full at #{@wave.target_size} contacted and #{@wave.target_size} held back"
+        end
+      end
+
       def set_wave
         @wave = @company.outreach_waves.find(params[:id])
       end
@@ -178,7 +237,7 @@ module Api
       def target_json(target)
         lead = target.lead
         item = target.draft_content_item_id && @company.outreach_content_items.find_by(id: target.draft_content_item_id)
-        target.as_json(only: %i[id lead_id test_group status rank ai_reason channel draft_subject draft_body draft_error stop_reason]).merge(
+        target.as_json(only: %i[id lead_id test_group status rank ai_reason channel draft_subject draft_body draft_error stop_reason override_reason]).merge(
           'name' => Assistant::Learn.display_name(lead), 'company' => lead.company_name, 'state' => lead.state, 'source' => lead.source&.name,
           'video_title' => item&.title
         )
