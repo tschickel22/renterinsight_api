@@ -172,7 +172,7 @@ articles:
 
       ## While it asks
 
-      The bank sometimes takes a few seconds to answer. The screen shows **Asking the bank...** and checks again by itself until the balance arrives. To ask again later, click **Get balances from the banks again**.
+      The bank usually answers within a few seconds. The screen shows **Asking the banks...** and checks again by itself for up to about 40 seconds. If a bank still hasn't answered, the screen stops asking and says **The bank has not sent its balance yet. Type it from your statement, or ask the banks again later.** Type the balance from your statement, or click **Get balances from the banks again** after about 15 minutes.
 
       ## A balance you typed
 
