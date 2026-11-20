@@ -54,7 +54,6 @@ RSpec.describe 'QuickBooks switch: invoices made during the trial', type: :reque
     inv.save!
     unless status == 'draft'
       inv.update!(status: status)
-      Accounting::InvoicePostingService.new(inv.reload).post! # after_commit never runs in transactional specs
     end
     inv.reload
   end

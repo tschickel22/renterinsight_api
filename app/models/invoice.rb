@@ -61,6 +61,7 @@ class Invoice < ApplicationRecord
   before_validation :set_default_status, on: :create
   before_save :stringify_jsonb_keys
   before_save :calculate_totals
+  before_save :note_status_change_for_posting
   after_save  :finalize_line_taxes_if_needed
   after_save  :update_status_based_on_payments
   after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
@@ -69,14 +70,25 @@ class Invoice < ApplicationRecord
 
   def should_auto_post_to_accounting?
     return false if accounting_import_id.present?
-    return false unless previous_changes.key?('status') || saved_change_to_status?
+    return false unless @status_changed_since_commit || previous_changes.key?('status') || saved_change_to_status?
     %w[finalized sent viewed partial paid overdue].include?(status)
   end
 
   def auto_post_to_accounting
+    @status_changed_since_commit = false
     Accounting::InvoicePostingService.new(self).post!
   rescue => e
     record_gl_post_failure!("#{e.class}: #{e.message}")
+  end
+
+  # Remembers that the status changed in this transaction. The after_commit
+  # check above used to read previous_changes alone, but
+  # update_status_based_on_payments locks the row (with_lock reloads it)
+  # after every save, which empties previous_changes before the commit. So
+  # since 2026-07-14 marking an invoice sent never posted it; it reached the
+  # books only when a payment posted against it.
+  def note_status_change_for_posting
+    @status_changed_since_commit = true if new_record? || will_save_change_to_status?
   end
   
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
