@@ -5,7 +5,9 @@
 # {{brand}}; it is filled in when the article is shown. No em or en dashes.
 #
 # Screen names and button labels here were checked against the app as of
-# 2026-10-30 (E68 steps 1 to 7, E87). Change the text with the screen.
+# 2026-10-30 (E68 steps 1 to 7, E87), and again 2026-11-20 for E106 to E109
+# (who hears, scope changes, contractor dates, costs, the projects calendar).
+# Change the text with the screen.
 
 supersedes:
   # Seeded April 2026 for the old project screens; replaced by the set below.
@@ -29,15 +31,20 @@ articles:
       - **Projects > Review Updates**: everything waiting on someone, such as contractor invoices, bids to award and change orders. See [Review Updates](review-updates).
       - **Projects > Bids & Quotes**: every bid and installer quote across all projects. See [Bids & Quotes](bids-and-quotes).
       - **Projects > Linked Installers**: install companies that run their own {{brand}} company. See [Link an installer](link-an-installer).
+      - **View calendar** on **All Projects**: phases and tasks with dates on the calendar. See [See projects on the calendar](projects-calendar).
       - **Administration > Company Settings > Project Management**: project templates and project settings.
+
+      {{shot: projects-grid "All Projects"}}
 
       ## Inside a project
 
       On a deal's **Progress** tab the project has five tabs:
 
+      {{shot: project-detail "Inside a project"}}
+
       1. **Phases**: the phases and their tasks, who owns each, dates, and the buttons to start, complete or skip a phase.
       2. **Bids**: bid requests sent to contractors for a phase.
-      3. **Costs & Budget**: the budget per phase, committed costs (awarded bids, installer jobs) and actual costs from bills and expenses.
+      3. **Costs & Budget**: the budget per phase and how much is left to assign, committed costs (awarded bids, installer jobs) and actual costs from bills, expenses and bank feed lines. **Add Cost** asks how a cost was paid. See [Track job costs on a project](project-job-costs).
       4. **Materials**: materials for the job.
       5. **Documents**: files and photos, by phase.
 
@@ -143,10 +150,27 @@ articles:
 
       Expand a phase on the **Phases** tab to see its tasks.
 
+      {{shot: project-detail "A project's phases and tasks"}}
+
       - Tick the box beside a task when it is done.
       - Click **Assign** under a task to give it to an employee, or **Contractor** to give it to a contractor. The contractor gets an email with a link to the task in the Contractor Portal.
       - Click **Add task** at the bottom of a phase to add a step to this project only.
-      - Click **Edit dates** to change a phase's estimated days, start and completion dates.
+      - Click **Edit dates** to change a phase's estimated days, start and completion dates. Changing a task's dates moves the later tasks and phases too.
+
+      ## Who is told about a change
+
+      Before you save a date change, finish a phase, or add or change a task, the screen says who will hear about it:
+
+      - A linked installer running any phase the change moves is told by bell, email and Review Updates.
+      - The customer is told when a phase starts or finishes, if the project or the phase is set to email them. The customer is never told about date changes.
+      - Contractors on the work are named as **not told**, so you can call them.
+
+      ## When a contractor accepts with dates
+
+      A contractor accepts a task in the portal with a start date, how many work days it takes (Monday to Friday) and notes.
+
+      - If the task has no dates yet, theirs go straight on it.
+      - If it already has dates, theirs wait for you. The task shows an amber note with their dates and notes, and **Review Updates** has a **Contractor dates to confirm** item. Click **Use their dates** or **Keep mine**. The contractor is emailed which you chose.
 
       ## Complete a phase
 
@@ -164,6 +188,8 @@ articles:
       ## Phases a linked installer runs
 
       A phase you sent to a linked installer follows their progress. Its tasks can't be ticked on your side: hover or tap a box to see who ticks them off. You can still change its install dates, and the installer is told when you do.
+
+      A task you add or change on that phase stays on your project unless you tick **Send it to** the installer. Sent, it is a scope change: it lands on their copy of the job, and that phase can't start on their side until they send a change order or say there is no charge. You hear their answer in **Review Updates**.
 
   - slug: get-bids-on-a-phase
     module: projects
@@ -190,9 +216,11 @@ articles:
       - A contractor can also **Pass on this job**. Their card then shows they passed.
       - Click **Ask more** to send the same request to more contractors.
 
+      {{shot: projects-bids "Bids & Quotes"}}
+
       ## A bid by phone or email
 
-      Click **Enter bid** on that contractor's card, type the amount, when they can start and the days of work, and save. It is marked as entered by you.
+      Click **Enter bid** on that contractor's card, type the amount, when they can start and the work days (Monday to Friday), and save. It is marked as entered by you.
 
       Next: [Award a bid](award-a-bid).
 
@@ -211,11 +239,14 @@ articles:
       4. Optionally write a **Note** to the winner: start date, site contact, gate code, anything they need to know.
       5. Confirm.
 
+      {{shot: project-detail "A project's phases"}}
+
       When you award:
 
       - The phase (or the whole project) is assigned to the winner, and their tasks that haven't started go to them.
       - A cost line for the bid amount is added to **Costs & Budget** as committed. Their invoice from the portal bills against it.
       - The winner gets an email and a text with your note. The others are told they weren't picked.
+      - The bid's start date and work days go on the phase. If the phase already has dates, the award screen shows both, with a box to use the bid's dates instead. Leave it unticked to keep yours.
 
       ## Change a contractor's bid
 
@@ -270,7 +301,7 @@ articles:
     position: 208
     excerpt: Everything on your projects that is waiting on someone, in one place, closing by itself once it is dealt with.
     content: |
-      **Projects > Review Updates** is the one place for project work that needs you: contractor invoices to approve, bids to award, installer quotes and change orders, rate cards, jobs offered to you, and more. You don't need to watch the bell.
+      **Projects > Review Updates** is the one place for project work that needs you: contractor invoices to approve, bids to award, installer quotes and change orders, contractor dates to confirm, scope changes, rate cards, jobs offered to you, and more. You don't need to watch the bell.
 
       ## The tabs
 
@@ -278,7 +309,9 @@ articles:
       - **Closed**: items that were dealt with, with who did it and when.
       - **Contractor work**: completed contractor work waiting for your review.
 
-      Each row has its own action button, such as **Review bill**, **Compare and award**, **Approve or decline** or **Accept or decline**.
+      {{shot: projects-review-updates "Review Updates"}}
+
+      Each row has its own action button, such as **Review bill**, **Compare and award**, **Approve or decline** or **Accept or decline**. A **Contractor dates to confirm** item has **Use their dates** and **Keep mine** right on it.
 
       ## Mine or everyone
 
@@ -311,7 +344,11 @@ articles:
       - Jobs sent to a linked installer, accepted, declined or taken back.
       - Rate cards, quotes and change orders sent, approved or declined.
       - Install dates moved by the other company.
+      - A contractor accepting a task with dates, or proposing dates that differ from yours.
+      - A scope change sent to your installer, and their answer (a change order or no charge).
       - A daily reminder for anything needing action that has waited a day.
+
+      Before you save a change on a project, the screen tells you who will hear about it. See [Work through tasks and complete phases](tasks-and-phases).
 
       ## Your switches
 
@@ -319,6 +356,8 @@ articles:
       2. Open the **Notifications** tab and find the **Projects** group.
       3. Each event has its own switches for the bell, email and text (and push in the mobile app). Turn off what you don't want.
       4. Click **Save Changes**. **Reset to Defaults** puts everything back.
+
+      {{shot: settings-notifications "Notification switches"}}
 
       By default, anything waiting on you or answering you is on for email and text, and things that are only for your information stay in the app. Review Updates always lists open items, whatever your switches say.
 
@@ -328,7 +367,7 @@ articles:
 
       ## Contractors
 
-      Contractors aren't users, so they have no switches. They get emails at the address on their vendor record, and texts only if they agreed to texts. If a contractor's email can't be delivered, {{brand}} tells you which one when you send the assignment.
+      Contractors aren't users, so they have no switches. They get emails at the address on their vendor record, and texts only if they agreed to texts. If a contractor's email can't be delivered, {{brand}} tells you which one when you send the assignment. They are emailed when you confirm or keep your dates over theirs. They are not told when you move dates on the project: call them.
 
   - slug: contractor-invoices-to-bills
     module: projects
@@ -341,7 +380,7 @@ articles:
 
       1. The contractor opens the job in the Contractor Portal and clicks **Send an invoice**, attaching the invoice (PDF or photo), the total, and which part of the job it is for.
       2. A **draft bill** from that vendor appears in **Accounting > Bills**, linked to the project and phase, and an item **Contractor invoice** waits in **Review Updates**. The project owner gets a bell notice, an email and a text.
-      3. Open it (the **Review bill** button in Review Updates goes straight there), check it and approve it.
+      3. Open it (the **Review bill** button in Review Updates goes straight there), check it and approve it. You can also click **Approve** on its line on the project's **Costs & Budget** tab.
 
       Approving moves the phase's cost from committed to actual on **Costs & Budget**, and closes the Review Updates item. Voiding or deleting the bill closes it too.
 
@@ -349,32 +388,69 @@ articles:
 
       Pay the bill as usual, including printing a check. When you print checks, the starting number is the next one not yet printed from that bank account. If you type a number that was already used, {{brand}} names the number that clashes and the next free one, and prints none of the batch.
 
-      > **Note:** Whether a cost line posts through bills or is only tracked is set under **Company Settings > Project Management**, **Project Costs and Bills**.
+      {{shot: accounting-bills "Bills & Payments"}}
+
+      > **Note:** Whether costs you add on a project can make a bill or an expense, or are only tracked, is set under **Company Settings > Project Management**, **Project Costs and Bills**. Contractor invoices from the portal become draft bills either way.
 
   - slug: project-job-costs
     module: projects
     title: Track job costs on a project
     article_type: how_to
     position: 211
-    excerpt: Put bills and expenses on a project and phase, and see budget, committed, billed and paid in two reports.
+    excerpt: Add costs on a project and say how they were paid, put bills, expenses and bank lines on a job, and see budget, committed, billed and paid.
     content: |
-      ## Put a cost on a project
+      Every project has a **Costs & Budget** tab, on the deal's **Progress** tab.
 
-      **A bill:** in **Accounting > Bills**, pick the **Project** in the bill header. A phase picker appears; choose the phase, or leave **No particular phase**. Each line takes the project, and a cost line appears on the project's **Costs & Budget** tab once the bill posts.
+      ## Budget
 
-      **An expense:** click **Record Expense**, pick the **Project**, then the phase. The category and vendor lists can be typed into to search. The cost line on the project shows the vendor, and its type comes from the vendor: a contractor becomes **Subcontractor**, a supplier **Materials**, anything else **Other**. Voiding the expense removes the line.
+      Click **Budget** to set the project budget, and a phase's amount to set its budget. While you split the budget, **Budget by Phase** says how much is assigned and how much is left; editing a phase offers **Use all of it here**. If every phase has a budget and they still don't add up to the project budget, or the phases go over it, a note says so with **Make the project budget** the phase total. Nothing stops you saving either way.
 
-      ## Committed and actual
+      ## Add a cost on the project
 
-      - **Committed**: work agreed but not billed yet, such as an awarded bid or a job sent to a linked installer.
-      - **Actual**: bills and expenses posted against the project.
+      Click **Add Cost** and answer **How was this paid?**:
+
+      - **Not paid yet**: makes a draft bill for the vendor. Pick the vendor first. Click **Approve** on the line when it's right (if you can approve bills), or approve it in **Accounting > Bills**. It counts as owed once approved.
+      - **Already paid**: records the expense now from the bank account or card you pick, to the expense account you pick. No bill, no approval step. Only people who can record expenses see this choice.
+      - **Tracking only**: counts on the job, but stays out of your books. Use it for your own crew's time, for example.
+
+      The first two show only when **Company Settings > Project Management**, **Project Costs and Bills** is on. With it off, every cost you add on a project is tracking only, and the tab links to the setting if you can change it.
+
+      If the same vendor and amount is already on the job, Add Cost warns you before you add it again.
+
+      ## Costs entered in Accounting
+
+      These all land on the project's cost list once, with where they came from:
+
+      - **A bill**: pick the **Project** in the bill header, then the phase, or set a project on a line. The line appears once the bill posts. If you'd already added the same vendor and amount on the project as tracking only, the bill takes that line over instead of adding a second one, and says so when you save it.
+      - **Record Expense**: pick the **Project**, then the phase.
+      - **A bank or card feed line**: categorize it to an expense account with the **Project** picked, or let a bank rule name the project. It is Paid at once.
+      - **A recurring entry**: pick a **Job** on its expense line; each run adds to the job.
+      - **A journal entry** with the project on an expense line.
+
+      A contractor's invoice from the portal arrives as a draft bill on its line. See [Contractor invoices become draft bills](contractor-invoices-to-bills).
+
+      ## Status
+
+      - **Committed**: agreed but not billed yet, such as an awarded bid, a job sent to a linked installer or a draft bill.
+      - **Approved, owed**: the bill is approved and not paid.
+      - **Paid**: paid, or recorded as already paid.
+      - **Tracking only**: on the job, not in your books.
+
+      A line's status follows its bill or its entry. A cost that is in your books can't be deleted or changed on the project: the screen says where to change it (the bill, the bank line or the entry).
+
+      ## No counting twice
+
+      - A bank or card line for money already recorded (an expense recorded as already paid, or a bill payment, up to a week either way) is not posted again: Categorize says it's already in the books and offers to match it. A bank rule leaves such a line for you, with the reason on it.
+      - A bank line that pays an open bill exactly is stopped from being categorized as cost again. Pay the bill and match the line to the payment, or tell it the line is something else.
 
       ## The reports
 
       Under **Reports**, in the **Projects** group:
 
+      {{shot: reports-project-budget "Project Budget vs. Actual"}}
+
       - **Project Profitability**: per project, the sale, front gross, job cost, margin and budget variance.
-      - **Project Budget vs. Actual**: per project and phase, the budget, committed, billed, paid and remaining.
+      - **Project Budget vs. Actual**: per project and phase, the budget, committed, billed, paid and remaining. Budget not on any phase has its own line, so the report adds up.
 
       Both work on a phone: rows become cards.
 
@@ -427,12 +503,25 @@ articles:
          - **Ask them to quote**: they price it when they accept, and you approve their price before any of it starts.
       5. Add a **Note for the installer** if you like, and send.
 
+      {{shot: linked-installers "Linked Installers"}}
+
+      ### Share the quote details
+
+      Turn on **Share quote details with the installer** on the deal's **Progress** tab, under the stages. The installer gets a **Quote details** file listing every item on the deal's quote: description, category, quantity and notes, so they know exactly what to install.
+
+      - It never shows a price, your cost or a total. Credits, fees such as freight, and payment lines are left off.
+      - It uses the accepted quote, or the latest one if none is accepted.
+      - Only the installer gets it. Your buyer and your contractors working tasks do not see it.
+      - It reaches them when they accept the job, whether you sent the whole project or only some phases.
+      - When the quote's items change, the file is made again. Turn the switch off to take it back.
+
       The installer's admins get an email and a text. The job shows **Waiting for them to accept**, and its price shows as a committed cost on **Costs & Budget** until their bill arrives.
 
       ## While they work it
 
       - Status comes back by itself: when they start or finish a phase, yours follows, and your customer gets the usual phase update under your name.
-      - Either side can change the install dates. The other side sees the new date and is told.
+      - Either side can change the install dates. The other side sees the new date and is told. The screen says so before you save.
+      - A task you add or change on a phase they run stays on your project unless you tick **Send it to** them. Sent, it is a scope change they answer with a change order or **No charge**; that phase can't start on their side until they answer.
       - Their photos come across unless they untick them. Other files cross only when ticked **Share with**. Files you share go to them the same way.
       - A quote or change order from them waits in **Review Updates** and on **Bids & Quotes**. Approve it, or decline with a reason. See [Rate cards, quotes and change orders](installer-prices).
 
@@ -475,6 +564,10 @@ articles:
 
       A lower price isn't a negative change order: send a new price instead. The installer can only bill the approved total (the price plus approved change orders).
 
+      ## Scope changes from the dealer
+
+      When the dealer adds or changes a task on a phase the installer runs and sends it, the installer sees **changed the scope** on the job, with **Send a change order** (filled in from the change) and **No charge**. That phase can't start until they answer. The dealer hears the answer in **Review Updates**, and answered changes stay listed on the job.
+
   - slug: installer-working-jobs
     module: projects
     title: For installers, working jobs from dealers
@@ -497,7 +590,9 @@ articles:
 
       - Start and complete phases and tick off tasks as usual. The dealer's project follows.
       - Tasks you add yourself stay in your company.
+      - When the dealer sends you a task they added or changed, it appears on your copy, with **Send a change order** or **No charge** on the job's card under **Linked Dealers**. The phase can't start until you answer.
       - Photos you upload are shared with the dealer unless you untick them. Other files cross only when ticked.
+      - If the dealer shares the quote details, a **Quote details** file sits with the job's files. It lists every item on the dealer's quote (description, category, quantity and notes) so you know what goes in, without any prices. It is replaced when the dealer's quote changes.
 
       ## See all your jobs
 
@@ -521,7 +616,7 @@ articles:
 
       Under **Bid requests** they see the work and the town (not your customer's name until they win it), the scope and tasks, and the due date.
 
-      - Enter **Your price**, **Can start**, **Days of work** and **Notes**, then **Send bid**. They can change it and send it again until you decide.
+      - Enter **Your price**, **Can start**, **Work days** (Monday to Friday) and **Notes**, then **Send bid**. They can change it and send it again until you decide. If they win, their start date and work days can go on the phase.
       - Add files with **Add files** (a quote sheet, photos, specs). You see them with the bid.
       - Or click **Pass on this job**.
 
@@ -529,7 +624,9 @@ articles:
 
       ## Tasks and work reviews
 
-      Assigned tasks are listed with the job. They update the status, add notes and photos, and click **Submit for Review** when the work is done. It waits in your **Review Updates**, **Contractor work** tab, for you to approve or ask for changes.
+      Assigned tasks are listed with the job. On a new task they click **Accept Task** and give a start date, how many work days it takes (Monday to Friday) and notes, and see the finish date. The dates go on your project at once, or, if you already set dates, wait for you to **Use their dates** or **Keep mine**; the task tells them which, and they are emailed.
+
+      They then update the status, add notes and photos, and click **Submit for Review** when the work is done. It waits in your **Review Updates**, **Contractor work** tab, for you to approve or ask for changes.
 
       ## Invoices
 
@@ -538,3 +635,28 @@ articles:
       ## Texts
 
       Contractors get emails about new work. They get texts as well once they agree to texts on their vendor record.
+
+  - slug: projects-calendar
+    module: projects
+    title: See projects on the calendar
+    article_type: how_to
+    position: 212
+    excerpt: Show project phases and tasks on the calendar, pick which projects, and put your project work on your phone or computer calendar.
+    content: |
+      ## On the {{brand}} calendar
+
+      1. Go to **Projects > All Projects** and click **View calendar**, or open **Calendar** and turn on **Project Phases** and **Project Tasks**.
+      2. Phases and tasks with dates show as bars across their days, one color per project. Click one to open the project.
+      3. Pick one or several projects in the project list, or leave **All projects**.
+      4. **Back to Project Management** returns you; **Show everything** brings back your other events.
+
+      **My calendar** shows phases on projects you own or run, plus any phase or task given to you. **Team** shows the same for your team, and **All** shows every phase and dated task. On a phone the calendar is a list by day.
+
+      ## On your phone or computer calendar
+
+      In **Account Settings > Availability**, **Put {{brand}} on your calendar** gives you a private link to add to Google Calendar, Outlook or an iPhone. Under **What the link carries**, pick **Appointments and project work** to include your project phases and tasks as all-day items.
+
+      It goes one way: changes in your own calendar don't come back. Your calendar app decides how often it reads the link; Google can take several hours.
+
+      **Bring your calendar into {{brand}}** is the other direction: paste your own calendar's private address so Quinn AI books visits around your busy times, and choose whether your events also show on your {{brand}} calendar. Nothing is written back to your calendar.
+
