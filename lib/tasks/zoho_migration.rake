@@ -36,12 +36,13 @@ namespace :zoho do
     # USER_EMAIL_REWRITE="@renterinsight.com=@ri-staging.invalid" matches owners to stand-in users on a test company.
     rewrite = ENV['USER_EMAIL_REWRITE'].presence&.split('=', 2)
     # SKIP_MATCHES_IN=14: leave out anything that tenant already has (and what hangs off it).
+    # PIPELINE=merge: write the bundle's stages even though the company has deals, keeping theirs.
     skip_in = ENV['SKIP_MATCHES_IN'].present? ? Company.find(ENV['SKIP_MATCHES_IN']) : nil
     puts "Bundle #{File.basename(path)} mapped #{data['mapped_at']}; loading into company #{company.id} #{company.name}"
     Migrations::Zoho::Loader.new(
       company: company, data: data, batch: ENV['BATCH'].presence || "zoho_#{Time.current.strftime('%Y%m%d_%H%M')}",
       dry_run: ENV['DRY_RUN'].present?, steps: steps, fallback_user: fallback, user_email_rewrite: rewrite,
-      skip_matches_in: skip_in
+      skip_matches_in: skip_in, pipeline: ENV['PIPELINE'].presence
     ).run
   end
 

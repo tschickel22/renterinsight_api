@@ -323,6 +323,18 @@ RSpec.describe Migrations::Zoho::Loader, type: :service do
       expect(Setting.get('Company', company.id, 'pipeline_stages', nil)).to be_nil
       expect(result[:report]['pipeline_stages'][:written]).to eq(0)
     end
+
+    it "with pipeline: 'merge' writes the stages and keeps the one its own deal sits in" do
+      acct = company.accounts.create!(name: 'Own customer')
+      own = company.deals.create!(name: 'Own deal', account: acct, stage: 'negotiation', value: 0)
+      result = load!(pipeline: 'merge')
+
+      keys = Setting.get('Company', company.id, 'pipeline_stages', nil).map { |s| s['key'] }
+      expect(keys).to eq(%w[gartner_ppl_lead negotiation closed_won closed_lost])
+      expect(result[:report]['pipeline_stages']).to include(kept_in_use: 1)
+      expect(own.reload.stage).to eq('negotiation')
+      expect(company.deals.where.not(id: own.id).pluck(:stage)).to contain_exactly('closed_won', 'closed_lost')
+    end
   end
 
   it 'keeps a phone with an extension, moving the extension to the notes' do
