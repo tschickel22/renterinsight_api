@@ -5,7 +5,7 @@
 # {{brand}}; it is filled in when the article is shown. No em or en dashes.
 #
 # Screen names and button labels here were checked against the switch as of
-# 2026-11-12 (trial and go live, statement balances from bank feeds, customer and vendor
+# 2026-11-12, and the Invoices made during the trial step on 2026-11-20 (trial and go live, statement balances from bank feeds, customer and vendor
 # matching, the QuickBooks sync turned off at posting). Change the
 # text with the screen. The video "Switch from QuickBooks: trial, then go live"
 # shows the same flow.
@@ -131,6 +131,10 @@ articles:
 
       When every **Difference** is zero, your first reconciliation in {{brand}} will balance.
 
+      ## Going live from a trial: Invoices made during the trial
+
+      This step only appears when you go live from a trial. It lists every invoice made in {{brand}} during the trial and dated on or before the cutover, and asks what each one is in QuickBooks. See [Go live after a QuickBooks trial](quickbooks-trial-go-live).
+
       ## 6. Preview and post
 
       The preview puts the opening entry next to the **QuickBooks trial balance** for the same day, and checks that open invoices and bills match receivables and payables in QuickBooks. Anything that must be fixed first is listed under **Fix these before posting**.
@@ -195,7 +199,7 @@ articles:
     title: Go live after a QuickBooks trial
     article_type: how_to
     position: 115
-    excerpt: What to do during a QuickBooks trial, how to go live at a month end, and what going live voids so nothing counts twice.
+    excerpt: What to do during a QuickBooks trial, how to go live at a month end, what going live voids, and how to answer for invoices made during the trial so nothing counts twice.
     content: |
       A trial switch brings your books over while QuickBooks stays your books. A banner across Accounting says so: **Trial switch from QuickBooks**, with the trial's cutover date.
 
@@ -203,6 +207,7 @@ articles:
 
       - Keep entering your books in QuickBooks. It is still the real set.
       - Look around {{brand}}: your accounts, bills and payments, bank transactions. Deals, invoices and payments post here as normal so you see it working.
+      - Keep entering deals in {{brand}} as you normally would. When you go live you say, invoice by invoice, which ones are also in QuickBooks, so nothing has to be entered twice to be safe.
       - **Don't reconcile a bank or close a month in {{brand}}.** Either one stops the trial from being rolled back, and going live needs that.
       - The QuickBooks record sync stays off for the whole trial, so nothing you record here is sent to QuickBooks while you also enter it there. Bank feeds keep running.
 
@@ -226,13 +231,30 @@ articles:
 
       Nothing is deleted, and anything dated after the cutover stays. Entries that were already in {{brand}} before the trial are left alone.
 
+      ## Invoices made during the trial
+
+      Going live brings your open invoices over from QuickBooks as of the cutover. An invoice you made in {{brand}} during the trial and dated on or before the cutover could then be there twice, or, if it was never entered in QuickBooks, drop out of the books. So going live adds a step, **Invoices made during the trial**, that lists each one. Invoices dated after the cutover belong to {{brand}} and are not listed.
+
+      Click **Answer** on each one and pick what it is:
+
+      - **It is in QuickBooks too**: pick the QuickBooks invoice. That one is not brought over again; your invoice takes its place and owes what QuickBooks owed at the cutover. If yours owed more, it is brought down with a credit that does not touch the books.
+      - **Paid in full in QuickBooks**: it is closed here with a credit that does not touch the books.
+      - **Not in QuickBooks**: it stays on {{brand}}'s books, with its payments and its deal. QuickBooks' books for that month will not have it.
+      - **Not a real sale**: the invoice is cancelled. The deal itself is not changed.
+
+      When an invoice has the same customer and the same number or amount owing as one in QuickBooks, it is suggested. Click **Accept the suggestions** to take them all, then answer the rest. You can't go live until every invoice has an answer.
+
+      A draft can't be answered as in QuickBooks or paid there: finalize it first, or approve its deal, so its entries are settled with the rest.
+
+      Rolling back puts every invoice back the way it was.
+
       The preview also warns about any bank with no feed connected. Transactions after the cutover won't come in until you connect it, so connect within about 90 days so nothing is missed.
 
       Click **Go live**, and {{brand}} is your books from the day after the cutover.
 
       ## After going live
 
-      - An invoice or bill created in {{brand}} during the trial and dated on or before the cutover is also in QuickBooks. Its journal entry is voided, but the document itself stays. Delete the duplicate by hand.
+      - A bill created in {{brand}} during the trial and dated on or before the cutover is also in QuickBooks. Its journal entry is voided, but the bill itself stays. Delete the duplicate by hand. (Invoices are handled by the step above.)
       - Keep QuickBooks for looking up past years. Stop entering new transactions there.
 
       See also [Run the QuickBooks switch, step by step](quickbooks-switch-steps).
