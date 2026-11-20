@@ -16,6 +16,27 @@ module Outreach
       "#{Messaging::TrackingUrl.base}/o/v/#{sign([target.id, item.id])}"
     end
 
+    # A short form for texts: the long signed token alone ran about 130
+    # characters and pushed every text into a third segment.
+    SHORT = /\A(\d+)-(\d+)-([a-f0-9]{12})\z/
+
+    def short_video_url(target, item)
+      "#{Messaging::TrackingUrl.base}/o/v/#{target.id}-#{item.id}-#{short_mac(target.id, item.id)}"
+    end
+
+    def short_mac(target_id, item_id)
+      OpenSSL::HMAC.hexdigest('SHA256', Rails.application.key_generator.generate_key('outreach_short_links'), "#{target_id}-#{item_id}")[0, 12]
+    end
+
+    # [target_id, item_id] from either form, or nil.
+    def read_video(token)
+      if (m = token.to_s.match(SHORT))
+        return ActiveSupport::SecurityUtils.secure_compare(m[3], short_mac(m[1], m[2])) ? [m[1].to_i, m[2].to_i] : nil
+      end
+
+      read(token)
+    end
+
     # Their website checkup (OutreachTrackingController#report).
     def report_url(target)
       "#{Messaging::TrackingUrl.base}/o/r/#{sign([target.id, 'report'])}"

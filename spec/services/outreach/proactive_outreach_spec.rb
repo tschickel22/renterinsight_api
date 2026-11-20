@@ -319,7 +319,7 @@ RSpec.describe 'Proactive Outreach pilot' do
       expect(results[:daily].first).to include('sent' => 1, 'replied' => 1)
     end
 
-    it 'pauses on a spam complaint and after repeated unsubscribes' do
+    it 'notices a spam complaint' do
       target = target!(lead!, status: 'sent')
       target.record!('complained')
       expect(Outreach::Safety.new(wave).problem).to eq('a spam complaint came in')
@@ -401,6 +401,51 @@ RSpec.describe 'Proactive Outreach pilot' do
       expect(sender.send(:email_html, 'Hello.', nil)).to include('https://book.example.com/tom')
       sender.instance_variable_set(:@kind, 'reply')
       expect(sender.send(:email_html, 'Hello.', nil)).not_to include('book.example.com')
+    end
+  end
+
+  describe 'Tom pauses, texts stay short (2026-11-20)' do
+    it 'tells the sender about unsubscribes once and keeps the wave running' do
+      targets = Array.new(3) { target!(lead!, status: 'sent') }
+      targets.each_with_index { |t, i| t.record!('sent', channel: 'email', communication_id: 300 + i) }
+      targets.first(2).each { |t| t.record!('unsubscribed') }
+      allow(NotificationService).to receive(:create)
+
+      Outreach::WaveRunner.new(wave).run
+      Outreach::WaveRunner.new(wave.reload).run
+
+      expect(wave.reload.status).not_to eq('paused')
+      expect(wave.pause_reason).to be_nil
+      expect(NotificationService).to have_received(:create).once.with(hash_including(message: /2 people unsubscribed. It is still sending/))
+    end
+
+    it 'sends no more than two unanswered texts' do
+      reach = Outreach::Eligibility::Reach.new(text: true, email: true)
+      wave.update!(channels: 'both')
+      expect(wave.next_channel(reach, last: 'email', texts_sent: 1)).to eq('text')
+      expect(wave.next_channel(reach, last: 'email', texts_sent: 2)).to eq('email')
+      wave.update!(channels: 'text')
+      expect(wave.next_channel(reach, last: 'text', texts_sent: 2)).to be_nil
+    end
+
+    it 'uses a short video link in texts that only works for its person and video' do
+      target = target!(lead!)
+      url = Outreach::Tracking.short_video_url(target, item)
+      token = url.split('/o/v/').last
+      expect(token.length).to be < 30
+      expect(Outreach::Tracking.read_video(token)).to eq([target.id, item.id])
+      expect(Outreach::Tracking.read_video(token.sub(/-\d+-/, "-#{item.id + 1}-"))).to be_nil
+      expect(Outreach::Tracking.read_video(Outreach::Tracking.sign([target.id, item.id]))).to eq([target.id, item.id])
+    end
+
+    it 'holds opener texts to 200 characters but lets a reply say where their details came from' do
+      lead = lead!
+      long = "#{'Weekend leads go cold. ' * 10}Which day works?"
+      expect(Outreach::Guard.violation(long, channel: 'text', lead: lead, text_max: Outreach::Guard::FIRST_TEXT_MAX)).to include('200')
+      expect(Outreach::Guard.violation(long, channel: 'text', lead: lead)).to be_nil
+      answer = 'Your details came from the trade show list. Want me to take you off it?'
+      expect(Outreach::Guard.violation(answer, channel: 'text', lead: lead)).to be_present
+      expect(Outreach::Guard.violation(answer, channel: 'text', lead: lead, where_from: false)).to be_nil
     end
   end
 end

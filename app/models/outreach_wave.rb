@@ -39,9 +39,15 @@ class OutreachWave < ApplicationRecord
     order.select { |channel| allows?(channel) }.find { |channel| reach.public_send(channel) }
   end
 
+  # At most this many texts go to someone who has not answered (research,
+  # Tom 2026-11-20). After that, email only, or nothing on a text only wave.
+  MAX_UNANSWERED_TEXTS = 2
+
   # The next follow-up's channel: the other one when both are allowed and work.
-  def next_channel(reach, last:)
+  # texts_sent: texts already sent to them that they have not answered.
+  def next_channel(reach, last:, texts_sent: 0)
     usable = %w[email text].select { |channel| allows?(channel) && reach.public_send(channel) }
+    usable.delete('text') if texts_sent >= MAX_UNANSWERED_TEXTS
     return usable.first if usable.size < 2
 
     last.to_s == 'text' ? 'email' : 'text'

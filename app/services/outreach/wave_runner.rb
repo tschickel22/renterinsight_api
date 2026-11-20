@@ -32,8 +32,7 @@ module Outreach
       Sync.new(@wave).run
       return pause!('Proactive Outreach was turned off') unless @settings.active?
 
-      problem = Safety.new(@wave).problem
-      return pause!(problem) if problem
+      warn!(Safety.new(@wave).problem)
 
       send_openers
       send_follow_ups
@@ -54,6 +53,25 @@ module Outreach
       )
     rescue StandardError => e
       Rails.logger.error("[Outreach::WaveRunner] pause notice failed: #{e.message}")
+    end
+
+    # Tom pauses waves himself (2026-11-20): a problem is told to him once and
+    # the wave keeps going. Accepting the events means the same ones never warn
+    # again; new ones can.
+    def warn!(problem)
+      return unless problem
+
+      Safety.acknowledge!(@wave)
+      person = @settings.sender
+      return unless person
+
+      NotificationService.create(
+        recipient: person, notification_type: :assistant_handoff, company_id: @company.id,
+        message: "Proactive Outreach \"#{@wave.name}\": #{problem}. It is still sending; pause it on the Results tab if you want to.",
+        action_text: 'Open results', action_url: '/marketing/outreach', deliver_now: true
+      )
+    rescue StandardError => e
+      Rails.logger.error("[Outreach::WaveRunner] problem notice failed: #{e.message}")
     end
 
     def sent_today
@@ -124,8 +142,11 @@ module Outreach
       reason = @eligibility.stop_reason(target.lead, override: target.override_reason.present?)
       return target.stop!(reason) if reason
 
-      channel = @wave.next_channel(@eligibility.reach(target.lead), last: target.last_channel)
-      return target.stop!("cannot be reached by #{@wave.channels_label.downcase}") unless channel
+      texts = unanswered_texts(target)
+      channel = @wave.next_channel(@eligibility.reach(target.lead), last: target.last_channel, texts_sent: texts)
+      unless channel
+        return target.stop!(texts >= OutreachWave::MAX_UNANSWERED_TEXTS ? 'sent two texts with no answer' : "cannot be reached by #{@wave.channels_label.downcase}")
+      end
 
       plan = Sender::GAPS.size + 1
       result = Writer.new(target).follow_up(channel, number: target.touch_count, of: plan - 1, booking: Booking.new(target.conversation))
@@ -133,6 +154,14 @@ module Outreach
 
       Sender.new(target).deliver!(body: result.body, subject: result.subject, channel: channel, kind: 'follow_up', content_item: result.content_item,
                                   report: result.share_report)
+    end
+
+    # Texts since their last reply (follow-ups only run while they are quiet).
+    def unanswered_texts(target)
+      since = target.outreach_events.where(event_type: 'replied').maximum(:occurred_at)
+      sent = target.outreach_events.where(event_type: 'sent', channel: 'text')
+      sent = sent.where('occurred_at > ?', since) if since
+      sent.count
     end
 
     def finish_if_done
