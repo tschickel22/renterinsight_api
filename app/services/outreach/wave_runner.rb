@@ -80,6 +80,11 @@ module Outreach
         target.stop!(reason)
         return false
       end
+      unless @wave.allows?(target.channel) && @wave.opening_channel(@eligibility.reach(target.lead))
+        target.record!('skipped', metadata: { reason: "cannot be reached by #{@wave.channels_label.downcase}" })
+        target.stop!("cannot be reached by #{@wave.channels_label.downcase}")
+        return false
+      end
       return false unless claim(target, 'approved')
 
       Sender.new(target).deliver!(body: target.draft_body, subject: target.draft_subject, channel: target.channel, kind: 'opener',
@@ -119,22 +124,15 @@ module Outreach
       reason = @eligibility.stop_reason(target.lead, override: target.override_reason.present?)
       return target.stop!(reason) if reason
 
-      channel = next_channel(target)
+      channel = @wave.next_channel(@eligibility.reach(target.lead), last: target.last_channel)
+      return target.stop!("cannot be reached by #{@wave.channels_label.downcase}") unless channel
+
       plan = Sender::GAPS.size + 1
-      result = Writer.new(target).follow_up(channel, number: target.touch_count, of: plan - 1)
+      result = Writer.new(target).follow_up(channel, number: target.touch_count, of: plan - 1, booking: Booking.new(target.conversation))
       return target.update!(next_touch_at: 1.day.from_now) if result.problem
 
       Sender.new(target).deliver!(body: result.body, subject: result.subject, channel: channel, kind: 'follow_up', content_item: result.content_item,
                                   report: result.share_report)
-    end
-
-    # Opens by email (AudienceBuilder), then takes turns where both are allowed.
-    def next_channel(target)
-      reach = @eligibility.reach(target.lead)
-      return 'email' unless reach.text
-      return 'text' unless reach.email
-
-      target.last_channel == 'text' ? 'email' : 'text'
     end
 
     def finish_if_done

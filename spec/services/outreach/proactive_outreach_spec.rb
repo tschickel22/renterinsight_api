@@ -354,4 +354,53 @@ RSpec.describe 'Proactive Outreach pilot' do
       expect(Outreach::Safety.new(wave).problem).to be_nil
     end
   end
+
+  describe 'wave channels and message wording (2026-11-20)' do
+    it 'opens by the chosen channel and only reaches people it can' do
+      both = lead!(sms_inquiry_consent: true)
+      email_only = lead!(sms_inquiry_consent: false)
+      eligibility = Outreach::Eligibility.new(company)
+
+      wave.update!(channels: 'both', first_channel: 'text')
+      expect(wave.opening_channel(eligibility.reach(both))).to eq('text')
+      expect(wave.opening_channel(eligibility.reach(email_only))).to eq('email')
+
+      wave.update!(channels: 'text')
+      expect(wave.opening_channel(eligibility.reach(email_only))).to be_nil
+      expect(wave.next_channel(eligibility.reach(both), last: 'text')).to eq('text')
+
+      wave.update!(channels: 'both')
+      expect(wave.next_channel(eligibility.reach(both), last: 'text')).to eq('email')
+      expect(wave.channels_label).to eq('Text and email, text first')
+    end
+
+    it 'refuses list names, AI phrasing and company-name subjects' do
+      lead = lead!
+      expect(Outreach::Guard.violation('I came across your info through the Louisville 2026 list.', channel: 'email', lead: lead)).to be_present
+      expect(Outreach::Guard.violation('Weekend leads go cold by Monday. This fixes it!', channel: 'email', lead: lead)).to include('exclamation')
+      expect(Outreach::Guard.violation('Weekend leads go cold by Monday. This fixes it!', channel: 'email', lead: lead, style: false)).to be_nil
+      expect(Outreach::Guard.violation('Weekend leads go cold by Monday. The video shows the fix.', channel: 'email', lead: lead)).to be_nil
+      expect(Outreach::Guard.subject_violation('Quick question for Haven Homes', lead: lead, company: company)).to be_present
+      expect(Outreach::Guard.subject_violation("#{company.name} for you", lead: lead, company: company)).to be_present
+      expect(Outreach::Guard.subject_violation('weekend leads', lead: lead, company: company)).to be_nil
+    end
+
+    it 'never tells the writer where the lead came from' do
+      source = Source.create!(company_id: company.id, name: 'Louisville 2026')
+      lead = lead!(source_id: source.id)
+      prompt = Outreach::Writer.new(target!(lead)).send(:system_prompt, 'email', 'task')
+      expect(prompt).not_to include('Louisville 2026')
+      expect(prompt).not_to include('Came from')
+    end
+
+    it 'puts the booking page in opener and follow-up emails, not replies' do
+      tom.update!(booking_url: 'https://book.example.com/tom')
+      settings.update!('sender_user_id' => tom.id)
+      sender = Outreach::Sender.new(target!(lead!))
+      sender.instance_variable_set(:@kind, 'opener')
+      expect(sender.send(:email_html, 'Hello.', nil)).to include('https://book.example.com/tom')
+      sender.instance_variable_set(:@kind, 'reply')
+      expect(sender.send(:email_html, 'Hello.', nil)).not_to include('book.example.com')
+    end
+  end
 end

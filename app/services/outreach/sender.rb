@@ -20,6 +20,7 @@ module Outreach
       raise NotAllowed, 'Proactive Outreach is off for this company' unless @settings.active?
 
       conversation = conversation!
+      @kind = kind
       communication = channel.to_s == 'email' ? email!(conversation, body, subject, content_item) : text!(conversation, body, kind, content_item)
       @target.record!('sent', channel: channel, communication_id: communication&.id,
                               metadata: { kind: kind, content_item_id: content_item&.id }.compact)
@@ -77,10 +78,21 @@ module Outreach
       paragraphs = body.to_s.split(/\n{2,}/).map { |p| "<p>#{esc.call(p).gsub("\n", '<br>')}</p>" }.join
       video = item ? %(<p><a href="#{esc.call(Tracking.video_url(@target, item))}">Watch: #{esc.call(item.title)}</a></p>) : ''
       video += %(<p><a href="#{esc.call(Tracking.report_url(@target))}">See your website checkup</a></p>) if @report
+      booking = booking_link
+      video += %(<p><a href="#{esc.call(booking)}">Pick a time for a #{@settings['demo_minutes'].to_i} minute demo</a></p>) if booking
       signature = [@settings['persona_name'], @settings['persona_title'], @company.name].compact_blank.map { |l| esc.call(l) }.join('<br>')
       footer = %(<p style="margin-top:24px;font-size:12px;color:#6b7280;">#{esc.call(@company.name)}, #{esc.call(@settings['postal_address'])}<br>) +
                %(<a href="#{esc.call(Tracking.unsubscribe_url(@target))}" style="color:#6b7280;">Unsubscribe</a></p>)
       "<p>Hi#{" #{esc.call(first)}" if first.present?},</p>#{paragraphs}#{video}<p>#{signature}</p>#{footer}"
+    end
+
+    # Openers and follow-ups by email always carry the sender's booking page
+    # (Tom, 2026-11-20). Replies offer real times instead.
+    def booking_link
+      return nil if @kind.to_s == 'reply'
+
+      url = @settings.sender&.booking_url.to_s.strip
+      url.match?(%r{\Ahttps?://}i) ? url : nil
     end
 
     def note_sent(channel, kind)

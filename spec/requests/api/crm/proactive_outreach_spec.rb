@@ -199,6 +199,25 @@ RSpec.describe 'Proactive Outreach waves', type: :request do
     TenantModuleOverride.create!(company: company, module_key: 'marketing.proactive_outreach', is_enabled: true)
   end
 
+  it 'changes a wave to text only before it starts: email-only people leave, written emails are written again' do
+    grant!
+    ActiveJob::Base.queue_adapter = :test
+    wave = company.outreach_waves.create!(name: 'W', status: 'review')
+    texter = company.leads.create!(first_name: 'T', last_name: 'X', email: 't@example.com', phone: '3035550111', owner_id: admin.id, status: 'new', sms_inquiry_consent: true)
+    drafted = wave.outreach_targets.create!(company_id: company.id, lead_id: texter.id, channel: 'email', status: 'approved', draft_body: 'Hi.')
+    gone = wave.outreach_targets.create!(company_id: company.id, lead_id: lead.id, channel: 'email', status: 'drafted', draft_body: 'Hi.')
+
+    patch "/api/crm/outreach_waves/#{wave.id}", headers: headers, params: { wave: { channels: 'text' } }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include('removed' => 1, 'redrafting' => true)
+    expect(response.parsed_body['wave']).to include('channels' => 'text', 'channels_label' => 'Text only', 'status' => 'drafting')
+    expect(drafted.reload).to have_attributes(channel: 'text', status: 'selected', draft_body: nil)
+    expect(OutreachTarget.exists?(gone.id)).to be(false)
+
+    patch "/api/crm/outreach_waves/#{wave.id}", headers: headers, params: { wave: { channels: 'fax' } }.to_json
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+
   it 'refuses a company without the module' do
     post '/api/crm/outreach_waves', headers: headers, params: { wave: { prompt: 'Retailers' } }.to_json
     expect(response).to have_http_status(:forbidden)
