@@ -24,7 +24,7 @@ class CalendarService
   ACTIVITY_EVENT_TYPES = %w[task meeting call reminder].freeze
 
   # Statuses treated as "done" for the hide_completed filter.
-  COMPLETED_STATUSES = %w[completed cancelled done resolved closed].freeze
+  COMPLETED_STATUSES = %w[completed cancelled done resolved closed skipped].freeze
 
   # Events from a rep's own Google or Outlook calendar (the private address
   # they pasted in Availability), shown only as much as that rep chose
@@ -87,6 +87,11 @@ class CalendarService
     
     # Apply date range filter
     events = filter_by_date_range(events)
+
+    # Project phases and tasks (E108). Added after the date filter: they come
+    # back already limited to spans that overlap the window, and a span that
+    # starts before it or ends after it still belongs on the calendar.
+    events += load_projects(view) if project_types.any?
 
     # Hide completed/cancelled events if requested
     events = filter_out_completed(events) if boolean_param?(:hide_completed)
@@ -161,6 +166,44 @@ class CalendarService
     ActiveModel::Type::Boolean.new.cast(params[key])
   end
   
+  # Which project event types this request wants (E108).
+  def project_types
+    @project_types ||= ProjectCalendarEvents::TYPES.select { |t| include_type?(t) }
+  end
+
+  # Project phases and tasks with dates, scoped like the projects list:
+  # a person who can't read projects sees none, a location-tier person sees
+  # their locations (and projects with no location), and the calendar's own
+  # location filter narrows further. project_ids picks one or several.
+  def load_projects(view)
+    return [] unless %w[my team all].include?(view)
+    return [] unless can_read_projects?
+
+    projects = company.projects
+    if user.uses_rbac? && !user.effective_admin?
+      ids = permission_service.accessible_location_ids
+      projects = projects.where('projects.location_id IN (?) OR projects.location_id IS NULL', ids) if ids.any?
+    end
+    scope = location_scope
+    projects = projects.where('projects.location_id IN (?) OR projects.location_id IS NULL', scope) if scope.present?
+    picked = Array(params[:project_ids]).map(&:to_i).reject(&:zero?)
+    projects = projects.where(id: picked) if picked.any?
+
+    user_ids = case view
+               when 'my' then [user.id]
+               when 'team' then get_team_user_ids(scope)
+               end
+    from, to = outside_window
+    ProjectCalendarEvents.new(projects: projects, user_ids: user_ids, from: from, to: to, types: project_types).events
+  end
+
+  def can_read_projects?
+    return true if user.platform_admin? || user.super_admin? || user.effective_admin?
+    return true unless company&.use_rbac_system
+
+    %w[own assigned_locations all].any? { |scope| permission_service.can?('deals', 'read', scope) }
+  end
+
   # Load activities from all modules (leads, accounts, contacts, deals)
   def load_activities(view)
     activities = []

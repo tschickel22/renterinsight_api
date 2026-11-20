@@ -8566,6 +8566,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.datetime "busy_feed_checked_at"
     t.string "busy_feed_error"
     t.string "busy_feed_detail", default: "none", null: false
+    t.string "calendar_feed_includes", default: "meetings", null: false
     t.string "office_phone"
     t.string "office_phone_ext"
     t.string "customer_phone", default: "mobile", null: false
