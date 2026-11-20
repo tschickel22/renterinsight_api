@@ -3453,6 +3453,7 @@ Rails.application.routes.draw do
       # What Quinn AI costs per dealer this month: AI tokens and messages (E96).
       get 'assistant_usage', to: 'assistant_questions#usage'
       get 'sms_registrations', to: 'sms_registrations#index'
+      patch 'sms_registrations/:id', to: 'sms_registrations#update'
       post 'sms_registrations/:id/send_to_carriers', to: 'sms_registrations#send_to_carriers'
       post 'sms_registrations/:id/check', to: 'sms_registrations#check'
       # Shared texting numbers for Quinn AI and which dealers may use them (E96).

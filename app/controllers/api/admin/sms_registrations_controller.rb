@@ -6,12 +6,29 @@
 # it is a person's decision, never automatic. Platform admins only.
 class Api::Admin::SmsRegistrationsController < ApplicationController
   before_action :require_platform_admin!
-  before_action :set_registration, only: %i[send_to_carriers check]
+  before_action :set_registration, only: %i[update send_to_carriers check]
 
   def index
     rows = SmsRegistration.includes(:company, :submitted_by_user).where.not(status: 'draft')
                           .order(Arel.sql("CASE status WHEN 'submitted' THEN 0 ELSE 1 END"), updated_at: :desc).limit(200)
     render json: { items: rows.map { |r| json(r) } }
+  end
+
+  # Corrects the dealer's answers before they go to the carriers (the dealer
+  # cannot edit once submitted). Refused once anything has reached Twilio.
+  def update
+    unless @registration.admin_editable?
+      return render(json: { error: 'This registration has gone to the carriers and cannot be changed here' }, status: :conflict)
+    end
+
+    attrs = params.require(:registration).permit(
+      :brand_type, :preferred_area_code,
+      business: SmsRegistration::BUSINESS_FIELDS, contact: SmsRegistration::CONTACT_FIELDS, consent: [:notes, { sources: [] }]
+    ).to_h
+    changes = @registration.apply_answers(attrs)
+    @registration.save!
+    @registration.log!('edited', "#{current_user.email}: #{changes.join('; ')}".truncate(500)) if changes.any?
+    render json: json(@registration.reload)
   end
 
   def send_to_carriers
@@ -43,6 +60,8 @@ class Api::Admin::SmsRegistrationsController < ApplicationController
       # What the dealer entered, to check before sending (EIN shown in full:
       # platform admins only, and it is what the carriers verify).
       business: r.business, contact: r.contact, consent_sources: Array(r.consent['sources']),
-      preferred_area_code: r.preferred_area_code, submitted_by: r.submitted_by_user&.email }
+      preferred_area_code: r.preferred_area_code, submitted_by: r.submitted_by_user&.email,
+      editable: r.admin_editable?, options: { brand_types: SmsRegistration::BRAND_TYPES, business_types: SmsRegistration::BUSINESS_TYPES,
+                                            consent_sources: SmsRegistration::CONSENT_SOURCES } }
   end
 end

@@ -50,6 +50,37 @@ class SmsRegistration < ApplicationRecord
     %w[draft rejected].include?(status)
   end
 
+  # A platform admin may still correct the answers after the dealer submits,
+  # as long as nothing has gone to Twilio yet (Submitter sends them once).
+  def admin_editable?
+    %w[draft submitted].include?(status) && sent_to_carriers_at.blank? && customer_profile_sid.blank?
+  end
+
+  # Merges permitted answers (string keys) from a dealer or platform admin.
+  # Returns the fields that changed, as "field: old -> new" lines for the log.
+  def apply_answers(attrs)
+    before = { 'business' => business.dup, 'contact' => contact.dup, 'area' => preferred_area_code, 'brand_type' => brand_type,
+               'sources' => Array(consent['sources']).dup }
+    self.brand_type = attrs['brand_type'] if BRAND_TYPES.include?(attrs['brand_type'])
+    self.preferred_area_code = attrs['preferred_area_code'].to_s.gsub(/\D/, '').presence if attrs.key?('preferred_area_code')
+    self.business = business.merge(attrs['business'].to_h)
+    self.contact = contact.merge(attrs['contact'].to_h)
+    self.consent = attrs['consent'] if attrs.key?('consent')
+    clean_json
+
+    changes = []
+    %w[business contact].each do |group|
+      (before[group].keys | public_send(group).keys).each do |k|
+        old, new = before[group][k].to_s, public_send(group)[k].to_s
+        changes << "#{k.tr('_', ' ')}: #{old.presence || '(blank)'} to #{new.presence || '(blank)'}" unless old == new
+      end
+    end
+    changes << "brand type: #{before['brand_type']} to #{brand_type}" if before['brand_type'] != brand_type
+    changes << "area code: #{before['area'] || '(blank)'} to #{preferred_area_code || '(blank)'}" if before['area'] != preferred_area_code
+    changes << "consent: #{before['sources'].join(' ')} to #{Array(consent['sources']).join(' ')}" if before['sources'].sort != Array(consent['sources']).sort
+    changes
+  end
+
   def dealer_name
     business['dba'].presence || business['legal_name'].presence || company.name
   end
