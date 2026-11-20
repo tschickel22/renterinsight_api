@@ -37,6 +37,44 @@ module Api
         render json: { wave: wave_json(wave) }, status: :created
       end
 
+      # Changes which channels the wave uses. Before it starts, everyone's first
+      # channel is worked out again: people the new choice cannot reach leave the
+      # wave, and messages already written for the other channel are written again.
+      # Once it has started, the change applies to follow-ups.
+      def update
+        return unless authorize_action!('company_settings', 'update')
+        return unless outreach_allowed!
+        return if performed?
+        return render(json: { error: 'This wave is finished' }, status: :unprocessable_entity) if %w[completed].include?(@wave.status)
+        if %w[building drafting].include?(@wave.status)
+          return render(json: { error: 'Wait for the audience or the messages to finish first' }, status: :unprocessable_entity)
+        end
+
+        @wave.assign_attributes(params.require(:wave).permit(:channels, :first_channel))
+        return render(json: { error: @wave.errors.full_messages.to_sentence }, status: :unprocessable_entity) unless @wave.valid?
+
+        removed = 0
+        redraft = false
+        OutreachWave.transaction do
+          @wave.save!
+          if @wave.started_at.nil?
+            eligibility = Outreach::Eligibility.new(@company)
+            @wave.outreach_targets.includes(:lead).find_each do |target|
+              channel = @wave.opening_channel(eligibility.reach(target.lead))
+              next (removed += 1) && target.destroy! unless channel
+              next if channel == target.channel
+
+              written = target.test_group == 'contact' && %w[drafted approved].include?(target.status)
+              target.update!(channel: channel, **(written ? { status: 'selected', draft_body: nil, draft_subject: nil, draft_error: nil, approved_at: nil, approved_by_user_id: nil } : {}))
+              redraft ||= written
+            end
+            @wave.update!(status: 'drafting') if redraft && @wave.status == 'review'
+          end
+        end
+        OutreachDraftOpenersJob.perform_later(@wave.id) if redraft && @wave.status == 'drafting'
+        render json: { wave: wave_json(@wave.reload), removed: removed, redrafting: redraft }
+      end
+
       # Leads that match the audience description but were left out, and why.
       def skipped
         return unless authorize_action!('company_settings', 'read')
@@ -53,6 +91,7 @@ module Api
           can_add: ADDABLE.include?(@wave.status),
           skipped: leads.map do |lead|
             found = eligibility.skip_info(lead)
+            found ||= { reason: "Cannot be reached by #{@wave.channels_label.downcase}", can_add: false } unless @wave.opening_channel(eligibility.reach(lead))
             info = found || { reason: ready_reason(lead), can_add: true }
             { lead_id: lead.id, name: lead.full_name.presence || lead.email, company_name: lead.company_name,
               reason: info[:reason], can_add: info[:can_add], ready: found.nil? }
@@ -84,10 +123,12 @@ module Api
           info = eligibility.skip_info(lead)
           next refused << { lead_id: lead.id, reason: info[:reason] } if info && !info[:can_add]
 
-          reach = eligibility.reach(lead)
+          channel = @wave.opening_channel(eligibility.reach(lead))
+          next refused << { lead_id: lead.id, reason: "Cannot be reached by #{@wave.channels_label.downcase}" } unless channel
+
           rank += 1
           @wave.outreach_targets.create!(
-            company_id: @company.id, lead_id: lead.id, rank: rank, test_group: 'contact', channel: reach.email ? 'email' : 'text',
+            company_id: @company.id, lead_id: lead.id, rank: rank, test_group: 'contact', channel: channel,
             ai_reason: 'Added by you',
             override_reason: info&.dig(:reason), overridden_by_user_id: (current_user.id if info)
           )
@@ -142,7 +183,7 @@ module Api
         target.draft_body = Assistant::Rules.tidy(target.draft_body) if target.draft_body_changed?
         case params.dig(:target, :decision).to_s
         when 'approve'
-          problem = Outreach::Guard.violation(target.draft_body, channel: target.channel, lead: target.lead)
+          problem = Outreach::Guard.violation(target.draft_body, channel: target.channel, lead: target.lead, style: false)
           return render(json: { error: "This message cannot be approved: #{problem}" }, status: :unprocessable_entity) if problem
 
           target.assign_attributes(status: 'approved', approved_by_user_id: current_user.id, approved_at: Time.current, draft_error: nil)
@@ -235,11 +276,12 @@ module Api
       end
 
       def wave_params
-        params.require(:wave).permit(:name, :prompt, :target_size, :daily_limit)
+        params.require(:wave).permit(:name, :prompt, :target_size, :daily_limit, :channels, :first_channel)
       end
 
       def wave_json(wave)
-        wave.as_json(only: %i[id name status prompt target_size daily_limit eligible_count pause_reason build_error started_at created_at]).merge(
+        wave.as_json(only: %i[id name status prompt target_size daily_limit channels first_channel eligible_count pause_reason build_error started_at created_at]).merge(
+          'channels_label' => wave.channels_label,
           'contact_count' => wave.contacted.count, 'holdout_count' => wave.held_back.count,
           'approved_count' => wave.contacted.where(status: 'approved').count, 'drafted_count' => wave.contacted.where(status: 'drafted').count
         )

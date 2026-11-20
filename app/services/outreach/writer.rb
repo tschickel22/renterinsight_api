@@ -7,8 +7,9 @@ module Outreach
     Result = Struct.new(:body, :subject, :content_item, :book_slot, :handoff, :handoff_reason, :stop, :summary, :problem, :share_report,
                         keyword_init: true)
     HANDOFF_REASONS = %w[asked_for_person upset legal_or_warranty ready_to_buy unsure appointment wants_site_scan other].freeze
-    # Early messages share the TrueBuild video (Tom, 2026-11-19).
-    OPENER_VIDEO = /true\s*build/i
+    # Early messages share the TrueBuild video (Tom, 2026-11-19). Production
+    # titles it "Let buyers design their home on your website".
+    OPENER_VIDEO = /true\s*build|design (their|your) (own )?home/i
     HISTORY = 14
 
     TOOL = {
@@ -18,7 +19,7 @@ module Outreach
         type: 'object',
         properties: {
           body: { type: 'string', description: 'The message. No greeting line or signature in an email; both are added for you.' },
-          subject: { type: 'string', description: 'Email only: a plain subject under 60 characters.' },
+          subject: { type: 'string', description: 'Email only: two to five plain words naming the problem, like a note between colleagues. Never "quick question" or the company name.' },
           content_id: { type: 'string', description: 'The [C number] of one video to share, or omit.' },
           book_slot: { type: 'string', description: 'The [id] from OPEN TIMES they clearly accepted. Omit otherwise.' },
           share_report: { type: 'boolean', description: 'True to attach their free website checkup link. Only when WEBSITE CHECKUP says you may.' },
@@ -37,17 +38,43 @@ module Outreach
       @settings = Settings.for(@company)
     end
 
+    # How every opener and follow-up is built (Tom, 2026-11-20, after the first
+    # production wave): one problem a retailer has, how we fix it, the video, and
+    # a plain ask for the demo. No open questions about their process.
+    SHAPE = 'Shape: name ONE everyday problem a manufactured home retailer has (pick the one the video you share shows), say in one sentence ' \
+            'how %<company>s fixes it using only PRODUCT FACTS, point to the video, then ask for the %<minutes>s minute demo. Never ask an open ' \
+            'question about how they work today, what their challenges are, or what they think.'
+
     def opener(channel)
-      write(channel, 'opener', task: 'This is your FIRST message to them. Say who you are and why you are reaching out, tie it to the show or list they came from, ' \
-                                     'share the TrueBuild video if it is listed (otherwise the one most likely to matter), and ask one easy question. Do not offer times yet. ' \
-                                     'If FROM THEIR WEBSITE is given, mention exactly one fact from it in your own words, naturally and without flattery, ' \
-                                     'and connect it to how we could help. Never mention a search score or say their website is bad.')
+      ask = if channel.to_s == 'email'
+              'End by asking them to pick a time on the calendar link (it is added below your message for you) or reply with a day that suits them.'
+            else
+              'End by asking which day this week or next suits them for a quick look. No times yet; you will set the time when they answer.'
+            end
+      video = opener_video
+      about = video ? "The video going with this message is \"#{video.title}\", so the problem you name must be the one it shows. " : ''
+      intro = channel.to_s == 'email' ? '' : "Start with their first name and who you are in a few words, like \"Hi Pat, #{sender_first} with #{@company.name.split.first} here.\" "
+      write(channel, 'opener', task: "This is your FIRST message to them. #{intro}#{about}#{shape} #{ask} " \
+                                     'If FROM THEIR WEBSITE is given, you may use exactly one fact from it in your own words, without flattery, to make the problem ' \
+                                     'feel like theirs. Never mention a search score or say their website is bad.')
     end
 
-    def follow_up(channel, number:, of:)
-      stage = number >= of ? 'a polite last note saying you will stop reaching out unless they want a demo' : 'one new, useful point and one easy question'
-      write(channel, 'follow_up', task: "They have not answered. This is follow-up #{number} of #{of}. Write #{stage}. Do not repeat earlier messages, do not guilt them. " \
-                                        'Share a video they have not seen if one fits.')
+    def follow_up(channel, number:, of:, booking: nil)
+      @booking = booking
+      last = number >= of
+      ask = if last
+              'This is the last one: in two short sentences, say you will stop reaching out, and leave the door open to a demo whenever the timing is better.'
+            elsif booking&.prompt_lines.to_s.match?(/\[/)
+              'Ask for the demo by offering EXACTLY TWO times from OPEN TIMES in plain words, never the [id].' \
+                "#{' Mention they can also pick any time from the calendar link below.' if channel.to_s == 'email'}"
+            elsif channel.to_s == 'email'
+              'Ask them to pick a time on the calendar link added below, or reply with a day that suits them.'
+            else
+              'Ask which day this week or next suits them for a quick look.'
+            end
+      write(channel, 'follow_up', task: "They have not answered. This is follow-up #{number} of #{of}. #{last ? '' : shape} #{ask} " \
+                                        'Use a different problem and a different video from earlier messages. Do not repeat earlier messages, do not mention ' \
+                                        'that they have not answered, and never write "following up", "circling back", "checking in" or "bumping".')
     end
 
     def reply(channel, booking:)
@@ -60,6 +87,14 @@ module Outreach
 
     private
 
+    def sender_first
+      (@settings['persona_name'].presence || @settings.sender&.first_name).to_s.split.first || 'Tom'
+    end
+
+    def shape
+      format(SHAPE, company: @company.name, minutes: @settings['demo_minutes'])
+    end
+
     def write(channel, feature, task:)
       @task_kind = feature
       feedback = nil
@@ -68,6 +103,7 @@ module Outreach
         input = AiClient.call(company: @company, feature: feature, system: system_prompt(channel, task), user: conversation_text(feedback), tool: TOOL)
         result = build(input)
         feedback = Guard.violation(result.body, channel: channel, lead: @lead)
+        feedback ||= Guard.subject_violation(result.subject, lead: @lead, company: @company) if channel.to_s == 'email' && feature != 'reply'
         return result if feedback.nil?
       end
       result.problem = feedback
@@ -93,14 +129,22 @@ module Outreach
         #{task}
 
         RULES. Breaking one of these is a serious failure.
-        1. #{channel.to_s == 'email' ? 'Email style: two to four short sentences, plain words, no lists.' : 'Text style: one or two short sentences, under 260 characters.'}
+        1. #{channel.to_s == 'email' ? 'Email style: three or four short sentences, 50 to 90 words, no lists, no greeting or sign off (both are added).' : 'Text style: two short sentences, under 200 characters, no greeting beyond their first name. Put the problem in the first few words.'}
         2. Say only what PRODUCT FACTS, PLAYBOOK and HELP ARTICLES support. Never invent a feature, customer, result, story or policy.
         3. Never state a price, range, discount or contract term.
         4. Never say or imply you are a human. If asked whether you are AI, say so honestly.
         5. #{Guard.visited_booth?(@lead) ? 'They visited the booth, so you may say so.' : 'You have NOT met this person. Never say you met, spoke with or saw them, and never mention a booth visit.'}
-        6. Never write a web address. To share a video set content_id; the link is added for you.
+        6. Never write a web address or a stand-in for one like [video] or [link]. To share a video set content_id; the link is put after your message for you,
+           so you can say "the video below" in an email or "here's a short video" in a text.
         7. Never say anything negative about a competitor.
         8. Do not use dashes as punctuation. No emojis.
+        9. Never say how you got their details or where they came from: no list, show list, database, sign up, or source name.#{' You may say you met at the booth.' if Guard.visited_booth?(@lead)}
+        10. Never name the software they use today.
+        11. Sound like a busy owner writing to another owner: short plain words, contractions, about a 5th grade reading level, and sentences that do not all
+            have the same shape. Never: "I hope this finds you well", "I came across", "I wanted to reach out", "quick question", "just checking in",
+            "touching base", "I'd love to", "don't hesitate", "game changer", "streamline", "leverage", "elevate", "empower", "unlock", "seamless", "robust",
+            "revolutionize", "cutting edge", "delve", "comprehensive", "utilize", "enhance", "furthermore", "moreover", lists of three adjectives,
+            "not just X but Y", flattery about their business, exclamation marks, or a closing sentence that sums up the message.
 
         PRODUCT FACTS
         #{@settings['product_facts'].presence || 'None provided.'}
@@ -204,8 +248,9 @@ module Outreach
       custom = @lead.custom_field_values.to_h
       {
         'First name' => @lead.first_name, 'Company' => @lead.company_name, 'State' => @lead.state,
-        'Came from' => @lead.source&.name, 'Locations' => custom['number_of_dealership_locations'],
-        'Uses today' => custom['competition'], 'Why chosen' => @target.ai_reason
+        'Locations' => custom['number_of_dealership_locations'],
+        # Where they came from is left out on purpose: the first wave named the list.
+        'Met at' => Guard.visited_booth?(@lead) ? @lead.source&.name : nil
       }.compact_blank.map { |k, v| "#{k}: #{v}" }.join("\n")
     end
   end

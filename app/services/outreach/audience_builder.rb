@@ -97,14 +97,14 @@ module Outreach
 
       "#{described} #{described == 1 ? 'lead matches' : 'leads match'} that description, but none can be contacted now: each is already being " \
         'worked (not New, no owner, on a campaign, nurture or workflow, in a conversation, or active in the last 30 days), ' \
-        'or has no usable email and no text consent'
+        "or cannot be reached by #{@wave.channels_label.downcase}"
     end
 
     def candidates(tree)
       matching = Audiences::FilterCompiler.new(company: @company, source_type: 'Lead', filter_tree: tree,
                                                exclude_active_campaign_enrollees: true, exclude_active_nurture_enrollees: true,
                                                channel: 'mixed', sms_consent_acknowledged: true).scope
-      @eligibility.scope.where(id: matching.select(:id)).includes(:source).limit(1000).to_a.select { |lead| @eligibility.reach(lead).any? }
+      @eligibility.scope.where(id: matching.select(:id)).includes(:source).limit(1000).to_a.select { |lead| @wave.opening_channel(@eligibility.reach(lead)) }
     end
 
     # Engaged leads first, so the AI sees the most promising when there are many.
@@ -164,10 +164,9 @@ module Outreach
       OutreachTarget.transaction do
         @wave.outreach_targets.delete_all
         shuffled.each_with_index do |(lead, reason), index|
-          reach = @eligibility.reach(lead)
           @wave.outreach_targets.create!(
             company_id: @company.id, lead_id: lead.id, rank: index + 1, ai_reason: Assistant::Rules.tidy(reason).truncate(160),
-            test_group: index < contact_count ? 'contact' : 'holdout', channel: reach.email ? 'email' : 'text'
+            test_group: index < contact_count ? 'contact' : 'holdout', channel: @wave.opening_channel(@eligibility.reach(lead))
           )
         end
       end
