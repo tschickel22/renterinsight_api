@@ -46,12 +46,18 @@ module Outreach
     private
 
     def text!(conversation, body, kind, item)
-      message = [body, item && Tracking.video_url(@target, item), (@report ? "Your website checkup: #{Tracking.report_url(@target)}" : nil)].compact.join(' ')
+      message = [plain_characters(body), item && Tracking.short_video_url(@target, item), (@report ? "Your website checkup: #{Tracking.report_url(@target)}" : nil)].compact.join(' ')
       message = "#{message} Reply STOP to opt out." if kind == 'opener'
       result = Assistant::Messenger.deliver!(conversation, body: message, sent_by: 'assistant', extra_metadata: { outreach_target_id: @target.id })
       raise NotAllowed, result[:error].to_s unless result[:success]
 
       result[:communication]
+    end
+
+    # Curly quotes and the like switch a text to a character set that fits 70
+    # characters a segment instead of 160.
+    def plain_characters(text)
+      text.to_s.tr("\u2018\u2019\u201C\u201D\u00A0", %(''"" )).gsub("\u2026", '...')
     end
 
     def email!(conversation, body, subject, item)

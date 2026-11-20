@@ -5,6 +5,9 @@ module Outreach
   # prompt asks for the same things; this is what makes them true.
   module Guard
     TEXT_MAX = 300
+    # Body of an opener or follow-up text. With the short video link and the
+    # opt out line it stays within two segments (research, 2026-11-20).
+    FIRST_TEXT_MAX = 200
     EMAIL_MAX = 900
     URL = %r{https?://|www\.|\b[a-z0-9-]+\.(com|net|org|io|co|us|biz|info|app)\b}i
     PRICE = /\$\s?\d|\b\d+\s?(dollars|bucks)\b|\bper\s+(month|user|seat|location)\b/i
@@ -54,7 +57,9 @@ module Outreach
     # nil when the message may be sent; otherwise the reason it may not.
     # style: false skips the wording checks, for a message the sender wrote or
     # edited by hand (they may use an exclamation mark if they like).
-    def violation(text, channel:, lead:, style: true)
+    # where_from: false in a reply, where they may have asked how we got their number.
+    # text_max: openers and follow-ups by text are held shorter than replies.
+    def violation(text, channel:, lead:, style: true, where_from: true, text_max: TEXT_MAX)
       body = text.to_s.strip
       return 'the message is empty' if body.empty?
       return 'write it without any web address; a link is added for you' if body.match?(URL)
@@ -63,14 +68,14 @@ module Outreach
       return 'you have not met this person; do not imply you did' if body.match?(MET_THEM) && !visited_booth?(lead)
       return 'fill in every placeholder' if body.match?(PLACEHOLDER)
       return 'use the name you were given' if body.match?(/\bquinn\b/i)
-      return 'never say how you got their details or name a list' if body.match?(WHERE_FROM) || names_source?(body, lead)
+      return 'never say how you got their details or name a list' if where_from && (body.match?(WHERE_FROM) || names_source?(body, lead))
       if style
         tell = body[AI_TELLS]
         return "it reads as machine written; do not use \"#{tell}\"" if tell
         return 'do not use exclamation marks' if body.include?('!')
       end
 
-      max = channel.to_s == 'email' ? EMAIL_MAX : TEXT_MAX
+      max = channel.to_s == 'email' ? EMAIL_MAX : text_max
       return "keep it under #{max} characters" if body.length > max
 
       nil

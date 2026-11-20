@@ -5,7 +5,7 @@
 class OutreachTrackingController < ActionController::API
   # GET /o/v/:token
   def video
-    target_id, item_id = Outreach::Tracking.read(params[:token])
+    target_id, item_id = Outreach::Tracking.read_video(params[:token])
     target = OutreachTarget.find_by(id: target_id)
     item = target && OutreachContentItem.find_by(id: item_id, company_id: target.company_id)
     return head(:not_found) unless item

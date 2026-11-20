@@ -102,7 +102,8 @@ module Outreach
       2.times do
         input = AiClient.call(company: @company, feature: feature, system: system_prompt(channel, task), user: conversation_text(feedback), tool: TOOL)
         result = build(input)
-        feedback = Guard.violation(result.body, channel: channel, lead: @lead)
+        reply = feature == 'reply'
+        feedback = Guard.violation(result.body, channel: channel, lead: @lead, where_from: !reply, text_max: reply ? Guard::TEXT_MAX : Guard::FIRST_TEXT_MAX)
         feedback ||= Guard.subject_violation(result.subject, lead: @lead, company: @company) if channel.to_s == 'email' && feature != 'reply'
         return result if feedback.nil?
       end
@@ -129,7 +130,7 @@ module Outreach
         #{task}
 
         RULES. Breaking one of these is a serious failure.
-        1. #{channel.to_s == 'email' ? 'Email style: three or four short sentences, 50 to 90 words, no lists, no greeting or sign off (both are added).' : 'Text style: two short sentences, under 200 characters, no greeting beyond their first name. Put the problem in the first few words.'}
+        1. #{channel.to_s == 'email' ? 'Email style: three or four short sentences, 50 to 90 words, no lists, no greeting or sign off (both are added).' : (@task_kind == 'reply' ? 'Text style: one to three short sentences, under 260 characters.' : 'Text style: two or three very short sentences, 180 characters at most, no greeting beyond their first name. Put the problem in the first few words, since that is what shows on their lock screen.')}
         2. Say only what PRODUCT FACTS, PLAYBOOK and HELP ARTICLES support. Never invent a feature, customer, result, story or policy.
         3. Never state a price, range, discount or contract term.
         4. Never say or imply you are a human. If asked whether you are AI, say so honestly.
@@ -138,7 +139,7 @@ module Outreach
            so you can say "the video below" in an email or "here's a short video" in a text.
         7. Never say anything negative about a competitor.
         8. Do not use dashes as punctuation. No emojis.
-        9. Never say how you got their details or where they came from: no list, show list, database, sign up, or source name.#{' You may say you met at the booth.' if Guard.visited_booth?(@lead)}
+        9. #{@task_kind == 'reply' ? "Never bring up how you got their details. Only if they ask, say plainly where it came from#{@lead.source&.name.present? ? " (#{@lead.source.name})" : ''} and offer to take them off the list." : "Never say how you got their details or where they came from: no list, show list, database, sign up, or source name.#{' You may say you met at the booth.' if Guard.visited_booth?(@lead)}"}
         10. Never name the software they use today.
         11. Sound like a busy owner writing to another owner: short plain words, contractions, about a 5th grade reading level, and sentences that do not all
             have the same shape. Never: "I hope this finds you well", "I came across", "I wanted to reach out", "quick question", "just checking in",
