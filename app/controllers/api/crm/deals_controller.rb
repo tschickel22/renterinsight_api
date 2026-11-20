@@ -2,7 +2,7 @@ module Api
   module Crm
     class DealsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
+      before_action :set_deal, only: [:show, :update, :destroy, :deletion_check, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
       include RecordFiles
       record_files_for :deal, finder: :set_deal, resource: 'deals'
       include PostedDealChanges
@@ -618,9 +618,19 @@ module Api
       # DELETE /api/crm/deals/:id
       def destroy
         return unless authorize_action!('deals', 'delete')
-        
-        @deal.destroy
+
+        Deals::Deletion.new(@deal).destroy!
         head :no_content
+      rescue Deals::Deletion::Blocked => e
+        render json: { error: "This deal can't be deleted yet.", blockers: e.blockers }, status: :unprocessable_content
+      end
+
+      # GET /api/crm/deals/:id/deletion_check
+      # What would stop this deal being deleted, so the page can say so before asking.
+      def deletion_check
+        return unless authorize_action!('deals', 'delete')
+
+        render json: { blockers: Deals::Deletion.new(@deal).blockers }
       end
 
       # GET /api/crm/deals/:id/service_tickets
