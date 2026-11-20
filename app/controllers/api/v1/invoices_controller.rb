@@ -344,11 +344,11 @@ class Api::V1::InvoicesController < ApplicationController
     # Unpaid count (draft, sent, viewed, partial, overdue - NOT paid or cancelled)
     unpaid_count = base_invoices.where.not(status: ['paid', 'cancelled']).count
     
-    # Overdue count (status='overdue' OR past due date and not paid/cancelled)
+    # Overdue count (status='overdue' OR past due date and not paid/cancelled/draft)
     overdue_count = base_invoices.where(
-      "status = 'overdue' OR (due_date < ? AND status NOT IN (?))", 
-      Date.current, 
-      ['paid', 'cancelled']
+      "status = 'overdue' OR (due_date < ? AND status NOT IN (?))",
+      Date.current,
+      %w[paid cancelled draft]
     ).count
     
     # Total outstanding (sum of amount_due for all unpaid invoices)

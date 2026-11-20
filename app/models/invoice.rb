@@ -127,7 +127,8 @@ class Invoice < ApplicationRecord
   scope :drafts, -> { where(status: 'draft') }
   scope :sent, -> { where.not(sent_at: nil) }
   scope :unpaid, -> { where.not(status: ['paid', 'cancelled']) }
-  scope :overdue, -> { where('due_date < ? AND status NOT IN (?)', Date.today, ['paid', 'cancelled']) }
+  # A draft is not owed yet, so it is never overdue.
+  scope :overdue, -> { where('due_date < ? AND status NOT IN (?)', Date.today, %w[paid cancelled draft]) }
   scope :customer_invoices, -> { where(billing_category: 'customer') }
   scope :warranty_invoices, -> { where(billing_category: 'warranty') }
   scope :for_service_tickets, -> { where(source_type: 'ServiceTicket') }
@@ -173,7 +174,10 @@ class Invoice < ApplicationRecord
   end
   
   def overdue?
-    due_date && due_date < Date.today && !paid? && status != 'cancelled'
+    # A draft is not owed yet. Counting it overdue turned a past-due draft
+    # into 'overdue' on its first save, and 'overdue' auto-posts, so a draft
+    # nobody had issued was booked to receivables and revenue.
+    due_date && due_date < Date.today && !paid? && !%w[cancelled draft].include?(status)
   end
   
   # Alias for API serialization
