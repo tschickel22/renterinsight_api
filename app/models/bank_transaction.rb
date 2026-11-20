@@ -77,7 +77,8 @@ class BankTransaction < ApplicationRecord
       matched_journal_entry: je,
       matched_at: Time.current,
       matched_by: source,
-      status: 'matched'
+      status: 'matched',
+      review_reason: nil
     )
   end
 
@@ -159,7 +160,8 @@ class BankTransaction < ApplicationRecord
         status: 'matched',
         matched_journal_entry: nil,
         matched_at: Time.current,
-        matched_by: source
+        matched_by: source,
+        review_reason: nil
       )
 
       create_journal_entry_from_categorization! if create_je

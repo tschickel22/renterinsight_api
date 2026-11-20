@@ -39,7 +39,7 @@ class JournalEntry < ApplicationRecord
   # E68: expense on a project from Record Expense or a manual entry is job
   # cost. Bills keep their own cost lines and reversals are 'auto', so only
   # these two sources are counted here.
-  JOB_COST_SOURCES = %w[manual quick_entry].freeze
+  JOB_COST_SOURCES = %w[manual quick_entry recurring].freeze
   after_save :sync_project_job_cost, if: :job_cost_entry?
   before_destroy :drop_project_job_cost
 
@@ -257,8 +257,14 @@ class JournalEntry < ApplicationRecord
     source_type == 'auto' && source_entity_type == 'BankTransaction'
   end
 
+  # Paid: the money came out of a bank or card account in this same entry
+  # (Record Expense, a bank feed line, or a manual or recurring entry that
+  # credits one). Otherwise the cost is on the books but still owed.
   def paid_from_bank?
-    source_type == 'quick_entry' || bank_feed_entry?
+    return true if source_type == 'quick_entry' || bank_feed_entry?
+
+    bank_gl_ids = BankAccount.where(company_id: company_id).where.not(chart_of_account_id: nil).pluck(:chart_of_account_id)
+    bank_gl_ids.any? && journal_entry_lines.any? { |l| bank_gl_ids.include?(l.chart_of_account_id) && l.credit_amount.to_d.positive? }
   end
 
   def phase_on?(project_id)

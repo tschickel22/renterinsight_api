@@ -66,6 +66,24 @@ class BankTransactionMatchingService
 
   NEARBY_DAYS = 7
 
+  # Why a rule should not post this line on its own, or nil.
+  def hold_reason(bank_transaction)
+    booked = booked_entries(bank_transaction)
+    return BankTransaction::AlreadyBooked.new(booked).message if booked.any?
+
+    project = bank_transaction.project
+    vendor = bank_transaction.try(:vendor)
+    bills = bank_transaction.open_bills_paid_by(project: project, vendor: vendor)
+    bills = open_bills_by_amount(bank_transaction) if bills.empty? && !bank_transaction.deposit?
+    BankTransaction::PaysOpenBill.new(bills).message if bills.any?
+  end
+
+  # With no job or vendor on the rule: an open bill for exactly this amount.
+  def open_bills_by_amount(bank_transaction)
+    @company.bills.where(is_deleted: [false, nil], status: %w[pending partially_paid])
+            .where(balance_due: bank_transaction.amount.abs).includes(:project, :vendor).limit(3).to_a
+  end
+
   def suggest_matches(bank_transaction, limit: 5)
     return [] if bank_transaction.matched?
 
@@ -148,6 +166,14 @@ class BankTransactionMatchingService
     # behind it reads as booked when it is not (Heartland had 28 like that).
     # Auto-confirm posts, and a line that cannot post stays for review.
     return unless rule.auto_confirm
+
+    # E109: a rule posts without anyone looking, so it must not post what is
+    # already in the books (an expense recorded as already paid, a bill
+    # payment) or what pays an open bill. Leave those for a person, and say why.
+    if (reason = hold_reason(bank_transaction))
+      bank_transaction.update!(review_reason: reason)
+      return
+    end
 
     BankTransaction.transaction do
       bank_transaction.update!(status: 'matched', matched_at: Time.current, matched_by: 'rule')

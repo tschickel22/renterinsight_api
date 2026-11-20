@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_20_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -953,6 +953,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.bigint "category_account_id"
     t.bigint "rule_id"
     t.text "excluded_reason"
+    t.text "review_reason"
     t.text "memo"
     t.bigint "contact_id"
     t.datetime "created_at", null: false

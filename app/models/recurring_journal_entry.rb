@@ -39,14 +39,22 @@ class RecurringJournalEntry < ApplicationRecord
       source_type: 'recurring'
     )
 
+    # A line can name a job (E109): each run is job cost on it, with its deal,
+    # as long as the project is still open in this company.
+    open_jobs = company.projects.where(is_deleted: [false, nil]).where.not(status: 'cancelled')
+                       .where(id: template_lines.filter_map { |l| l['project_id'].presence }).pluck(:id, :deal_id).to_h
     template_lines.each do |line|
+      project_id = line['project_id'].presence&.to_i
+      project_id = nil unless open_jobs.key?(project_id)
       je.journal_entry_lines.build(
         chart_of_account_id: line['chart_of_account_id'],
         debit_amount: line['debit_amount'] || 0,
         credit_amount: line['credit_amount'] || 0,
         memo: line['memo'],
         department: line['department'],
-        location_id: line['location_id']
+        location_id: line['location_id'],
+        project_id: project_id,
+        deal_id: project_id && open_jobs[project_id]
       )
     end
 
