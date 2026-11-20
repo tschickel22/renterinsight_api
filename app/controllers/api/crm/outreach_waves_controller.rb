@@ -148,6 +148,52 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
+      # Clears an audience that has not started, so it can be built again from
+      # scratch. Everything chosen and written for it goes with it. Once a wave
+      # has sent anything it stays, because its results are the record.
+      def destroy
+        return unless authorize_action!('company_settings', 'update')
+        return unless outreach_allowed!
+        return if performed?
+        return render(json: { error: 'This wave has already started, so it is kept. Pause it instead.' }, status: :unprocessable_entity) if @wave.started_at
+
+        @wave.destroy!
+        head :no_content
+      end
+
+      # Approves every message still waiting, optionally only the emails or only
+      # the texts. Each one is checked the way the writer checks it, so one that
+      # needs a fix stays waiting with the reason. except_ids: people whose
+      # message is being edited on screen right now, left for a hand approval.
+      def approve_all
+        return unless authorize_action!('company_settings', 'update')
+        return unless outreach_allowed!
+        return if performed?
+        return render(json: { error: 'Messages can be approved only before the wave starts' }, status: :unprocessable_entity) unless @wave.status == 'review'
+
+        channel = params[:channel].presence
+        return render(json: { error: 'Choose email or text' }, status: :unprocessable_entity) if channel && OutreachTarget::CHANNELS.exclude?(channel)
+
+        scope = @wave.contacted.where(status: 'drafted').includes(:lead)
+        scope = scope.where(channel: channel) if channel
+        scope = scope.where.not(id: Array(params[:except_ids]).map(&:to_i)) if params[:except_ids].present?
+
+        approved = 0
+        held = []
+        scope.find_each do |target|
+          problem = target.draft_error.presence ||
+                    Outreach::Guard.violation(target.draft_body, channel: target.channel, lead: target.lead)
+          if problem
+            held << { target_id: target.id, name: Assistant::Learn.display_name(target.lead), reason: problem }
+            next
+          end
+
+          target.update!(status: 'approved', approved_by_user_id: current_user.id, approved_at: Time.current)
+          approved += 1
+        end
+        render json: { approved: approved, held: held, wave: wave_json(@wave.reload) }
+      end
+
       # Takes a person out before messages are written.
       def remove_target
         return unless authorize_action!('company_settings', 'update')

@@ -9,8 +9,13 @@ class OutreachDraftOpenersJob < ApplicationJob
     wave = OutreachWave.find_by(id: wave_id)
     return unless wave&.status == 'drafting' && Outreach::Settings.for(wave.company).add_on?
 
-    wave.contacted.where(status: 'selected').includes(:lead).find_each { |target| draft(target) }
-    wave.update!(status: 'review')
+    wave.contacted.where(status: 'selected').includes(:lead).find_each do |target|
+      # Cleared and started over while writing: stop spending on it.
+      break unless OutreachWave.exists?(wave.id)
+
+      draft(target)
+    end
+    wave.update!(status: 'review') if OutreachWave.exists?(wave.id)
   rescue StandardError => e
     Rails.logger.error("[OutreachDraftOpenersJob] wave #{wave_id}: #{e.class}: #{e.message}")
     wave&.update!(status: 'review', build_error: e.message.truncate(240))

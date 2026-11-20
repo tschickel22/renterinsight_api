@@ -3008,9 +3008,10 @@ Rails.application.routes.draw do
       get  'automations', to: 'automations#index'
       post 'automations/stop', to: 'automations#stop'
       post 'automations/stop_all', to: 'automations#stop_all'
-      resources :outreach_waves, only: %i[index show create update] do
+      resources :outreach_waves, only: %i[index show create update destroy] do
         member do
           post :draft
+          post :approve_all
           post :start
           post :pause
           post :resume
