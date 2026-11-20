@@ -9,7 +9,7 @@ class Api::V1::AccountingImportsController < ApplicationController
   before_action :require_company_admin!, only: %i[
     create_migration migration update_migration accounts suggest_accounts update_accounts
     banks update_banks create_banks uncleared update_uncleared migration_preview post_migration rollback_migration
-    go_live bank_balances lists update_lists search_lists
+    go_live bank_balances lists update_lists search_lists trial_invoices update_trial_invoices
   ]
 
   def index
@@ -279,6 +279,28 @@ class Api::V1::AccountingImportsController < ApplicationController
 
     kind = params[:kind].to_s == 'vendors' ? 'vendors' : 'customers'
     render json: { results: wizard.list_matcher.search(kind, params[:q]) }
+  end
+
+  # Going live from a trial: the invoices made during the trial and dated on
+  # or before the cutover, each with what the dealer says it is
+  # (Accounting::QboMigration::TrialInvoices).
+  def trial_invoices
+    return unless authorize_action!('accounting', 'read')
+    return unless (wizard = load_wizard)
+
+    render json: wizard.trial_invoices.json
+  end
+
+  # PUT /api/v1/accounting_imports/:id/trial_invoices
+  #   { answers: [{ invoice_id, answer: 'same' | 'paid' | 'keep' | 'cancel' | 'auto', qbo_external_id }] }
+  #   or { answers: [{ answer: 'accept_suggestions' }] }
+  def update_trial_invoices
+    return unless authorize_action!('accounting', 'create')
+    return unless (wizard = load_wizard)
+
+    answers = Array(params.permit(answers: %i[invoice_id answer qbo_external_id])[:answers]).map { |a| a.to_h.stringify_keys }
+    with_migration_errors { wizard.trial_invoices.update!(answers) } or return
+    render json: Accounting::QboMigration::Wizard.new(wizard.import.reload).trial_invoices.json
   end
 
   # GET /api/v1/accounting_imports/:id/preview

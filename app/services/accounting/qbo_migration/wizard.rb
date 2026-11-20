@@ -254,6 +254,8 @@ module Accounting
       # opening entry carries them) and are voided; feed lines on matched
       # banks dated on or before the cutover are excluded. Later activity is
       # DealerTide's and stays. Empty for a trial or a switch not from one.
+      # Invoices the dealer answered "not in QuickBooks" (TrialInvoices) keep
+      # their entries, with their payments' and their deal's.
       def settlement
         return { entries: [], bank_lines: [] } if trial? || config['trial_started_at'].blank?
 
@@ -265,7 +267,8 @@ module Accounting
         entries = @company.journal_entries.where(is_void: [false, nil])
                           .where('journal_entries.created_at >= ? AND entry_date <= ?', since, cutover_date)
                           .where('source_entity_type IS NULL OR source_entity_type <> ?', 'AccountingImport')
-                          .where.not(id: reversals).order(:entry_date, :id).to_a
+                          .where.not(id: reversals).where.not(id: trial_invoices.kept_entry_ids)
+                          .order(:entry_date, :id).to_a
         # Feed lines up to the cutover that nobody booked yet (the opening
         # balances hold them), and lines booked by an entry voided here. A line
         # matched to an entry that stays (booked before the trial) is left
@@ -935,6 +938,12 @@ module Accounting
           self.class.d(state.dig('bank_balance', 'amount')) == self.class.d(state['statement_balance'])
       end
 
+      # ── Invoices made during the trial (going live) ─────────────
+
+      def trial_invoices
+        @trial_invoices ||= TrialInvoices.new(self)
+      end
+
       # ── Customers and vendors ───────────────────────────────────
 
       def list_matcher
@@ -1083,6 +1092,8 @@ module Accounting
           differences << "#{fmt(bills[:unapplied_vendor_credits])} of vendor credits has no open bill from the same " \
                          'vendor to apply to. It stays in the opening entry; enter it as a vendor credit after posting.'
         end
+
+        differences.concat(trial_invoices.differences)
 
         blocker_list = blocker_items(include_preview: false)
         blockers = blocker_list.map { |b| b[:message] }
@@ -1240,7 +1251,12 @@ module Accounting
           uncleared: { done: bank_rows.all? { |b| b['match'].present? } &&
                              matched_banks.all? { |b| uncleared_difference(b)&.zero? } },
           preview: { done: config['preview_viewed_at'].present? || !draft? }
-        }
+        }.tap do |out|
+          # Only going live from a trial has this step.
+          if (ti = trial_invoices.step)
+            out[:trial_invoices] = ti.merge(done: ti[:done] || !draft?)
+          end
+        end
       end
 
       def needs_attention?(row)
@@ -1333,6 +1349,8 @@ module Accounting
         about.call(nil)
 
         tag.call('lists')
+        trial_invoices.blocker_messages.each { |m| out << m }
+        tag.call('trial_invoices')
         closed = closed_period_on(cutover_date)
         out << "The cutover date is in a closed period (FY#{closed.fiscal_year} period #{closed.period_number})" if closed
 
