@@ -1392,7 +1392,10 @@ module Accounting
           trial: trial?,
           trial_started_at: config['trial_started_at'].presence || (trial? ? config.dig('posted', 'posted_at') : nil),
           from_import_id: config['from_import_id'],
-          settled: config.dig('posted', 'settled')
+          settled: config.dig('posted', 'settled'),
+          # Going live: how the invoices made during the trial were answered
+          # ({ matched, paid, cancelled, kept }), nil otherwise.
+          trial_invoices_settled: @import.status == 'posted' ? @import.results&.dig('trial_invoices') : nil
         }
       end
 
