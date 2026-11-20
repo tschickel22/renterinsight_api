@@ -61,7 +61,7 @@ class SmsRegistration
     private
 
     def client
-      @client ||= TwilioProvisioningService.master_client
+      @client ||= @registration.twilio_client
     end
 
     def reject!(reason)
