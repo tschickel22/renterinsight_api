@@ -61,6 +61,9 @@ class ProjectBidRequest < ApplicationRecord
       stage: stage,
       project_phase_id: project_phase_id,
       phase_name: project_phase&.name,
+      # E107: the award screen asks before the bid's dates replace these.
+      phase_estimated_start_date: project_phase&.estimated_start_date,
+      phase_estimated_completion_date: project_phase&.estimated_completion_date,
       bids_due_on: bids_due_on,
       start_wanted_on: start_wanted_on,
       overdue: open? && bids_due_on.present? && bids_due_on < Date.current,

@@ -81,7 +81,30 @@ module Api
           update_attrs[:completed_at] = Time.current
         end
 
-        if @assignment.update(update_attrs)
+        # E107: accepting comes with a start date, a duration in work days
+        # and notes. The dates go on the task (or the whole phase they run)
+        # now, or wait for the dealer when the dealer already set dates.
+        dates_result = nil
+        if params[:status] == 'accepted' && params[:start_date].present?
+          begin
+            ActiveRecord::Base.transaction do
+              @assignment.update!(update_attrs)
+              dates_result = ContractorDates.new(@assignment).propose!(
+                start: params[:start_date], work_days: params[:work_days], notes: params[:accept_notes],
+                for_phase: params[:dates_for] == 'phase'
+              )
+            end
+          rescue ContractorDates::Error, Date::Error => e
+            return render json: { error: e.message.presence || 'That date is not valid' }, status: :unprocessable_entity
+          end
+          if params[:accept_notes].present?
+            AssignmentWorkLog.create!(contractor_assignment: @assignment, contractor_id: current_contractor.id,
+                                      author_type: 'contractor', author_name: current_contractor.name,
+                                      note: params[:accept_notes].to_s.truncate(2000), log_type: 'note', logged_at: Time.current)
+          end
+        end
+
+        if (dates_result || @assignment.update(update_attrs))
           AssignmentWorkLog.create!(
             contractor_assignment: @assignment,
             contractor_id: current_contractor.id,
@@ -252,8 +275,21 @@ module Api
           review_notes: assignment.review_notes,
           revision_notes: assignment.revision_notes,
           revision_count: assignment.revision_count || 0,
-          reviewed_by_name: assignment.reviewed_by&.full_name
+          reviewed_by_name: assignment.reviewed_by&.full_name,
+          proposed_start_date: assignment.proposed_start_date,
+          proposed_work_days: assignment.proposed_work_days,
+          proposed_end_date: assignment.proposed_end_date,
+          proposed_for: assignment.proposed_for,
+          dates_status: assignment.dates_status,
+          accept_notes: assignment.accept_notes
         }
+        # E107: a contractor who runs the whole phase can give dates for it.
+        owned = task && ContractorDates.new(assignment).phase_owned
+        if owned
+          json[:runs_whole_phase] = true
+          json[:phase_estimated_start_date] = owned.estimated_start_date
+          json[:phase_estimated_completion_date] = owned.estimated_completion_date
+        end
 
         if detailed && task
           json[:job_info] = {

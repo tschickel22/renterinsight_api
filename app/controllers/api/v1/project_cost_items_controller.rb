@@ -5,7 +5,7 @@ module Api
     class ProjectCostItemsController < ApplicationController
       before_action :set_company_scope
       before_action :set_project
-      before_action :set_cost_item, only: %i[show update destroy]
+      before_action :set_cost_item, only: %i[show update destroy approve]
 
       # GET /api/v1/projects/:project_id/cost_items
       def index
@@ -54,8 +54,30 @@ module Api
         render json: {
           cost_items: items.includes(:vendor, :bill).map { |item| serialize_cost_item(item) },
           stats: stats,
+          posting: posting_options,
           meta: { total_count: total_count, page: page, per_page: per_page }
         }
+      end
+
+      # GET /api/v1/projects/:project_id/cost_items/duplicates?contractor_id=&amount=
+      # Lines already on this job from the same vendor for the same amount.
+      def duplicates
+        return unless authorize_action!('projects', 'read')
+
+        found = entry_service.duplicates(vendor_id: params[:contractor_id], amount: params[:amount], except_id: params[:except_id])
+        render json: { duplicates: found.map { |item| serialize_cost_item(item) } }
+      end
+
+      # POST /api/v1/projects/:project_id/cost_items/:id/approve
+      # Approves the draft bill behind the line (E109), as Post does in Bills.
+      def approve
+        return unless authorize_action!('projects', 'read')
+        return unless authorize_action!('bills', 'update')
+
+        entry_service.approve!(@cost_item)
+        render json: serialize_cost_item(@cost_item.reload)
+      rescue ProjectCostEntryService::Error => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # GET /api/v1/projects/:project_id/cost_items/:id
@@ -69,8 +91,9 @@ module Api
       def create
         return unless authorize_action!('projects', 'update')
 
-        @cost_item = @project.project_cost_items.build(cost_item_params)
-        @cost_item.company_id = @company.id
+        # Only used to fill in from a part; the line is built and saved by
+        # ProjectCostEntryService.
+        @cost_item = ProjectCostItem.new(cost_item_params)
 
         # Auto-populate from part if provided
         if @cost_item.part_id.present?
@@ -81,19 +104,47 @@ module Api
           end
         end
 
-        if @cost_item.save
-          ProjectCostBillService.bill_cost_line!(@cost_item, user: current_user)
-          render json: serialize_cost_item(@cost_item.reload), status: :created
-        else
-          render json: { errors: @cost_item.errors.full_messages }, status: :unprocessable_entity
+        pay_mode = params[:pay_mode].presence
+        if pay_mode == 'paid'
+          return unless authorize_action!('journal_entries', 'create')
         end
+
+        attrs = cost_item_params.to_h.symbolize_keys
+        if @cost_item.part_id.present?
+          attrs[:unit_price] ||= @cost_item.unit_price
+          attrs[:description] = @cost_item.description if attrs[:description].blank?
+        end
+        item = entry_service.create!(attrs, pay_mode: pay_mode, payment_account_id: params[:payment_account_id],
+                                            category_account_id: params[:category_account_id])
+        render json: serialize_cost_item(item), status: :created
+      rescue ProjectCostEntryService::Error => e
+        render json: { error: e.message, errors: [e.message] }, status: :unprocessable_entity
+      rescue ActiveRecord::RecordInvalid => e
+        render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
       end
 
       # PATCH/PUT /api/v1/projects/:project_id/cost_items/:id
       def update
         return unless authorize_action!('projects', 'update')
 
-        if @cost_item.update(cost_item_params)
+        attrs = cost_item_params
+        # A line's status comes from its bill or its expense entry (E109).
+        # Only tracking-only lines take a status from the form.
+        if @cost_item.bill_id.present? || @cost_item.journal_entry_id.present?
+          attrs = attrs.except(:status, :paid_at, :approved_by_id)
+          if @cost_item.journal_entry_id.present? && attrs.key?(:amount) && attrs[:amount].to_d != @cost_item.amount.to_d
+            return render json: { error: 'This cost is already in your books. Change the amount on its entry in Accounting.' },
+                          status: :unprocessable_entity
+          end
+          if @cost_item.bill && @cost_item.bill.status != 'draft' && attrs.key?(:amount) && attrs[:amount].to_d != @cost_item.amount.to_d
+            return render json: { error: "Bill #{@cost_item.bill.bill_number} is approved. Change the amount on the bill in Accounting, Bills." },
+                          status: :unprocessable_entity
+          end
+        elsif attrs.key?(:status) && !attrs[:status].in?(%w[pending approved disputed])
+          attrs = attrs.merge(status: 'approved')
+        end
+
+        if @cost_item.update(attrs)
           ProjectCostBillService.follow_cost_line!(@cost_item) if @cost_item.saved_change_to_amount?
           render json: serialize_cost_item(@cost_item)
         else
@@ -105,11 +156,13 @@ module Api
       def destroy
         return unless authorize_action!('projects', 'delete')
 
-        @cost_item.update!(is_deleted: true)
+        entry_service.remove!(@cost_item)
         @cost_item.project.recalculate_costs!
         @cost_item.project_phase&.recalculate_costs! if @cost_item.project_phase_id.present?
 
         render json: { message: 'Cost item deleted' }
+      rescue ProjectCostEntryService::Error => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # GET /api/v1/projects/:project_id/cost_items/summary
@@ -135,6 +188,10 @@ module Api
         # Unassigned costs (no phase)
         unassigned = items.where(project_phase_id: nil)
 
+        # E109: do the phase budgets add up to the project budget?
+        budgeted = @project.project_phases.map(&:estimated_budget).compact
+        phase_budget_total = budgeted.any? ? budgeted.sum.to_d : nil
+
         render json: {
           project: {
             budget_amount: @project.budget_amount,
@@ -147,7 +204,9 @@ module Api
             other_cost: @project.other_cost,
             variance: @project.budget_variance,
             variance_percentage: @project.budget_variance_percentage,
-            over_budget: @project.over_budget?
+            over_budget: @project.over_budget?,
+            phase_budget_total: phase_budget_total,
+            budget_not_on_phase: (@project.budget_amount && phase_budget_total ? @project.budget_amount - phase_budget_total : nil)
           },
           phases: phases,
           unassigned: {
@@ -173,6 +232,29 @@ module Api
                    :lender_pending, :draws, :due_date)
       end
 
+      def entry_service
+        @entry_service ||= ProjectCostEntryService.new(@project, user: current_user)
+      end
+
+      # What the Add cost form may offer this person (E109).
+      def posting_options
+        on = ProjectCostEntryService.posting_on?(@company)
+        can_expense = on && can?('journal_entries', 'create')
+        out = { posts_to_books: on, can_record_expense: can_expense, can_approve_bills: on && can?('bills', 'update') }
+        return out unless can_expense
+
+        default = ProjectCostBillService.expense_account_for(@company, nil)
+        out.merge(
+          payment_accounts: @company.bank_accounts.where.not(chart_of_account_id: nil).order(:bank_name).map do |ba|
+            { chart_of_account_id: ba.chart_of_account_id, name: ba.try(:bank_name) || ba.try(:name),
+              last_four: ba.try(:display_last_four) || ba.try(:last_four) }
+          end,
+          expense_accounts: @company.chart_of_accounts.postable.where(account_type: 'expense').ordered
+                                    .map { |a| { id: a.id, name: a.name, account_number: a.account_number } },
+          default_expense_account_id: default&.id
+        )
+      end
+
       def set_project
         @project = @company.projects.not_deleted.find(params[:project_id])
       end
@@ -195,7 +277,10 @@ module Api
           'bill' => item.bill && {
             'id' => item.bill.id, 'bill_number' => item.bill.bill_number, 'status' => item.bill.status,
             'source' => item.bill.source, 'total_amount' => item.bill.total_amount
-          }
+          },
+          'pay_mode' => ProjectCostEntryService.pay_mode_for(item),
+          'source_label' => ProjectCostEntryService.source_for(item),
+          'journal_entry_id' => item.journal_entry_id
         )
       end
 

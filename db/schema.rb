@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_19_213000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_20_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2772,6 +2772,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_19_213000) do
     t.string "client_review_status"
     t.datetime "client_reviewed_at"
     t.text "client_review_notes"
+    t.date "proposed_start_date"
+    t.integer "proposed_work_days"
+    t.date "proposed_end_date"
+    t.string "proposed_for"
+    t.string "dates_status"
+    t.datetime "dates_decided_at"
+    t.bigint "dates_decided_by_id"
+    t.text "accept_notes"
     t.bigint "acted_on_behalf_by_id"
     t.boolean "cc_assigner", default: false, null: false
     t.index ["acted_on_behalf_by_id"], name: "index_contractor_assignments_on_acted_on_behalf_by_id"

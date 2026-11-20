@@ -128,7 +128,10 @@ class ProjectBidService
     bid
   end
 
-  def award!(request, bid, notify_others: true, note: nil)
+  # apply_dates (E107): put the bid's start date and work days on the phase.
+  # nil means yes when the phase has no dates yet; the dealer is the one
+  # awarding, so when it has dates the award screen asks and sends true or false.
+  def award!(request, bid, notify_others: true, note: nil, apply_dates: nil)
     raise Error, 'This request is closed' unless request.open?
     raise Error, 'That bid is not on this request' unless bid.project_bid_request_id == request.id
     raise Error, 'Only a bid with an amount can be awarded' unless bid.status == 'submitted' && bid.amount.to_d.positive?
@@ -156,6 +159,7 @@ class ProjectBidService
                       previous_vendor_id: phase ? phase.assigned_vendor_id : project.assigned_vendor_id)
 
       assign!(project, phase, vendor)
+      apply_bid_dates!(phase, bid, apply_dates)
     end
 
     ProjectNotices.close!(subject: request, kinds: 'bid_received', resolution: 'awarded', by: @actor)
@@ -259,6 +263,19 @@ class ProjectBidService
     else
       service.assign_project({ vendor: vendor }, apply_to_phases: true)
     end
+  end
+
+  # The winning bid's dates on the awarded phase (E107). Work days run
+  # Monday to Friday (ContractorDates.end_date).
+  def apply_bid_dates!(phase, bid, apply_dates)
+    return unless phase && bid.can_start_on && bid.duration_days.to_i.positive?
+
+    has_dates = phase.estimated_start_date.present? || phase.estimated_completion_date.present?
+    apply = apply_dates.nil? ? !has_dates : apply_dates
+    return unless apply
+
+    phase.update!(estimated_start_date: bid.can_start_on,
+                  estimated_completion_date: ContractorDates.end_date(bid.can_start_on, bid.duration_days))
   end
 
   def default_scope_for(project, phase)

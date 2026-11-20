@@ -30,6 +30,9 @@ class JournalEntry < ApplicationRecord
   # Record Expense (E87): who was paid and for which phase, so the project's
   # cost line names the vendor and takes their type instead of only the memo.
   attr_accessor :job_cost_vendor, :job_cost_phase_id, :job_cost_description
+  # A cost line typed on the project as already paid (E109): the entry takes
+  # that line instead of making its own.
+  attr_accessor :job_cost_item
 
   before_create :assign_entry_number
   before_save :set_fiscal_period
@@ -224,6 +227,13 @@ class JournalEntry < ApplicationRecord
 
     wanted.each do |project_id, amount|
       next unless amount.positive?
+
+      if job_cost_item && job_cost_item.project_id == project_id && job_cost_item.journal_entry_id.nil?
+        job_cost_item.update!(journal_entry_id: id, amount: amount, status: status,
+                              paid_at: status == 'paid' ? (job_cost_item.paid_at || Time.current) : nil,
+                              metadata: job_cost_item.metadata.to_h.merge('source' => source_type))
+        next
+      end
 
       ProjectCostItem.create!(
         company_id: company_id, project_id: project_id, journal_entry_id: id,

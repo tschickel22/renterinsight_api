@@ -21,6 +21,7 @@ class ReviewItem < ApplicationRecord
     'job_answered'         => ['Job accepted or declined', false],
     'phase_open_tasks'     => ['Phase closed with open tasks', false],
     'link_request'         => ['Link request', true],
+    'contractor_dates'     => ['Contractor dates to confirm', true],
     # Installer side
     'job_offered'          => ['Job offered', true],
     'job_taken_back'       => ['Job taken back', false],

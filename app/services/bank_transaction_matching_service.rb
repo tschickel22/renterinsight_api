@@ -50,9 +50,21 @@ class BankTransactionMatchingService
   # Entries already in the books for exactly this line (same date, amount and
   # side on the bank's GL account) that no feed line is matched to yet.
   # Categorizing a line that has one would post the money a second time.
+  #
+  # E109: an expense recorded as already paid (Record Expense, or a cost typed
+  # on a project as already paid) and a bill payment are often dated a few
+  # days before the bank or card posts them, so those count within a week
+  # either way too. Other entries still need the same date, so two real
+  # charges of the same amount on different days are not mistaken for one.
   def booked_entries(bank_transaction)
-    JournalEntry.where(id: find_exact_matches(bank_transaction).select(:journal_entry_id)).order(:id).to_a
+    exact = find_exact_matches(bank_transaction).select(:journal_entry_id)
+    nearby = find_fuzzy_matches(bank_transaction, days_range: NEARBY_DAYS)
+             .where('journal_entries.source_type = ? OR journal_entries.source_entity_type = ?', 'quick_entry', 'Bill')
+             .select(:journal_entry_id)
+    JournalEntry.where(id: exact).or(JournalEntry.where(id: nearby)).order(:id).to_a
   end
+
+  NEARBY_DAYS = 7
 
   def suggest_matches(bank_transaction, limit: 5)
     return [] if bank_transaction.matched?

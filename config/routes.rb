@@ -896,6 +896,10 @@ Rails.application.routes.draw do
         resources :cost_items, controller: 'project_cost_items' do
           collection do
             get :summary
+            get :duplicates
+          end
+          member do
+            post :approve
           end
         end
 
@@ -1019,6 +1023,10 @@ Rails.application.routes.draw do
 
         resources :contractor_assignments, only: [:index, :create, :update, :destroy]
       end
+
+      # E107: contractor's proposed dates, confirmed or turned down by the dealer
+      post 'contractor_assignments/:id/confirm_dates', to: 'contractor_dates#confirm'
+      post 'contractor_assignments/:id/decline_dates', to: 'contractor_dates#decline'
 
       # Contractor Reviews (dealer-side approval workflow)
       resources :contractor_reviews, path: 'contractor-reviews', only: [:index, :show] do

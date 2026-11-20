@@ -323,7 +323,7 @@ RSpec.describe 'Projects on bills, journal lines and job cost reports', type: :r
                              'disputed' => 900.0, 'total' => 5800.0, 'remaining' => 4200.0)
       set = row['phases'].find { |p| p['name'] == 'Set' }
       expect(set).to include('budget' => 6000.0, 'committed' => 1500.0, 'billed' => 4000.0, 'remaining' => 500.0)
-      expect(row['phases'].find { |p| p['name'] == 'No phase' }).to include('paid' => 300.0, 'disputed' => 900.0)
+      expect(row['phases'].find { |p| p['name'] == 'Not on a phase' }).to include('paid' => 300.0, 'disputed' => 900.0)
     end
 
     it 'counts a voided bill as disputed' do
