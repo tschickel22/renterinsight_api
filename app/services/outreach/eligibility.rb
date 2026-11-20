@@ -158,7 +158,11 @@ module Outreach
     end
 
     def emailable?(lead)
-      lead.email.to_s.match?(EMAIL) && !email_opted_out?(lead) && !CampaignSuppression.unmailable?(@company.id, lead.email)
+      return false unless lead.email.to_s.match?(EMAIL) && !email_opted_out?(lead) && !CampaignSuppression.unmailable?(@company.id, lead.email)
+
+      # An address that bounced will bounce again, and it hurts the sender's mail.
+      !Communication.where(company_id: @company.id, communicable: lead, channel: 'email', direction: 'outbound', status: 'bounced')
+                    .where('LOWER(communications.to_address) = ?', lead.email.to_s.downcase).exists?
     end
 
     def sms_opted_out?(lead)

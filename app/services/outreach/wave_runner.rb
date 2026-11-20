@@ -143,7 +143,8 @@ module Outreach
       return target.stop!(reason) if reason
 
       texts = unanswered_texts(target)
-      channel = @wave.next_channel(@eligibility.reach(target.lead), last: target.last_channel, texts_sent: texts)
+      channel = @wave.next_channel(@eligibility.reach(target.lead), last: target.last_channel, texts_sent: texts,
+                                   prefer: Engagement.new(target).preferred_channel)
       unless channel
         return target.stop!(texts >= OutreachWave::MAX_UNANSWERED_TEXTS ? 'sent two texts with no answer' : "cannot be reached by #{@wave.channels_label.downcase}")
       end
