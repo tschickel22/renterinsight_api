@@ -11,6 +11,8 @@ module Api
 
       before_action :set_company_scope
       before_action :set_contact, only: [:show, :update, :destroy, :tags, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status, :documents, :upload_documents]
+      include RecordFiles
+      record_files_for :contact, finder: :set_contact, resource: 'crm'
       before_action :set_account, only: [:index]
 
       # GET /api/v1/contacts

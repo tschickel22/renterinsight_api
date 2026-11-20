@@ -10,6 +10,8 @@ module Api
 
       before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check, :clone, :marketing_consent, :text_consent]
+      include RecordFiles
+      record_files_for :lead, finder: :set_lead, resource: 'leads'
 
       # ==== Lead cloning ====
       #

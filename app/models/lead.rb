@@ -83,6 +83,8 @@ class Lead < ApplicationRecord
 
   # Core CRM associations
   has_many :activities,           dependent: :destroy
+  # Team files (Files tab). Not shown in the buyer portal; see RecordFiles.
+  has_many_attached :files
   has_many :reminders,            dependent: :destroy
   has_many :lead_activities,      dependent: :destroy
   has_many :lead_scores,          dependent: :destroy

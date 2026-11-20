@@ -10,6 +10,8 @@ module Api
       include AccountNameMatches
       before_action :set_company_scope
       before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals contacts insights score communications_rollup]
+      include RecordFiles
+      record_files_for :account, finder: :set_account, resource: 'crm'
 
       # GET /api/v1/accounts
       def index

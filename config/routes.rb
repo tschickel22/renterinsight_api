@@ -1848,6 +1848,13 @@ Rails.application.routes.draw do
       
       # ==================== CONTACTS ====================
       resources :contacts do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being
           # merged away is named as duplicate_id in the body, so a mis-sent
@@ -1922,6 +1929,13 @@ Rails.application.routes.draw do
       put 'followers', to: 'followers#update'
 
       resources :accounts do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being
           # merged away is named as duplicate_id in the body, so a mis-sent
@@ -3074,6 +3088,13 @@ Rails.application.routes.draw do
 
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being
           # merged away is named as duplicate_id in the body, so a mis-sent
@@ -3253,6 +3274,13 @@ Rails.application.routes.draw do
 
       # ==================== DEALS (SALES PIPELINE) ====================
       resources :deals, only: %i[index show create update destroy] do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         collection do
           get :metrics
           get :forecast

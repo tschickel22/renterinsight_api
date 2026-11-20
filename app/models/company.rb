@@ -245,6 +245,9 @@ class Company < ApplicationRecord
   # the Meta feed carries no link and Meta rejects every home.
   after_create :seed_default_intake_form
   after_create :seed_invitation_templates
+  # The 2026-06-29 migration seeded the companies that existed then; nothing
+  # seeded one since, so newer tenants had no lead statuses at all.
+  after_create :seed_default_lead_statuses
   after_save :seed_installer_role, if: -> { saved_change_to_industry? && industry == 'installer' }
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
@@ -975,6 +978,12 @@ class Company < ApplicationRecord
     Websites::DefaultLeadForm.ensure_for(self)
   rescue StandardError => e
     Rails.logger.error "[Company#seed_default_intake_form] company=#{id} failed: #{e.message}"
+  end
+
+  def seed_default_lead_statuses
+    LeadStatus.ensure_for(self)
+  rescue StandardError => e
+    Rails.logger.error "[Company#seed_default_lead_statuses] company=#{id} failed: #{e.message}"
   end
 
   def seed_mh_finance_defaults

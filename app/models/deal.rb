@@ -86,6 +86,8 @@ class Deal < ApplicationRecord
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
   has_many :activities, class_name: 'DealActivity', dependent: :destroy
+  # Team files (Files tab). Not shown in the buyer portal; see RecordFiles.
+  has_many_attached :files
   has_many :commission_payments, dependent: :destroy
   has_many :quotes, dependent: :nullify
   has_many :service_tickets, dependent: :nullify
