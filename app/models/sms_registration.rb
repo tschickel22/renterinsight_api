@@ -19,6 +19,9 @@ class SmsRegistration < ApplicationRecord
   belongs_to :company
   belongs_to :submitted_by_user, class_name: 'User', optional: true
 
+  # The dealer's Twilio subaccount login, made by Submitter#subaccount!.
+  encrypts :subaccount_auth_token
+
   validates :status, inclusion: { in: STATUSES }
   validates :brand_type, inclusion: { in: BRAND_TYPES }
 
@@ -40,6 +43,22 @@ class SmsRegistration < ApplicationRecord
                              'phone' => admin&.try(:phone) }.compact
     registration.consent = { 'sources' => %w[website_forms] }
     registration
+  end
+
+  # Everything for this dealer (profile, brand, campaign, Messaging Service,
+  # number) lives in their subaccount and is reached with its own login.
+  # Without one it is our master account: only a registration sent before
+  # subaccounts (2026-11-20) has that, and it stays where it was made.
+  def twilio_credentials
+    if subaccount_sid.present? && subaccount_auth_token.present?
+      [subaccount_sid, subaccount_auth_token]
+    else
+      TwilioProvisioningService.master_credentials
+    end
+  end
+
+  def twilio_client
+    Twilio::REST::Client.new(*twilio_credentials)
   end
 
   def sole_proprietor?

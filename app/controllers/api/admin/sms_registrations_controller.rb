@@ -55,6 +55,7 @@ class Api::Admin::SmsRegistrationsController < ApplicationController
     { id: r.id, company_id: r.company_id, company: r.company&.name, status: r.status, brand_type: r.brand_type,
       legal_name: r.business['legal_name'], dealer_name: r.dealer_name, stages: r.stages, brand_status: r.brand_status,
       campaign_status: r.campaign_status, campaign_id: r.campaign_id, phone_number: r.phone_number,
+      subaccount_sid: r.subaccount_sid,
       rejection_reason: r.rejection_reason, submitted_at: r.submitted_at, sent_to_carriers_at: r.sent_to_carriers_at,
       live_at: r.live_at, events: Array(r.events).last(12), problems: r.problems,
       # What the dealer entered, to check before sending (EIN shown in full:

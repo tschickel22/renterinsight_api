@@ -98,10 +98,14 @@ RSpec.describe 'Texting registration', type: :request do
 
     it 'sends it once, even when sent again, and goes live after approval' do
       SmsRegistration::Submitter.new(registration, client: client).call
-      expect(registration.reload).to have_attributes(status: 'in_review', customer_profile_sid: 'BU1', trust_product_sid: 'BU2',
-                                                     brand_registration_sid: 'BN1', messaging_service_sid: 'MG1')
+      expect(registration.reload).to have_attributes(status: 'in_review', subaccount_sid: 'ACsub1', customer_profile_sid: 'BU1',
+                                                     trust_product_sid: 'BU2', brand_registration_sid: 'BN1', messaging_service_sid: 'MG1')
+      expect(made.first).to eq([:subaccount, 'Summit Park Homes (' + company.id.to_s + ')'])
+      expect(registration.twilio_credentials).to eq(%w[ACsub1 subtoken1])
+      expect(registration.read_attribute_before_type_cast(:subaccount_auth_token)).not_to include('subtoken1')
       SmsRegistration::Submitter.new(registration, client: client).call
       expect(made.count { |m| m == :brand }).to eq(1)
+      expect(made.count { |m| m.is_a?(Array) && m.first == :subaccount }).to eq(1)
 
       client.brand_status = 'APPROVED'
       submitted = []
@@ -115,7 +119,20 @@ RSpec.describe 'Texting registration', type: :request do
       SmsRegistration::StatusPoller.new(registration, client: client).call
       expect(registration.reload).to have_attributes(status: 'live', phone_number: '+17205550999', campaign_id: 'CXYZ')
       account = TwilioAccount.find_by(company_id: company.id)
-      expect(account.metadata).to include('links_allowed' => true, 'messaging_service_sid' => 'MG1')
+      expect(account.metadata).to include('links_allowed' => true, 'messaging_service_sid' => 'MG1', 'subaccount' => true)
+      # Sends like a dealer's own account: the subaccount's login and service.
+      expect(account).to be_own_account
+      expect(account.api_credentials).to eq(%w[ACsub1 subtoken1])
+      expect(account.messaging_service_sid).to eq('MG1')
+      expect(company.reload.sms_provisioning_mode).to eq('dedicated')
+    end
+
+    it 'keeps a registration already started on our master account there' do
+      registration.update!(customer_profile_sid: 'BUold')
+      SmsRegistration::Submitter.new(registration, client: client).call
+      expect(registration.reload.subaccount_sid).to be_nil
+      expect(made.none? { |m| m.is_a?(Array) && m.first == :subaccount }).to be(true)
+      expect(registration.twilio_credentials).to eq(%w[AC1 token])
     end
 
     it 'records the reason when the carriers reject the campaign' do
@@ -144,6 +161,15 @@ RSpec.describe 'Texting registration', type: :request do
 
     def trusthub = self
     def v1 = self
+    def api = self
+    def v2010 = self
+
+    def accounts
+      made = @made
+      Class.new do
+        define_method(:create) { |friendly_name:| made << [:subaccount, friendly_name]; OpenStruct.new(sid: 'ACsub1', auth_token: 'subtoken1') }
+      end.new
+    end
     def messaging = self
 
     def customer_profiles(_sid = nil)

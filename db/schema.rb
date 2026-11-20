@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_20_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_20_213000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7425,6 +7425,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_200000) do
     t.datetime "live_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "subaccount_sid"
+    t.text "subaccount_auth_token"
     t.index ["company_id"], name: "index_sms_registrations_on_company_id", unique: true
     t.index ["status"], name: "index_sms_registrations_on_status"
   end

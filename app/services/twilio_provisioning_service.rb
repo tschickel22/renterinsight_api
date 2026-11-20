@@ -10,6 +10,10 @@
 # by a sub-account cannot be enrolled in the master account's Messaging Service,
 # making A2P compliance impossible without per-sub-account registration (~$4-8/mo each).
 #
+# That per-subaccount registration is exactly what a dealer's own texting does
+# (SmsRegistration::Submitter): their own brand and campaign in their own
+# subaccount. This service is still only for numbers on our master account.
+#
 class TwilioProvisioningService
   class ProvisioningError < StandardError; end
 

@@ -4,9 +4,16 @@ require 'net/http'
 
 class SmsRegistration
   # Registers a dealer's own texting with the carriers through Twilio (E96
-  # phase 4), as an ISV: a secondary customer profile and an A2P trust product
-  # under our primary profile, a brand, the dealer's own Messaging Service, and
-  # (once the brand is approved, by StatusPoller) the campaign and number.
+  # phase 4), as an ISV: a Twilio subaccount for the dealer, and in it a
+  # secondary customer profile and an A2P trust product under our primary
+  # profile (which stays in our parent account), a brand, the dealer's own
+  # Messaging Service, and (once the brand is approved, by StatusPoller) the
+  # campaign and number.
+  #
+  # A subaccount per dealer is what Twilio support recommended (ticket
+  # #30449715, 2026-11-20): each dealer's traffic, opt-outs and billing stay
+  # apart, so one dealer's texting being flagged does not touch ours. It costs
+  # nothing extra; the parent account is billed for its usage.
   #
   # Every step records the SID it made and is skipped when run again, so a
   # failure part way can be fixed and the submit run again without creating a
@@ -31,6 +38,8 @@ class SmsRegistration
 
     attr_reader :registration
 
+    # client: one fake standing in for both the master and the dealer's
+    # account (specs). Left out, each is a real client.
     def initialize(registration, client: nil)
       @registration = registration
       @client = client
@@ -42,6 +51,7 @@ class SmsRegistration
       problems = registration.problems
       raise Error, "Not ready: #{problems.join(', ')}" if problems.any?
 
+      subaccount!
       customer_profile!
       trust_product!
       brand!
@@ -72,7 +82,9 @@ class SmsRegistration
     CAMPAIGN_COMPLIANCE_SID = 'QE2c6890da8086d771620e9b13fadeba0b'
 
     # Called by StatusPoller once the campaign is VERIFIED: a number in the
-    # dealer's area code, on their Messaging Service, as their TwilioAccount.
+    # dealer's area code, bought in their subaccount, on their Messaging
+    # Service, as their TwilioAccount. It sends like a dealer's own account
+    # (TwilioAccount#own_account?): their login and their Messaging Service.
     def number!
       return registration.company.twilio_accounts.active.first if registration.phone_number.present?
 
@@ -85,20 +97,42 @@ class SmsRegistration
                                                     friendly_name: "#{registration.dealer_name} (own texting)")
       client.messaging.v1.services(registration.messaging_service_sid).phone_numbers.create(phone_number_sid: bought.sid)
       registration.update!(phone_number: bought.phone_number, phone_number_sid: bought.sid)
+      sub = registration.subaccount_sid.present?
       account = TwilioAccount.create!(
         company_id: registration.company_id, phone_number: bought.phone_number, phone_number_sid: bought.sid,
         status: 'active', provisioned_at: Time.current,
-        metadata: { 'own_registration' => true, 'messaging_service_sid' => registration.messaging_service_sid,
+        sub_account_sid: (registration.subaccount_sid if sub), auth_token: (registration.subaccount_auth_token if sub),
+        metadata: { 'own_registration' => true, 'own_account' => sub, 'subaccount' => sub,
+                    'messaging_service_sid' => registration.messaging_service_sid,
                     'links_allowed' => true, 'sms_registration_id' => registration.id }
       )
+      # Texts go out on this number only in dedicated mode (CommunicationSettingsService).
+      registration.company.update!(sms_provisioning_mode: 'dedicated')
       registration.log!('number_bought', bought.phone_number)
       account
     end
 
     private
 
+    # The dealer's account (their subaccount once it exists).
     def client
-      @client ||= TwilioProvisioningService.master_client
+      @client || (@account_client ||= registration.twilio_client)
+    end
+
+    # Our parent account, which owns the subaccounts.
+    def master
+      @client || TwilioProvisioningService.master_client
+    end
+
+    # Skipped when it exists, and for a registration already started on our
+    # master account before subaccounts, so its profile is not orphaned.
+    def subaccount!
+      return if registration.subaccount_sid.present? || registration.customer_profile_sid.present?
+
+      account = master.api.v2010.accounts.create(friendly_name: "#{registration.dealer_name} (#{registration.company_id})".truncate(64))
+      registration.update!(subaccount_sid: account.sid, subaccount_auth_token: account.auth_token)
+      @account_client = nil
+      registration.log!('subaccount_created', account.sid)
     end
 
     def primary_profile_sid
@@ -203,7 +237,7 @@ class SmsRegistration
 
     # Twilio REST, form-encoded, repeating array keys (MessageSamples).
     def rest_post(host, path, attrs)
-      sid, token = TwilioProvisioningService.master_credentials
+      sid, token = registration.twilio_credentials
       uri = URI("#{host}#{path}")
       req = Net::HTTP::Post.new(uri)
       req.basic_auth(sid, token)
