@@ -132,10 +132,14 @@ class ProjectChangeAudience
     sent
   end
 
+  # Contractors on the work, leaving out a linked installer's vendor record:
+  # that company is told through the link (named above).
   def contractor_names(phases)
     task_ids = ProjectPhaseTask.where(project_phase_id: phases.map(&:id)).pluck(:id)
+    linked_vendor_ids = CompanyLink.active.where(dealer_company_id: @company.id).where.not(installer_company_id: nil)
+                                   .pluck(:dealer_vendor_id)
     ContractorAssignment.where(assignable_type: 'ProjectPhaseTask', assignable_id: task_ids)
-                        .where.not(status: %w[completed declined]).includes(:contractor)
-                        .map { |a| a.contractor&.name }.compact.uniq
+                        .where.not(status: %w[completed declined]).where.not(vendor_id: linked_vendor_ids)
+                        .includes(:contractor).map { |a| a.contractor&.name }.compact.uniq
   end
 end

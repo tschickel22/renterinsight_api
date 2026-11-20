@@ -93,7 +93,10 @@ module Api
       def payload
         user = current_user
         user.update!(calendar_feed_token: SecureRandom.urlsafe_base64(24)) if user.calendar_feed_token.blank?
-        base = (ENV['RAILS_API_URL'].presence || request.base_url).to_s.chomp('/')
+        # The customer-facing address (api.dealertide.com in production), so the
+        # link people paste into Google or Outlook carries the brand. The
+        # Render address keeps working for links already subscribed.
+        base = (ENV['MCP_PUBLIC_BASE_URL'].presence || ENV['RAILS_API_URL'].presence || request.base_url).to_s.chomp('/')
         availability = Assistant::Availability.new(company: @company, user: user, minutes: Assistant::Settings.for(@company).visit_minutes,
                                                    notice: 0.hours)
         {

@@ -98,6 +98,27 @@ RSpec.describe 'Linked job scope changes and who hears', type: :request do
       expect(installer_phase.project_phase_tasks.where(name: 'Haul debris')).to be_empty
     end
 
+    it 'does not hand the new task to the installer as a portal contractor too' do
+      pl
+      set_phase.update!(assigned_vendor_id: vendor.id)
+      post "/api/v1/projects/#{project.id}/phases/#{set_phase.id}/tasks", headers: h(dealer), params: { task: { name: 'Haul debris' } }.to_json
+      expect(ProjectPhaseTask.find(body['id']).contractor_assignments).to be_empty
+    end
+
+    it 'does not list the linked installer among contractors who are not told' do
+      pl
+      task = set_phase.project_phase_tasks.create!(company: dealer_co, name: 'Level', position: 9)
+      task.contractor_assignments.create!(company: dealer_co, contractor: vendor, status: 'assigned')
+      expect(who(change: 'dates', phase_ids: [set_phase.id])).not_to include(a_string_including('not told. Let them know'))
+    end
+
+    it 'labels the job cost line from the hand-off' do
+      pl.update!(dealer_cost_item: nil) if pl.respond_to?(:dealer_cost_item)
+      item = project.project_cost_items.create!(company: dealer_co, description: 'Installer: Set', amount: 4000, cost_type: 'subcontractor',
+                                                status: 'pending', metadata: { 'source' => 'project_link' })
+      expect(ProjectCostEntryService.source_for(item)).to eq('Linked installer job, committed')
+    end
+
     it 'goes to the installer when sent, holds the phase, and no charge releases it' do
       pl
       post "/api/v1/projects/#{project.id}/phases/#{set_phase.id}/tasks", headers: h(dealer),

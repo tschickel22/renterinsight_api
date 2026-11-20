@@ -57,6 +57,8 @@ class ProjectCostEntryService
       return 'Journal entry'
     end
     return 'Bid award' if item.description.to_s.start_with?('Bid:')
+    return 'Linked installer job, committed' if source == 'project_link'
+    return 'Installer change order, committed' if source.to_s.include?('link_change')
 
     'Tracking only'
   end
