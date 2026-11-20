@@ -240,7 +240,8 @@ module Api
       def posting_options
         on = ProjectCostEntryService.posting_on?(@company)
         can_expense = on && can?('journal_entries', 'create')
-        out = { posts_to_books: on, can_record_expense: can_expense, can_approve_bills: on && can?('bills', 'update') }
+        out = { posts_to_books: on, can_record_expense: can_expense, can_approve_bills: on && can?('bills', 'update'),
+                can_change_setting: can_change_cost_setting? }
         return out unless can_expense
 
         default = ProjectCostBillService.expense_account_for(@company, nil)
@@ -253,6 +254,17 @@ module Api
                                     .map { |a| { id: a.id, name: a.name, account_number: a.account_number } },
           default_expense_account_id: default&.id
         )
+      end
+
+      # Who may turn "Project Costs and Bills" on or off: the same rule as
+      # CompanySettingsController#authorize_settings_update!.
+      def can_change_cost_setting?
+        u = current_user
+        return true if u.try(:platform_admin?) || u.try(:super_admin?) || u.try(:effective_admin?)
+
+        u.has_permission?('company_settings', 'update', 'all', @company.id)
+      rescue StandardError
+        false
       end
 
       def set_project

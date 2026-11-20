@@ -130,6 +130,8 @@ RSpec.describe 'Project costs: how they were paid', type: :request do
       add_cost(contractor_id: supplier.id)
       expect(response).to have_http_status(:created)
       expect(body).to include('pay_mode' => 'track', 'bill_id' => nil, 'status' => 'approved')
+      get "/api/v1/projects/#{project.id}/cost_items", headers: headers
+      expect(body['posting']).to include('posts_to_books' => false, 'can_change_setting' => true)
       expect(project.reload.actual_cost).to eq(1140)
     end
 
