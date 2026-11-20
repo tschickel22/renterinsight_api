@@ -3291,6 +3291,7 @@ Rails.application.routes.draw do
         
         member do
           post :move_stage
+          get :deletion_check
           get :tags
           post :tags, to: 'deals#add_tags'
           delete 'tags/:tag_name', to: 'deals#remove_tag'
