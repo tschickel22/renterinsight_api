@@ -112,8 +112,8 @@ RSpec.describe Accounting::AccountLinkResolver do
       inv = company.invoices.create!(location: at, contact: contact, invoice_date: Date.current, status: 'draft')
       inv.invoice_items.create!(description: 'Service', quantity: 1, rate: 400)
       inv.save!
-      inv.update!(status: 'sent')
-      Accounting::InvoicePostingService.new(inv.reload).post!
+      inv.update!(status: 'sent') # posts it (Invoice#note_status_change_for_posting)
+      company.journal_entries.find_by(source_entity_type: 'Invoice', source_entity_id: inv.id, is_void: false)
     end
 
     def credited_accounts(je)

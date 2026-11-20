@@ -46,8 +46,8 @@ RSpec.describe 'Ledger integrity guards' do
       expect(inv.tax_amount).to eq(BigDecimal('0.16'))
 
       inv.update!(status: 'sent')
-      # Auto-posting runs after commit, which transactional specs never reach.
-      je = Accounting::InvoicePostingService.new(inv.reload).post!
+      # Marking it sent posts it (Invoice#note_status_change_for_posting).
+      je = company.journal_entries.find_by(source_entity_type: 'Invoice', source_entity_id: inv.id, is_void: false)
       expect(je).to be_present
       expect(balanced?(je)).to be(true)
       expect(je.journal_entry_lines.sum(&:debit_amount)).to eq(inv.reload.total)
@@ -96,7 +96,8 @@ RSpec.describe 'Ledger integrity guards' do
       deal.save!(validate: false)
       inv = sent_invoice(deal_id: deal.id)
 
-      expect(Accounting::InvoicePostingService.new(inv).post!).to be_present
+      # Marking it sent posted it; posting again finds it already in.
+      expect(company.journal_entries.where(source_entity_type: 'Invoice', source_entity_id: inv.id, is_void: false).count).to eq(1)
     end
   end
 
