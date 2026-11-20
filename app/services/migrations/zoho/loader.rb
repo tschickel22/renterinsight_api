@@ -51,7 +51,7 @@ module Migrations
       # owners against stand-in users on a test company, so a staging load never
       # points records (or notifications) at real staff inboxes.
       def initialize(company:, data:, batch:, dry_run: true, steps: STEPS, fallback_user: nil, user_email_rewrite: nil,
-                     skip_matches_in: nil, log: $stdout)
+                     skip_matches_in: nil, pipeline: nil, log: $stdout)
         @company = company
         @data = data
         @batch = batch
@@ -68,6 +68,9 @@ module Migrations
         # Records another tenant already holds are not loaded (Tom, 2026-11-20:
         # anything already in the DealerTide tenant stays there).
         @skip_company = skip_matches_in
+        # pipeline: 'merge' writes the bundle's stages even on a company that
+        # has deals of its own, keeping every stage those deals sit in.
+        @pipeline_mode = pipeline.to_s
         @skipped = []
         @skipped_ids = Hash.new { |h, k| h[k] = Set.new }
         @location_id = location_id_from(data) || company.locations.order(:id).first&.id
@@ -377,9 +380,10 @@ module Migrations
         wanted = (ref['deal_stage_keys'] || []).map(&:to_s).uniq
         return if wanted.empty?
 
-        bring = Array(ref['pipeline_stages'])
-        if bring.any? && own_deals.none?
-          Setting.set('Company', @company.id, 'pipeline_stages', bring.map(&:deep_stringify_keys))
+        bring = Array(ref['pipeline_stages']).map(&:deep_stringify_keys)
+        if bring.any? && (own_deals.none? || @pipeline_mode == 'merge')
+          bring = keep_stages_in_use(bring) if @pipeline_mode == 'merge'
+          Setting.set('Company', @company.id, 'pipeline_stages', bring)
           @company.instance_variables.grep(/stage_keys\z/).each { |v| @company.remove_instance_variable(v) }
           @report['pipeline_stages'][:written] += bring.size
         end
@@ -398,6 +402,24 @@ module Migrations
         else
           @report['pipeline_stages'][:verified] += wanted.size
         end
+      end
+
+      # A stage one of the company's own deals sits in stays, just before the
+      # closed stages, named as the current config names it.
+      def keep_stages_in_use(bring)
+        have = bring.map { |s| s['key'] }
+        current = @company.pipeline_stages.index_by { |s| (s['key'] || s[:key]).to_s }
+        extra = own_deals.distinct.pluck(:stage).compact.map(&:to_s) - have
+        return bring if extra.empty?
+
+        first_closed = bring.index { |s| %w[closed_won closed_lost].include?(s['key']) } || bring.size
+        kept = extra.map do |key|
+          old = (current[key] || {}).to_h.deep_stringify_keys
+          { 'key' => key, 'name' => old['name'] || key.humanize, 'probability' => old['probability'] || @company.pipeline_stage_probability(key) || 50,
+            'color' => old['color'] || '#64748b', 'active' => true, 'locked' => false }
+        end
+        @report['pipeline_stages'][:kept_in_use] += kept.size
+        (bring[0...first_closed] + kept + bring[first_closed..]).each_with_index.map { |s, i| s.merge('order' => i) }
       end
 
       # Deals this company has that did not come from Zoho.
