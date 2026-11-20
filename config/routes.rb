@@ -2783,6 +2783,8 @@ Rails.application.routes.draw do
           get   :lists
           put   :lists, action: :update_lists
           get   'lists/search', action: :search_lists
+          get   :trial_invoices
+          put   :trial_invoices, action: :update_trial_invoices
           get   :preview, action: :migration_preview
           post  :post, action: :post_migration
           post  :rollback, action: :rollback_migration

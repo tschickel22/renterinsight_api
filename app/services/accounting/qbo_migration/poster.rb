@@ -38,6 +38,7 @@ module Accounting
           save_invoices!(contacts)
           save_bills!(vendors, ids)
           save_reconciliations!(entry)
+          settle_trial_invoices!
           settled = settle_trial_activity!
           turn_off_old_sync!
 
@@ -342,7 +343,16 @@ module Accounting
         location_id = @wizard.default_location_id
         created = 0
         skipped = 0
+        # Going live: QuickBooks invoices the dealer said are one they made
+        # here during the trial become that invoice instead of a second one.
+        adopting = @wizard.trial_invoices.by_qbo_id
+        adopted = (@trial_invoices = { 'adopted' => [] })['adopted']
         invoices.each do |inv|
+          if (mine = adopting[inv['external_id'].to_s])
+            adopted << @wizard.trial_invoices.adopt!(mine, inv, [inv['carry'], 0].max, import: @import, user: @user,
+                                                                                       location_id: location_id)
+            next
+          end
           if inv['carry'] <= 0 || @company.invoices.exists?(quickbooks_id: inv['external_id'])
             skipped += 1
             next
@@ -372,6 +382,20 @@ module Accounting
 
         credit_memos = save_leftover_credits!(leftovers, contacts, location_id)
         @results[:open_invoices] = { created: created, skipped: skipped, credit_memos: credit_memos }
+      end
+
+      # Trial invoices answered paid in QuickBooks or cancel (TrialInvoices).
+      # Kept in posted.trial_invoices so a rollback can put them back.
+      def settle_trial_invoices!
+        @trial_invoices ||= { 'adopted' => [] }
+        return unless @wizard.trial_invoices.applies?
+
+        done = @wizard.trial_invoices.settle!(import: @import, user: @user, location_id: @wizard.default_location_id)
+        @trial_invoices.merge!(done.except('adopted'))
+        @created['trial_invoices'] = @trial_invoices
+        @results[:trial_invoices] = { matched: @trial_invoices['adopted'].size, paid: @trial_invoices['paid'].size,
+                                      cancelled: @trial_invoices['cancelled'].size,
+                                      kept: @wizard.trial_invoices.invoices.count { |i| @wizard.trial_invoices.answer_for(i)&.dig('answer') == 'keep' } }
       end
 
       def save_leftover_credits!(leftovers, contacts, location_id)

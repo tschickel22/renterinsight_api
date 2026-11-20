@@ -46,7 +46,10 @@ module Accounting
         bill = bills.find { |b| paid_bills.include?(b.id) }
         return "Bill #{bill.reference_number || bill.bill_number} has a payment applied since the switch" if bill
 
-        applied = credit_memos.any? ? CreditMemoApplication.where(credit_memo_id: credit_memos.map(&:id)).distinct.pluck(:credit_memo_id).to_set : Set.new
+        # The switch applies its own off-books credits to trial invoices when
+        # going live (TrialInvoices); those are undone below, not a reason to refuse.
+        own = trial_invoice_memo_ids
+        applied = credit_memos.any? ? CreditMemoApplication.where(credit_memo_id: credit_memos.map(&:id) - own).distinct.pluck(:credit_memo_id).to_set : Set.new
         memo = credit_memos.find { |m| applied.include?(m.id) }
         return "Credit memo #{memo.credit_memo_number} has been applied since the switch" if memo
 
@@ -71,7 +74,13 @@ module Accounting
           reconciliations.each(&:destroy!)
           invoices.each(&:destroy!)
           bills.each(&:destroy!)
+          # The off-books credits on trial invoices go first, without their
+          # callbacks refreshing a memo that is about to go (they raised
+          # "cannot update a destroyed record"); undo_trial_invoices! then
+          # recomputes each invoice.
+          CreditMemoApplication.where(credit_memo_id: trial_invoice_memo_ids).delete_all
           credit_memos.each(&:destroy!)
+          undo_trial_invoices!
 
           Array(@wizard.config.dig('posted', 'bank_gl_links')).each do |ba_id|
             @company.bank_accounts.find_by(id: ba_id)&.update_column(:chart_of_account_id, nil)
@@ -100,6 +109,30 @@ module Accounting
       end
 
       private
+
+      def trial_invoice_record
+        @wizard.config.dig('posted', 'trial_invoices') || {}
+      end
+
+      def trial_invoice_memo_ids
+        %w[adopted paid].flat_map { |k| Array(trial_invoice_record[k]) }.filter_map { |r| r['credit_memo_id'] }
+      end
+
+      # Going live answered the trial's invoices (TrialInvoices): the matched
+      # ones give back their QuickBooks id, the cancelled ones their status,
+      # and every one recomputes its balance now its off-books credit is gone.
+      def undo_trial_invoices!
+        rec = trial_invoice_record
+        ids = %w[adopted paid cancelled].flat_map { |k| Array(rec[k]) }.map { |r| r['invoice_id'] }.uniq
+        return if ids.empty?
+
+        adopted = Array(rec['adopted']).map { |r| r['invoice_id'] }
+        @company.invoices.where(id: adopted).update_all(quickbooks_id: nil, quickbooks_synced_at: nil) if adopted.any?
+        Array(rec['cancelled']).each do |r|
+          @company.invoices.find_by(id: r['invoice_id'])&.update_columns(status: r['status_before'])
+        end
+        @company.invoices.where(id: ids).find_each(&:update_status_based_on_payments)
+      end
 
       def invoices
         @invoices ||= @company.invoices.where(accounting_import_id: @import.id).to_a
