@@ -45,10 +45,12 @@ class OutreachWave < ApplicationRecord
 
   # The next follow-up's channel: the other one when both are allowed and work.
   # texts_sent: texts already sent to them that they have not answered.
-  def next_channel(reach, last:, texts_sent: 0)
+  # prefer: the channel they acted on (Outreach::Engagement), used while it works.
+  def next_channel(reach, last:, texts_sent: 0, prefer: nil)
     usable = %w[email text].select { |channel| allows?(channel) && reach.public_send(channel) }
     usable.delete('text') if texts_sent >= MAX_UNANSWERED_TEXTS
     return usable.first if usable.size < 2
+    return prefer.to_s if usable.include?(prefer.to_s)
 
     last.to_s == 'text' ? 'email' : 'text'
   end

@@ -72,9 +72,17 @@ module Outreach
             else
               'Ask which day this week or next suits them for a quick look.'
             end
+      engagement = Engagement.new(@target)
+      variety = if engagement.engaged?
+                  'Share a different video only if it shows the same problem; otherwise share none.'
+                else
+                  'Use a different problem and a different video from earlier messages.'
+                end
+      did = engagement.prompt_lines
       write(channel, 'follow_up', task: "They have not answered. This is follow-up #{number} of #{of}. #{last ? '' : shape} #{ask} " \
-                                        'Use a different problem and a different video from earlier messages. Do not repeat earlier messages, do not mention ' \
-                                        'that they have not answered, and never write "following up", "circling back", "checking in" or "bumping".')
+                                        "#{variety} Do not repeat earlier messages, do not mention " \
+                                        'that they have not answered, and never write "following up", "circling back", "checking in" or "bumping".' \
+                                        "#{"\n\nWHAT THEY DID WITH YOUR MESSAGES\n#{did}" if did.present?}")
     end
 
     def reply(channel, booking:)

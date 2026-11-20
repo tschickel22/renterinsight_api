@@ -10,7 +10,7 @@ class OutreachTrackingController < ActionController::API
     item = target && OutreachContentItem.find_by(id: item_id, company_id: target.company_id)
     return head(:not_found) unless item
 
-    record_click(target, item)
+    record_click(target, item, channel: params[:token].to_s.match?(Outreach::Tracking::SHORT) ? 'text' : 'email')
     redirect_to item.url, allow_other_host: true
   end
 
@@ -52,25 +52,44 @@ class OutreachTrackingController < ActionController::API
 
   private
 
+  def machine_visit?(target)
+    reason = Outreach::LinkVisit.machine_reason(target, ip: visitor_ip, user_agent: request.user_agent)
+    Rails.logger.info("[OutreachTracking] target #{target.id}: not counted (#{reason}) #{visitor_ip} #{request.user_agent.to_s.truncate(120)}") if reason
+    reason.present?
+  end
+
+  def visitor_ip
+    @visitor_ip ||= Campaigns::ScannerClick.client_ip(request)
+  end
+
+  def visit_metadata
+    { ip: visitor_ip, user_agent: request.user_agent.to_s.truncate(200) }
+  end
+
   def unsubscribe_target
     target_id, purpose = Outreach::Tracking.read(params[:token])
     purpose == 'unsubscribe' ? OutreachTarget.find_by(id: target_id) : nil
   end
 
-  def record_click(target, item)
-    return if request.user_agent.to_s.match?(/bot|crawler|spider|preview|scanner|facebookexternalhit|slurp/i)
-    return if target.last_sent_at && target.last_channel == 'email' && target.last_sent_at > 60.seconds.ago
+  # Link previews and spam checks open the link before the person sees the
+  # message (Outreach::LinkVisit). Only a person counts, and only a person
+  # moves their next message forward.
+  def record_click(target, item, channel:)
+    return if machine_visit?(target)
 
-    target.record!('clicked', metadata: { content_item_id: item.id })
+    Outreach::Engagement.interested!(target)
+    target.record!('clicked', channel: channel, metadata: visit_metadata.merge(content_item_id: item.id))
     target.update!(first_click_at: target.first_click_at || Time.current)
   rescue StandardError => e
     Rails.logger.warn("[OutreachTracking] click not recorded: #{e.message}")
   end
 
   def record_report_view(target)
-    return if request.user_agent.to_s.match?(/bot|crawler|spider|preview|scanner|facebookexternalhit|slurp/i)
+    return if machine_visit?(target)
+    return if target.recorded?('report_viewed')
 
-    target.record!('report_viewed') unless target.recorded?('report_viewed')
+    Outreach::Engagement.interested!(target)
+    target.record!('report_viewed', metadata: visit_metadata)
   rescue StandardError => e
     Rails.logger.warn("[OutreachTracking] report view not recorded: #{e.message}")
   end
