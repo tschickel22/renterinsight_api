@@ -186,6 +186,8 @@ module Api
 
         if @wave.status == 'paused'
           Outreach::Settings.for(@company).update!('enabled' => true)
+          # Resuming accepts what paused it, or the next tick pauses it again.
+          Outreach::Safety.acknowledge!(@wave, user: current_user)
           @wave.update!(status: 'running', pause_reason: nil)
         end
         render json: { wave: wave_json(@wave) }

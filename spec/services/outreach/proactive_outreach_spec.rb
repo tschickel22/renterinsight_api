@@ -331,5 +331,27 @@ RSpec.describe 'Proactive Outreach pilot' do
       target.record!('unsubscribed')
       expect(Outreach::Safety.new(wave).problem).to be_nil
     end
+
+    it 'stays running after a resume until new problems come in' do
+      targets = Array.new(4) { target!(lead!, status: 'sent') }
+      targets.each_with_index { |t, i| t.record!('sent', channel: 'email', communication_id: 100 + i) }
+      targets.first(2).each { |t| t.record!('unsubscribed') }
+      expect(Outreach::Safety.new(wave).problem).to eq('2 people unsubscribed')
+
+      Outreach::Safety.acknowledge!(wave, user: tom)
+      expect(Outreach::Safety.new(wave).problem).to be_nil
+      expect(wave.outreach_events.where(event_type: 'unsubscribed').count).to eq(2)
+
+      targets.last.record!('unsubscribed')
+      expect(Outreach::Safety.new(wave).problem).to be_nil
+      targets[2].record!('unsubscribed')
+      expect(Outreach::Safety.new(wave).problem).to eq('2 people unsubscribed')
+    end
+
+    it 'acknowledges a spam complaint on resume' do
+      target!(lead!, status: 'sent').record!('complained')
+      Outreach::Safety.acknowledge!(wave)
+      expect(Outreach::Safety.new(wave).problem).to be_nil
+    end
   end
 end
