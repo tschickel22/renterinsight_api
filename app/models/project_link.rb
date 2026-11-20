@@ -21,6 +21,8 @@ class ProjectLink < ApplicationRecord
   # Price requests and change orders (step 6). Not named "changes": that is
   # ActiveRecord's dirty tracking.
   has_many :link_changes, class_name: 'ProjectLinkChange', dependent: :destroy
+  # Tasks the dealer added or changed and sent over (E106).
+  has_many :scope_changes, class_name: 'ProjectLinkScopeChange', dependent: :destroy
   belongs_to :link_rate_card, optional: true
 
   PRICE_SOURCES = %w[card dealer quote].freeze

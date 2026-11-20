@@ -11,6 +11,8 @@ class WorkqueueService
   # the inventory hot-interest window.
   BROCHURE_CLICK_WINDOW = 48.hours
 
+  OUTREACH_QUEUES = %w[outreach_needs_you outreach_replied outreach_clicked outreach_opened outreach_booked].freeze
+
   QUEUES = {
     'inventory_hot_interest'      => :prospect_hot_signals,
     'brochure_hot_interest'       => :brochure_click_signals,
@@ -23,6 +25,11 @@ class WorkqueueService
     'engagement_contact_clicked_today' => :engagement_contact_clicked_today,
     'engagement_landing_visit_today'   => :engagement_landing_visit_today,
     'engagement_landing_deep'          => :engagement_landing_deep,
+    'outreach_needs_you'               => :outreach_needs_you,
+    'outreach_replied'                 => :outreach_replied,
+    'outreach_clicked'                 => :outreach_clicked,
+    'outreach_opened'                  => :outreach_opened,
+    'outreach_booked'                  => :outreach_booked,
     'activity_tasks_today'        => :activity_tasks_today,
     'activity_tasks_week'         => :activity_tasks_week,
     'activity_meetings_today'     => :activity_meetings_today,
@@ -54,6 +61,10 @@ class WorkqueueService
   GROUPS = [
     { id: 'engagement', label: 'Hot Engagement',
       queue_ids: %w[inventory_hot_interest brochure_hot_interest engagement_landing_deep engagement_landing_visit_today engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
+    # Proactive Outreach (E105): only for companies with the add-on, and only
+    # for the outreach sender and admins. See outreach_visible?.
+    { id: 'outreach', label: 'Proactive Outreach',
+      queue_ids: OUTREACH_QUEUES },
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
@@ -383,6 +394,7 @@ class WorkqueueService
   end
 
   def hidden_queue?(queue_id)
+    return true if OUTREACH_QUEUES.include?(queue_id.to_s) && !outreach_visible?
     return true if %w[leads_designed_home leads_design_opened leads_design_shared leads_design_price_up].include?(queue_id.to_s) && !truebuild_dealer?
 
     hidden = Array(prefs[:hidden_queues]).map(&:to_s)
@@ -440,6 +452,11 @@ class WorkqueueService
     when 'engagement_contact_clicked_today' then 'Contacts — Clicked Link Today'
     when 'engagement_landing_visit_today'   then 'Leads — Visited a Landing Page Today'
     when 'engagement_landing_deep'          then 'Leads — Engaged a Landing Page, No Enquiry'
+    when 'outreach_needs_you'          then 'Handed to You'
+    when 'outreach_replied'            then 'Replied'
+    when 'outreach_clicked'            then 'Watched a Video or Checkup'
+    when 'outreach_opened'             then 'Opened, No Click Yet'
+    when 'outreach_booked'             then 'Demo Booked'
     when 'activity_tasks_today'        then 'Tasks — Today & Overdue'
     when 'activity_tasks_week'         then "Tasks — Next #{prefs[:tasks_week_days]}d"
     when 'activity_meetings_today'     then 'Meetings — Today'
@@ -1143,6 +1160,92 @@ class WorkqueueService
     @company.leads.where(owner_id: @user.id, id: ordered_ids)
                   .where.not(status: excluded_lead_status_keys)
                   .order(Arel.sql("array_position(ARRAY[#{ids_csv}]::bigint[], leads.id)"))
+  end
+
+  # ─── Proactive Outreach queues (E105) ───────────────────────────
+  #
+  # People a wave has contacted, by the most useful thing they did. Each person
+  # sits in one queue at a time: handed to you, then replied, then clicked,
+  # then opened. A booked demo takes them out of the engagement queues and into
+  # Demo Booked. Anyone who unsubscribed or complained is left out of all of
+  # them. Rows are every contacted lead in the company, not only the user's
+  # own, because outreach goes out under one sender; that is why the group is
+  # shown only to that sender and to admins.
+
+  OUTREACH_WINDOW = 7.days
+  OUTREACH_HANDOFF_WINDOW = 14.days
+
+  def outreach_visible?
+    return @outreach_visible if defined?(@outreach_visible)
+
+    settings = Outreach::Settings.for(@company)
+    @outreach_visible = settings.add_on? && (@user.effective_admin? || settings['sender_user_id'].to_i == @user.id)
+  rescue StandardError
+    @outreach_visible = false
+  end
+
+  def outreach_needs_you
+    outreach_scope_for(outreach_lead_recency(%w[handed_off scan_requested], since: OUTREACH_HANDOFF_WINDOW.ago))
+  end
+
+  def outreach_replied
+    recency = outreach_lead_recency(%w[replied], since: OUTREACH_WINDOW.ago)
+    outreach_scope_for(recency.except(*outreach_tier_ids(:needs_you)))
+  end
+
+  def outreach_clicked
+    recency = outreach_lead_recency(%w[clicked report_viewed], since: OUTREACH_WINDOW.ago)
+    outreach_scope_for(recency.except(*outreach_tier_ids(:needs_you), *outreach_tier_ids(:replied)))
+  end
+
+  def outreach_opened
+    recency = outreach_lead_recency(%w[opened], since: OUTREACH_WINDOW.ago)
+    outreach_scope_for(recency.except(*outreach_tier_ids(:needs_you), *outreach_tier_ids(:replied), *outreach_tier_ids(:clicked)))
+  end
+
+  # Demos set and not yet held or missed, newest booking first.
+  def outreach_booked
+    return @company.leads.none unless outreach_visible?
+
+    recency = OutreachTarget.where(company_id: @company.id, test_group: 'contact', status: 'booked')
+                            .group(:lead_id).maximum(:booked_at)
+    outreach_scope_for(recency.transform_values { |at| at || Time.current }, keep_booked: true)
+  end
+
+  # {lead_id => latest occurred_at} for contacted people with these events.
+  def outreach_lead_recency(types, since:)
+    return {} unless outreach_visible?
+
+    OutreachEvent.joins(:outreach_target)
+                 .where(company_id: @company.id, event_type: types, outreach_targets: { test_group: 'contact' })
+                 .where('outreach_events.occurred_at >= ?', since)
+                 .group('outreach_targets.lead_id').maximum(:occurred_at)
+  end
+
+  # Lead ids in a higher tier, before dismissals, so a person dismissed from
+  # Replied does not drop down into Clicked.
+  def outreach_tier_ids(tier)
+    @outreach_tiers ||= {}
+    @outreach_tiers[tier] ||= case tier
+                              when :needs_you then outreach_lead_recency(%w[handed_off scan_requested], since: OUTREACH_HANDOFF_WINDOW.ago).keys
+                              when :replied then outreach_lead_recency(%w[replied], since: OUTREACH_WINDOW.ago).keys
+                              when :clicked then outreach_lead_recency(%w[clicked report_viewed], since: OUTREACH_WINDOW.ago).keys
+                              end
+  end
+
+  def outreach_scope_for(recency, keep_booked: false)
+    return @company.leads.none if recency.empty?
+
+    out = OutreachEvent.where(company_id: @company.id, event_type: %w[unsubscribed complained])
+                       .joins(:outreach_target).distinct.pluck('outreach_targets.lead_id')
+    out |= OutreachTarget.where(company_id: @company.id, status: %w[booked held]).distinct.pluck(:lead_id) unless keep_booked
+    recency = reject_dismissed_recency(recency.except(*out), 'Lead')
+    return @company.leads.none if recency.empty?
+
+    ordered_ids = recency.sort_by { |_, ts| -(ts ? ts.to_f : 0) }.map { |id, _| id.to_i }
+    @company.leads.where(id: ordered_ids)
+            .where('leads.status IS NULL OR leads.status NOT IN (?)', excluded_lead_status_keys)
+            .order(Arel.sql("array_position(ARRAY[#{ordered_ids.join(',')}]::bigint[], leads.id)"))
   end
 
   # Contact-side engagement queues. Parallel to the Lead-side queues above but

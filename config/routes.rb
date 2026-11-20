@@ -800,6 +800,9 @@ Rails.application.routes.draw do
           post :withdraw
         end
       end
+      # E106: the dealer's scope changes, answered by the installer
+      post 'project_link_scope_changes/:id/no_charge', to: 'project_link_scope_changes#no_charge'
+      get 'projects/:project_id/who_hears', to: 'project_change_audience#show'
 
       resources :projects do
         collection do
@@ -896,6 +899,10 @@ Rails.application.routes.draw do
         resources :cost_items, controller: 'project_cost_items' do
           collection do
             get :summary
+            get :duplicates
+          end
+          member do
+            post :approve
           end
         end
 
@@ -1019,6 +1026,10 @@ Rails.application.routes.draw do
 
         resources :contractor_assignments, only: [:index, :create, :update, :destroy]
       end
+
+      # E107: contractor's proposed dates, confirmed or turned down by the dealer
+      post 'contractor_assignments/:id/confirm_dates', to: 'contractor_dates#confirm'
+      post 'contractor_assignments/:id/decline_dates', to: 'contractor_dates#decline'
 
       # Contractor Reviews (dealer-side approval workflow)
       resources :contractor_reviews, path: 'contractor-reviews', only: [:index, :show] do
@@ -1837,6 +1848,13 @@ Rails.application.routes.draw do
       
       # ==================== CONTACTS ====================
       resources :contacts do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being
           # merged away is named as duplicate_id in the body, so a mis-sent
@@ -1911,6 +1929,13 @@ Rails.application.routes.draw do
       put 'followers', to: 'followers#update'
 
       resources :accounts do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being
           # merged away is named as duplicate_id in the body, so a mis-sent
@@ -2983,9 +3008,10 @@ Rails.application.routes.draw do
       get  'automations', to: 'automations#index'
       post 'automations/stop', to: 'automations#stop'
       post 'automations/stop_all', to: 'automations#stop_all'
-      resources :outreach_waves, only: %i[index show create update] do
+      resources :outreach_waves, only: %i[index show create update destroy] do
         member do
           post :draft
+          post :approve_all
           post :start
           post :pause
           post :resume
@@ -3063,6 +3089,13 @@ Rails.application.routes.draw do
 
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         member do
           # Find & merge duplicates. :id is always the SURVIVOR; the record being
           # merged away is named as duplicate_id in the body, so a mis-sent
@@ -3242,6 +3275,13 @@ Rails.application.routes.draw do
 
       # ==================== DEALS (SALES PIPELINE) ====================
       resources :deals, only: %i[index show create update destroy] do
+        # Team files (RecordFiles concern). Not the buyer-portal documents.
+        member do
+          get    'files',                  action: :files
+          post   'files',                  action: :upload_file
+          delete 'files/:file_id',         action: :destroy_file
+          get    'files/:file_id/download', action: :download_file
+        end
         collection do
           get :metrics
           get :forecast
@@ -3442,6 +3482,7 @@ Rails.application.routes.draw do
       # What Quinn AI costs per dealer this month: AI tokens and messages (E96).
       get 'assistant_usage', to: 'assistant_questions#usage'
       get 'sms_registrations', to: 'sms_registrations#index'
+      patch 'sms_registrations/:id', to: 'sms_registrations#update'
       post 'sms_registrations/:id/send_to_carriers', to: 'sms_registrations#send_to_carriers'
       post 'sms_registrations/:id/check', to: 'sms_registrations#check'
       # Shared texting numbers for Quinn AI and which dealers may use them (E96).

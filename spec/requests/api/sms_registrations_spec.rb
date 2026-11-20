@@ -72,6 +72,30 @@ RSpec.describe 'Texting registration', type: :request do
       allow(TwilioProvisioningService).to receive(:master_credentials).and_return(%w[AC1 token])
     end
 
+    it 'lets a platform admin correct answers before sending, and not after' do
+      staff = Company.create!(name: "DT #{SecureRandom.hex(3)}")
+      ops = User.create!(email: "ops-#{SecureRandom.hex(4)}@example.com", first_name: 'Op', last_name: 'Staff', password: 'Pass1234!',
+                         company_id: staff.id, role: 'platform_admin', status: 'active')
+      ops_headers = { 'Authorization' => "Bearer #{JsonWebToken.encode(user_id: ops.id, company_id: staff.id)}", 'Content-Type' => 'application/json' }
+
+      patch "/api/admin/sms_registrations/#{registration.id}", headers: headers,
+                                                               params: { registration: { business: { website: 'https://x.example.com' } } }.to_json
+      expect(response.status).to be >= 400
+
+      patch "/api/admin/sms_registrations/#{registration.id}", headers: ops_headers,
+                                                               params: { registration: { business: { website: 'https://www.summitpark.example.com/' } } }.to_json
+      body = JSON.parse(response.body)
+      expect(body).to include('status' => 'submitted', 'editable' => true, 'problems' => [])
+      expect(body['business']).to include('website' => 'https://www.summitpark.example.com/', 'legal_name' => 'Summit Park Homes LLC')
+      expect(registration.reload.company_id).to eq(company.id)
+      expect(registration.events.last['detail']).to include('website: https://summitpark.example.com to https://www.summitpark.example.com/')
+
+      SmsRegistration::Submitter.new(registration, client: client).call
+      patch "/api/admin/sms_registrations/#{registration.id}", headers: ops_headers,
+                                                               params: { registration: { business: { dba: 'Other' } } }.to_json
+      expect(response).to have_http_status(:conflict)
+    end
+
     it 'sends it once, even when sent again, and goes live after approval' do
       SmsRegistration::Submitter.new(registration, client: client).call
       expect(registration.reload).to have_attributes(status: 'in_review', customer_profile_sid: 'BU1', trust_product_sid: 'BU2',

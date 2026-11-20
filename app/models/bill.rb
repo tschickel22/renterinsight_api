@@ -394,6 +394,7 @@ class Bill < ApplicationRecord
     cost_status = COST_STATUS_FOR_BILL[status] || 'approved'
     wanted.each do |project_id, amount|
       next unless amount.positive?
+      next if adopt_typed_cost_line(project_id, amount, cost_status)
 
       project_cost_items.create!(
         company_id: company_id,
@@ -411,6 +412,28 @@ class Bill < ApplicationRecord
         metadata: { 'source' => 'bill' }
       )
     end
+  end
+
+  # E109: the project manager typed this cost on the job (tracking only)
+  # before the vendor's bill was entered. The bill takes that line over
+  # instead of adding a second one, so the job isn't charged twice. Only an
+  # exact match: same job, same vendor, same amount, not linked to anything.
+  def adopt_typed_cost_line(project_id, amount, cost_status)
+    return false unless vendor_id
+
+    typed = ProjectCostItem.not_deleted
+                           .where(company_id: company_id, project_id: project_id, vendor_id: vendor_id, amount: amount,
+                                  bill_id: nil, journal_entry_id: nil)
+                           .order(:created_at).first
+    return false unless typed
+
+    typed.update!(
+      bill_id: id, status: cost_status, paid_at: cost_status == 'paid' ? Time.current : nil,
+      invoice_number: typed.invoice_number.presence || reference_number,
+      project_phase_id: typed.project_phase_id || phase_for(project_id),
+      metadata: typed.metadata.to_h.merge('source' => 'bill', 'adopted_by_bill' => id)
+    )
+    true
   end
 
   def close_review_items

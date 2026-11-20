@@ -445,6 +445,12 @@ class Api::V1::BillsController < ApplicationController
         journal_entry: { only: [:id, :entry_number] }
       },
       methods: [:vendor_display_name]
+    ).merge(
+      # E109: cost lines typed on a job before this bill, now paid through it
+      # instead of counted a second time.
+      'adopted_cost_lines' => bill.project_cost_items.not_deleted.includes(:project)
+                                  .select { |i| i.metadata.to_h['adopted_by_bill'] == bill.id }
+                                  .map { |i| { 'id' => i.id, 'description' => i.description, 'project_name' => i.project&.name } }
     )
   end
 end

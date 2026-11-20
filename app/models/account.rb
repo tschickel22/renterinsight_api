@@ -83,6 +83,8 @@ class Account < ApplicationRecord
   has_many :tag_assignments, as: :entity, class_name: 'TagAssignment', dependent: :destroy
   has_many :tags, through: :tag_assignments
   has_many :activities, class_name: 'AccountActivity', dependent: :destroy
+  # Team files (Files tab). Not shown in the buyer portal; see RecordFiles.
+  has_many_attached :files
   has_many :quotes, dependent: :destroy
   
   # Owner helper methods (for consistency with other models)

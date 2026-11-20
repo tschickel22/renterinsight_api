@@ -73,7 +73,8 @@ module Api
         return render(json: { error: 'Bid not found' }, status: :not_found) unless bid
 
         notify = params.key?(:notify_others) ? ActiveModel::Type::Boolean.new.cast(params[:notify_others]) : true
-        service.award!(@request, bid, notify_others: notify, note: params[:note])
+        apply_dates = params.key?(:apply_dates) ? ActiveModel::Type::Boolean.new.cast(params[:apply_dates]) : nil
+        service.award!(@request, bid, notify_others: notify, note: params[:note], apply_dates: apply_dates)
         render json: { bid_request: request_json(@request.reload) }
       rescue ProjectBidService::Error => e
         render json: { error: e.message }, status: :unprocessable_entity

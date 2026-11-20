@@ -20,7 +20,7 @@ module Api
       end
 
       def update
-        attrs = params.require(:availability).permit(:busy_feed_url, :busy_feed_detail, :use_location_hours, working_hours: {})
+        attrs = params.require(:availability).permit(:busy_feed_url, :busy_feed_detail, :calendar_feed_includes, :use_location_hours, working_hours: {})
         if attrs.key?(:working_hours) || attrs.key?(:use_location_hours)
           use_location = ActiveModel::Type::Boolean.new.cast(attrs[:use_location_hours])
           current_user.update!(working_hours: use_location ? nil : clean_hours(attrs[:working_hours]))
@@ -32,6 +32,14 @@ module Api
           end
 
           change_feed_detail(detail)
+        end
+        if attrs.key?(:calendar_feed_includes)
+          includes = attrs[:calendar_feed_includes].to_s
+          unless CalendarFeeds::IcsOut::INCLUDES.include?(includes)
+            return render(json: { error: 'Choose what your calendar link carries' }, status: :unprocessable_entity)
+          end
+
+          current_user.update!(calendar_feed_includes: includes)
         end
         if attrs.key?(:busy_feed_url)
           url = attrs[:busy_feed_url].to_s.strip.presence
@@ -85,7 +93,10 @@ module Api
       def payload
         user = current_user
         user.update!(calendar_feed_token: SecureRandom.urlsafe_base64(24)) if user.calendar_feed_token.blank?
-        base = (ENV['RAILS_API_URL'].presence || request.base_url).to_s.chomp('/')
+        # The customer-facing address (api.dealertide.com in production), so the
+        # link people paste into Google or Outlook carries the brand. The
+        # Render address keeps working for links already subscribed.
+        base = (ENV['MCP_PUBLIC_BASE_URL'].presence || ENV['RAILS_API_URL'].presence || request.base_url).to_s.chomp('/')
         availability = Assistant::Availability.new(company: @company, user: user, minutes: Assistant::Settings.for(@company).visit_minutes,
                                                    notice: 0.hours)
         {
@@ -93,6 +104,7 @@ module Api
           location_hours: Assistant::Hours.hours_for(availability.location),
           time_zone: availability.zone.tzinfo.name,
           feed_url: "#{base}/calendar/#{user.calendar_feed_token}.ics",
+          calendar_feed_includes: user.calendar_feed_includes,
           busy_feed_url: user.busy_feed_url,
           busy_feed_checked_at: user.busy_feed_checked_at,
           busy_feed_error: user.busy_feed_error,

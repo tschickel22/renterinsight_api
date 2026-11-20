@@ -156,9 +156,16 @@ class ProjectPhase < ApplicationRecord
   def price_hold_message
     map = ProjectLinkPhase.includes(project_link: :dealer_company).find_by(installer_phase_id: id)
     pl = map&.project_link
-    return nil unless pl&.accepted? && !pl.legacy_price?
+    return nil unless pl&.accepted?
 
     dealer = pl.dealer_company.name
+    # E106: the dealer changed the work on this phase and is waiting for a
+    # change order or "no charge".
+    if (scope = pl.scope_changes.pending.where(dealer_phase_id: map.dealer_phase_id).order(:id).first)
+      return "#{name} can't start until you answer #{dealer}'s scope change: #{scope.description.truncate(120)}"
+    end
+    return nil if pl.legacy_price?
+
     if (held = pl.hold_for(map.dealer_phase_id))
       "#{name} can't start until #{dealer} approves #{held.price? ? 'the price' : held.label.downcase}."
     elsif !pl.price_agreed?

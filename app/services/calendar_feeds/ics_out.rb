@@ -9,6 +9,8 @@ module CalendarFeeds
     MODELS = %w[LeadActivity ContactActivity AccountActivity DealActivity].freeze
     PAST = 30.days
     AHEAD = 180.days
+    # What the link carries (users.calendar_feed_includes, E108).
+    INCLUDES = %w[meetings meetings_and_projects].freeze
 
     def initialize(user)
       @user = user
@@ -16,8 +18,9 @@ module CalendarFeeds
 
     def to_ics
       lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', "PRODID:-//#{Brand.current.name}//Appointments//EN", 'CALSCALE:GREGORIAN',
-               'METHOD:PUBLISH', "X-WR-CALNAME:#{escape("#{Brand.current.name} appointments")}"]
+               'METHOD:PUBLISH', "X-WR-CALNAME:#{escape("#{Brand.current.name} #{projects? ? 'appointments and projects' : 'appointments'}")}"]
       events.each { |e| lines.concat(vevent(e)) }
+      project_work.each { |e| lines.concat(all_day_vevent(e)) } if projects?
       lines << 'END:VCALENDAR'
       lines.map { |l| fold(l) }.join("\r\n") + "\r\n"
     end
@@ -34,7 +37,39 @@ module CalendarFeeds
       end
     end
 
+    def projects?
+      @user.try(:calendar_feed_includes) == 'meetings_and_projects'
+    end
+
+    # The person's project work (E108): the same phases and tasks their My
+    # calendar shows in DealerTide, in their own company.
+    def project_work
+      company = @user.company
+      return [] unless company
+
+      events = ProjectCalendarEvents.new(projects: company.projects, user_ids: [@user.id],
+                                         from: Time.current - PAST, to: Time.current + AHEAD)
+      (events.phases.to_a + events.tasks.to_a).reject { |r| %w[completed skipped].include?(r.status) }
+    end
+
     private
+
+    # Phases and tasks are whole days: DTEND is the day after the last one.
+    def all_day_vevent(record)
+      first, last = ProjectCalendarEvents.span(record)
+      phase = record.is_a?(ProjectPhase) ? record : record.project_phase
+      project = phase.project
+      who = project.customer_name.presence || project.name
+      summary = "#{record.name}: #{who}"
+      out = ['BEGIN:VEVENT', "UID:dt-#{record.class.name.underscore}-#{record.id}@#{host}",
+             "DTSTAMP:#{utc(record.updated_at || Time.current)}",
+             "DTSTART;VALUE=DATE:#{first.strftime('%Y%m%d')}", "DTEND;VALUE=DATE:#{(last + 1).strftime('%Y%m%d')}",
+             "SUMMARY:#{escape(summary)}"]
+      place = [project.try(:delivery_street), project.try(:delivery_city), project.try(:delivery_state)].compact_blank.join(', ')
+      out << "LOCATION:#{escape(place)}" if place.present?
+      out << "DESCRIPTION:#{escape([project.name, (phase.name unless record == phase)].compact_blank.join(', '))}"
+      out << 'END:VEVENT'
+    end
 
     def vevent(activity)
       finish = activity.end_time || (activity.start_time + (activity.try(:duration_minutes).presence || 60).to_i.minutes)

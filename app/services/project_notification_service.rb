@@ -841,6 +841,41 @@ class ProjectNotificationService
     nil
   end
 
+  # E107: the dealer confirmed or kept their own dates after the contractor
+  # proposed theirs.
+  def self.notify_contractor_dates_decided(assignment, confirmed)
+    contractor = assignment.contractor
+    return unless notice_email?(contractor)
+
+    company = assignment.company
+    esc = ->(v) { ERB::Util.html_escape(v.to_s) }
+    work = ContractorDates.new(assignment).label
+    span = "#{assignment.proposed_start_date&.strftime('%b %-d')} to #{assignment.proposed_end_date&.strftime('%b %-d')}"
+    subject = confirmed ? "Dates confirmed: #{work}" : "Keep the scheduled dates: #{work}"
+    news = if confirmed
+      "#{esc.(company.name)} confirmed your dates for #{esc.(work)}: #{esc.(span)}."
+    else
+      target = ContractorDates.new(assignment).proposed_target
+      kept = "#{target.estimated_start_date&.strftime('%b %-d') || 'not set'} to #{target.estimated_completion_date&.strftime('%b %-d') || 'not set'}"
+      "#{esc.(company.name)} is keeping the scheduled dates for #{esc.(work)}: #{esc.(kept)}. Call them if those don't work for you."
+    end
+    body = <<~HTML
+      <p>Hello #{esc.(notice_greeting(contractor))},</p>
+      <p>#{news}</p>
+      <p>#{esc.(company.name)}</p>
+    HTML
+    notice_emails(contractor).each do |to|
+      CommunicationService.send_email(
+        company: company, to: to, subject: subject,
+        body: wrap_html(body, subject, audience: :contractor),
+        category: 'project_notification', communicable: assignment
+      )
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] dates decided notice failed for assignment #{assignment&.id}: #{e.message}")
+    nil
+  end
+
   # ── BATCHED: Dealer review-submitted email (called by DealerReviewNotifierJob)
   # Sends ONE email listing all pending reviews on a project to the project owner.
   def self.notify_review_submitted_batch(project, assignments)

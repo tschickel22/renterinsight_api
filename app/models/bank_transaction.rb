@@ -77,7 +77,8 @@ class BankTransaction < ApplicationRecord
       matched_journal_entry: je,
       matched_at: Time.current,
       matched_by: source,
-      status: 'matched'
+      status: 'matched',
+      review_reason: nil
     )
   end
 
@@ -95,9 +96,28 @@ class BankTransaction < ApplicationRecord
     def initialize(entries)
       @entries = entries
       first = entries.first
+      job = ProjectCostItem.not_deleted.where(journal_entry_id: first.id).includes(:project).first&.project
+      on_job = job ? " It is already job cost on #{job.name}." : ''
       super("This transaction is already in the books as entry #{first.entry_number} on " \
-            "#{first.entry_date&.strftime('%m/%d/%Y')}. Match it to that entry instead of categorizing, " \
+            "#{first.entry_date&.strftime('%m/%d/%Y')}.#{on_job} Match it to that entry instead of categorizing, " \
             'or it would be counted twice.')
+    end
+  end
+
+  # E109: an expense line on the feed that is most likely the payment of a
+  # bill still open in Accounting. Categorizing it would put the cost on the
+  # books a second time (the bill already did). Pay the bill instead, then
+  # match the line to that payment. The person can say it is something else.
+  class PaysOpenBill < StandardError
+    attr_reader :bills
+
+    def initialize(bills)
+      @bills = bills
+      bill = bills.first
+      job = bill.project ? " on #{bill.project.name}" : ''
+      super("This looks like the payment of bill #{bill.bill_number} from #{bill.vendor_display_name}#{job}, " \
+            "which is still open for #{format('$%.2f', bill.balance_due.to_d)}. Record the payment on the bill in " \
+            'Accounting, Bills, then match this line to it. Categorizing it as well would count the cost twice.')
     end
   end
 
@@ -106,7 +126,7 @@ class BankTransaction < ApplicationRecord
   # posted nothing changes. Re-categorizing a line this replaces the entry
   # its earlier categorization posted (voided, as the app voids entries).
   def categorize!(account:, contact: nil, memo: nil, create_je: false, source: 'manual',
-                  project: nil, project_phase: nil, vendor: nil)
+                  project: nil, project_phase: nil, vendor: nil, not_a_bill_payment: false)
     if project_phase && project_phase.project_id != project&.id
       raise PostingError, 'That phase is not on the project picked.'
     end
@@ -120,6 +140,10 @@ class BankTransaction < ApplicationRecord
       if create_je && previous.nil?
         booked = BankTransactionMatchingService.new(company).booked_entries(self)
         raise AlreadyBooked, booked if booked.any?
+        unless not_a_bill_payment
+          open_bills = open_bills_paid_by(project: project, vendor: vendor)
+          raise PaysOpenBill, open_bills if open_bills.any?
+        end
       end
 
       previous&.void!(Current.user) unless previous&.is_void?
@@ -136,11 +160,23 @@ class BankTransaction < ApplicationRecord
         status: 'matched',
         matched_journal_entry: nil,
         matched_at: Time.current,
-        matched_by: source
+        matched_by: source,
+        review_reason: nil
       )
 
       create_journal_entry_from_categorization! if create_je
     end
+  end
+
+  # Open bills this withdrawal would pay off exactly: from the vendor picked,
+  # or tagged to the job picked (E109). Empty for deposits.
+  def open_bills_paid_by(project:, vendor:)
+    return [] if deposit? || (project.nil? && vendor.nil?)
+
+    scope = company.bills.where(is_deleted: [false, nil], status: %w[pending partially_paid])
+                   .where(balance_due: amount.abs)
+    scope = vendor ? scope.where(vendor_id: vendor.id) : scope.where(project_id: project.id)
+    scope.includes(:project, :vendor).order(:bill_date).limit(3).to_a
   end
 
   # E99: a deposit that is a customer's or lender's payment. On a deal it goes

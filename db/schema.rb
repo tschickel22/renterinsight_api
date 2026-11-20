@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_20_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -953,6 +953,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.bigint "category_account_id"
     t.bigint "rule_id"
     t.text "excluded_reason"
+    t.text "review_reason"
     t.text "memo"
     t.bigint "contact_id"
     t.datetime "created_at", null: false
@@ -2772,6 +2773,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.string "client_review_status"
     t.datetime "client_reviewed_at"
     t.text "client_review_notes"
+    t.date "proposed_start_date"
+    t.integer "proposed_work_days"
+    t.date "proposed_end_date"
+    t.string "proposed_for"
+    t.string "dates_status"
+    t.datetime "dates_decided_at"
+    t.bigint "dates_decided_by_id"
+    t.text "accept_notes"
     t.bigint "acted_on_behalf_by_id"
     t.boolean "cc_assigner", default: false, null: false
     t.index ["acted_on_behalf_by_id"], name: "index_contractor_assignments_on_acted_on_behalf_by_id"
@@ -6157,6 +6166,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.index ["project_link_id"], name: "index_project_link_phases_on_project_link_id"
   end
 
+  create_table "project_link_scope_changes", force: :cascade do |t|
+    t.bigint "project_link_id", null: false
+    t.bigint "dealer_phase_id", null: false
+    t.bigint "dealer_task_id"
+    t.bigint "installer_task_id"
+    t.string "kind", null: false
+    t.string "status", default: "pending", null: false
+    t.text "description", null: false
+    t.bigint "requested_by_id"
+    t.bigint "answered_by_id"
+    t.datetime "answered_at"
+    t.bigint "link_change_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["dealer_phase_id"], name: "index_project_link_scope_changes_on_dealer_phase_id"
+    t.index ["project_link_id", "status"], name: "index_project_link_scope_changes_on_project_link_id_and_status"
+    t.index ["project_link_id"], name: "index_project_link_scope_changes_on_project_link_id"
+  end
+
   create_table "project_links", force: :cascade do |t|
     t.bigint "company_link_id", null: false
     t.bigint "dealer_company_id", null: false
@@ -8558,6 +8586,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.datetime "busy_feed_checked_at"
     t.string "busy_feed_error"
     t.string "busy_feed_detail", default: "none", null: false
+    t.string "calendar_feed_includes", default: "meetings", null: false
     t.string "office_phone"
     t.string "office_phone_ext"
     t.string "customer_phone", default: "mobile", null: false
@@ -9933,6 +9962,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
   add_foreign_key "project_link_phases", "project_links"
   add_foreign_key "project_link_phases", "project_phases", column: "dealer_phase_id"
   add_foreign_key "project_link_phases", "project_phases", column: "installer_phase_id"
+  add_foreign_key "project_link_scope_changes", "project_links"
   add_foreign_key "project_links", "bills", column: "dealer_bill_id"
   add_foreign_key "project_links", "companies", column: "dealer_company_id"
   add_foreign_key "project_links", "companies", column: "installer_company_id"

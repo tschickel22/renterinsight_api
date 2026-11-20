@@ -73,7 +73,7 @@ class Api::V1::RecurringJournalEntriesController < ApplicationController
     params.require(:recurring_journal_entry).permit(
       :name, :frequency, :next_run_date, :end_date,
       :auto_post, :is_active, :memo,
-      template_lines: [:chart_of_account_id, :debit_amount, :credit_amount, :memo, :department, :location_id]
+      template_lines: [:chart_of_account_id, :debit_amount, :credit_amount, :memo, :department, :location_id, :project_id]
     )
   end
 end

@@ -99,7 +99,14 @@ module Reports
             .merge(phase_id: phase.id, status: phase.status)
         end
         unphased = by_phase[[project.id, nil]]
-        phases << budget_line('No phase', nil, unphased).merge(phase_id: nil, status: nil) if unphased
+        # E109: budget the phases don't account for sits beside costs on no
+        # phase, so the phase lines add up to the project budget.
+        phase_budgets = project.project_phases.map(&:estimated_budget).compact
+        spare = project.budget_amount && phase_budgets.any? ? project.budget_amount.to_d - phase_budgets.sum.to_d : nil
+        spare = nil unless spare&.positive?
+        if unphased || spare
+          phases << budget_line('Not on a phase', spare, unphased).merge(phase_id: nil, status: nil)
+        end
 
         project_row(project).merge(budget_line(nil, project.budget_amount, by_project.fetch(project.id, empty_bucket)).except(:name))
                             .merge(phases: phases)

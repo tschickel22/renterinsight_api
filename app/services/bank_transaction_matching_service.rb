@@ -50,8 +50,38 @@ class BankTransactionMatchingService
   # Entries already in the books for exactly this line (same date, amount and
   # side on the bank's GL account) that no feed line is matched to yet.
   # Categorizing a line that has one would post the money a second time.
+  #
+  # E109: an expense recorded as already paid (Record Expense, or a cost typed
+  # on a project as already paid) and a bill payment are often dated a few
+  # days before the bank or card posts them, so those count within a week
+  # either way too. Other entries still need the same date, so two real
+  # charges of the same amount on different days are not mistaken for one.
   def booked_entries(bank_transaction)
-    JournalEntry.where(id: find_exact_matches(bank_transaction).select(:journal_entry_id)).order(:id).to_a
+    exact = find_exact_matches(bank_transaction).select(:journal_entry_id)
+    nearby = find_fuzzy_matches(bank_transaction, days_range: NEARBY_DAYS)
+             .where('journal_entries.source_type = ? OR journal_entries.source_entity_type = ?', 'quick_entry', 'Bill')
+             .select(:journal_entry_id)
+    JournalEntry.where(id: exact).or(JournalEntry.where(id: nearby)).order(:id).to_a
+  end
+
+  NEARBY_DAYS = 7
+
+  # Why a rule should not post this line on its own, or nil.
+  def hold_reason(bank_transaction)
+    booked = booked_entries(bank_transaction)
+    return BankTransaction::AlreadyBooked.new(booked).message if booked.any?
+
+    project = bank_transaction.project
+    vendor = bank_transaction.try(:vendor)
+    bills = bank_transaction.open_bills_paid_by(project: project, vendor: vendor)
+    bills = open_bills_by_amount(bank_transaction) if bills.empty? && !bank_transaction.deposit?
+    BankTransaction::PaysOpenBill.new(bills).message if bills.any?
+  end
+
+  # With no job or vendor on the rule: an open bill for exactly this amount.
+  def open_bills_by_amount(bank_transaction)
+    @company.bills.where(is_deleted: [false, nil], status: %w[pending partially_paid])
+            .where(balance_due: bank_transaction.amount.abs).includes(:project, :vendor).limit(3).to_a
   end
 
   def suggest_matches(bank_transaction, limit: 5)
@@ -136,6 +166,14 @@ class BankTransactionMatchingService
     # behind it reads as booked when it is not (Heartland had 28 like that).
     # Auto-confirm posts, and a line that cannot post stays for review.
     return unless rule.auto_confirm
+
+    # E109: a rule posts without anyone looking, so it must not post what is
+    # already in the books (an expense recorded as already paid, a bill
+    # payment) or what pays an open bill. Leave those for a person, and say why.
+    if (reason = hold_reason(bank_transaction))
+      bank_transaction.update!(review_reason: reason)
+      return
+    end
 
     BankTransaction.transaction do
       bank_transaction.update!(status: 'matched', matched_at: Time.current, matched_by: 'rule')

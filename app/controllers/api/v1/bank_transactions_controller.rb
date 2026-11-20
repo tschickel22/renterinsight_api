@@ -90,12 +90,17 @@ class Api::V1::BankTransactionsController < ApplicationController
       source: 'manual',
       project: project,
       project_phase: phase,
-      vendor: vendor
+      vendor: vendor,
+      not_a_bill_payment: ActiveModel::Type::Boolean.new.cast(params[:not_a_bill_payment]) == true
     )
 
     render json: @transaction.reload.as_json.merge(booked_to(@transaction))
   rescue ActiveRecord::RecordNotFound => e
     render json: { error: "Not found: #{e.model}" }, status: :unprocessable_entity
+  rescue BankTransaction::PaysOpenBill => e
+    render json: { error: e.message, code: 'pays_open_bill',
+                   bills: e.bills.map { |b| { id: b.id, bill_number: b.bill_number, balance_due: b.balance_due.to_f } } },
+           status: :unprocessable_entity
   rescue => e
     render json: { error: e.message }, status: :unprocessable_entity
   end

@@ -21,12 +21,15 @@ class ReviewItem < ApplicationRecord
     'job_answered'         => ['Job accepted or declined', false],
     'phase_open_tasks'     => ['Phase closed with open tasks', false],
     'link_request'         => ['Link request', true],
+    'contractor_dates'     => ['Contractor dates to confirm', true],
+    'scope_answered'       => ['Scope change answered', false],
     # Installer side
     'job_offered'          => ['Job offered', true],
     'job_taken_back'       => ['Job taken back', false],
     'change_decided'       => ['Change order decided', false],
     'rate_card_decided'    => ['Rate card decided', false],
     'date_changed'         => ['Date changed', false],
+    'scope_changed'        => ['Dealer changed the scope', true],
     # Either side
     'assigned'             => ['Assigned to you', false]
   }.freeze

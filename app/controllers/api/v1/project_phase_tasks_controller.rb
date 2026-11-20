@@ -28,10 +28,20 @@ module Api
         task.position = @phase.project_phase_tasks.count
         if task.save
           ProjectAssignmentService.new(@project, actor: current_user).inherit_for_new_task!(task)
+          # E106: on a phase a linked installer runs, the task stays here
+          # unless the dealer sends it to them.
+          sent = nil
+          if send_to_installer?
+            begin
+              sent = ProjectLinkScope.new(actor: current_user).send_new_task!(task)
+            rescue ProjectLinkScope::Error => e
+              return render json: { error: e.message }, status: :unprocessable_entity
+            end
+          end
           render json: task.as_json(
             only: %i[id name position status is_required assigned_to_id visible_to_client client_actionable completed_at created_at],
             include: { assigned_to: { only: %i[id first_name last_name email] } }
-          ), status: :created
+          ).merge('sent_to_installer' => sent.present?), status: :created
         else
           render json: { errors: task.errors.full_messages }, status: :unprocessable_entity
         end
@@ -40,7 +50,15 @@ module Api
       # PATCH /api/v1/projects/:project_id/phases/:phase_id/tasks/:id
       def update
         return unless authorize_action!('deals', 'update')
+        before = @task.attributes.slice(*ProjectLinkScope::TASK_FIELDS)
         if @task.update(task_params)
+          if send_to_installer?
+            begin
+              ProjectLinkScope.new(actor: current_user).send_task_change!(@task, before)
+            rescue ProjectLinkScope::Error => e
+              return render json: { error: e.message }, status: :unprocessable_entity
+            end
+          end
           render json: @task.as_json(
             only: %i[id name position status is_required assigned_to_id visible_to_client client_actionable completed_at updated_at],
             include: { assigned_to: { only: %i[id first_name last_name email] } }
@@ -122,6 +140,10 @@ module Api
         unless @task
           render json: { error: 'Task not found' }, status: :not_found
         end
+      end
+
+      def send_to_installer?
+        ActiveModel::Type::Boolean.new.cast(params[:send_to_installer]) == true
       end
 
       def task_params

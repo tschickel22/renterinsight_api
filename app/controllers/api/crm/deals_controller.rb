@@ -3,6 +3,8 @@ module Api
     class DealsController < ApplicationController
       before_action :set_company_scope
       before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
+      include RecordFiles
+      record_files_for :deal, finder: :set_deal, resource: 'deals'
       include PostedDealChanges
       include FollowedRecords
       # An edit to an approved deal posts the difference and updates its invoice.

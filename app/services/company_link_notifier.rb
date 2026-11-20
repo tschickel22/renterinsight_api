@@ -222,6 +222,41 @@ class CompanyLinkNotifier
       Rails.logger.error("[CompanyLinkNotifier] date_changed for link #{project_link&.id}: #{e.class}: #{e.message}")
     end
 
+    # E106: the dealer sent a task they added or changed. The installer
+    # answers with a change order or "no charge".
+    def scope_changed(change)
+      pl = change.project_link
+      dealer = pl.dealer_company.name
+      installer_project = pl.installer_project
+      installer_phase = ProjectLinkPhase.find_by(project_link_id: pl.id, dealer_phase_id: change.dealer_phase_id)&.installer_phase
+      title = "#{dealer} changed the scope: #{change.headline}"
+      text = "#{change.description}. #{installer_phase&.name || change.dealer_phase.name} can't start until you send a change order " \
+             "or say there is no charge. #{installer_project&.name}."
+      people = [installer_project&.owner].compact.select { |u| u.company_id == pl.installer_company_id && u.active? }.presence ||
+               installer_admins(pl.company_link)
+      ProjectNotices.deliver(users: people, company: pl.installer_company, type: :project_scope_changed, notifiable: change,
+                             title: title, message: text, action_url: installer_project ? link_to_project(installer_project) : nil,
+                             item: { kind: 'scope_changed', subject: change, title: title, detail: text, from_name: dealer,
+                                     project: installer_project, phase: installer_phase, assigned_user: installer_project&.owner })
+    rescue => e
+      Rails.logger.error("[CompanyLinkNotifier] scope_changed #{change&.id}: #{e.class}: #{e.message}")
+    end
+
+    def scope_answered(change)
+      pl = change.project_link
+      ProjectNotices.close!(subject: change, kinds: 'scope_changed', resolution: change.status == 'no_charge' ? 'no charge' : 'change order',
+                            by: change.answered_by || pl.installer_company)
+      installer = pl.installer_company.name
+      answer = change.status == 'no_charge' ? 'no charge' : "change order #{change.link_change&.number} to approve"
+      title = "#{installer} answered your scope change: #{answer}"
+      text = "#{change.description}. #{pl.dealer_project.name}."
+      deliver(dealer_recipients(pl), pl.dealer_company, :project_scope_answered, change, title, text,
+              item: { kind: 'scope_answered', title: title, detail: text, from_name: installer,
+                      project: pl.dealer_project, phase: change.dealer_phase, assigned_user: pl.dealer_project.owner })
+    rescue => e
+      Rails.logger.error("[CompanyLinkNotifier] scope_answered #{change&.id}: #{e.class}: #{e.message}")
+    end
+
     private
 
     def link_to_project(project)

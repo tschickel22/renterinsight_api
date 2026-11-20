@@ -113,8 +113,15 @@ module Api
       def request_change
         return unless authorize_action!('deals', 'update')
 
-        change = service.request_change!(@pl, kind: params[:kind].presence || 'change', lines: price_lines_param(:lines),
-                                              description: params[:description], dealer_phase_id: params[:dealer_phase_id])
+        scope = @pl.scope_changes.pending.find_by(id: params[:scope_change_id]) if params[:scope_change_id].present?
+        phase_id = params[:dealer_phase_id].presence || scope&.dealer_phase_id
+        change = nil
+        ActiveRecord::Base.transaction do
+          change = service.request_change!(@pl, kind: params[:kind].presence || 'change', lines: price_lines_param(:lines),
+                                                description: params[:description], dealer_phase_id: phase_id)
+          # E106: a change order that answers the dealer's scope change.
+          ProjectLinkScope.new(actor: current_user).answered_with_change_order!(scope, change) if scope
+        end
         render json: { change: link_change_json(change) }, status: :created
       rescue ProjectLinkService::Error, ActiveRecord::RecordInvalid => e
         render json: { error: e.message }, status: :unprocessable_entity

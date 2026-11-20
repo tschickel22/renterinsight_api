@@ -78,6 +78,8 @@ class Contact < ApplicationRecord
   has_many :payments, as: :payable, dependent: :destroy
   has_many :communications, as: :communicable, dependent: :destroy
   has_many :contact_activities, dependent: :destroy
+  # Team files (Files tab). Not shown in the buyer portal; see RecordFiles.
+  has_many_attached :files
   has_many :portal_documents, as: :owner, dependent: :destroy
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
   has_many :deals, dependent: :nullify

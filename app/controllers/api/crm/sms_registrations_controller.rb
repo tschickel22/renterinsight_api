@@ -24,13 +24,7 @@ module Api
           :brand_type, :preferred_area_code,
           business: SmsRegistration::BUSINESS_FIELDS, contact: SmsRegistration::CONTACT_FIELDS, consent: [:notes, { sources: [] }]
         ).to_h
-        registration.assign_attributes(
-          brand_type: SmsRegistration::BRAND_TYPES.include?(attrs['brand_type']) ? attrs['brand_type'] : registration.brand_type,
-          preferred_area_code: attrs.key?('preferred_area_code') ? attrs['preferred_area_code'].to_s.gsub(/\D/, '').presence : registration.preferred_area_code,
-          business: registration.business.merge(attrs['business'].to_h),
-          contact: registration.contact.merge(attrs['contact'].to_h),
-          consent: attrs.key?('consent') ? attrs['consent'] : registration.consent
-        )
+        registration.apply_answers(attrs)
         registration.save!
         render json: payload(registration)
       end

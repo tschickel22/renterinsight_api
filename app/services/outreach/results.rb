@@ -44,15 +44,29 @@ module Outreach
       rows.sort.reverse.map { |day, counts| { 'date' => day }.merge(counts) }
     end
 
+    # What each person did, so the list can be filtered by it.
+    ENGAGEMENT = %w[delivered opened clicked report_viewed replied scan_requested handed_off booked held no_show
+                    unsubscribed bounced undelivered complained].freeze
+    # Did something: the people worth a look.
+    ENGAGED = %w[opened clicked report_viewed replied scan_requested booked held].freeze
+
     def people
       targets = @wave.contacted.includes(:lead).order(:rank).to_a
-      latest = @wave.outreach_events.where(outreach_target_id: targets.map(&:id)).order(:occurred_at).group_by(&:outreach_target_id)
+      events = @wave.outreach_events.where(outreach_target_id: targets.map(&:id)).order(:occurred_at).group_by(&:outreach_target_id)
       targets.map do |target|
-        last = latest[target.id]&.last
-        { id: target.id, lead_id: target.lead_id, name: Assistant::Learn.display_name(target.lead), company: target.lead.company_name,
+        mine = events[target.id] || []
+        last = mine.last
+        did = mine.group_by(&:event_type).slice(*ENGAGEMENT).transform_values do |list|
+          { 'count' => list.size, 'first_at' => list.first.occurred_at&.iso8601, 'last_at' => list.last.occurred_at&.iso8601 }
+        end
+        lead = target.lead
+        { id: target.id, lead_id: target.lead_id, name: Assistant::Learn.display_name(lead), company: lead.company_name,
+          email: lead.email, phone: lead.phone, channel: target.channel,
           status: target.status, stop_reason: target.stop_reason, touches: target.touch_count, last_event: last&.event_type,
           last_event_at: last&.occurred_at&.iso8601, next_touch_at: target.next_touch_at&.iso8601, conversation_id: target.conversation_id,
-          booked_at: target.booked_at&.iso8601, held_at: target.held_at&.iso8601 }
+          booked_at: target.booked_at&.iso8601, held_at: target.held_at&.iso8601,
+          engagement: did, engaged: (did.keys & ENGAGED).any?,
+          last_engaged_at: mine.select { |e| ENGAGED.include?(e.event_type) }.last&.occurred_at&.iso8601 }
       end
     end
   end

@@ -192,7 +192,7 @@ module Api
       
       def calendar_params
         params.permit(:view, :start_date, :end_date, :status, :priority, :assigned_to,
-                      :hide_completed, :hide_past, types: [], location_ids: [])
+                      :hide_completed, :hide_past, types: [], location_ids: [], project_ids: [])
       end
       
       def valid_view?(view)
