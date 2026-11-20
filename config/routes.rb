@@ -800,6 +800,9 @@ Rails.application.routes.draw do
           post :withdraw
         end
       end
+      # E106: the dealer's scope changes, answered by the installer
+      post 'project_link_scope_changes/:id/no_charge', to: 'project_link_scope_changes#no_charge'
+      get 'projects/:project_id/who_hears', to: 'project_change_audience#show'
 
       resources :projects do
         collection do

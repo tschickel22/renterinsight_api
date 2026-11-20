@@ -143,6 +143,8 @@ class Notification < ApplicationRecord
     project_review_nudge: { category: 'projects', priority: 'normal', title: 'Project Items Still Waiting' },
     project_date_changed: { category: 'projects', priority: 'normal', title: 'Install Date Changed' },
     project_contractor_dates: { category: 'projects', priority: 'normal', title: 'Contractor Dates' },
+    project_scope_changed: { category: 'projects', priority: 'high', title: 'Dealer Changed the Scope' },
+    project_scope_answered: { category: 'projects', priority: 'normal', title: 'Scope Change Answered' },
     project_phase_open_tasks: { category: 'projects', priority: 'normal', title: 'Phase Closed With Open Steps' },
     company_link: { category: 'projects', priority: 'high', title: 'Linked Company' },
     project_link: { category: 'projects', priority: 'high', title: 'Linked Job' },

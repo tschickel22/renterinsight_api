@@ -146,6 +146,7 @@ RSpec.describe 'Project costs: how they were paid', type: :request do
       expect(response).to have_http_status(:created), response.body
       expect(items.count).to eq(1)
       expect(items.first).to have_attributes(id: typed_id, bill_id: body['id'], status: 'approved', project_phase_id: skirting.id)
+      expect(body['adopted_cost_lines']).to eq([{ 'id' => typed_id, 'description' => 'Skirting', 'project_name' => 'Garcia set' }])
     end
   end
 

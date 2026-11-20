@@ -6165,6 +6165,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
     t.index ["project_link_id"], name: "index_project_link_phases_on_project_link_id"
   end
 
+  create_table "project_link_scope_changes", force: :cascade do |t|
+    t.bigint "project_link_id", null: false
+    t.bigint "dealer_phase_id", null: false
+    t.bigint "dealer_task_id"
+    t.bigint "installer_task_id"
+    t.string "kind", null: false
+    t.string "status", default: "pending", null: false
+    t.text "description", null: false
+    t.bigint "requested_by_id"
+    t.bigint "answered_by_id"
+    t.datetime "answered_at"
+    t.bigint "link_change_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["dealer_phase_id"], name: "index_project_link_scope_changes_on_dealer_phase_id"
+    t.index ["project_link_id", "status"], name: "index_project_link_scope_changes_on_project_link_id_and_status"
+    t.index ["project_link_id"], name: "index_project_link_scope_changes_on_project_link_id"
+  end
+
   create_table "project_links", force: :cascade do |t|
     t.bigint "company_link_id", null: false
     t.bigint "dealer_company_id", null: false
@@ -9942,6 +9961,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_20_173000) do
   add_foreign_key "project_link_phases", "project_links"
   add_foreign_key "project_link_phases", "project_phases", column: "dealer_phase_id"
   add_foreign_key "project_link_phases", "project_phases", column: "installer_phase_id"
+  add_foreign_key "project_link_scope_changes", "project_links"
   add_foreign_key "project_links", "bills", column: "dealer_bill_id"
   add_foreign_key "project_links", "companies", column: "dealer_company_id"
   add_foreign_key "project_links", "companies", column: "installer_company_id"

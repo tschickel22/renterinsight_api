@@ -36,7 +36,18 @@ module LinkPricingJson
       rate_card_version: pl.link_rate_card&.version,
       price_agreed: pl.price_agreed?, approved_total: pl.legacy_price? ? pl.fee_amount&.to_f : (pl.price_agreed? ? pl.approved_total.to_f : nil),
       changes: changes.map { |c| link_change_json(c) },
-      pending_count: changes.count(&:pending?)
+      pending_count: changes.count(&:pending?),
+      # E106: tasks the dealer added or changed and sent over.
+      scope_changes: pl.scope_changes.includes(:dealer_phase, :link_change).order(id: :desc).map { |sc| scope_change_json(sc) },
+      pending_scope_count: pl.scope_changes.pending.count
+    }
+  end
+
+  def scope_change_json(sc)
+    {
+      id: sc.id, kind: sc.kind, status: sc.status, headline: sc.headline, description: sc.description,
+      dealer_phase_id: sc.dealer_phase_id, phase_name: sc.dealer_phase&.name, requested_at: sc.created_at,
+      answered_at: sc.answered_at, change_order_number: sc.link_change&.number
     }
   end
 
