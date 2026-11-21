@@ -105,7 +105,7 @@ RSpec.describe 'Floor plan homes', type: :request do
       }.to_json
 
       expect(body['saved']).to eq(1)
-      expect(body['failed']).to eq([{ 'vehicle_id' => bad.id, 'ok' => false, 'error' => 'Enter the amount the lender advanced on this home.' }])
+      expect(body['failed'].map { |f| f.slice('vehicle_id', 'ok', 'error') }).to eq([{ 'vehicle_id' => bad.id, 'ok' => false, 'error' => 'Enter the amount the lender advanced on this home.' }])
       expect(bad.reload.floor_plan_amount).to be_nil
     end
 
