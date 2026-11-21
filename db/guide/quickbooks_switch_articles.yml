@@ -151,7 +151,9 @@ articles:
 
       From the finished switch, **Roll back** voids the opening entry and removes the open invoices, bills and uncleared items it brought over. Customers, vendors, converted leads and new accounts stay, QuickBooks is not touched, and a QuickBooks sync the switch turned off goes back to how it was.
 
-      Roll back works until an accounting period after the cutover date is closed, a payment is applied to an imported invoice or bill, or a bank is reconciled after the cutover.
+      Rolling back a go-live from a trial also puts back what going live settled: the trial entries it voided count again, bank lines it set aside return as they were, and invoices made during the trial go back to how they were. **Start a new switch** afterwards carries your matches over and still settles what was recorded in {{brand}} during the trial.
+
+      Roll back works until an accounting period after the cutover date is closed, a payment is applied to an imported invoice or bill, or a bank is reconciled after the cutover. Going live from a trial also can't be rolled back once a period holding the trial entries it voided is closed.
 
   - slug: quickbooks-switch-statement-balances
     module: accounting

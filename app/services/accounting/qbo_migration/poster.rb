@@ -69,11 +69,14 @@ module Accounting
         s = @wizard.settlement
         reason = "Recorded in QuickBooks: on or before the #{@wizard.cutover_date.iso8601} cutover"
         s[:entries].each { |je| je.void!(@user, entry_date: je.entry_date) }
+        before = s[:bank_lines].to_h { |bt| [bt.id.to_s, bt.status] }
         s[:bank_lines].each do |bt|
           bt.exclude!(reason: reason)
         end
         @results[:settled] = { voided: s[:entries].size, excluded_bank_lines: s[:bank_lines].size }
-        { 'voided_entry_ids' => s[:entries].map(&:id), 'excluded_bank_line_ids' => s[:bank_lines].map(&:id) }
+        # bank_line_status_before lets a rollback put each line back (Rollback#restore_settlement!).
+        { 'voided_entry_ids' => s[:entries].map(&:id), 'excluded_bank_line_ids' => s[:bank_lines].map(&:id),
+          'bank_line_status_before' => before }
       end
 
       class BlockedError < Error
