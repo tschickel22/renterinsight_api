@@ -262,6 +262,11 @@ class Vehicle < ApplicationRecord
 
   # Auto-compute discounted sale price when discount fields change
   before_save :compute_discounted_price
+  # A home going onto floor plan by any route (the edit form, the floor plan
+  # list, a CSV import, the API) takes the company's default rate and lender
+  # and a start date, so it never sits on floor plan building up $0.
+  before_save :apply_floor_plan_defaults,
+              if: -> { company_id.present? && floor_plan_amount.to_f.positive? && going_onto_floor_plan? }
 
   # TrueBuild: a home arriving from a Champion feed finds its factory model,
   # and so its factory prices, by the Champion model id (see InventoryLinker).
@@ -318,6 +323,20 @@ class Vehicle < ApplicationRecord
 
     monthly_rate = floor_plan_rate.to_f / 100.0 / 12.0
     (floor_plan_amount.to_f * monthly_rate * months).round(2)
+  end
+
+  def going_onto_floor_plan?
+    return true if new_record?
+    return false unless will_save_change_to_floor_plan_amount?
+
+    floor_plan_amount_in_database.to_f <= 0
+  end
+
+  def apply_floor_plan_defaults
+    settings = AccountingSettings.find_by(company_id: company_id)
+    self.floor_plan_rate = settings.default_floor_plan_rate if floor_plan_rate.to_f <= 0 && settings&.default_floor_plan_rate.to_f.positive?
+    self.floor_plan_lender = settings.default_floor_plan_lender if floor_plan_lender.blank? && settings&.default_floor_plan_lender.present?
+    self.floor_plan_start_date ||= [date_in_stock&.to_date, Date.current].compact.min
   end
 
   # Display helpers
