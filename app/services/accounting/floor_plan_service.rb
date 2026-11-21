@@ -11,6 +11,11 @@ module Accounting
       total_interest = BigDecimal('0')
 
       floor_planned_vehicles.find_each do |vehicle|
+        # The lender has not started charging yet.
+        next if vehicle.floor_plan_start_date && vehicle.floor_plan_start_date > Date.current
+        # Once a day: a second run (a retry, a redeploy at 6am) must not charge the day twice.
+        next if accrued_today?(vehicle)
+
         daily_rate = (vehicle.floor_plan_rate || 0) / 100.0 / 365.0
         daily_interest = (vehicle.floor_plan_amount || 0) * daily_rate
 
@@ -125,13 +130,14 @@ module Accounting
 
     private
 
+    # Deleted homes used to stay in here and kept accruing interest.
     def floor_planned_vehicles
-      scope = @company.vehicles.where('floor_plan_amount > 0')
-      scope = scope.where(floor_plan_curtailed_at: nil) if Vehicle.column_names.include?('floor_plan_curtailed_at')
-      if Vehicle.column_names.include?('status')
-        scope = scope.where.not(status: ['sold', 'delivered'])
-      end
-      scope
+      FloorPlanHomes.tracked_scope(@company.vehicles)
+    end
+
+    def accrued_today?(vehicle)
+      @company.journal_entries.where(source_entity: vehicle, entry_date: Date.current)
+              .where('memo LIKE ?', 'Floor plan interest%').exists?
     end
   end
 end
