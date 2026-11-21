@@ -155,6 +155,70 @@ RSpec.describe 'QuickBooks switch: invoices made during the trial', type: :reque
     expect(mine.reload).to have_attributes(quickbooks_id: '311', amount_due: 1200)
   end
 
+  it 'rolls a go-live back completely, and starting again still settles the trial' do
+    cash = books[:chart]['1010']
+    sales = company.chart_of_accounts.find_by!(account_type: 'revenue', is_header: [false, nil])
+    trial_id = post_trial
+    during = Accounting::ManualPostingService.new(company).post_simple!(
+      debit_account: cash, credit_account: sales, amount: 100, memo: 'Deal approved during the trial', entry_date: Date.new(2026, 10, 15)
+    )
+    booked = company.bank_transactions.create!(bank_account: books[:banks][:chase], transaction_date: Date.new(2026, 10, 15), amount: 100,
+                                               description: 'Booked in the trial', status: 'matched', matched_journal_entry_id: during.id)
+    loose = company.bank_transactions.create!(bank_account: books[:banks][:chase], transaction_date: Date.new(2026, 10, 20), amount: 50,
+                                              description: 'Deposit in October', status: 'unmatched')
+    sales_balance = lambda do
+      JournalEntryLine.joins(:journal_entry).where(journal_entries: { company_id: company.id, is_void: false })
+                      .where(chart_of_account_id: sales.id).sum('credit_amount - debit_amount')
+    end
+
+    post "#{base}/#{trial_id}/go_live", params: { cutover_date: '2026-10-31' }, headers: headers, as: :json
+    live_id = json.dig('migration', 'id')
+    sales_before = sales_balance.call # the trial is rolled back by now; nothing of the go-live is posted
+    finish_uncleared(live_id)
+    get "#{base}/#{live_id}/preview", headers: headers
+    post "#{base}/#{live_id}/post", headers: headers, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(during.reload.is_void).to be(true)
+    expect([booked.reload.status, loose.reload.status]).to eq(%w[excluded excluded])
+
+    post "#{base}/#{live_id}/rollback", headers: headers, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(during.reload).to have_attributes(is_void: false, reversed_by_id: nil)
+    expect(company.journal_entries.where(memo: 'VOID: Deal approved during the trial')).to be_empty
+    expect(booked.reload).to have_attributes(status: 'matched', excluded_reason: nil)
+    expect(loose.reload).to have_attributes(status: 'unmatched', excluded_reason: nil)
+    expect(sales_balance.call).to eq(sales_before)
+
+    # Start a new switch from scratch: the trial clock carries, so going live
+    # still settles what DealerTide recorded during the trial.
+    post "#{base}/migrations", params: { cutover_date: '2026-10-31' }, headers: headers, as: :json
+    expect(response).to have_http_status(:created)
+    again = json['migration']
+    expect(again['trial_started_at']).to be_present
+    expect(again['steps']).to have_key('trial_invoices')
+    finish_uncleared(again['id'])
+    get "#{base}/#{again['id']}/preview", headers: headers
+    expect(json['settlement']['entries'].map { |e| e['id'] }).to include(during.id)
+  end
+
+  it 'will not roll back over a closed period holding trial entries going live voided' do
+    cash = books[:chart]['1010']
+    sales = company.chart_of_accounts.find_by!(account_type: 'revenue', is_header: [false, nil])
+    trial_id = post_trial
+    Accounting::ManualPostingService.new(company).post_simple!(debit_account: cash, credit_account: sales, amount: 100,
+                                                               memo: 'During the trial', entry_date: Date.new(2026, 10, 15))
+    post "#{base}/#{trial_id}/go_live", params: { cutover_date: '2026-10-31' }, headers: headers, as: :json
+    live_id = json.dig('migration', 'id')
+    finish_uncleared(live_id)
+    get "#{base}/#{live_id}/preview", headers: headers
+    post "#{base}/#{live_id}/post", headers: headers, as: :json
+    company.fiscal_periods.create!(fiscal_year: 2026, period_number: 10, start_date: Date.new(2026, 10, 1),
+                                   end_date: Date.new(2026, 10, 20), status: 'closed')
+    post "#{base}/#{live_id}/rollback", headers: headers, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(json['error']).to match(/holds trial entries going live voided/)
+  end
+
   it 'has no such step for a first switch or a trial update' do
     trial_id = post_trial
     invoice(customer('101'), Date.new(2026, 10, 2), 1200)

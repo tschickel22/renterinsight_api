@@ -11,6 +11,11 @@ module Accounting
     #
     # Accounts, customers and vendors it created stay: they are harmless,
     # may already be in use, and a second run matches them by QuickBooks id.
+    #
+    # A go-live from a trial also settled the trial (Poster#settle_trial_activity!):
+    # it voided DealerTide entries QuickBooks also had and excluded bank lines up
+    # to the cutover. Rolling it back puts those back: each void's reversing
+    # entry is removed and the entry counts again, each line gets its old status.
     class Rollback
       def initialize(wizard)
         @wizard = wizard
@@ -57,6 +62,17 @@ module Accounting
           later = rec.bank_account.bank_reconciliations.where.not(id: rec.id).where('statement_date > ?', rec.statement_date)
           return "#{rec.bank_account.institution_name.presence || rec.bank_account.bank_name} has been reconciled since the switch" if later.exists?
         end
+
+        # Settled trial entries are dated on or before the cutover, so a period
+        # closed before it would be changed by putting them back.
+        if (first = settled_entries.min_by(&:entry_date))
+          shut = @company.fiscal_periods.where(status: %w[closed locked]).where('end_date >= ?', first.entry_date)
+                         .where('start_date <= ?', cutover).order(:start_date).first
+          if shut
+            return "The books are closed for FY#{shut.fiscal_year} period #{shut.period_number}, which holds trial entries going live " \
+                   'voided. Reopen it to roll back.'
+          end
+        end
         nil
       end
 
@@ -81,6 +97,7 @@ module Accounting
           CreditMemoApplication.where(credit_memo_id: trial_invoice_memo_ids).delete_all
           credit_memos.each(&:destroy!)
           undo_trial_invoices!
+          restore_settlement!
 
           Array(@wizard.config.dig('posted', 'bank_gl_links')).each do |ba_id|
             @company.bank_accounts.find_by(id: ba_id)&.update_column(:chart_of_account_id, nil)
@@ -109,6 +126,42 @@ module Accounting
       end
 
       private
+
+      def settled_record
+        @wizard.config.dig('posted', 'settled') || {}
+      end
+
+      def settled_entries
+        ids = Array(settled_record['voided_entry_ids'])
+        @settled_entries ||= ids.empty? ? [] : @company.journal_entries.where(id: ids).to_a
+      end
+
+      # Undoes Poster#settle_trial_activity!. A void is a reversing entry on the
+      # same date, so removing the reversal and clearing the flag leaves every
+      # balance, on every date, as it was before going live.
+      def restore_settlement!
+        restored = 0
+        settled_entries.each do |je|
+          next unless je.is_void?
+
+          reversal = je.reversed_by
+          je.update!(is_void: false, voided_at: nil, voided_by: nil, reversed_by: nil)
+          reversal&.destroy!
+          restored += 1
+        end
+
+        before = settled_record['bank_line_status_before'] || {}
+        lines = BankTransaction.where(id: Array(settled_record['excluded_bank_line_ids']), status: 'excluded').to_a
+        lines.each do |bt|
+          # Switches posted before bank_line_status_before was kept: a line
+          # still pointing at an entry was matched, any other was unmatched.
+          status = before[bt.id.to_s].presence || (bt.matched_journal_entry_id ? 'matched' : 'unmatched')
+          bt.update!(status: status, excluded_reason: nil)
+        end
+        @wizard.config['restored'] = { 'entries' => restored, 'bank_lines' => lines.size } if restored.positive? || lines.any?
+      end
+
+      def cutover = @wizard.cutover_date
 
       def trial_invoice_record
         @wizard.config.dig('posted', 'trial_invoices') || {}

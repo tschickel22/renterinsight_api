@@ -52,6 +52,11 @@ module Accounting
         return existing if existing
 
         check_cutover!(company, cutover_date)
+        # Starting over after a rollback: a trial's clock (and the matches)
+        # carry from the last switch rolled back, or going live would no
+        # longer settle what DealerTide recorded during the trial and those
+        # entries would count twice.
+        from ||= company.accounting_imports.migrations.where(status: 'rolled_back').order(:id).last
 
         unless QboMigration.fixture_mode? || QboMigration.connection_for(company)
           raise Error, 'QuickBooks Online is not connected. Connect it under Integrations, then start the switch again.'
