@@ -29,7 +29,7 @@ class Api::V1::FloorPlanHomesController < ApplicationController
   def create
     return unless authorize_action!('inventory', 'update')
 
-    rows = Array(params[:homes]).map { |h| h.permit(:vehicle_id, :amount, :rate, :lender, :start_date).to_h }
+    rows = Array(params[:homes]).map { |h| h.permit(:vehicle_id, :amount, :rate, :lender, :start_date, :catch_up).to_h }
     return render(json: { error: 'Choose at least one home.' }, status: :unprocessable_entity) if rows.empty?
     return render(json: { error: "Track up to #{MAX_AT_ONCE} homes at a time." }, status: :unprocessable_entity) if rows.size > MAX_AT_ONCE
 
@@ -39,11 +39,12 @@ class Api::V1::FloorPlanHomesController < ApplicationController
       next { vehicle_id: row['vehicle_id'], ok: false, error: 'Home not found.' } unless vehicle
 
       result = service.save(vehicle, row.except('vehicle_id'))
-      { vehicle_id: vehicle.id, ok: result.ok, error: result.error }
+      { vehicle_id: vehicle.id, ok: result.ok, error: result.error, posted: result.posted.to_f, note: result.note }
     end
 
     saved = results.count { |r| r[:ok] }
-    render json: { saved: saved, failed: results.reject { |r| r[:ok] }, results: results },
+    render json: { saved: saved, failed: results.reject { |r| r[:ok] }, results: results,
+                   posted_total: results.sum { |r| r[:posted].to_f }.round(2), notes: results.filter_map { |r| r[:note] }.uniq },
            status: saved.zero? ? :unprocessable_entity : :ok
   end
 
@@ -51,9 +52,9 @@ class Api::V1::FloorPlanHomesController < ApplicationController
   def update
     return unless authorize_action!('inventory', 'update')
 
-    result = service.save(@vehicle, params.permit(:amount, :rate, :lender, :start_date).to_h)
+    result = service.save(@vehicle, params.permit(:amount, :rate, :lender, :start_date, :catch_up).to_h)
     if result.ok
-      render json: { ok: true }
+      render json: { ok: true, posted: result.posted.to_f, note: result.note }
     else
       render json: { error: result.error }, status: :unprocessable_entity
     end

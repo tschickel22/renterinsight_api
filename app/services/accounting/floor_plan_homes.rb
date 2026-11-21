@@ -16,7 +16,7 @@ module Accounting
     # outright.
     IN_STOCK = %w[available reserved pending service].freeze
 
-    Result = Struct.new(:ok, :vehicle, :error, keyword_init: true)
+    Result = Struct.new(:ok, :vehicle, :error, :posted, :note, keyword_init: true)
 
     def initialize(company, scope: nil)
       @company = company
@@ -33,7 +33,10 @@ module Accounting
       {
         tracking_enabled: @settings.floor_plan_tracking_enabled,
         rate: @settings.default_floor_plan_rate&.to_f,
-        lender: @settings.default_floor_plan_lender.presence
+        lender: @settings.default_floor_plan_lender.presence,
+        # The day interest is counted through. The browser's own date can be a
+        # day off in the evening, so its estimate uses this one.
+        today: Date.current.iso8601
       }
     end
 
@@ -83,7 +86,10 @@ module Accounting
       return failure(vehicle, 'This home was paid off on its floor plan. Its payoff stays as it is.') if vehicle.floor_plan_curtailed_at.present?
 
       vehicle.update!(floor_plan_amount: amount, floor_plan_rate: rate, floor_plan_lender: lender, floor_plan_start_date: start)
-      Result.new(ok: true, vehicle: vehicle)
+      return Result.new(ok: true, vehicle: vehicle) unless ActiveModel::Type::Boolean.new.cast(attrs[:catch_up])
+
+      posted, note = post_missed_interest!(vehicle)
+      Result.new(ok: true, vehicle: vehicle, posted: posted, note: note)
     rescue ActiveRecord::RecordInvalid => e
       failure(vehicle, e.record.errors.full_messages.to_sentence)
     end
@@ -96,6 +102,45 @@ module Accounting
 
       vehicle.update!(floor_plan_amount: nil, floor_plan_start_date: nil)
       Result.new(ok: true, vehicle: vehicle)
+    end
+
+    # Interest the lender charged from the start date to today that the books
+    # do not have yet. The nightly run posts one day at a time from the day a
+    # home is tracked, so a home tracked with an earlier start date is missing
+    # the days before. Counts what is already posted, so asking twice never
+    # charges twice, and a lower rate never reverses anything.
+    def missed_interest(vehicle, as_of: Date.current)
+      start = vehicle.floor_plan_start_date
+      return 0.0 if start.blank? || start >= as_of
+
+      days = (as_of - start).to_i + 1
+      expected = vehicle.floor_plan_amount.to_f * vehicle.floor_plan_rate.to_f / 100.0 / 365.0 * days
+      [(expected - vehicle.floor_plan_accrued_interest.to_f).round(2), 0.0].max
+    end
+
+    # The dealer said yes to adding it. One entry dated today; its memo starts
+    # like the nightly one, so tonight's run sees today as done.
+    def post_missed_interest!(vehicle)
+      amount = missed_interest(vehicle)
+      return [0.0, nil] unless amount.positive?
+      return [0.0, 'Floor plan tracking is off in Accounting Settings, so no interest was posted.'] unless @settings.floor_plan_tracking_enabled
+
+      expense = @company.chart_of_accounts.find_by(account_number: '5300')
+      payable = @company.chart_of_accounts.find_by(account_number: '2130')
+      return [0.0, 'The floor plan interest accounts (5300 and 2130) are missing from the chart of accounts, so nothing was posted.'] unless expense && payable
+
+      label = [vehicle.stock_number, vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
+      je = ManualPostingService.new(@company).post_simple!(
+        debit_account: expense, credit_account: payable, amount: BigDecimal(amount.to_s),
+        memo: "Floor plan interest before tracking started, #{label}, #{vehicle.floor_plan_start_date.iso8601} to #{Date.current.iso8601}",
+        entry_date: Date.current, source_entity: vehicle, vehicle_id: vehicle.id,
+        location_id: vehicle.location_id, department: 'new_sales'
+      )
+      return [0.0, 'The interest could not be posted to the books.'] unless je
+
+      vehicle.update_columns(floor_plan_accrued_interest: vehicle.floor_plan_accrued_interest.to_f + amount,
+                             days_on_floor_plan: (Date.current - vehicle.floor_plan_start_date).to_i)
+      [amount, nil]
     end
 
     private
@@ -143,6 +188,8 @@ module Accounting
     def untracked_json(vehicle)
       base_json(vehicle).merge(
         suggested_amount: vehicle.structured_cost,
+        # Posted while it was on floor plan before (taken off, now going back on).
+        accrued_interest: vehicle.floor_plan_accrued_interest.to_f.round(2),
         # When the home came in is usually when the lender started charging.
         suggested_start_date: [vehicle.date_in_stock&.to_date, Date.current].compact.min,
         in_stock_since: vehicle.date_in_stock&.to_date,
