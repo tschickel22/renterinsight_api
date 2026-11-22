@@ -32,6 +32,20 @@ RSpec.describe Leads::Converter, 'people and account details' do
     expect(account.billing_city).to eq('Elkhart') # not sent: from the lead
   end
 
+  it 'uses the Buyer and Co-Buyer as the dialog sent them, and makes a second person typed only there' do
+    lead.update!(co_applicant_first_name: nil, co_applicant_last_name: nil)
+    result = convert(buyer_details: { first_name: 'Kei', email: 'kei@example.com' },
+                     co_buyer_details: { first_name: 'Andre', last_name: 'Walker', phone: '2605550199' })
+    expect([result.contact.first_name, result.contact.last_name, result.contact.email]).to eq(['Kei', 'Walker', 'kei@example.com'])
+    expect([result.co_applicant.first_name, result.co_applicant.phone]).to eq(['Andre', '260-555-0199'])
+    expect(result.deal.co_applicant_contact_id).to eq(result.co_applicant.id)
+  end
+
+  it 'drops the second person when the dialog clears their name' do
+    result = convert(co_buyer_details: { first_name: '', last_name: '' })
+    expect(result.co_applicant).to be_nil
+  end
+
   it 'starts the deal people card with Buyer and Co-Buyer' do
     result = convert
     people = result.deal.entity_buyers.active.ordered.map { |e| [e.contact.first_name, e.role] }
