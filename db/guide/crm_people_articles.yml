@@ -1,0 +1,192 @@
+# Leads, accounts, contacts and the people on a deal (Tom, 2026-11-22).
+#
+# Rewrites of three older help articles after the people card work (one Buyers
+# card on the deal, Labels for the words, the convert window showing the account
+# details and buyers). Applied by
+# db/migrate/20261122190000_update_crm_people_help_articles.rb, which replaces an
+# article only while it still holds its old text (see `replaces_when`), so a
+# later rewrite in Knowledge admin is left alone.
+#
+# Write the product name as {{brand}}. No em or en dashes. The screen words are
+# the defaults; a company can rename Account, Contact, Deal and the buyer roles
+# under Company Settings > Customize > Labels. Checked against the app 2026-11-22.
+
+articles:
+  - slug: lead-conversion
+    replaces_when: "A co-applicant on the lead becomes a second contact by itself"
+    title: Converting a Lead to a Customer
+    excerpt: Turn a lead into an account with its people, and start the deal in the same step.
+    content: |
+      ## Overview
+      When a lead is ready to buy, converting them makes an **account** for the household. The account holds everything from then on: its people (contacts), deals, quotes, invoices, documents and service tickets.
+
+      Your company may call these by other names, for example **Customer** for account and **Person** for contact. The convert window uses your words. See **Company Settings > Customize > Labels**.
+
+      ## Getting There
+      1. Click **CRM & Sales** > **Leads** in the sidebar
+      2. Click a lead to open it
+
+      {{shot: leads-list "The leads list"}}
+
+      ## Step-by-Step Guide
+      ### Run the conversion
+      1. Click **Convert Lead**.
+      2. Check the **Account Name**. For a household it is usually the buyer's name.
+      3. Check the **Account details**: email, phone and address, filled in from the lead. Change anything that should be different on the account. The lead itself is not changed.
+      4. Leave **Create a Contact from this lead** ticked to add the person to the account.
+      5. Check the **Buyers**. The lead's person is the **Buyer** and the lead's second person (if there is one) is the **Co-Buyer**. Fix a name, email or phone here, add a Co-Buyer with **Add a co-buyer**, or click **Remove** if there is none.
+      6. Tick **Create a Deal now** to start the sale in the same step, then set the deal name, stage and expected close date.
+      7. Click **Convert to Account**. You land on the account.
+
+      The Buyer and Co-Buyer become contacts on the account. With a deal, they are also the deal's Buyer and Co-Buyer, so their names go on the Deal Sheet and agreements. See [People on a deal](deal-people).
+
+      ### When the account name is already in use
+      Two different families can share a name, so {{brand}} asks before it joins anything. If an account you can see already has that name, the window lists it with its city and number of contacts, and you choose:
+      - **Join** that account, when the lead is the same household (for example a spouse, or someone coming back to buy again). Use **Open this account** to check it first.
+      - **Make a new account** with the same name, when it is a different customer.
+
+      The convert button tells you which one you picked, and nothing is converted until you choose. Changing the account name clears the question. Joining an existing account only fills in the account details it is missing.
+
+      ### What goes to the account
+      - Notes, activities and tags
+      - Open tasks and reminders. The lead's copies are closed, so you are only reminded once.
+      - Custom field values that have a matching field
+      - The deposit, TrueBuild designs, followers and marketing consent
+      - The lead's emails and texts show on the account's **Communication** tab
+
+      The lead score and AI insights stay on the lead. The account builds its own.
+
+      ### What changes
+      - The lead leaves your Leads list
+      - Nurture sequences running on the lead stop
+
+      ## Tips & Best Practices
+      > **Tip:** Convert when the lead is clearly qualified: they scheduled a showing, asked for a quote, or agreed on a price range. Converting too early fills your accounts with people who are only looking.
+
+      > **Tip:** Capture the second person on the lead (the lead form's second contact fields) so they carry through as the Co-Buyer without retyping.
+
+      > **Tip:** When the name is already in use, check the city and contacts before you join. Joining puts this buyer's deal and documents on the other account.
+
+      ## Related Features
+      - [People on a deal](deal-people)
+      - Managing accounts
+      - Managing contacts
+
+  - slug: managing-accounts
+    replaces_when: "Accounts represent businesses and organizations"
+    title: Managing Accounts
+    excerpt: An account is a customer household or business, with its people, deals, documents and history in one place.
+    content: |
+      ## Overview
+      An **account** is a customer: usually a household (the Smiths), sometimes a business. It holds the customer's **contacts** (the people), their deals, quotes, invoices, documents and history in one place.
+
+      Your company may call accounts **Customers** and contacts **People**. The menus and pages use your words. See **Company Settings > Customize > Labels**.
+
+      Most accounts are made for you when you convert a lead. See [Converting a Lead to a Customer](lead-conversion).
+
+      ## Getting There
+      1. Click **CRM & Sales** in the sidebar
+      2. Click **Accounts**
+
+      {{shot: accounts-list "Accounts"}}
+
+      ## Step-by-Step Guide
+      ### Adding an account
+      1. Click **Add Account**, then **Add Individual** (or **Import from File** for a list)
+      2. Fill in the name, type, email, phone and address
+      3. Pick an owner
+      4. Click **Save**
+
+      {{shot: accounts-new "Adding an account"}}
+
+      ### The people on an account
+      Open the account and click the **Contacts** tab. It lists everyone on the account. Click **Add Contact** to add someone. Each contact belongs to one account.
+
+      Under each name you see the person's role on the account's open deals, for example **Buyer on D-000024 Smith home** or **Co-Buyer on ...**. Click it to open that deal. An account can also hold people who are not buying, such as a relative or a realtor; they have no badge.
+
+      Who is buying is set on the deal, not here. See [People on a deal](deal-people).
+
+      ### Related records
+      Each account shows:
+      - **Deals**: every open and closed deal
+      - **Quotes** and **Invoices**: pricing and billing history
+      - **Agreements**: contracts sent and signed
+      - **Documents**: every file for the customer in one place (see below)
+      - **Communication**: email and texts across the account's contacts
+
+      Click any row to open it.
+
+      ### Documents
+      The **Documents** tab gathers every file about the customer:
+      - files filed on the account itself
+      - files shared with each contact through their buyer portal
+      - files added on any of the account's deals
+
+      A file from a deal shows the deal's number. Click it to open that deal's **Documents** tab. Each file is counted once, even when a deal file was also shared with the buyer. **Staff only** files never reach the customer. See [Documents on a deal](deal-documents).
+
+      ### Searching and filtering
+      Search the account list by name, email or phone. Filters narrow it by type, status, owner and followers.
+
+      ### Duplicates
+      On an account, click **Find & Merge Duplicates** to find accounts that look like the same customer and merge them, keeping their history.
+
+      ## Tips & Best Practices
+      > **Tip:** Set an **owner** on every account. One person accountable for each account keeps it from falling through the cracks.
+
+      > **Tip:** Keep the account's email and phone current. The convert window fills them from the lead, and they are where the customer is reached when no one person is picked.
+
+      ## Related Features
+      - [People on a deal](deal-people)
+      - Managing contacts
+      - Account types and categories
+
+  - slug: managing-contacts
+    replaces_when: "Contacts are individual people in your CRM"
+    title: Managing Contacts
+    excerpt: Contacts are the people on your accounts, and the people a deal's Buyer and Co-Buyer are picked from.
+    content: |
+      ## Overview
+      A **contact** is one person. Each contact belongs to an **account** (the customer household or business), and a deal's Buyer, Co-Buyer, Co-Signer and Guarantor are picked from the account's contacts.
+
+      Your company may call contacts **People** and accounts **Customers**. The menus and pages use your words. See **Company Settings > Customize > Labels**.
+
+      ## Getting There
+      1. Click **CRM & Sales** in the sidebar
+      2. Click **Contacts**
+
+      You can also open the people on one customer from the account's **Contacts** tab.
+
+      {{shot: contacts-list "Contacts"}}
+
+      ## Step-by-Step Guide
+      ### Adding a contact
+      1. Click **Add Contact**, then **Add Individual** (or **Import from File** for a list)
+      2. Fill in name, email, phone and address
+      3. Pick the **Account** they belong to
+      4. Click **Save**
+
+      {{shot: contacts-new "Adding a contact"}}
+
+      Converting a lead makes the contacts for you: the lead's person, and the lead's second person if there is one.
+
+      ### On a deal
+      A contact's role on a deal (Buyer, Co-Buyer, Co-Signer or Guarantor) belongs to that deal, so the same person can co-sign one deal and buy on the next. Set it on the deal's **Buyers** card. See [People on a deal](deal-people).
+
+      To fix a buyer's name, email or phone, edit the contact. The deal, the Deal Sheet and agreements all read it from there.
+
+      ### Editing in place
+      On the contact's page, click any field to change it. Changes save as you go and are logged in the history.
+
+      ### Tags and custom fields
+      Tags group contacts loosely; filter and segment by them. Custom fields (set up in **Company Settings > Custom Fields**) add structured details such as referral source or birthday.
+
+      ### Duplicates
+      On a contact, click **Find & Merge Duplicates** to find contacts that look like the same person and merge them, keeping their history.
+
+      ## Tips & Best Practices
+      > **Tip:** Keep email addresses current. They drive open tracking, nurture sequences, e-signing and document delivery, so a stale email quietly breaks a lot.
+
+      ## Related Features
+      - [People on a deal](deal-people)
+      - Managing accounts
+      - Communication history
