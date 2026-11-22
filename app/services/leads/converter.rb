@@ -53,7 +53,17 @@ module Leads
     # account_details: { email, phone, street, city, state, zip, country } as
     #   the convert dialog shows them (filled in from the lead, editable). A key
     #   that is present wins, blank included; a missing key uses the lead.
-    def call(account_name: nil, account_mode: nil, account_id: nil, create_contact_param: nil, deal_params: nil, account_details: nil)
+    # buyer_details / co_buyer_details: { first_name, last_name, email, phone }
+    #   for the contact made from the lead and for its second person, as the
+    #   convert dialog shows them (from the lead, editable). Same rule: a key
+    #   that is present wins. A second person typed only in the dialog is
+    #   made too.
+    def call(account_name: nil, account_mode: nil, account_id: nil, create_contact_param: nil, deal_params: nil,
+             account_details: nil, buyer_details: nil, co_buyer_details: nil)
+      @buyer = person_values(buyer_details, first_name: @lead.first_name, last_name: @lead.last_name,
+                                            email: @lead.email, phone: @lead.phone)
+      @co_buyer = person_values(co_buyer_details, first_name: @lead.try(:co_applicant_first_name), last_name: @lead.try(:co_applicant_last_name),
+                                                  email: @lead.try(:co_applicant_email), phone: @lead.try(:co_applicant_phone))
       raise ArgumentError, 'Lead has already been converted' if @lead.is_converted
 
       account_mode = account_mode.to_s.presence
@@ -128,16 +138,16 @@ module Leads
           contact = nil
           create_contact = create_contact_param.present? ? 
             ActiveModel::Type::Boolean.new.cast(create_contact_param) : 
-            (@lead.first_name.present? && @lead.last_name.present?)
+            (@buyer[:first_name].present? && @buyer[:last_name].present?)
 
           if create_contact
             Rails.logger.info "✅ [ConvertLead] Creating contact"
 
             contact_attrs = {
-              first_name: @lead.first_name,
-              last_name: @lead.last_name,
-              email: @lead.email,
-              phone: @lead.phone,
+              first_name: @buyer[:first_name],
+              last_name: @buyer[:last_name],
+              email: @buyer[:email],
+              phone: @buyer[:phone],
               account_id: account.id,
               company_id: @lead.company_id,
               location_id: location_id,
@@ -169,15 +179,14 @@ module Leads
           # 2b. CREATE CO-APPLICANT CONTACT (co-borrower) — a second contact on
           # the same account. Only when the lead captured co-applicant identity.
           co_applicant = nil
-          if @lead.respond_to?(:co_applicant_first_name) &&
-             (@lead.co_applicant_first_name.present? || @lead.co_applicant_last_name.present?)
+          if @co_buyer[:first_name].present? || @co_buyer[:last_name].present?
             Rails.logger.info "✅ [ConvertLead] Creating co-applicant contact"
 
             co_applicant = Contact.new(
-              first_name: @lead.co_applicant_first_name.presence || 'Co-Applicant',
-              last_name:  @lead.co_applicant_last_name,
-              email:      @lead.co_applicant_email,
-              phone:      @lead.co_applicant_phone,
+              first_name: @co_buyer[:first_name].presence || @company.resolved_labels['co_buyer'].presence || 'Co-Buyer',
+              last_name:  @co_buyer[:last_name],
+              email:      @co_buyer[:email],
+              phone:      @co_buyer[:phone],
               account_id: account.id,
               company_id: @lead.company_id,
               location_id: location_id,
@@ -305,6 +314,13 @@ module Leads
 
     ACCOUNT_DETAIL_KEYS = { email: :email, phone: :phone, street: :street, city: :city,
                             state: :state, zip: :zip, country: :country }.freeze
+
+    # A person's name and contact details: what the convert dialog sent, else
+    # the lead's (fallbacks).
+    def person_values(details, fallbacks)
+      given = (details.respond_to?(:to_unsafe_h) ? details.to_unsafe_h : details.to_h).stringify_keys
+      fallbacks.to_h { |key, value| [key, given.key?(key.to_s) ? given[key.to_s].to_s.strip.presence : value] }
+    end
 
     # The account's contact details: what the convert dialog sent, else the lead's.
     def account_values(details)

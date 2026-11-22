@@ -1,0 +1,48 @@
+# People on a deal: the Buyers card (Tom, 2026-11-22).
+#
+# Loaded into knowledge_articles by db/migrate/20261122180000_load_deal_people_help_article.rb
+# (Guide::ArticleLoader), matched by slug. The deal page's Buyers card opens this
+# article from its (i) link. Write the product name as {{brand}}. No em or en dashes.
+# Role names follow the company's Labels; the text uses the default words.
+# Checked against the app 2026-11-22. Change the text with the screen.
+
+articles:
+  - slug: deal-people
+    module: deals
+    title: People on a deal (Buyer, Co-Buyer, Co-Signer, Guarantor)
+    article_type: concept
+    position: 15
+    excerpt: Who is on a deal, what each role means, and where their names are used.
+    content: |
+      Every deal belongs to an **account** (the household) and lists the people on it from that account's contacts. Each person has a **role** on this deal. The role belongs to the deal, not the person: a parent can co-sign one deal and buy their own home on the next.
+
+      ## The roles
+
+      - **Buyer**: the main person on the contract. Signs first. A deal has one Buyer.
+      - **Co-Buyer**: a second person buying the home, usually a spouse or partner. Also signs. If there are more than two people buying, add each as a Co-Buyer; the first is the contract's second buyer and the rest are named on its buyers line.
+      - **Co-Signer**: signs the loan to help the buyers qualify. Does not own the home.
+      - **Guarantor**: promises to pay if the buyers do not. Does not sign the purchase.
+
+      Co-Signers and Guarantors are kept on the deal but are not printed as buyers on the purchase agreement.
+
+      Your company can rename these roles under **Administration > Company Settings > Labels** (for example Applicant and Co-Applicant).
+
+      ## Where you see them
+
+      Open a deal. The **Buyers** card is at the top of the **Overview** tab. The same people are used on the **Deal Sheet** and on every agreement for the deal, so a change on the card shows everywhere.
+
+      ## Converting a lead fills it in
+
+      When you convert a lead and create a deal, the lead's person becomes the **Buyer** and the lead's second person (if there is one) becomes the **Co-Buyer**. Both are added to the account as contacts. The convert window shows who they will be and lets you fix their names first.
+
+      ## Adding or changing people
+
+      - **Add person**: pick someone already on the account, or choose **Someone new** and type their name, email and phone. Then pick their role.
+      - **Also on this account**: when the account has someone who is not on the deal yet, the card offers them with one click. It never adds them on its own, since an account can also hold a realtor or a relative.
+      - **Change a role**: use the role menu next to the person.
+      - **Remove**: the bin button takes the person off this deal. Their contact stays on the account.
+      - **Fix a name, email or phone**: click the person's name to open their contact and edit it there.
+
+      A deal with no account gets one when you add the first person: it uses the Buyer's account, or makes a new household account named after the Buyer.
+
+      If the card cannot do something, it says why. For example, someone on a different account has to be added to this deal's account first.

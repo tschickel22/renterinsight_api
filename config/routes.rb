@@ -1928,6 +1928,10 @@ Rails.application.routes.draw do
       get 'followers', to: 'followers#show'
       put 'followers', to: 'followers#update'
 
+      # Who on the account is a Buyer / Co-Buyer / Co-Signer / Guarantor on an
+      # open deal (badges on the account's contacts).
+      get 'accounts/:account_id/deal_people', to: 'account_deal_people#index'
+
       resources :accounts do
         # Team files (RecordFiles concern). Not the buyer-portal documents.
         member do

@@ -772,6 +772,9 @@ module Api
               create_contact_param: params[:create_contact],
               # Email, phone and address as the convert dialog showed them.
               account_details: (params[:account_details].permit(:email, :phone, :street, :city, :state, :zip, :country).to_h if params[:account_details].is_a?(ActionController::Parameters)),
+              # The Buyer and Co-Buyer as the dialog showed them (from the lead, editable).
+              buyer_details: (params[:buyer_details].permit(:first_name, :last_name, :email, :phone).to_h if params[:buyer_details].is_a?(ActionController::Parameters)),
+              co_buyer_details: (params[:co_buyer_details].permit(:first_name, :last_name, :email, :phone).to_h if params[:co_buyer_details].is_a?(ActionController::Parameters)),
               deal_params: (params[:create_deal] if params[:create_deal].present? && params[:create_deal].is_a?(ActionController::Parameters))
             )
             account = result.account
