@@ -49,6 +49,10 @@ RSpec.describe 'Agreement merge fields: Form 500 options and home header', type:
     expect(body.dig('line_item_counts', 'line_items_options')).to eq(2)
   end
 
+  it 'gives the key that explains the * on non-taxable lines' do
+    expect(field(fetch, 'deal.tax_mark_key')).to eq('* Not taxable')
+  end
+
   it 'reads the category tag, so the fee and accessory subtotals fill' do
     body = fetch
     expect(field(body, 'deal.fee_total').to_f).to eq(499.0)

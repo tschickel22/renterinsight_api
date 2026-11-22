@@ -187,6 +187,8 @@ OPTION_ROWS.each_with_index do |y, i|
   merge 1, "deal.line_items_options[#{i}].description", "Optional equipment #{i + 1}", 30.4, y, 245.0, 10.7
   merge 1, "deal.line_items_options[#{i}].line_total", "Optional equipment #{i + 1} amount", 283.6, y, 55.2, 10.7, type: 'currency'
 end
+# Key for the "*", in the blank start of the balance-carried row under the list.
+merge 1, 'deal.tax_mark_key', 'Key for the * on non-taxable lines', 21.0, 543.4, 46.0, 10.7
 field 1, 'balance_carried', 'Balance carried to optional equipment', 283.6, 543.4, 55.2, 10.7,
       type: 'currency', group: 'optional_equipment', formula: '=sum_unmarked(deal.line_items_options.line_total, deal.line_items_options.tax_mark)'
 
