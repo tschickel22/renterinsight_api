@@ -69,11 +69,41 @@ Rules:
   (land, insurance), take that category out of the options too.
 - Lines priced at $0 (included items) still print with their $0. That is
   intended: the buyer sees what comes with the home.
+- **Taxable vs non-taxable.** Each row has a `tax_mark` column: "*" on a line that
+  isn't taxable (the deal's `taxable:no` tag, the deal form's rule), blank
+  otherwise. Place it as a narrow box before the description, the way dealers
+  mark it by hand. Total the rows with
+  `=sum_unmarked(deal.line_items_options.line_total, deal.line_items_options.tax_mark)`
+  for Optional Equipment (taxed) and `sum_marked(...)` for Non-taxable Items.
 - Sales tax: `deal.tax_amount` adds up the tax on the lines (Deal Sheet deals
   use the deal's own tax).
 - Down payment on a contract is `deal.contract_down_payment`. `deal.down_payment`
   is the deposit and no template should read it.
 - The deal sheet writes its lines onto the deal, so reading the deal covers it.
+
+## Everything we fill stays editable, and changes go back to the deal
+
+Dealers fix things on the spot, not by asking us. So:
+
+- Every box we fill can be changed on the agreement: merge boxes in the Merge
+  Fields panel, `field` boxes on Fill Form. Calculated totals follow the edits.
+- Give a line-item section spare rows. The builder shows the deal's rows plus an
+  "Add a line" button that opens the next spare one.
+- When the dealer saves (and before Send or Sign Here), rows they added or
+  changed are offered back to the deal in an "Update the deal too?" list,
+  ticked by default. Ticked lines are added to or changed on the deal
+  (`Agreements::DealChanges`, `GET/POST /api/v1/agreements/:id/deal_changes`).
+  A new line takes the tax rate already on the deal. Each row carries
+  `deal.<array>[i].ref` ("dp:<id>") so it can be traced to its deal line.
+- Never from a sent or signed agreement, never for a deal priced in the Deal
+  Desk (change it there), never for a deal sheet line (change it on the deal
+  sheet). A closed deal gets a warning. A line changed on the deal after the
+  agreement was made is offered unticked, since the deal may be the newer one.
+- Boxes that exist only on the form (no `merge_from`, no formula: key numbers,
+  remarks, insulation thickness) carry to the next agreement on the same
+  deal and template (`carry_forward` from `agreement_merge_fields`).
+- Not yet: header corrections (serial, address, color) going back to the home
+  or contact. Planned as the same list.
 
 ## The home header
 
@@ -125,5 +155,11 @@ state, zip, phone, mobile_phone, email), `deal.co_buyer_*` for buyer 2.
 5. The header boxes fill from the home. Anything still blank is blank on the
    record too (check the contact address and the deal's delivery fields before
    calling it a bug).
-6. Spec: `spec/requests/agreement_merge_fields_form500_header_spec.rb` covers the
-   options, serial, stock number and sections rules. Add to it when adding a rule.
+6. Add a line on a spare row, change a price, clear a "*", save: the list offers
+   all three, and after "Update the deal" the deal shows them and saving again
+   offers nothing.
+7. Make a second agreement on the same deal: key numbers and remarks come along.
+8. Specs: `spec/requests/agreement_merge_fields_form500_header_spec.rb` (options,
+   serial, stock number, sections) and `spec/requests/agreement_deal_changes_spec.rb`
+   (tax mark, totals, changes back to the deal, carry forward). Add to them when
+   adding a rule.

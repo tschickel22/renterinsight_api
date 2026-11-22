@@ -34,6 +34,8 @@ module Agreements
   #     source:            String   # 'home'|'deal'|'package'|'manual'|nil (from scenario)
   #     source_vehicle_id: Integer  # nil when the row isn't backed by a Vehicle record
   #     is_home:           Boolean  # derived flag (see home identification rule above)
+  #     ref:               String   # "dp:<deal_product id>" or "sc:<scenario index>", so an
+  #                                 # agreement row can be traced back to its deal line
   #   }
   class DealLineItemsResolver
     HOME_SOURCES = %w[home package].freeze
@@ -81,12 +83,23 @@ module Agreements
           total: dp.total.to_f,
           tax: dp.tax.to_f,
           category: category_from_notes(dp.notes),
-          taxable: dp.tax.to_f > 0,
+          taxable: product_taxable?(dp),
           source: source.presence,
           source_vehicle_id: source_vehicle_id,
-          is_home: home?(source: source, source_vehicle_id: source_vehicle_id)
+          is_home: home?(source: source, source_vehicle_id: source_vehicle_id),
+          ref: "dp:#{dp.id}"
         }
       end
+    end
+
+    # The deal form's rule (DealForm.tsx): tagged taxable:no is not taxable, a deal
+    # sheet line is, otherwise a line is taxable when it carries tax.
+    def product_taxable?(dp)
+      notes = dp.notes.to_s
+      return false if notes.match?(/taxable:\s*no\b/i)
+      return true if notes.match?(/deal_sheet:/i)
+
+      dp.tax.to_f != 0
     end
 
     # deal_products carry their category as a tag in notes ("category:service,
@@ -118,7 +131,8 @@ module Agreements
         taxable: h['taxable'] == true,
         source: source.presence,
         source_vehicle_id: source_vehicle_id,
-        is_home: home?(source: source, source_vehicle_id: source_vehicle_id, category: h['category'])
+        is_home: home?(source: source, source_vehicle_id: source_vehicle_id, category: h['category']),
+        ref: "sc:#{idx}"
       }
     end
 

@@ -13,6 +13,7 @@ module Api
           line_item_values: flattened_line_item_values,
           line_item_counts: line_item_counts,
           option_lists: option_lists,
+          carry_forward: carry_forward_values,
         }
       end
 
@@ -484,6 +485,32 @@ module Api
       end
 
       HISTORY_LIMIT = 25
+
+      # Boxes that exist only on the form (hitch size, key numbers, remarks): a new
+      # agreement on the same deal and template starts with what the last one said,
+      # so nothing the dealer typed is lost. Boxes that fill from the deal or are
+      # calculated are left out; the deal is their source.
+      def carry_forward_values
+        return {} unless @deal && params[:template_id].present?
+
+        template = AgreementTemplate.available_for_company(@company).find_by(id: params[:template_id])
+        return {} unless template
+
+        keys = Array(template.custom_field_definitions)
+               .reject { |d| d['merge_from'].present? || d['formula'].present? || d['filled_by'].to_s == 'signer' }
+               .map { |d| d['key'].to_s }
+        return {} if keys.empty?
+
+        last = @company.agreements.active.where(deal_id: @deal.id, agreement_template_id: template.id)
+        last = last.where.not(id: params[:exclude_agreement_id]) if params[:exclude_agreement_id].present?
+        values = last.order(created_at: :desc).pick(:custom_field_values)
+        return {} unless values.is_a?(Hash)
+
+        values.slice(*keys).reject { |_, v| v.to_s.strip.empty? }
+      rescue StandardError => e
+        Rails.logger.error("[AgreementMergeFields] carry_forward failed: #{e.message}")
+        {}
+      end
 
       def history_option_lists
         template = params[:template_id].present? && AgreementTemplate.available_for_company(@company).find_by(id: params[:template_id])

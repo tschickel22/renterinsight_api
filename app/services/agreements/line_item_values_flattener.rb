@@ -45,7 +45,9 @@ module Agreements
     end
 
     # Fields per line item that we surface as `deal.<array>[i].<field>`.
-    ITEM_FIELDS = %w[description name amount price cost quantity line_total total category source is_home].freeze
+    # tax_mark is "*" on a line that isn't taxable, the way Form 500 style forms
+    # flag non-taxable items; ref ties the row back to its deal line.
+    ITEM_FIELDS = %w[description name amount price cost quantity line_total total category source is_home tax_mark ref].freeze
 
     def self.apply!(values_map, deal)
       return values_map unless deal
@@ -56,7 +58,8 @@ module Agreements
       by_key.each do |array_key, items|
         items.each_with_index do |item, idx|
           ITEM_FIELDS.each do |f|
-            values_map["deal.#{array_key}[#{idx}].#{f}"] = stringify(item[f.to_sym])
+            value = f == 'tax_mark' ? (item[:taxable] ? '' : '*') : item[f.to_sym]
+            values_map["deal.#{array_key}[#{idx}].#{f}"] = stringify(value)
           end
         end
       end
