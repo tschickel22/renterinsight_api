@@ -1581,7 +1581,15 @@ class Company < ApplicationRecord
   end
 
   def resolved_labels
-    label_defaults.merge(label_overrides)
+    labels = label_defaults.merge(label_overrides)
+    # The lead's second person reads "Second <contact word>" by default, so a
+    # dealer who renames Contact to Person gets "Second Person" without also
+    # renaming this. Their own second_person label still wins.
+    default_second = "Second #{label_defaults['contact']}"
+    if !label_overrides.key?('second_person') && label_defaults['second_person'] == default_second
+      labels['second_person'] = "Second #{labels['contact']}"
+    end
+    labels
   end
 
   # ==================== CONVERSION TRACKING ====================

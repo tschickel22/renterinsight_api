@@ -70,7 +70,15 @@ RSpec.describe 'Deal people card sync' do
     deal = company.deals.create!(name: 'W', account: account, contact_id: hannah.id)
     second = EntityBuyer.new(company: company, contact: ben, buyable: deal, role: 'buyer')
     expect(second).not_to be_valid
-    expect(second.errors[:role].join).to include('already set')
+    expect(second.errors[:base].join).to include('already has a Buyer')
+  end
+
+  it 'reads "Second <contact word>" for the second person unless the company set its own' do
+    expect(company.resolved_labels['second_person']).to eq('Second Contact')
+    Setting.set('Company', company.id, 'label_overrides', { 'contact' => 'Person' })
+    expect(company.resolved_labels['second_person']).to eq('Second Person')
+    Setting.set('Company', company.id, 'label_overrides', { 'contact' => 'Person', 'second_person' => 'Spouse' })
+    expect(company.resolved_labels['second_person']).to eq('Spouse')
   end
 
   it 'fills an empty card from the columns, and lists a disagreement instead of overwriting it' do

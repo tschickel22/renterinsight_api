@@ -59,6 +59,16 @@ RSpec.describe 'Deal people card', type: :request do
     expect(deal.entity_buyers.active.ordered.map { |e| [e.contact.first_name, e.role] }).to eq([%w[Lee buyer], %w[Mo guarantor]])
   end
 
+  it 'swaps when someone else is made the Buyer' do
+    deal = company.deals.create!(name: 'D', account: account, contact_id: buyer.id, co_applicant_contact_id: spouse.id)
+    row = deal.entity_buyers.active.find_by(contact_id: spouse.id)
+
+    patch "/api/v1/deals/#{deal.id}/buyers/#{row.id}", params: { role: 'buyer' }, headers: headers
+    expect(response).to have_http_status(:ok)
+    deal.reload
+    expect([deal.contact_id, deal.co_applicant_contact_id]).to eq([spouse.id, buyer.id])
+  end
+
   it 'refuses someone from another account and says why' do
     deal = company.deals.create!(name: 'D', account: account, contact_id: buyer.id)
     other = company.contacts.create!(first_name: 'Al', account: company.accounts.create!(name: 'Other'))
@@ -98,6 +108,7 @@ RSpec.describe 'Account deal people badges', type: :request do
 
     get "/api/v1/accounts/#{account.id}/deal_people", headers: headers
     expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.first['deal_number']).to eq(open_deal.reload.deal_number)
     rows = response.parsed_body.map { |r| [r['contact_id'], r['role_label'], r['deal_name']] }
     expect(rows).to contain_exactly([buyer.id, 'Buyer', 'Smuts home'], [spouse.id, 'Co-Buyer', 'Smuts home'])
   end

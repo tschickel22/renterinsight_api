@@ -38,7 +38,7 @@ class Api::V1::AccountDealPeopleController < ApplicationController
     render json: rows.map { |deal_id, contact_id, role|
       { contact_id: contact_id, role: role,
         role_label: labels[EntityBuyer::LABEL_KEYS[role]].presence || role.titleize,
-        deal_id: deal_id, deal_name: by_id[deal_id].name }
+        deal_id: deal_id, deal_name: by_id[deal_id].name, deal_number: by_id[deal_id].deal_number }
     }
   end
 end

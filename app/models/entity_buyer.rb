@@ -77,7 +77,7 @@ class EntityBuyer < ApplicationRecord
 
     taken = EntityBuyer.active.where(buyable_type: buyable_type, buyable_id: buyable_id, role: role)
     taken = taken.where.not(id: id) if persisted?
-    errors.add(:role, "#{role_label} is already set on this record. Change that person's role first.") if taken.exists?
+    errors.add(:base, "This #{buyable_type.to_s.downcase} already has a #{role_label}. Change that person's role first.") if taken.exists?
   end
 
   def sync_deal_pointers

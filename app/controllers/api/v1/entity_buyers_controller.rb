@@ -63,6 +63,7 @@ class Api::V1::EntityBuyersController < ApplicationController
       error = place_on_account(contact)
       raise ActiveRecord::Rollback if error
 
+      step_aside_for_new_buyer!(except: nil) if role == EntityBuyer::ROLE_BUYER
       buyer = add_to_record(contact, role)
       unless buyer.persisted?
         error = buyer.errors.full_messages.to_sentence
@@ -83,7 +84,14 @@ class Api::V1::EntityBuyersController < ApplicationController
       return render json: { errors: [no_buyer_message] }, status: :unprocessable_entity
     end
 
-    if @entity_buyer.update(buyer_params)
+    saved = false
+    ActiveRecord::Base.transaction do
+      step_aside_for_new_buyer!(except: @entity_buyer) if buyer_params[:role] == EntityBuyer::ROLE_BUYER
+      saved = @entity_buyer.update(buyer_params)
+      raise ActiveRecord::Rollback unless saved
+    end
+
+    if saved
       render json: buyer_json(@entity_buyer)
     else
       render json: { errors: @entity_buyer.errors.full_messages }, status: :unprocessable_entity
@@ -230,6 +238,14 @@ class Api::V1::EntityBuyersController < ApplicationController
                                          position: params[:position] || position, notes: params[:notes])
     buyer.save
     buyer
+  end
+
+  # Making someone the Buyer moves the current Buyer to Co-Buyer: a swap, not
+  # a refusal (Tom, 2026-11-22 click-through).
+  def step_aside_for_new_buyer!(except:)
+    @buyable.entity_buyers.active.where(role: EntityBuyer::ROLE_BUYER).where.not(id: except&.id).find_each do |eb|
+      eb.update!(role: EntityBuyer::ROLE_CO_BUYER)
+    end
   end
 
   # A deal with no account must keep a Buyer (it has nobody else to point at).
