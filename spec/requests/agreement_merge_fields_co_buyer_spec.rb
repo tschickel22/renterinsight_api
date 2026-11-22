@@ -50,8 +50,9 @@ RSpec.describe 'Agreement merge fields: co-buyer', type: :request do
   it 'fills Buyer 2 from the Buyers card when there is no co-applicant, and names everyone once' do
     deal = company.deals.create!(name: 'Card buyers', contact_id: buyer.id)
     third = company.contacts.create!(first_name: 'Lee', last_name: 'Ray', email: 'lee@example.com')
-    [buyer, co_buyer, third].each_with_index do |c, i|
-      EntityBuyer.create!(company: company, contact: c, buyable: deal, role: i.zero? ? 'buyer' : 'co_buyer', position: i)
+    # The deal's contact is already the Buyer on the card; add two Co-Buyers.
+    [co_buyer, third].each_with_index do |c, i|
+      EntityBuyer.create!(company: company, contact: c, buyable: deal, role: 'co_buyer', position: i + 1)
     end
 
     fields = fields_for(deal)

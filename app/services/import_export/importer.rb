@@ -164,6 +164,7 @@ module ImportExport
       end
 
       process_images!(created_ids) if @job.image_zip_url.present? && ModuleRegistry.supports_images?(@job.module_type)
+      household_contacts!(created_ids) if @job.module_type == 'accounts'
 
       @job.update!(
         status: 'completed',
@@ -519,6 +520,29 @@ module ImportExport
       match_summary = fields.map { |f| "#{f}=#{row_data[f].to_s.truncate(60)}" }.join(', ')
       base = "Skipped: duplicate of existing record ##{existing.id}"
       match_summary.present? ? "#{base} (matched on #{match_summary})" : base
+    end
+
+    # Dealer companies sell to households: an imported account with no contact
+    # gets its person made from the account (Accounts::HouseholdContact), so its
+    # deals have a Buyer. The tally lands on the job's options for the summary.
+    def household_contacts!(created_ids)
+      company = @job.company
+      return unless Accounts::HouseholdContact.applies_to?(company)
+
+      made = 0
+      skipped = []
+      company.accounts.where(id: created_ids).find_each do |account|
+        result = Accounts::HouseholdContact.ensure!(account)
+        if result.status == :created
+          made += result.contacts.size
+        elsif !result.reason.to_s.start_with?('already has')
+          skipped << { account_id: account.id, name: account.name, reason: result.reason }
+        end
+      end
+      @job.options = (@job.options || {}).merge('household_contacts' => { 'created' => made, 'skipped' => skipped.first(200) }.deep_stringify_keys)
+    rescue StandardError => e
+      # A contact we could not make must not fail an import that already landed.
+      Rails.logger.error "[ImportExport::Importer] household contacts: #{e.class}: #{e.message}"
     end
 
     def process_images!(created_ids)

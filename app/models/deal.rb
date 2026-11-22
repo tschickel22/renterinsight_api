@@ -46,13 +46,72 @@ class Deal < ApplicationRecord
   # source of truth — the deal only points at it.
   belongs_to :co_applicant_contact, class_name: 'Contact', optional: true
 
-  # Everyone buying, each once: the deal's contact, the co-applicant, then the
-  # people on the deal's Buyers card in their order. Agreements print and sign
-  # from this list (Tom, 2026-11-16), so a buyer added only on the Buyers card
-  # still reaches the contract.
+  # Everyone buying, each once: the deal's contact (Buyer), the co-applicant
+  # (Co-Buyer), then anyone else on the people card with a buying role.
+  # Agreements print and sign from this list (Tom, 2026-11-16), so a buyer added
+  # only on the card still reaches the contract. Co-Signers and Guarantors are
+  # left out on purpose: they are not buying, and [1] here is the contract's
+  # Buyer 2 / Co-Buyer slot (Tom, 2026-11-22). Use #deal_people for everyone.
   def agreement_buyers
-    card = entity_buyers.active.ordered.includes(:contact).map(&:contact)
+    card = entity_buyers.active.purchasers.ordered.includes(:contact).map(&:contact)
     [contact, co_applicant_contact, *card].compact.select { |c| c.company_id == company_id }.uniq(&:id)
+  end
+
+  # Everyone on the people card, Co-Signers and Guarantors included.
+  def deal_people
+    entity_buyers.active.ordered.includes(:contact)
+  end
+
+  # ── People card <-> buyer columns ────────────────────────────────
+  # contact_id is the Buyer and co_applicant_contact_id the Co-Buyer. The card
+  # (entity_buyers) carries the same two people plus Co-Signers and Guarantors.
+  # Whichever side changes, the other follows, so the Deal Sheet, agreements,
+  # payments and the card always name the same people.
+  PEOPLE_POINTERS = { EntityBuyer::ROLE_BUYER => :contact_id,
+                      EntityBuyer::ROLE_CO_BUYER => :co_applicant_contact_id }.freeze
+
+  # Card -> columns. Called by EntityBuyer after a Buyer or Co-Buyer row changes.
+  # A deal with no account keeps its contact when the Buyer row goes, since the
+  # deal must point at someone.
+  def sync_pointers_from_people!(roles = EntityBuyer::PURCHASER_ROLES)
+    updates = {}
+    Array(roles).each do |role|
+      column = PEOPLE_POINTERS[role] or next
+      in_role = entity_buyers.active.where(role: role).order(:position, :created_at).pluck(:contact_id)
+      # The person the column names keeps it while they still hold the role;
+      # otherwise the first in the role takes it.
+      person_id = in_role.include?(self[column]) ? self[column] : in_role.first
+      next if person_id.nil? && column == :contact_id && account_id.blank?
+
+      updates[column] = person_id if self[column] != person_id
+    end
+    update_columns(updates.merge(updated_at: Time.current)) if updates.any?
+  end
+
+  # Columns -> card, for the roles whose column holds someone and whose role
+  # has nobody on the card yet. Never overwrites a card that already names
+  # someone else: a disagreement is for a person to settle
+  # (deals:sync_people lists them).
+  def ensure_people_from_pointers!
+    PEOPLE_POINTERS.each do |role, column|
+      person_id = self[column]
+      next if person_id.blank?
+      next if entity_buyers.active.where(role: role).exists?
+      next if entity_buyers.active.where(contact_id: person_id).exists?
+      next unless Contact.where(id: person_id, company_id: company_id).exists?
+
+      place_person!(person_id, role)
+    end
+  end
+
+  # Where the card and the columns name different people for the same role.
+  def people_conflicts
+    PEOPLE_POINTERS.filter_map do |role, column|
+      on_card = entity_buyers.active.where(role: role).order(:position, :created_at).pluck(:contact_id)
+      next if on_card.empty? || self[column].nil? || on_card.include?(self[column])
+
+      { role: role, column_contact_id: self[column], card_contact_id: on_card.first }
+    end
   end
   belongs_to :user, optional: true  # FIX: Made optional to prevent 422 errors when user_id not set
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
@@ -233,6 +292,9 @@ class Deal < ApplicationRecord
   # Mirror the deal's lifecycle onto the linked vehicle: close_won → sold,
   # transition back out → revert to available (only if this deal owns the sale).
   after_save :sync_vehicle_sold_status, if: :saved_change_to_stage?
+  # The people card follows the Buyer / Co-Buyer columns whichever path set
+  # them (lead conversion, Edit Deal, imports, the AI connector).
+  after_save :sync_people_from_pointers, if: -> { saved_change_to_contact_id? || saved_change_to_co_applicant_contact_id? }
   # Companies that pay at close get their commission payments when the deal closes.
   after_commit :generate_commissions_at_close, on: [:create, :update], if: -> { saved_change_to_stage? && stage_is_won? }
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
@@ -303,6 +365,49 @@ class Deal < ApplicationRecord
     if account_id.blank? && contact_id.blank?
       errors.add(:base, "Deal must have either an account or a contact")
     end
+  end
+
+  # Columns -> card after a save changed who the Buyer or Co-Buyer is.
+  def sync_people_from_pointers
+    PEOPLE_POINTERS.each do |role, column|
+      next unless saved_change_to_attribute?(column)
+
+      old_id, person_id = saved_change_to_attribute(column)
+      # The person the column used to name leaves the role (other Co-Buyers stay).
+      if old_id.present? && old_id != person_id
+        entity_buyers.active.where(role: role, contact_id: old_id).each do |eb|
+          eb.skip_pointer_sync = true
+          eb.update!(is_deleted: true)
+        end
+      end
+      next if person_id.blank?
+      next if entity_buyers.active.where(role: role, contact_id: person_id).exists?
+
+      # One Buyer: anyone else still holding it (from before) steps aside.
+      if role == EntityBuyer::ROLE_BUYER
+        entity_buyers.active.where(role: role).where.not(contact_id: person_id).each do |eb|
+          eb.skip_pointer_sync = true
+          eb.update!(is_deleted: true)
+        end
+      end
+      place_person!(person_id, role)
+    end
+  end
+
+  # Put a contact on the card in a role, reusing their row if they are already
+  # on it (in another role, or removed earlier). Does not write the columns back.
+  def place_person!(person_id, role)
+    row = entity_buyers.where(contact_id: person_id).order(Arel.sql('is_deleted ASC NULLS FIRST'), :id).first
+    if row
+      row.skip_pointer_sync = true
+      row.update!(role: role, is_deleted: false)
+    else
+      row = entity_buyers.build(company_id: company_id, contact_id: person_id, role: role,
+                                position: entity_buyers.active.count)
+      row.skip_pointer_sync = true
+      row.save!
+    end
+    row
   end
 
   def co_applicant_contact_is_valid

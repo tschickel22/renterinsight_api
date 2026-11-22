@@ -1359,7 +1359,15 @@ class Company < ApplicationRecord
       'service_ticket' => 'Service Ticket',
       'service_tickets'=> 'Service Tickets',
       'project'        => 'Project',
-      'projects'       => 'Projects'
+      'projects'       => 'Projects',
+      # People on a deal: roles on the deal's people card, the Deal Sheet and
+      # agreements. second_person is the extra person a lead can hold.
+      'buyer'          => 'Buyer',
+      'co_buyer'       => 'Co-Buyer',
+      'buyers'         => 'Buyers',
+      'cosigner'       => 'Co-Signer',
+      'guarantor'      => 'Guarantor',
+      'second_person'  => 'Second Contact'
     }.freeze,
     'rv' => {
       'vehicle'       => 'Unit',
@@ -1393,7 +1401,15 @@ class Company < ApplicationRecord
       'service_ticket' => 'Service Ticket',
       'service_tickets'=> 'Service Tickets',
       'project'        => 'Project',
-      'projects'       => 'Projects'
+      'projects'       => 'Projects',
+      # People on a deal: roles on the deal's people card, the Deal Sheet and
+      # agreements. second_person is the extra person a lead can hold.
+      'buyer'          => 'Buyer',
+      'co_buyer'       => 'Co-Buyer',
+      'buyers'         => 'Buyers',
+      'cosigner'       => 'Co-Signer',
+      'guarantor'      => 'Guarantor',
+      'second_person'  => 'Second Contact'
     }.freeze,
     'saas' => {
       'vehicle'       => 'Product',
@@ -1427,7 +1443,15 @@ class Company < ApplicationRecord
       'service_ticket' => 'Support Ticket',
       'service_tickets'=> 'Support Tickets',
       'project'        => 'Project',
-      'projects'       => 'Projects'
+      'projects'       => 'Projects',
+      # People on a deal: roles on the deal's people card, the Deal Sheet and
+      # agreements. second_person is the extra person a lead can hold.
+      'buyer'          => 'Contact',
+      'co_buyer'       => 'Second Contact',
+      'buyers'         => 'Contacts',
+      'cosigner'       => 'Co-Signer',
+      'guarantor'      => 'Guarantor',
+      'second_person'  => 'Second Contact'
     }.freeze,
     'property_management' => {
       'vehicle'       => 'Unit',
@@ -1461,7 +1485,15 @@ class Company < ApplicationRecord
       'service_ticket' => 'Maintenance Request',
       'service_tickets'=> 'Maintenance Requests',
       'project'        => 'Project',
-      'projects'       => 'Projects'
+      'projects'       => 'Projects',
+      # People on a deal: roles on the deal's people card, the Deal Sheet and
+      # agreements. second_person is the extra person a lead can hold.
+      'buyer'          => 'Applicant',
+      'co_buyer'       => 'Co-Applicant',
+      'buyers'         => 'Applicants',
+      'cosigner'       => 'Co-Signer',
+      'guarantor'      => 'Guarantor',
+      'second_person'  => 'Co-Applicant'
     }.freeze,
     'storage' => {
       'vehicle'       => 'Unit',
@@ -1495,7 +1527,15 @@ class Company < ApplicationRecord
       'service_ticket' => 'Service Request',
       'service_tickets'=> 'Service Requests',
       'project'        => 'Project',
-      'projects'       => 'Projects'
+      'projects'       => 'Projects',
+      # People on a deal: roles on the deal's people card, the Deal Sheet and
+      # agreements. second_person is the extra person a lead can hold.
+      'buyer'          => 'Renter',
+      'co_buyer'       => 'Co-Renter',
+      'buyers'         => 'Renters',
+      'cosigner'       => 'Co-Signer',
+      'guarantor'      => 'Guarantor',
+      'second_person'  => 'Second Contact'
     }.freeze
   }.freeze
 

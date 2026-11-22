@@ -86,6 +86,14 @@ module Api
         # lead's notes where no report could see it.
         def lead_fields
           standard = STANDARD_LEAD_FIELDS.select { |f| Lead.column_names.include?(f[:name]) }
+          # The second person's fields carry the company's word for them
+          # (Labels, second_person: "Second Contact", "Co-Applicant", ...).
+          second = @company.resolved_labels['second_person'].presence || 'Second Contact'
+          standard = standard.map do |f|
+            next f unless f[:group] == 'Co-Applicant'
+
+            f.merge(label: f[:label].sub('Co-Applicant', second), group: second)
+          end
 
           # Namespaced with `custom:` because a custom field key is free to
           # collide with a real Lead column — company 17 has a lead custom

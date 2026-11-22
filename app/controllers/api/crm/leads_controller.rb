@@ -770,6 +770,8 @@ module Api
               account_mode: account_mode,
               account_id: account_id,
               create_contact_param: params[:create_contact],
+              # Email, phone and address as the convert dialog showed them.
+              account_details: (params[:account_details].permit(:email, :phone, :street, :city, :state, :zip, :country).to_h if params[:account_details].is_a?(ActionController::Parameters)),
               deal_params: (params[:create_deal] if params[:create_deal].present? && params[:create_deal].is_a?(ActionController::Parameters))
             )
             account = result.account

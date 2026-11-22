@@ -1337,8 +1337,17 @@ class PageLayout < ApplicationRecord
             { key: 'first_name', type: 'standard', visible: true, required: true, width: 1 },
             { key: 'last_name', type: 'standard', visible: true, required: true, width: 1 },
             { key: 'email', type: 'standard', visible: true, required: true, width: 1 },
-            { key: 'phone', type: 'standard', visible: true, required: true, width: 1 },
-            # Co-applicant (co-borrower) — optional; converts to a 2nd contact
+            { key: 'phone', type: 'standard', visible: true, required: true, width: 1 }
+          ]
+        },
+        {
+          # The lead's second person (spouse, partner). Optional; becomes a
+          # second contact on conversion and the deal's Co-Buyer.
+          id: 'second_person',
+          title: 'Second Contact',
+          columns: 2,
+          collapsed: false,
+          fields: [
             { key: 'co_applicant_first_name', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'co_applicant_last_name', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'co_applicant_email', type: 'standard', visible: true, required: false, width: 1 },
