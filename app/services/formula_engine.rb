@@ -6,6 +6,8 @@
 # Formula syntax: starts with '=', references field keys, supports +, -, *, /
 # Functions: round(value, decimals), if(condition, true_val, false_val), percent_of(base, rate),
 #            sum(a, b, ...) where an argument may name a line-item column
+#            sum_marked(column, mark_column) / sum_unmarked(column, mark_column): the rows
+#            of a line-item column whose mark (e.g. tax_mark "*") is filled in / blank
 #
 # Besides the template's own fields, a formula may read merge fields
 # (deal.selling_price, vehicle.msrp, ...) passed in as `context`. A line-item
@@ -127,7 +129,7 @@ class FormulaEngine
     # Remove function names, numbers, operators, and parens to find field key references
     cleaned = expr.dup
     # Remove function calls (keep args)
-    cleaned.gsub!(/\b(round|if|percent_of|sum)\s*\(/, '(')
+    cleaned.gsub!(/\b(round|if|percent_of|sum_marked|sum_unmarked|sum)\s*\(/, '(')
     # Remove numeric literals (including decimals)
     cleaned.gsub!(/\b\d+(\.\d+)?\b/, '')
     # Remove operators and parens
@@ -274,6 +276,8 @@ class FormulaEngine
 
       # Check if it's a function call
       if tokens.first && tokens.first[:type] == :lparen
+        return call_marked_sum(name, tokens) if MARKED_SUMS.include?(name)
+
         return call_function(name, tokens)
       end
 
@@ -304,6 +308,39 @@ class FormulaEngine
       args.sum(BigDecimal('0'))
     else
       raise InvalidFormulaError, "Unknown function: #{name}"
+    end
+  end
+
+  MARKED_SUMS = %w[sum_marked sum_unmarked].freeze
+
+  # sum_marked(deal.x.line_total, deal.x.tax_mark): adds row i of the first column
+  # when row i of the second is filled in (sum_unmarked: when it is blank). Both
+  # arguments name columns, so they are read as names, not values.
+  def call_marked_sum(name, tokens)
+    expect_token(tokens, :lparen)
+    column = tokens.shift
+    expect_token(tokens, :comma)
+    marks = tokens.shift
+    expect_token(tokens, :rparen)
+    unless column && marks && column[:type] == :identifier && marks[:type] == :identifier
+      raise InvalidFormulaError, "#{name}() takes two line-item columns"
+    end
+
+    array, _, field = column[:value].rpartition('.')
+    mark_array, _, mark_field = marks[:value].rpartition('.')
+    pattern = /\A#{Regexp.escape(array)}\[(\d+)\]\.#{Regexp.escape(field)}\z/
+    @values.sum(BigDecimal('0')) do |key, value|
+      m = pattern.match(key)
+      next BigDecimal('0') unless m
+
+      marked = @values["#{mark_array}[#{m[1]}].#{mark_field}"].to_s.strip.present?
+      next BigDecimal('0') unless marked == (name == 'sum_marked')
+
+      begin
+        value.to_s.strip.empty? ? BigDecimal('0') : BigDecimal(value.to_s.delete('$,'))
+      rescue ArgumentError
+        BigDecimal('0')
+      end
     end
   end
 

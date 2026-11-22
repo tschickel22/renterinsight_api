@@ -156,7 +156,7 @@ price 'sub_total_1', 'Sub-total', 219.1, formula: '=base_price + optional_equipm
 charge_line 2, 231.6
 price 'sales_tax', 'Sales tax', 243.7, merge_from: 'deal.tax_amount'
 charge_line 3, 255.6
-price 'non_taxable_items', 'Non-taxable items', 267.4
+price 'non_taxable_items', 'Non-taxable items', 267.4, formula: '=sum_marked(deal.line_items_options.line_total, deal.line_items_options.tax_mark)'
 price 'various_fees', 'Various fees and insurance', 279.7, merge_from: 'deal.fee_total'
 price 'cash_purchase_price', 'Cash purchase price', 291.4,
       formula: '=sub_total_1 + other_charge_2 + sales_tax + other_charge_3 + non_taxable_items + various_fees'
@@ -173,16 +173,21 @@ price 'unpaid_balance', 'Unpaid balance of cash sale price', 399.4, formula: '=s
 field 1, 'remarks', 'Remarks', 343.1, 421.0, 248.2, 62.0, group: 'remarks'
 
 # Optional equipment, labor and accessories: 22 ruled rows, filled from every
-# deal line except the home (base price above) and fees (various fees above);
-# the balance carried is their total.
+# deal line except the home (base price above) and fees (various fees above).
+# A line that isn't taxable carries a "*" before its description, as dealers
+# mark it by hand. The balance carried (to Optional Equipment, which is taxed)
+# is the unmarked rows; the marked rows total to Non-taxable Items. The dealer
+# can change any row, add one on a spare row, or add or clear a "*", and the
+# totals follow. Rows they add or change can be saved back to the deal.
 OPTION_ROWS = [279.7, 291.8, 303.7, 315.5, 327.4, 339.7, 351.8, 363.6, 375.6, 387.7, 399.8,
                411.7, 423.8, 435.8, 447.9, 459.8, 471.4, 483.7, 495.5, 507.4, 519.6, 531.3].freeze
 OPTION_ROWS.each_with_index do |y, i|
-  merge 1, "deal.line_items_options[#{i}].description", "Optional equipment #{i + 1}", 20.4, y, 255.0, 10.7
+  merge 1, "deal.line_items_options[#{i}].tax_mark", "Optional equipment #{i + 1} non-taxable (*)", 20.4, y, 7.0, 10.7
+  merge 1, "deal.line_items_options[#{i}].description", "Optional equipment #{i + 1}", 27.4, y, 248.0, 10.7
   merge 1, "deal.line_items_options[#{i}].line_total", "Optional equipment #{i + 1} amount", 283.6, y, 55.2, 10.7, type: 'currency'
 end
 field 1, 'balance_carried', 'Balance carried to optional equipment', 283.6, 543.4, 55.2, 10.7,
-      type: 'currency', group: 'optional_equipment', formula: '=sum(deal.line_items_options.line_total)'
+      type: 'currency', group: 'optional_equipment', formula: '=sum_unmarked(deal.line_items_options.line_total, deal.line_items_options.tax_mark)'
 
 # Trade-in
 field 1, 'trade_description', 'Trade-in description', 20.4, 564.6, 209.0, 10.7, group: 'trade_in'

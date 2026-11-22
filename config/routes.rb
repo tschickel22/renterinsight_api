@@ -2346,6 +2346,9 @@ Rails.application.routes.draw do
           post :prepare_signature
           put :preparer_sign
           post :calculate
+          # Rows added or changed on the agreement, offered back to its deal.
+          get :deal_changes, to: 'agreement_deal_changes#show'
+          post :deal_changes, to: 'agreement_deal_changes#create'
           post :vision_scan
           post :upload_signed_document
           get 'custom_fields', to: 'agreements#list_custom_fields'
