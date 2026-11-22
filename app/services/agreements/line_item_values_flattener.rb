@@ -24,6 +24,7 @@ module Agreements
     ARRAY_KEYS = %w[
       line_items
       non_home_line_items
+      line_items_options
       line_items_home
       line_items_land
       line_items_fee
@@ -32,6 +33,16 @@ module Agreements
       line_items_product
       line_items_other
     ].freeze
+
+    # Categories left out of line_items_options: the home has its own price line
+    # and fees have their own fees line on a purchase agreement.
+    OPTION_EXCLUDED_CATEGORIES = %w[home fee].freeze
+
+    # Everything on the deal but the home and the fees, in deal order: the
+    # "optional equipment, labor and accessories" list on Form 500 style forms.
+    def self.option_items(all_items)
+      all_items.reject { |li| li[:is_home] || OPTION_EXCLUDED_CATEGORIES.include?(li[:category].to_s) }
+    end
 
     # Fields per line item that we surface as `deal.<array>[i].<field>`.
     ITEM_FIELDS = %w[description name amount price cost quantity line_total total category source is_home].freeze
@@ -57,6 +68,7 @@ module Agreements
       {
         'line_items'          => all_items,
         'non_home_line_items' => all_items.reject { |li| li[:is_home] },
+        'line_items_options'  => option_items(all_items),
         'line_items_home'      => all_items.select { |li| li[:category].to_s == 'home' },
         'line_items_land'      => all_items.select { |li| li[:category].to_s == 'land' },
         'line_items_fee'       => all_items.select { |li| li[:category].to_s == 'fee' },

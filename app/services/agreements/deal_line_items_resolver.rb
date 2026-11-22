@@ -8,7 +8,8 @@ module Agreements
   #   1. Selected `deal_desk_scenarios` scenario's `line_items` JSONB (what the rep sees
   #      in the Deal Edit UI's Line Items card and just committed to)
   #   2. `deal_products` (legacy fallback for older deals with no selected scenario, or
-  #      when the selected scenario has an empty line_items array)
+  #      when the selected scenario has an empty line_items array). Their category is
+  #      read from the `category:<name>` tag in notes.
   #
   # Home identification rule:
   #   A line item is THE home if `source == 'home'` (frontend sets this when the row is
@@ -79,13 +80,20 @@ module Agreements
           line_total: (price * qty).round(2),
           total: dp.total.to_f,
           tax: dp.tax.to_f,
-          category: nil, # deal_products has no category — leave nil for the caller to bucket
+          category: category_from_notes(dp.notes),
           taxable: dp.tax.to_f > 0,
           source: source.presence,
           source_vehicle_id: source_vehicle_id,
           is_home: home?(source: source, source_vehicle_id: source_vehicle_id)
         }
       end
+    end
+
+    # deal_products carry their category as a tag in notes ("category:service,
+    # source:standard_item, ..."), the convention the deal form, Deal Desk and the
+    # deal sheet all write. Untagged rows stay nil.
+    def category_from_notes(notes)
+      notes.to_s[/category:\s*(\w+)/i, 1]&.downcase
     end
 
     def normalize_scenario_item(item, idx)

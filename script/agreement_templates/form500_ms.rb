@@ -122,8 +122,9 @@ merge 1, 'vehicle.year', 'Year', 20.4, 170.0, 31.9
 merge 1, 'vehicle.bedrooms', 'Bedrooms', 55.1, 170.2, 45.5
 merge 1, 'vehicle.length', 'Floor size L', 109, 170.2, 45.2
 merge 1, 'vehicle.width', 'Floor size W', 165, 170.2, 43.7
-field 1, 'hitch_size_l', 'Hitch size L', 216, 170.2, 29.5, group: 'unit'
-field 1, 'hitch_size_w', 'Hitch size W', 255, 170.2, 27.7, group: 'unit'
+# We hold no hitch size, so it starts as the floor size and the dealer corrects it.
+field 1, 'hitch_size_l', 'Hitch size L', 216, 170.2, 29.5, group: 'unit', merge_from: 'vehicle.length'
+field 1, 'hitch_size_w', 'Hitch size W', 255, 170.2, 27.7, group: 'unit', merge_from: 'vehicle.width'
 merge 1, 'vehicle.exterior_color', 'Color', 284.4, 170.2, 119.0
 field 1, 'key_numbers', 'Key numbers', 405.0, 170.2, 91.0, group: 'unit'
 field 1, 'proposed_delivery_date', 'Proposed delivery date', 497.9, 170.2, 93.4, type: 'date', group: 'unit', merge_from: 'deal.delivery_date'
@@ -171,16 +172,17 @@ price 'unpaid_balance', 'Unpaid balance of cash sale price', 399.4, formula: '=s
 
 field 1, 'remarks', 'Remarks', 343.1, 421.0, 248.2, 62.0, group: 'remarks'
 
-# Optional equipment, labor and accessories: 22 ruled rows, filled from the
-# deal's accessory lines; the balance carried is their total.
+# Optional equipment, labor and accessories: 22 ruled rows, filled from every
+# deal line except the home (base price above) and fees (various fees above);
+# the balance carried is their total.
 OPTION_ROWS = [279.7, 291.8, 303.7, 315.5, 327.4, 339.7, 351.8, 363.6, 375.6, 387.7, 399.8,
                411.7, 423.8, 435.8, 447.9, 459.8, 471.4, 483.7, 495.5, 507.4, 519.6, 531.3].freeze
 OPTION_ROWS.each_with_index do |y, i|
-  merge 1, "deal.line_items_accessory[#{i}].description", "Optional equipment #{i + 1}", 20.4, y, 255.0, 10.7
-  merge 1, "deal.line_items_accessory[#{i}].line_total", "Optional equipment #{i + 1} amount", 283.6, y, 55.2, 10.7, type: 'currency'
+  merge 1, "deal.line_items_options[#{i}].description", "Optional equipment #{i + 1}", 20.4, y, 255.0, 10.7
+  merge 1, "deal.line_items_options[#{i}].line_total", "Optional equipment #{i + 1} amount", 283.6, y, 55.2, 10.7, type: 'currency'
 end
 field 1, 'balance_carried', 'Balance carried to optional equipment', 283.6, 543.4, 55.2, 10.7,
-      type: 'currency', group: 'optional_equipment', formula: '=sum(deal.line_items_accessory.line_total)'
+      type: 'currency', group: 'optional_equipment', formula: '=sum(deal.line_items_options.line_total)'
 
 # Trade-in
 field 1, 'trade_description', 'Trade-in description', 20.4, 564.6, 209.0, 10.7, group: 'trade_in'
