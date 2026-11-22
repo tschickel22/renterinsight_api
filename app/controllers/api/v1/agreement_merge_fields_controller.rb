@@ -226,6 +226,7 @@ module Api
               { key: 'deal.line_items', label: 'All Line Items (repeating)', type: 'line_items', value: deal_line_items_data },
               { key: 'deal.home_line_item', label: 'Home Line Item', type: 'line_item', value: home_line_item_data },
               { key: 'deal.non_home_line_items', label: 'Non-Home Line Items (repeating)', type: 'line_items', value: non_home_line_items_data },
+              { key: 'deal.line_items_options', label: 'Options, Labor and Add-ons (everything but the home and fees, repeating)', type: 'line_items', value: ::Agreements::LineItemValuesFlattener.option_items(deal_line_items_data) },
               { key: 'deal.line_items_home', label: 'Home-Tagged Line Items (repeating)', type: 'line_items', value: line_items_by_category('home') },
               { key: 'deal.line_items_land', label: 'Land / Site Improvement Line Items (repeating)', type: 'line_items', value: line_items_by_category('land') },
               { key: 'deal.line_items_fee', label: 'Fee Line Items (repeating)', type: 'line_items', value: line_items_by_category('fee') },
@@ -240,6 +241,7 @@ module Api
               { key: 'deal.line_items_total', label: 'All Line Items Subtotal', type: 'currency', value: line_items_subtotal { |_li| true } },
               { key: 'deal.land_total', label: 'Land / Site Improvements Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'land' } },
               { key: 'deal.fee_total', label: 'Fees Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'fee' } },
+              { key: 'deal.options_total_from_lines', label: 'Options, Labor and Add-ons Subtotal (from line items)', type: 'currency', value: (@deal ? ::Agreements::LineItemValuesFlattener.option_items(deal_line_items_data).sum { |li| li[:line_total].to_f }.round(2) : nil) },
               { key: 'deal.accessory_total_from_lines', label: 'Accessories Subtotal (from line items)', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'accessory' } },
               { key: 'deal.service_total', label: 'Services Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'service' } },
               { key: 'deal.product_total', label: 'Products Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'product' } },
@@ -259,14 +261,14 @@ module Api
               { key: 'vehicle.trim', label: 'Trim', type: 'text', value: @vehicle.try(:trim) },
               { key: 'vehicle.year', label: 'Year', type: 'text', value: @vehicle.try(:year)&.to_s },
               { key: 'vehicle.vin', label: 'VIN', type: 'text', value: @vehicle.try(:vin) },
-              { key: 'vehicle.serial_number', label: 'Serial Number', type: 'text', value: @vehicle.try(:serial_number) || @vehicle.try(:vin) },
-              { key: 'vehicle.stock_number', label: 'Stock Number', type: 'text', value: @vehicle.try(:stock_number) },
+              { key: 'vehicle.serial_number', label: 'Serial Number', type: 'text', value: vehicle_serial },
+              { key: 'vehicle.stock_number', label: 'Stock Number (else Inventory ID)', type: 'text', value: @vehicle.try(:stock_number).presence || @vehicle.try(:inventory_id).presence },
               { key: 'vehicle.inventory_id', label: 'Inventory ID', type: 'text', value: @vehicle.try(:inventory_id) },
               { key: 'vehicle.condition', label: 'New/Used', type: 'text', value: @vehicle.try(:condition)&.titleize },
               { key: 'vehicle.is_new', label: 'Home Is New (checkbox)', type: 'checkbox', value: vehicle_condition == 'new' ? 'true' : nil },
               { key: 'vehicle.is_used', label: 'Home Is Used (checkbox)', type: 'checkbox', value: vehicle_condition == 'used' ? 'true' : nil },
-              { key: 'vehicle.is_single_section', label: 'Single Section (checkbox)', type: 'checkbox', value: @vehicle.try(:sections).to_i == 1 ? 'true' : nil },
-              { key: 'vehicle.is_multi_section', label: 'Multi Section (checkbox)', type: 'checkbox', value: @vehicle.try(:sections).to_i >= 2 ? 'true' : nil },
+              { key: 'vehicle.is_single_section', label: 'Single Section (checkbox)', type: 'checkbox', value: vehicle_section_count == 1 ? 'true' : nil },
+              { key: 'vehicle.is_multi_section', label: 'Multi Section (checkbox)', type: 'checkbox', value: vehicle_section_count.to_i >= 2 ? 'true' : nil },
               { key: 'vehicle.year_size', label: 'Home Year / Size', type: 'text', value: vehicle_year_size },
               { key: 'vehicle.home_description', label: 'Home: Year, Size, Manufacturer, Serial', type: 'text', value: vehicle_home_description },
               { key: 'vehicle.status', label: 'Status', type: 'text', value: InventoryStatusNames.new(@vehicle.try(:company)).for(@vehicle.try(:status)) },
@@ -525,12 +527,32 @@ module Api
         [@vehicle.try(:width).presence, @vehicle.try(:length).presence].compact.join(' x ').presence
       end
 
+      # The home's serial (else VIN). A home imported from a factory catalog and not
+      # built yet carries a placeholder serial (CAT-<source>-<model>..., see
+      # Catalog::IngestionService) so it stays unique; that never prints on a form.
+      def vehicle_serial
+        serial = @vehicle.try(:serial_number).presence
+        serial = nil if serial&.start_with?('CAT-')
+        serial || @vehicle.try(:vin).presence
+      end
+
+      # Sections as recorded, else read from the width: a home 20 feet or wider is
+      # a multi-section. Catalog imports leave sections blank.
+      def vehicle_section_count
+        return nil unless @vehicle
+        sections = @vehicle.try(:sections).to_i
+        return sections if sections.positive?
+        width = @vehicle.try(:width).to_f
+        return nil unless width.positive?
+        width >= 20 ? 2 : 1
+      end
+
       def vehicle_year_size
         [@vehicle.try(:year).presence, vehicle_size].compact.join(' / ').presence
       end
 
       def vehicle_home_description
-        serial = @vehicle.try(:serial_number).presence || @vehicle.try(:vin).presence
+        serial = vehicle_serial
         [@vehicle.try(:year).presence, vehicle_size, @vehicle.try(:make).presence, serial].compact.join(', ').presence
       end
 
