@@ -182,8 +182,9 @@ field 1, 'remarks', 'Remarks', 343.1, 421.0, 248.2, 62.0, group: 'remarks'
 OPTION_ROWS = [279.7, 291.8, 303.7, 315.5, 327.4, 339.7, 351.8, 363.6, 375.6, 387.7, 399.8,
                411.7, 423.8, 435.8, 447.9, 459.8, 471.4, 483.7, 495.5, 507.4, 519.6, 531.3].freeze
 OPTION_ROWS.each_with_index do |y, i|
-  merge 1, "deal.line_items_options[#{i}].tax_mark", "Optional equipment #{i + 1} non-taxable (*)", 20.4, y, 7.0, 10.7
-  merge 1, "deal.line_items_options[#{i}].description", "Optional equipment #{i + 1}", 27.4, y, 248.0, 10.7
+  # 10 points wide: narrower and the builder's preview pads the "*" out of sight.
+  merge 1, "deal.line_items_options[#{i}].tax_mark", "Optional equipment #{i + 1} non-taxable (*)", 20.4, y, 10.0, 10.7
+  merge 1, "deal.line_items_options[#{i}].description", "Optional equipment #{i + 1}", 30.4, y, 245.0, 10.7
   merge 1, "deal.line_items_options[#{i}].line_total", "Optional equipment #{i + 1} amount", 283.6, y, 55.2, 10.7, type: 'currency'
 end
 field 1, 'balance_carried', 'Balance carried to optional equipment', 283.6, 543.4, 55.2, 10.7,
