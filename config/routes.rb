@@ -2272,7 +2272,10 @@ Rails.application.routes.draw do
 
       # ==================== ENTITY BUYERS (Co-Buyers, Guarantors, Cosigners) ====================
       resources :deals, only: [] do
-        resources :buyers, controller: 'entity_buyers', only: [:index, :create, :update, :destroy]
+        resources :buyers, controller: 'entity_buyers', only: [:index, :create, :update, :destroy] do
+          # Account contacts not yet on the deal, offered as "Add as Co-Buyer?"
+          get :suggestions, on: :collection
+        end
       end
       resources :quotes, only: [] do
         resources :buyers, controller: 'entity_buyers', only: [:index, :create, :update, :destroy]

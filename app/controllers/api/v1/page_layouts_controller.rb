@@ -561,11 +561,12 @@ module Api
           { key: 'last_name', label: 'Last Name', type: 'text', source: 'standard', required: true, protected: true },
           { key: 'email', label: 'Email', type: 'email', source: 'standard', required: true, protected: true },
           { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: true, protected: true },
-          # Co-applicant (co-borrower) — becomes a second contact on conversion
-          { key: 'co_applicant_first_name', label: 'Co-Applicant First Name', type: 'text', source: 'standard', required: false, protected: false },
-          { key: 'co_applicant_last_name', label: 'Co-Applicant Last Name', type: 'text', source: 'standard', required: false, protected: false },
-          { key: 'co_applicant_email', label: 'Co-Applicant Email', type: 'email', source: 'standard', required: false, protected: false },
-          { key: 'co_applicant_phone', label: 'Co-Applicant Phone', type: 'phone', source: 'standard', required: false, protected: false },
+          # The lead's second person (Labels: second_person); becomes a second
+          # contact on conversion and the deal's Co-Buyer.
+          { key: 'co_applicant_first_name', label: "#{ilabel('second_person', 'Second Contact')} First Name", type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'co_applicant_last_name', label: "#{ilabel('second_person', 'Second Contact')} Last Name", type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'co_applicant_email', label: "#{ilabel('second_person', 'Second Contact')} Email", type: 'email', source: 'standard', required: false, protected: false },
+          { key: 'co_applicant_phone', label: "#{ilabel('second_person', 'Second Contact')} Phone", type: 'phone', source: 'standard', required: false, protected: false },
           { key: 'company_name', label: 'Company Name', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'title', label: 'Job Title', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'created_at', label: 'Lead Created', type: 'datetime', source: 'standard', required: false, protected: false },

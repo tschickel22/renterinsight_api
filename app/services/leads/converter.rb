@@ -50,7 +50,10 @@ module Leads
     #   and last name".
     # deal_params: { name, stage, close_date or expected_close, description }
     #   to open a deal as well.
-    def call(account_name: nil, account_mode: nil, account_id: nil, create_contact_param: nil, deal_params: nil)
+    # account_details: { email, phone, street, city, state, zip, country } as
+    #   the convert dialog shows them (filled in from the lead, editable). A key
+    #   that is present wins, blank included; a missing key uses the lead.
+    def call(account_name: nil, account_mode: nil, account_id: nil, create_contact_param: nil, deal_params: nil, account_details: nil)
       raise ArgumentError, 'Lead has already been converted' if @lead.is_converted
 
       account_mode = account_mode.to_s.presence
@@ -66,6 +69,7 @@ module Leads
           # 1. FIND OR CREATE ACCOUNT
           # Priority: explicit param > lead.company_name > person name fallback.
           account_name = account_name_for(account_name)
+          acct = account_values(account_details)
 
           Rails.logger.info "✅ [ConvertLead] Account #{account_name} (mode #{account_mode || 'default'})"
 
@@ -78,19 +82,19 @@ module Leads
 
           account ||= Account.create!(name: account_name, company_id: @lead.company_id) do |a|
             a.status = 'active'
-            a.email = @lead.email
-            a.phone = @lead.phone
+            a.email = acct[:email]
+            a.phone = acct[:phone]
             a.source_id = @lead.source_id
             a.notes = @lead.notes
             a.location_id = location_id
             a.owner_id = inherited_owner_id
             a.account_type = 'converted_lead' if a.respond_to?(:account_type=)
             # Copy lead address → account billing address
-            a.billing_street      = @lead.street
-            a.billing_city        = @lead.city
-            a.billing_state       = @lead.state
-            a.billing_postal_code = @lead.zip
-            a.billing_country     = @lead.country
+            a.billing_street      = acct[:street]
+            a.billing_city        = acct[:city]
+            a.billing_state       = acct[:state]
+            a.billing_postal_code = acct[:zip]
+            a.billing_country     = acct[:country]
             # Deposit follows the customer forward
             a.deposit_amount      = @lead.deposit_amount if a.respond_to?(:deposit_amount=)
           end
@@ -104,13 +108,13 @@ module Leads
           # the account already has.
           unless account.previously_new_record?
             backfill = {}
-            backfill[:email]               = @lead.email   if account.email.blank?               && @lead.email.present?
-            backfill[:phone]               = @lead.phone   if account.phone.blank?               && @lead.phone.present?
-            backfill[:billing_street]      = @lead.street  if account.billing_street.blank?      && @lead.street.present?
-            backfill[:billing_city]        = @lead.city    if account.billing_city.blank?        && @lead.city.present?
-            backfill[:billing_state]       = @lead.state   if account.billing_state.blank?       && @lead.state.present?
-            backfill[:billing_postal_code] = @lead.zip     if account.billing_postal_code.blank? && @lead.zip.present?
-            backfill[:billing_country]     = @lead.country if account.billing_country.blank?     && @lead.country.present?
+            backfill[:email]               = acct[:email]   if account.email.blank?               && acct[:email].present?
+            backfill[:phone]               = acct[:phone]   if account.phone.blank?               && acct[:phone].present?
+            backfill[:billing_street]      = acct[:street]  if account.billing_street.blank?      && acct[:street].present?
+            backfill[:billing_city]        = acct[:city]    if account.billing_city.blank?        && acct[:city].present?
+            backfill[:billing_state]       = acct[:state]   if account.billing_state.blank?       && acct[:state].present?
+            backfill[:billing_postal_code] = acct[:zip]     if account.billing_postal_code.blank? && acct[:zip].present?
+            backfill[:billing_country]     = acct[:country] if account.billing_country.blank?     && acct[:country].present?
             # Only fill the owner when the existing account is unassigned — never steal
             # ownership from a rep who already owns the account.
             backfill[:owner_id]            = inherited_owner_id if account.owner_id.blank? && inherited_owner_id.present?
@@ -298,6 +302,17 @@ module Leads
     end
 
     private
+
+    ACCOUNT_DETAIL_KEYS = { email: :email, phone: :phone, street: :street, city: :city,
+                            state: :state, zip: :zip, country: :country }.freeze
+
+    # The account's contact details: what the convert dialog sent, else the lead's.
+    def account_values(details)
+      given = (details.respond_to?(:to_unsafe_h) ? details.to_unsafe_h : details.to_h).stringify_keys
+      ACCOUNT_DETAIL_KEYS.to_h do |key, lead_attr|
+        [key, given.key?(key.to_s) ? given[key.to_s].to_s.strip.presence : @lead.try(lead_attr)]
+      end
+    end
 
     # The home chosen on the lead becomes the deal's home line, priced the way
     # the inventory list prices it. Linking deal.vehicle_id alone left the deal

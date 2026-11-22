@@ -78,6 +78,10 @@ class Contact < ApplicationRecord
   has_many :payments, as: :payable, dependent: :destroy
   has_many :communications, as: :communicable, dependent: :destroy
   has_many :contact_activities, dependent: :destroy
+  # The person's places on deal, quote and invoice people cards. Deleting the
+  # contact for good takes them along; each one leaving also clears the deal's
+  # Buyer / Co-Buyer column it filled (EntityBuyer -> Deal#sync_pointers_from_people!).
+  has_many :entity_buyers, dependent: :destroy
   # Team files (Files tab). Not shown in the buyer portal; see RecordFiles.
   has_many_attached :files
   has_many :portal_documents, as: :owner, dependent: :destroy
