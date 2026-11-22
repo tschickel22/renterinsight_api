@@ -75,6 +75,9 @@ Rules:
   mark it by hand. Total the rows with
   `=sum_unmarked(deal.line_items_options.line_total, deal.line_items_options.tax_mark)`
   for Optional Equipment (taxed) and `sum_marked(...)` for Non-taxable Items.
+- **Explain the mark.** Any form that prints a "*" also places `deal.tax_mark_key`
+  ("* Not taxable") right under the list, so a buyer reading the form knows what
+  it means. On Form 500 it sits in the blank start of the balance-carried row.
 - Sales tax: `deal.tax_amount` adds up the tax on the lines (Deal Sheet deals
   use the deal's own tax).
 - Down payment on a contract is `deal.contract_down_payment`. `deal.down_payment`

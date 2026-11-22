@@ -242,6 +242,9 @@ module Api
               { key: 'deal.line_items_total', label: 'All Line Items Subtotal', type: 'currency', value: line_items_subtotal { |_li| true } },
               { key: 'deal.land_total', label: 'Land / Site Improvements Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'land' } },
               { key: 'deal.fee_total', label: 'Fees Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'fee' } },
+              # The legend for the "*" on non-taxable rows (tax_mark). Always the same words,
+              # so forms that mark rows can explain the mark.
+              { key: 'deal.tax_mark_key', label: 'Key for the * on non-taxable lines', type: 'text', value: (@deal ? TAX_MARK_KEY : nil) },
               { key: 'deal.options_total_from_lines', label: 'Options, Labor and Add-ons Subtotal (from line items)', type: 'currency', value: (@deal ? ::Agreements::LineItemValuesFlattener.option_items(deal_line_items_data).sum { |li| li[:line_total].to_f }.round(2) : nil) },
               { key: 'deal.accessory_total_from_lines', label: 'Accessories Subtotal (from line items)', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'accessory' } },
               { key: 'deal.service_total', label: 'Services Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'service' } },
@@ -485,6 +488,7 @@ module Api
       end
 
       HISTORY_LIMIT = 25
+      TAX_MARK_KEY = '* Not taxable'
 
       # Boxes that exist only on the form (hitch size, key numbers, remarks): a new
       # agreement on the same deal and template starts with what the last one said,
