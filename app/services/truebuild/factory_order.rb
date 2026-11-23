@@ -169,6 +169,8 @@ module Truebuild
 
       build = po.deal_home_build || po.deal&.home_build
       PurchaseOrder.transaction do
+        # The home the deal already has (its serial typed on the deal or the sheet) is this one.
+        vehicle ||= deals_own_home(po)
         vehicle ||= add_home(po, build, serial_number, stock_number)
         # The serial typed in at receiving is off the HUD label: it wins over one on file.
         vehicle.update!(serial_number: serial_number) if serial_number.present? && vehicle.serial_number != serial_number
@@ -192,6 +194,15 @@ module Truebuild
       fill[:dealer_cost] = po.subtotal if vehicle.has_attribute?(:dealer_cost) && vehicle.dealer_cost.blank? && po.subtotal.to_d.positive?
       fill[:stock_number] = stock_number if stock_number.present? && vehicle.stock_number.blank?
       vehicle.update_columns(fill.merge(updated_at: Time.current)) if fill.any?
+    end
+
+    # The deal's own home (not an "available to order" one), when no other PO received it.
+    def self.deals_own_home(po)
+      home = po.deal&.vehicle
+      return nil if home.nil? || home.catalog_row? || home.is_deleted
+      return nil if po.company.purchase_orders.where.not(id: po.id).exists?(received_vehicle_id: home.id)
+
+      home
     end
 
     def self.add_home(po, build, serial_number, stock_number)

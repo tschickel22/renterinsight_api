@@ -926,8 +926,10 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       model: model_json(variant, Truebuild::HomeMatcher.new).merge(specs_for_json(build)).merge(factory: variant.catalog_plan.factory&.name,
                                                                    series: variant.manual_home? ? nil : variant.catalog_plan.series,
                                                                    model_number: variant.shown_model_number),
-      vehicle: build.vehicle && { id: build.vehicle.id, stock_number: build.vehicle.stock_number, status: build.vehicle.status, on_lot: build.vehicle.on_lot?,
-                                  title: [build.vehicle.year, build.vehicle.make, build.vehicle.model].compact.join(' ') },
+      vehicle: build.vehicle && home_summary(build.vehicle),
+      # The home the deal points at when the sheet has none of its own: the
+      # model's "available to order" home it is waiting on.
+      deal_home: (dv = build.deal.vehicle) && dv.id != build.vehicle_id ? home_summary(dv) : nil,
       design_id: build.truebuild_design_id,
       deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_street: @deal.delivery_street,
                     delivery_city: @deal.delivery_city, delivery_state: @deal.delivery_state,
@@ -951,6 +953,13 @@ class Api::V1::DealHomeBuildsController < ApplicationController
                             .map { |po| purchase_order_json(po) },
       lines: build.lines.includes(:option).map { |l| line_json(l) }
     } }
+  end
+
+  def home_summary(v)
+    { id: v.id, stock_number: v.stock_number, status: v.status, on_lot: v.on_lot?, available_to_order: v.catalog_row?,
+      title: [v.year, v.make, v.model].compact.join(' '),
+      # An "available to order" home's serial is the catalog's placeholder, not a real one.
+      serial_number: DealHomeLink.real_serial(v), vin: DealHomeLink.real_vin(v) }
   end
 
   # Buyers signed and the deal did not change: every open of the sheet says so until it is sorted out.
