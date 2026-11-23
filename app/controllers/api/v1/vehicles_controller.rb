@@ -381,6 +381,24 @@ module Api
           clone_status   = requested_status.presence || 'available_to_order'
           override_attrs = params_to_update.to_h.except('status', :status)
 
+          # A status means a real home: it belongs to one buyer waiting on this
+          # model. One waiting deal takes it; with more, the person says which.
+          waiting = requested_status.present? ? DealHomeLink.deals_waiting_on(@vehicle).to_a : []
+          for_deal = params[:for_deal_id].to_s
+          if waiting.size > 1 && for_deal.blank?
+            return render json: {
+              error: 'Which buyer is this home for?',
+              choose_deal: waiting.map { |d| waiting_deal_json(d) }
+            }, status: :conflict
+          end
+          buyer_deal = if for_deal == 'none' then nil
+                       elsif for_deal.present? then waiting.find { |d| d.id.to_s == for_deal }
+                       elsif waiting.one? then waiting.first
+                       end
+          if for_deal.present? && for_deal != 'none' && buyer_deal.nil?
+            return render json: { error: 'That deal is not waiting on this home' }, status: :unprocessable_entity
+          end
+
           # The clone always inherits the catalog row's media verbatim. The edit
           # form round-trips images as relative paths, which would clobber the
           # catalog's full-URL images on the clone — so drop media overrides
@@ -407,13 +425,20 @@ module Api
           clone = service.call
 
           if clone
+            message = 'Created a working copy from the manufacturer catalog. The original stays available to order for other customers.'
+            if buyer_deal
+              DealHomeLink.move_deal!(buyer_deal, from: @vehicle, to: clone)
+              DealVehicleStatusSync.mark_sold(buyer_deal, clone) if @company.won_stage_keys.include?(buyer_deal.stage.to_s)
+              message += " It is now the home on #{buyer_deal.name.presence || "deal #{buyer_deal.id}"}."
+            end
             render json: {
-              vehicle:        vehicle_json(clone, detailed: true),
+              vehicle:        vehicle_json(clone.reload, detailed: true),
               cloned:         true,
               clone_id:       clone.id,
               source_id:      @vehicle.id,
               source_inventory_id: @vehicle.inventory_id,
-              message:        "Created a working copy from the manufacturer catalog. The original stays available to order for other customers."
+              linked_deal_id: buyer_deal&.id,
+              message:        message
             }, status: :created
           else
             render json: { errors: service.errors.full_messages }, status: :unprocessable_entity
@@ -1363,6 +1388,13 @@ module Api
       end
 
       private
+
+      # A deal waiting on an "available to order" home, as the which-buyer question lists it.
+      def waiting_deal_json(deal)
+        { id: deal.id, name: deal.name, deal_number: deal.try(:deal_number), stage: deal.stage,
+          customer: deal.try(:customer_display_name), created_at: deal.created_at }
+      end
+
 
       # RBAC: location-tier users see their assigned locations plus
       # sharing-group peers, plus the location-less catalog rows

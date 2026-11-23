@@ -368,6 +368,8 @@ Rails.application.routes.draw do
       # The contract's sale details: the Deal Sheet's sections 4 and 5 (DealSaleDetails).
       get    'deals/:deal_id/sale_details', to: 'deal_sale_details#show'
       patch  'deals/:deal_id/sale_details', to: 'deal_sale_details#update'
+      get    'deals/:deal_id/home', to: 'deal_homes#show'
+      post   'deals/:deal_id/home/serial', to: 'deal_homes#serial'
       get    'deals/:deal_id/home_build', to: 'deal_home_builds#show'
       post   'deals/:deal_id/home_build', to: 'deal_home_builds#create'
       patch  'deals/:deal_id/home_build', to: 'deal_home_builds#update'

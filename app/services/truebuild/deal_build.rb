@@ -467,6 +467,8 @@ module Truebuild
     # buyers sign, or a correction on the sheet, moves them (write_closed_deal!).
     def sync_deal!
       return unless @build.live?
+      # The deal shows the home this sheet prices (a won deal keeps the home it closed with).
+      DealHomeLink.new(@build.deal, build: @build).link_from_sheet! unless @build.deal.cost_snapshotted?
       if @build.deal.cost_snapshotted?
         write_closed_deal!(nil) if @correcting_by
         return
