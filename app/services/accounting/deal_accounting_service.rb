@@ -142,19 +142,12 @@ module Accounting
                    department: deal_department, deal_id: @deal.id }
       end
 
-      fp_amount = @deal.try(:floor_plan_amount) || BigDecimal('0')
-      if fp_amount > 0
-        fp_liability = @company.chart_of_accounts.find_by(account_number: '2110')
-        bank_account = @company.chart_of_accounts.where(sub_type: 'bank', is_active: true).order(:account_number).first
-        if fp_liability && bank_account
-          lines << { chart_of_account_id: fp_liability.id, debit_amount: fp_amount, credit_amount: 0,
-                     memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
-                     deal_id: @deal.id, vehicle_id: @deal.try(:vehicle_id) }
-          lines << { chart_of_account_id: bank_account.id, debit_amount: 0, credit_amount: fp_amount,
-                     memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
-                     deal_id: @deal.id }
-        end
-      end
+      # No floor plan payoff here. The lender's advance is never booked to the
+      # floor plan liability, and the payoff leaves the bank as a line in the
+      # bank feed, so booking it at approval would drive 2110 negative and
+      # count the cash twice once that line is categorized. The dealer books
+      # it by categorizing the payoff bank line to the floor plan account
+      # (Tom, 2026-11-24). Interest already stops when the home is sold.
 
       # The deal's other line items. The home line is the selling price posted
       # above, so it is left out here, and each line counts before tax: the
