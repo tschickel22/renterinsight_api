@@ -115,9 +115,11 @@ module Guide
         reasons = []
         reasons << 'the deal is not closed as won' unless deal.stage_is_won?
         reasons << 'it has a selling price but no home cost, so approval will refuse it' if deal.selling_price.to_d.positive? && !deal.cost_entered?
+        notes = []
+        notes << 'it has no selling price yet, so approving it would post no sale' if deal.selling_price.to_d.zero?
         return { approved_to_books: false,
                  next_step: 'It waits for approval under Accounting, Deals & Commissions, Pending GL Approval (Approve & Post to GL).',
-                 blocking: reasons.presence }.compact
+                 blocking: reasons.presence, worth_checking: notes.presence }.compact
       end
 
       je = deal.gl_journal_entry_id && @company.journal_entries.find_by(id: deal.gl_journal_entry_id)
@@ -150,6 +152,8 @@ module Guide
       payments = CommissionPayment.where(deal_id: deal.id, is_deleted: [false, nil]).order(:id)
       {
         plan: plan&.name || 'No plan applies to this deal.',
+        plan_pays: plan && plan.commission_components.where(is_active: true).ordered.map { |c| { name: c.name, role: (c.applies_to_role || 'primary_salesperson').humanize, pays: c.calculation_description } },
+        paid_payments_stand: 'A payment already paid keeps its amount if the deal changes later; more owed becomes a new payment, less owed is noted on the paid one.',
         why_this_plan: if chosen then 'chosen on the deal'
                        elsif plan then 'the plan for its salesperson, their role, or the company default'
                        end,
