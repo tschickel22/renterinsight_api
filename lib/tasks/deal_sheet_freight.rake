@@ -22,7 +22,8 @@ namespace :deal_sheets do
 
     builds.includes(:deal).find_each do |build|
       deal = build.deal
-      freight = build.lines.select { |l| l.kind == 'freight' && l.priced? }
+      # Only freight charged to the buyer becomes its own line; its cost stays on the home.
+      freight = build.lines.select { |l| l.kind == 'freight' && l.priced? && !l.retail.to_d.zero? }
       next if freight.empty?
       next if freight.all? { |l| deal.deal_products.any? { |dp| dp.notes.to_s.include?("deal_sheet:#{l.id}") } }
 
