@@ -196,6 +196,24 @@ RSpec.describe 'Stand-alone home pricing and surcharge rules', type: :request do
       expect(set.reload.pack_amount).to eq(2500)
     end
 
+    it 'adds freight at 0 to the buyer, so the contract total stays complete' do
+      deal = new_deal
+      post sheet_path(deal), headers: headers, params: { manual_home: { description: '2018 Clayton', cost: 36_201.45, price: 55_000 } }.to_json
+      json = -> { JSON.parse(response.body)['build'] }
+      freight = json.call['lines'].find { |l| l['kind'] == 'freight' }
+      delete "#{sheet_path(deal)}/lines/#{freight['id']}", headers: headers if freight
+
+      post "#{sheet_path(deal)}/lines", headers: headers, params: { kind: 'freight' }.to_json
+      expect(response).to have_http_status(:created)
+      freight = json.call['lines'].find { |l| l['kind'] == 'freight' }
+      expect(freight['retail']).to eq(0.0)
+      expect(json.call.dig('totals', 'contract_total')).not_to be_nil
+
+      patch "#{sheet_path(deal)}/lines/#{freight['id']}", headers: headers, params: { unit_cost: 2_400 }.to_json
+      expect(json.call.dig('totals', 'retail')).to eq(55_000.0)
+      expect(json.call.dig('totals', 'margin')).to eq((55_000 - 36_201.45 - 2_400).round(2))
+    end
+
     it 'shows what inventory says about a home with no catalog model' do
       vehicle = company.vehicles.create!(vin: SecureRandom.hex(8), make: 'Clayton', model: 'Ultra', year: 2018, dealer_cost: 40_000, msrp: 80_000, pack_amount: 1_500,
                                          special_discount_enabled: true, discount_type: '$ Flat Amount', discount_value: 5_000)
