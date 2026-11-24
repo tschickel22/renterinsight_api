@@ -131,6 +131,8 @@ class CommissionPayment < ApplicationRecord
       reversal_reason: reason,
       status: 'reversed'
     )
+    sync_deal_accrual
+    true
   end
   
   # Undo reversal - restore payment to previous state
@@ -152,6 +154,8 @@ class CommissionPayment < ApplicationRecord
       reversal_reason: nil,
       status: restored_status
     )
+    sync_deal_accrual
+    true
   end
   
   # Cancel the payment (only if pending)
@@ -159,6 +163,8 @@ class CommissionPayment < ApplicationRecord
     return false unless status == 'pending'
     
     update!(status: 'cancelled')
+    sync_deal_accrual
+    true
   end
   
   # Can this payment be reversed?
@@ -197,6 +203,17 @@ class CommissionPayment < ApplicationRecord
   end
   
   private
+
+  # What the deal owes in commission changed, so its booked accrual follows
+  # (Accounting::DealCommissionAccrual). Never stops the payment change.
+  def sync_deal_accrual
+    return unless deal&.gl_posted?
+
+    result = Accounting::DealCommissionAccrual.new(deal).sync!(user: Current.user)
+    Rails.logger.warn("[Commission] Deal #{deal.id}: #{result[:error]}") if result[:error]
+  rescue StandardError => e
+    Rails.logger.error("[Commission] Deal #{deal_id} accrual failed: #{e.class} #{e.message}")
+  end
   
   # Generate unique payment number
   def generate_payment_number

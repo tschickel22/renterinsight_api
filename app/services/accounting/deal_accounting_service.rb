@@ -199,19 +199,10 @@ module Accounting
         end
       end
 
-      commission = @deal.commission_amount || BigDecimal('0')
-      if commission > 0
-        commission_exp = @company.chart_of_accounts.find_by(account_number: '6010')
-        accrued_comp = @company.chart_of_accounts.find_by(account_number: '2020')
-        if commission_exp && accrued_comp
-          lines << { chart_of_account_id: commission_exp.id, debit_amount: commission, credit_amount: 0,
-                     memo: "Commission — #{deal_description}", location_id: deal_location_id,
-                     department: deal_department, deal_id: @deal.id }
-          lines << { chart_of_account_id: accrued_comp.id, debit_amount: 0, credit_amount: commission,
-                     memo: "Commission — #{deal_description}", location_id: deal_location_id,
-                     department: deal_department, deal_id: @deal.id }
-        end
-      end
+      # Commission is not in the closing entry. It is booked once, right
+      # after approval, from what the deal's commission payments add up to
+      # (Accounting::DealCommissionAccrual). Booking it here too counted it
+      # twice whenever the deal already had a commission amount.
       lines
     end
 
