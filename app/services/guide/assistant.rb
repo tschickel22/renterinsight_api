@@ -39,7 +39,7 @@ module Guide
       How to answer:
       - Use your tools before answering: find_place for where something is, search_help for how to do it and how the product works, search_videos for a how-to.
       - When the answer depends on how this dealership set something up (how their commissions are figured, which account a payment posts to, their tax setup, their texting numbers, their agreement templates), call my_setup for that module and answer from what it returns. Say what their setup actually is, not what it could be.
-      - When they ask about a particular record or a handful of records (this deal, a journal entry, an invoice, why a bank line was categorized), use look_up. The page they are on is given at the start of the question; use it to find the record they mean.
+      - When they ask why a particular record came out the way it did (why is this deal's tax missing, how was this commission figured, why isn't this invoice in the books, what posted this entry, where does this agreement field come from), call explain_record for it. To find or list records, use look_up. The page they are on is given at the start of the question (for example /deals/659 or /accounting/journal-entries/16); use it to find the record they mean, and ask for the number only if the page does not show it.
       - When they ask whether {{brand}} can do something, call product_facts. Say "{{brand}} doesn't do that today" ONLY when product_facts returns it with offered false, then give the nearest thing it does, and use outcome not_offered.
       - Answer only from what the tools return and what the person told you. Never invent a menu path, button, field, report, setting or number. If the tools do not cover it, say plainly that you do not know and use outcome no_help. Do not guess.
       - If you need one more thing from them to answer (which deal, which location), ask one short question and use outcome needs_detail.
@@ -89,6 +89,19 @@ module Guide
             type: 'object',
             properties: { tool: { type: 'string', enum: Guide::LookUp.tools.keys }, arguments: { type: 'object' } },
             required: ['tool']
+          }
+        },
+        {
+          name: 'explain_record',
+          description: 'Why one record came out the way it did, read as this person: a deal (its lines, tax, gross, ' \
+                       'whether and how it posted, money in, and its commission line by line with the plan used), a ' \
+                       'journal_entry (its lines and what posted it), an invoice or payment (whether it is in the books, ' \
+                       'and why not), a bank_transaction (how it was booked), or an agreement (where each field gets its ' \
+                       'value and which signer fills it). Use it for "why is", "how was this figured", "where does this come from".',
+          input_schema: {
+            type: 'object',
+            properties: { type: { type: 'string', enum: Guide::ExplainRecord::TYPES }, id: { type: 'string', description: 'The record number, like 659' } },
+            required: %w[type id]
           }
         },
         {
@@ -228,6 +241,7 @@ module Guide
         when 'my_account' then Guide::AccountState.new(@user, @company).to_h
         when 'my_setup' then Guide::SetupAreas.new(app_ctx).call(input['module'])
         when 'look_up' then Guide::LookUp.new(app_ctx).call(input['tool'], input['arguments'])
+        when 'explain_record' then Guide::ExplainRecord.new(app_ctx).call(input['type'], input['id'])
         when 'product_facts' then product_facts(input['topic'])
         else { error: 'unknown tool' }
         end
