@@ -915,6 +915,13 @@ class Deal < ApplicationRecord
     (fee_line && doc_fee_name?(name)) || title_license_fee_name?(name)
   end
 
+  # Freight charged to the buyer. The Deal Sheet writes it as its own line
+  # (it used to ride inside the home's price), so add-on commission leaves it
+  # out the way it always did.
+  def self.freight_line_name?(name)
+    name.to_s.match?(/\bfreight\b/i)
+  end
+
   # Does this deal carry any fee/accessory line items? Determines whether to read
   # line items (Phase 3) or fall back to the deprecated columns (legacy/API deals).
   def has_fee_line_items?
@@ -988,6 +995,7 @@ class Deal < ApplicationRecord
         # Doc, title and license fees are excluded from add-on gross (commission-wise
         # they're pass-throughs).
         next 0.0 if self.class.non_commission_fee_name?(dp.product_name, fee_line: fee_line_item?(dp))
+        next 0.0 if self.class.freight_line_name?(dp.product_name)
         line_item_price(dp)
       end.round(2)
     else

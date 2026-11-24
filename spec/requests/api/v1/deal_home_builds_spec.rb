@@ -199,9 +199,13 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
 
     products = deal.reload.deal_products.order(:id)
     home = products.find(&:home_line_item?)
-    expect(home).to have_attributes(unit_price: 68_156.25 - 2500, cost: 49_645 + 3000, discount: 10_985.4)
+    expect(home).to have_attributes(unit_price: 68_156.25 - 2500 - 3600, cost: 49_645, discount: 10_985.4)
     expect(home.notes).to include('category:home', 'deal_sheet:home')
-    expect(deal.selling_price.to_f).to eq((65_656.25 - 10_985.4).round(2))
+    expect(deal.selling_price.to_f).to eq((62_056.25 - 10_985.4).round(2))
+    # Freight is its own line, so a plan paid on the home only leaves it out.
+    freight = products.find { |dp| dp.product_name == 'Freight' }
+    expect(freight).to have_attributes(unit_price: 3600, cost: 3000)
+    expect(freight.notes).to include('category:service', 'deal_sheet:')
     setup = products.find { |dp| dp.product_name == 'Set-up and blocking' }
     expect(setup).to have_attributes(unit_price: 2500, source_type: 'template')
     expect(setup.notes).to include('category:fee', 'deal_sheet:')
@@ -213,7 +217,7 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     deal.deal_products.destroy_all
     kept.each { |a| deal.deal_products.create!(a.merge('product_sku' => "CUSTOM-#{SecureRandom.hex(4)}")) }
     post "#{path}/reprice", headers: headers
-    expect(deal.reload.deal_products.count).to eq(2)
+    expect(deal.reload.deal_products.count).to eq(3) # home, freight, set-up
 
     # A line someone added in Products shows on the sheet, untouched.
     deal.deal_products.create!(product_name: 'Extended warranty', product_sku: 'CUSTOM-w', unit_price: 900, quantity: 1, notes: 'category:product')
@@ -222,8 +226,95 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
 
     delete path, headers: headers
     names = deal.reload.deal_products.map(&:product_name)
-    expect(names).to include('Extended warranty', home.product_name)
+    expect(names).to include('Extended warranty', home.product_name, 'Freight')
     expect(names).not_to include('Set-up and blocking')
+  end
+
+  it 'leaves freight charged to the buyer out of a plan paid on the home only, and out of add-on commission' do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    freight = line('Freight')
+    patch "#{path}/lines/#{freight['id']}", headers: headers, params: { unit_cost: 1500, unit_retail: 11_000 }.to_json
+    deal.reload
+    home = deal.home_line_item
+    freight_line = deal.deal_products.find { |dp| dp.product_name == 'Freight' }
+    expect(freight_line).to have_attributes(unit_price: 11_000, cost: 1500)
+
+    home_margin = (home.unit_price - home.discount - home.cost).round(2)
+    expect(deal.house_profit).to eq(home_margin)                       # Easy Homesource: no commission on freight
+    expect(deal.commission_gross('house_profit')).to eq(home_margin)
+    expect(deal.front_gross).to eq((home_margin + 11_000 - 1500).round(2)) # the books still count it
+    expect(deal.addon_gross).to eq(0)
+
+    # The margin panel is told the plan pays on the home only.
+    plan = company.commission_plans.create!(name: 'Agent 20% of House Profit', is_default: true)
+    company.commission_components.create!(commission_plan: plan, name: '20% of house profit', component_type: 'percent_of_gross',
+                                          gross_type: 'house_profit', rate: 0.2, is_active: true, applies_to_role: 'primary_salesperson')
+    deal.update_columns(commission_plan_id: plan.id)
+    get path, headers: headers
+    expect(body.dig('build', 'commission_basis')).to eq('plan_name' => 'Agent 20% of House Profit', 'gross_types' => ['house_profit'], 'house_profit' => home_margin.to_f)
+  end
+
+  it 'splits freight out of the home line on deals priced before, open or won (deal_sheets:split_freight)' do
+    require 'rake'
+    Rails.application.load_tasks unless Rake::Task.task_defined?('deal_sheets:split_freight')
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    deal.reload
+    home = deal.home_line_item
+    freight = deal.deal_products.find { |dp| dp.product_name == 'Freight' }
+    before_total = deal.line_items_price
+    before_gross = deal.front_gross
+    # As the sheet wrote it before: freight inside the home line.
+    home.update_columns(unit_price: home.unit_price + freight.unit_price, cost: home.cost + freight.cost)
+    freight.destroy!
+    expect(deal.reload.deal_products.count).to eq(1)
+
+    run = lambda do |apply|
+      ENV['APPLY'] = apply ? '1' : nil
+      ENV['COMPANY_ID'] = company.id.to_s
+      task = Rake::Task['deal_sheets:split_freight']
+      task.reenable
+      expect { task.invoke }.to output(/#{apply ? 'SPLIT' : 'WOULD'} co #{company.id} deal #{deal.id}/).to_stdout
+    ensure
+      ENV.delete('APPLY'); ENV.delete('COMPANY_ID')
+    end
+
+    run.call(false)
+    expect(deal.reload.deal_products.count).to eq(1)
+    run.call(true)
+    deal.reload
+    expect(deal.deal_products.map(&:product_name)).to include('Freight')
+    expect(deal.line_items_price).to eq(before_total)
+    expect(deal.front_gross).to eq(before_gross)
+    task = Rake::Task['deal_sheets:split_freight']
+    task.reenable
+    expect { task.invoke }.not_to output(/deal #{deal.id}/).to_stdout # once only
+  end
+
+  it 'splits freight out of a won deal through the correction path, keeping its total and gross' do
+    require 'rake'
+    Rails.application.load_tasks unless Rake::Task.task_defined?('deal_sheets:split_freight')
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    deal.reload
+    home = deal.home_line_item
+    freight = deal.deal_products.find { |dp| dp.product_name == 'Freight' }
+    charged = freight.unit_price
+    home.update_columns(unit_price: home.unit_price + freight.unit_price, cost: home.cost + freight.cost)
+    freight.destroy!
+    deal.reload.update!(stage: company.won_stage_keys.first)
+    deal.reload
+    expect(deal).to be_cost_snapshotted
+    sold_at = deal.selling_price
+    before_gross = deal.front_gross
+
+    ENV['APPLY'] = '1'
+    ENV['COMPANY_ID'] = company.id.to_s
+    expect { Rake::Task['deal_sheets:split_freight'].tap(&:reenable).invoke }.to output(/SPLIT co #{company.id} deal #{deal.id} .*\(closed\)/).to_stdout
+    deal.reload
+    expect(deal.selling_price).to eq(sold_at - charged)
+    expect(deal.front_gross).to eq(before_gross)
+    expect(deal.house_profit).to eq((deal.selling_price - deal.home_line_item.cost - deal.effective_pack_amount).round(2))
+  ensure
+    ENV.delete('APPLY'); ENV.delete('COMPANY_ID')
   end
 
   it 'starts a Deal Desk scenario on a factory order from the price the deal sheet wrote' do
@@ -236,8 +327,8 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(response).to have_http_status(:created)
     scenario = DealDeskScenario.find(body.dig('scenario', 'id'))
     expect(scenario.unit_price_snapshot.to_f).to eq(deal.reload.selling_price.to_f)
-    expect(scenario.unit_price_snapshot.to_f).to eq(64_036.25)
-    expect(scenario.line_items.map { |l| l['description'] }).to include('Skirting')
+    expect(scenario.unit_price_snapshot.to_f).to eq(62_056.25)
+    expect(scenario.line_items.map { |l| l['description'] }).to include('Skirting', 'Freight')
   end
 
   it 'taxes the sale by the state rules, takes trade-in and down payment, and writes the contract total' do
@@ -321,7 +412,8 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     home = line('Apex (2856H32P01)')
     patch "#{path}/lines/#{home['id']}", headers: headers, params: { unit_cost: 48_000 }.to_json
     expect(line('Apex (2856H32P01)')).to include('cost' => 48_000.0, 'set_cost' => true)
-    expect(deal.reload.deal_products.find(&:home_line_item?).cost.to_f).to eq(48_000 + 1100 + 1650) # freight rides on the home line
+    expect(deal.reload.deal_products.find(&:home_line_item?).cost.to_f).to eq(48_000 + 1100) # freight is its own line
+    expect(deal.deal_products.find { |dp| dp.product_name == 'Freight' }.cost.to_f).to eq(1650)
 
     patch "#{path}/lines/#{id}", headers: headers, params: { unit_cost: nil, unit_retail: nil }.to_json
     expect(line(insulation.name)).to include('cost' => 1295.0, 'set_cost' => false, 'set_retail' => false)

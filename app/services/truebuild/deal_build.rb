@@ -9,9 +9,9 @@ module Truebuild
   # Totals leave out TBD lines. N/C lines keep their cost (it still reduces
   # gross) and charge nothing.
   #
-  # The build is the deal sheet, so it writes the deal: one home line (base,
-  # factory options and freight, less the buyer discounts), a deal product for
-  # each add-on, template and custom line, and the deal's discount columns that
+  # The build is the deal sheet, so it writes the deal: one home line (base and
+  # factory options, less the buyer discounts), a deal product for freight and
+  # for each add-on, template and custom line, and the deal's discount columns that
   # agreements merge. Those deal products carry a deal_sheet:<id> tag in their
   # notes, which survives the Products form's delete-and-recreate save, so a
   # line is never entered twice in Products, the deal sheet and the Deal Desk.
@@ -506,9 +506,15 @@ module Truebuild
       CommissionPaymentGeneratorService.new(deal).recalculate
     end
 
+    # Lines the deal carries on their own: everything but the home itself.
+    # Freight is one of them (Easy Homesource, 2026-11-24): folded into the
+    # home's price it counted toward commission plans paid on the home only
+    # (house profit), and their reps are not paid on freight.
+    HOME_KINDS = %w[base option].freeze
+
     def write_deal!(deal)
       lines = @build.lines.reload.select(&:priced?)
-      extras = lines.reject { |l| %w[base option freight].include?(l.kind) }
+      extras = lines.reject { |l| HOME_KINDS.include?(l.kind) }
       t = @build.totals.to_h
       ActiveRecord::Base.transaction do
         tagged = deal.deal_products.reload.select { |dp| dp.notes.to_s.match?(TAG) }
@@ -552,7 +558,8 @@ module Truebuild
       deal.update_columns(value: deal.deal_products.reload.sum(:total))
     end
 
-    # Clearing the build: its add-on lines go; the home line stays as a plain line.
+    # Clearing the build: its add-on lines go; the home line, and the freight that
+    # used to ride inside it, stay as plain lines.
     # The sheet fills a deal's blank pack and remembers it did, so clearing the
     # sheet takes it back off. A pack someone set on the deal stays either way.
     def fill_deal_pack!(amount)
@@ -567,9 +574,10 @@ module Truebuild
       deal = @build.deal
       filled = @build.metadata.to_h['pack_filled']
       deal.update_columns(pack_amount: nil) if filled && deal.pack_amount.to_f == filled.to_f && !deal.cost_snapshotted?
+      freight_tags = @build.lines.select { |l| l.kind == 'freight' }.map { |l| l.id.to_s }
       @build.deal.deal_products.select { |dp| dp.notes.to_s.match?(TAG) }.each do |dp|
-        if tag_of(dp) == 'home'
-          dp.update!(notes: dp.notes.to_s.gsub(/,?\s*deal_sheet:home/, ''))
+        if tag_of(dp) == 'home' || freight_tags.include?(tag_of(dp))
+          dp.update!(notes: dp.notes.to_s.gsub(/,?\s*deal_sheet:\w+/, '').sub(/\A,\s*/, ''))
         else
           dp.destroy!
         end
@@ -823,7 +831,7 @@ module Truebuild
       deal = @build.deal
       return Tax::DealTax.new(deal: deal, selling_price: 0, home_sale: true).call.merge(note: nil) unless selling
 
-      extras = counted.reject { |l| %w[base option freight].include?(l.kind) }
+      extras = counted.reject { |l| HOME_KINDS.include?(l.kind) }
       untaxed = extras.select { |l| untaxed_tags.include?(l.id.to_s) }.sum { |l| l.retail.to_d }
       # The home line: the selling price less the extras and the other lines.
       untaxed += selling - others.sum { |dp| net(dp) } - extras.sum { |l| l.retail.to_d } if untaxed_tags.include?('home')
