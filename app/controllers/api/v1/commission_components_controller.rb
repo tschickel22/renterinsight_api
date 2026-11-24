@@ -137,7 +137,7 @@ module Api
       def options
         render json: {
           component_types: CommissionComponent::COMPONENT_TYPES.map { |t| { value: t, label: t.humanize } },
-          gross_types: CommissionComponent::GROSS_TYPES.map { |t| { value: t, label: t.humanize } },
+          gross_types: CommissionComponent::GROSS_TYPES.map { |t| { value: t, label: CommissionComponent.gross_label(t).sub(/\A./, &:upcase) } },
           roles: CommissionComponent::ROLES.map { |r| { value: r, label: r.humanize } },
           deal_types: CommissionComponent::DEAL_TYPES.map { |d| { value: d, label: d.upcase } },
           verticals: CommissionComponent::VERTICALS.map { |v| { value: v, label: v.upcase } },
@@ -168,7 +168,10 @@ module Api
           :vertical,
           :sequence,
           :description,
-          :location_id
+          :location_id,
+          :min_amount,
+          :max_amount,
+          tiers: %i[up_to rate]
         )
       end
       
@@ -193,6 +196,9 @@ module Api
           flatAmount: component.flat_amount,
           unitsThreshold: component.units_threshold,
           thresholdPeriod: component.threshold_period,
+          minAmount: component.min_amount&.to_f,
+          maxAmount: component.max_amount&.to_f,
+          tiers: component.normalized_tiers.map { |t| { upTo: t['up_to']&.to_f, rate: t['rate'].to_f } },
           
           # Filters
           dealType: component.deal_type,

@@ -4,7 +4,7 @@ module Api
   module V1
     class CommissionPlansController < ApplicationController
       before_action :set_company_scope
-      before_action :set_commission_plan, only: [:show, :update, :destroy, :activate, :deactivate, :components, :available_components, :add_component, :remove_component, :reorder_components, :guide, :test_options, :test_deal]
+      before_action :set_commission_plan, only: [:show, :update, :destroy, :activate, :deactivate, :components, :available_components, :add_component, :remove_component, :reorder_components, :guide, :test_options, :test_deal, :usage, :new_version]
 
       # GET /api/v1/commission-plans
       def index
@@ -208,6 +208,32 @@ module Api
         return render(json: { error: 'Deal not found' }, status: :not_found) unless deal
 
         render json: CommissionPlanTester.deal_result(@plan, deal)
+      end
+
+      # GET /api/v1/commission-plans/:id/usage
+      # What a change to this plan would move: open deals on it (their estimates
+      # follow the plan), unpaid payments (they change at the next update) and
+      # paid ones (they stand).
+      def usage
+        return unless authorize_action!('commission_plans', 'read')
+
+        render json: CommissionPlanVersion.usage(@plan)
+      end
+
+      # POST /api/v1/commission-plans/:id/new-version  { starts_on: 'YYYY-MM-DD' }
+      # A copy of this plan, with its components, that takes over on starts_on.
+      # This plan ends the day before, so deals already on it keep it. The
+      # editor then saves the change on the copy.
+      def new_version
+        return unless authorize_action!('commission_plans', 'update')
+
+        starts_on = Date.iso8601(params[:starts_on].to_s) rescue nil
+        return render(json: { error: 'Choose the day the new version starts' }, status: :unprocessable_entity) unless starts_on
+
+        copy = CommissionPlanVersion.new(@plan).start_on(starts_on)
+        render json: serialize_plan(copy, detailed: true), status: :created
+      rescue CommissionPlanVersion::Refused => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # GET /api/v1/commission-plans/:id/components
@@ -457,7 +483,10 @@ module Api
           sequence: component.sequence,
           isActive: component.is_active,
           calculationDescription: component.calculation_description,
-          displayName: component.display_name
+          displayName: component.display_name,
+          minAmount: component.min_amount&.to_f,
+          maxAmount: component.max_amount&.to_f,
+          tiers: component.normalized_tiers.map { |t| { upTo: t['up_to']&.to_f, rate: t['rate'].to_f } }
         }
       end
 

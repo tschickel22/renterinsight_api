@@ -849,8 +849,8 @@ module Api
           # (see Deal#denormalize_lender_name); lender_name still accepted as a free string.
           :lender_id, :lender_name, :payment_type,
           :deal_type, :vertical, :quantity,
-          # Commission plan
-          :commission_plan_id,
+          # Commission plan, and this deal's own split between two salespeople
+          :commission_plan_id, :commission_split_primary_pct,
           # Deal Participants (for commission calculation)
           :sales_manager_id, :finance_manager_id, :desk_manager_id, :secondary_salesperson_id,
           # Addresses (billing + delivery)

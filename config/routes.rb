@@ -1622,6 +1622,8 @@ Rails.application.routes.draw do
           get :guide
           get :test_options, path: 'test-options'
           post :test_deal, path: 'test-deal'
+          get :usage
+          post :new_version, path: 'new-version'
         end
         
         collection do
@@ -3329,6 +3331,9 @@ Rails.application.routes.draw do
           collection do
             post :preview
             post :refresh
+            get :worksheet
+            post :adjustments, action: :create_adjustment
+            delete 'adjustments/:adjustment_id', action: :destroy_adjustment
           end
         end
         

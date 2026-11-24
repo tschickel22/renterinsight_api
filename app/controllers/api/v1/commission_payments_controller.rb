@@ -618,7 +618,7 @@ module Api
         
         # Commission cannot be approved until the deal has reached the company's payable point
         if @payment.deal && !@payment.deal.commissions_payable?
-          render json: { error: CommissionSettings.not_payable_message(@company) }, status: :unprocessable_entity
+          render json: { error: CommissionSettings.not_payable_message(@company, deal: @payment.deal) }, status: :unprocessable_entity
           return
         end
         
@@ -822,7 +822,7 @@ module Api
         deal = @company.deals.find(deal_id)
         
         unless deal.commissions_payable?
-          render json: { error: CommissionSettings.not_payable_message(@company) }, status: :unprocessable_entity
+          render json: { error: CommissionSettings.not_payable_message(@company, deal: deal) }, status: :unprocessable_entity
           return
         end
         
@@ -938,10 +938,14 @@ module Api
 
       PAID_ON_SQL = 'COALESCE(commission_payments.paid_date, CAST(commission_payments.paid_at AS date))'
 
+      # Payable once the deal is approved, or once it closes where its plan (or,
+      # when the plan does not say, the company) pays at close.
       def payable_only(scope)
-        return scope if CommissionSettings.at_close?(@company)
-
-        scope.joins(:deal).where(deals: { gl_posted: true })
+        company_default = CommissionSettings.payable_at(@company)
+        scope.joins(:deal)
+             .joins('LEFT JOIN commission_plans payable_plans ON payable_plans.id = commission_payments.commission_plan_id')
+             .where("deals.gl_posted = TRUE OR COALESCE(NULLIF(payable_plans.metadata->>'payable_at', ''), ?) = ?",
+                    company_default, CommissionSettings::DEAL_CLOSED)
       end
 
       def set_payment

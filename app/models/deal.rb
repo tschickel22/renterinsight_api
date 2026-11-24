@@ -148,6 +148,7 @@ class Deal < ApplicationRecord
   # Team files (Files tab). Not shown in the buyer portal; see RecordFiles.
   has_many_attached :files
   has_many :commission_payments, dependent: :destroy
+  has_many :commission_adjustments, dependent: :destroy
   has_many :quotes, dependent: :nullify
   has_many :service_tickets, dependent: :nullify
   has_one :project, dependent: :nullify
@@ -168,6 +169,7 @@ class Deal < ApplicationRecord
   validates :name, presence: true
   validates :value, numericality: { greater_than_or_equal_to: 0 }
   validates :probability, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 100 }, allow_nil: true
+  validates :commission_split_primary_pct, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 100 }, allow_nil: true
   validate :stage_is_valid
 
   def stage_is_valid
@@ -313,7 +315,7 @@ class Deal < ApplicationRecord
   after_commit :keep_pending_sale_invoice, on: [:create, :update], unless: :gl_posted?
 
   def generate_commissions_at_close
-    generate_commission_payments! if CommissionSettings.at_close?(company)
+    generate_commission_payments! if CommissionSettings.at_close_for?(self)
   end
 
   def keep_pending_sale_invoice
@@ -837,6 +839,9 @@ class Deal < ApplicationRecord
   # margin where that gross includes it (addon_gross and house_profit already leave them
   # out; back gross never had them). nil when the gross is nil (cost not entered) or the type is unknown.
   def commission_gross(gross_type)
+    # "What this plan pays on": the plan's own checklist (CommissionBasis).
+    return CommissionBasis.new(self).amount('plan_basis') if gross_type.to_s == 'plan_basis'
+
     method = COMMISSION_GROSS_TYPES[gross_type.to_s]
     return nil unless method
 
@@ -1104,7 +1109,7 @@ class Deal < ApplicationRecord
   def commissions_payable?
     return false unless stage_is_won?
 
-    gl_posted? || CommissionSettings.at_close?(company)
+    gl_posted? || CommissionSettings.at_close_for?(self)
   end
 
   # Generate commission payment records for this deal's participants. Called from the GL

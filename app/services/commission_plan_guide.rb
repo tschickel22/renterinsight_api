@@ -94,7 +94,9 @@ class CommissionPlanGuide
 
   def split_sentence
     engine = CommissionPaymentGeneratorService.new(CommissionPlanTester.sample_deal(@plan, SAMPLE, split_roles))
-    "With a second salesperson, they split it evenly: #{money(engine.total_for_role(:primary_salesperson))} and " \
+    pct = @plan.split_primary_pct
+    how = pct == 50 ? 'evenly' : "#{pct.to_s('F').sub(/\.0\z/, '')}/#{(100 - pct).to_s('F').sub(/\.0\z/, '')}"
+    "With a second salesperson, they split it #{how}: #{money(engine.total_for_role(:primary_salesperson))} and " \
       "#{money(engine.total_for_role(:secondary_salesperson))}."
   end
 
