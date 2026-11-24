@@ -411,6 +411,12 @@ articles:
 
       Floor plan interest is never part of a home's cost of sale.
 
+      ## Paying off the lender
+
+      Approving the sale does not post a payoff. When you pay the lender, the payment comes into your bank feed. Categorize that line to your floor plan account, **2110 Floor Plan - New Homes** or **2120 Floor Plan - Used Homes**, and the interest part of it to **2130 Floor Plan Interest Payable**. That books the payoff once, on the day the money left the bank.
+
+      {{brand}} does not book the lender's advance when a home goes on floor plan, so for the floor plan account to come back to zero, the advance must be in it too (for example from the factory invoice you entered, or your opening balances).
+
   - slug: how-it-works-bank-feed
     module: accounting
     title: "How it works: the bank feed"
