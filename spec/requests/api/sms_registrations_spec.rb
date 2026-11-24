@@ -97,8 +97,9 @@ RSpec.describe 'Texting registration', type: :request do
     end
 
     it 'sends it once, even when sent again, and goes live after approval' do
+      registration.update_columns(rejection_reason: 'Twilio said no on an earlier try')
       SmsRegistration::Submitter.new(registration, client: client).call
-      expect(registration.reload).to have_attributes(status: 'in_review', subaccount_sid: 'ACsub1', customer_profile_sid: 'BU1',
+      expect(registration.reload).to have_attributes(status: 'in_review', rejection_reason: nil, subaccount_sid: 'ACsub1', customer_profile_sid: 'BU1',
                                                      trust_product_sid: 'BU2', brand_registration_sid: 'BN1', messaging_service_sid: 'MG1')
       expect(made.first).to eq([:subaccount, 'Summit Park Homes (' + company.id.to_s + ')'])
       expect(registration.twilio_credentials).to eq(%w[ACsub1 subtoken1])

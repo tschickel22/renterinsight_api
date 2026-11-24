@@ -56,7 +56,9 @@ class SmsRegistration
       trust_product!
       brand!
       messaging_service!
-      registration.update!(status: 'in_review', sent_to_carriers_at: registration.sent_to_carriers_at || Time.current)
+      # A send that gets through replaces the error from any earlier try.
+      registration.update!(status: 'in_review', rejection_reason: nil,
+                           sent_to_carriers_at: registration.sent_to_carriers_at || Time.current)
       registration.log!('sent_to_carriers')
       registration
     rescue Twilio::REST::RestError, Error => e
