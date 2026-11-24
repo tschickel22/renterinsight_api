@@ -257,6 +257,15 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     expect(body.dig('build', 'commission_basis')).to eq('plan_name' => 'Agent 20% of House Profit', 'gross_types' => ['house_profit'], 'house_profit' => home_margin.to_f)
   end
 
+  it 'writes no freight line when the buyer is charged nothing for freight, and keeps its cost on the home' do
+    post path, headers: headers, params: { variant_id: variant.id }.to_json
+    freight = line('Freight')
+    patch "#{path}/lines/#{freight['id']}", headers: headers, params: { unit_cost: 1088, unit_retail: 0 }.to_json
+    deal.reload
+    expect(deal.deal_products.map(&:product_name)).not_to include('Freight')
+    expect(deal.home_line_item.cost).to eq(deal.home_build.lines.select { |l| %w[base option freight].include?(l.kind) }.sum { |l| l.cost.to_d })
+  end
+
   it 'splits freight out of the home line on deals priced before, open or won (deal_sheets:split_freight)' do
     require 'rake'
     Rails.application.load_tasks unless Rake::Task.task_defined?('deal_sheets:split_freight')

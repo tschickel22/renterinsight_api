@@ -523,6 +523,9 @@ module Truebuild
         home = tagged.find { |dp| tag_of(dp) == 'home' } || deal.home_line_item
         kept = [write_home_line(deal, home, lines, extras, t)]
         extras.each do |l|
+          # No freight charged to the buyer, no freight line (its cost is on the home).
+          next if l.kind == 'freight' && l.retail.to_d.zero?
+
           dp = tagged.find { |d| tag_of(d) == l.id.to_s }
           kept << write_extra_line(deal, dp, l)
         end
