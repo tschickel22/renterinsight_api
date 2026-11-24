@@ -930,6 +930,7 @@ class Api::V1::DealHomeBuildsController < ApplicationController
       # The home the deal points at when the sheet has none of its own: the
       # model's "available to order" home it is waiting on.
       deal_home: (dv = build.deal.vehicle) && dv.id != build.vehicle_id ? home_summary(dv) : nil,
+      commission_basis: commission_basis(build.deal),
       design_id: build.truebuild_design_id,
       deal_terms: { delivery_point: @deal.try(:delivery_point), delivery_street: @deal.delivery_street,
                     delivery_city: @deal.delivery_city, delivery_state: @deal.delivery_state,
@@ -953,6 +954,20 @@ class Api::V1::DealHomeBuildsController < ApplicationController
                             .map { |po| purchase_order_json(po) },
       lines: build.lines.includes(:option).map { |l| line_json(l) }
     } }
+  end
+
+  # What the deal's commission plan pays percentages on, so the margin panel
+  # can say which figure commission comes from (a plan paid on the home only
+  # leaves freight and add-ons out). Names and kinds only, never amounts.
+  def commission_basis(deal)
+    plan = deal.commission_plan
+    return nil unless plan
+
+    types = plan.commission_components.where(is_active: true, component_type: 'percent_of_gross').distinct.pluck(:gross_type).compact
+    basis = { plan_name: plan.name, gross_types: types }
+    # The deal was just written from the sheet, so read it fresh.
+    basis[:house_profit] = Deal.find(deal.id).house_profit&.to_f if types.include?('house_profit')
+    basis
   end
 
   def home_summary(v)

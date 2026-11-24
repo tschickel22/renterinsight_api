@@ -53,7 +53,7 @@ RSpec.describe 'Deal sheet and Products, both ways', type: :request do
     expect(sewer).to have_attributes(kind: 'custom', retail: 800, cost: 500)
     dp = deal.deal_products.reload.find { |p| p.product_name == 'Sewer Hookup' }
     expect(dp.notes).to include("deal_sheet:#{sewer.id}", 'taxable:no')
-    expect(deal.deal_products.count).to eq(3) # home, fence, sewer: nothing doubled
+    expect(deal.deal_products.count).to eq(4) # home, freight, fence, sewer: nothing doubled
 
     save_products do |rows|
       rows.map { |r| r['product_name'] == 'Fencing' ? r.merge('product_name' => 'Privacy fence', 'unit_price' => 650, 'cost' => 400) : r }
@@ -66,7 +66,7 @@ RSpec.describe 'Deal sheet and Products, both ways', type: :request do
   it 'removes a sheet line removed in Products, and keeps the home line however Products saves' do
     save_products { |rows| rows.reject { |r| r['product_name'] == 'Fencing' } }
     expect(sheet_line('Fencing')).to be_nil
-    expect(deal.deal_products.reload.map(&:product_name)).to eq([deal.deal_products.find(&:home_line_item?).product_name])
+    expect(deal.deal_products.reload.map(&:product_name)).to contain_exactly(deal.deal_products.find(&:home_line_item?).product_name, 'Freight')
 
     # Every line removed: the home comes back, since its price is the sheet's.
     deal.deal_products.each { |dp| delete "/api/crm/deals/#{deal.id}/products/#{dp.id}", headers: headers }
