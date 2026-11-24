@@ -35,17 +35,35 @@ class ReportAiService
 
   # Generates a one-sentence plain-English answer for a question + result rows.
   # Returns a String, or nil on failure.
+  #
+  # The model sees five rows. It used to be told the page size (at most 50)
+  # as the number of results and asked to state a sum or average, so it
+  # stated figures worked out from five rows of a capped page. It now gets
+  # the true count, and when it cannot see every row it may give the count
+  # but never a total or average.
   def summarize_results(question, report_data)
     rows       = report_data[:rows] || []
     columns    = report_data[:columns] || (rows.first&.keys || [])
-    field_list = columns.map(&:to_s).join(', ')
+    field_list = columns.map { |c| c.is_a?(Hash) ? (c[:label] || c['label'] || c[:key] || c['key']) : c }.join(', ')
     sample     = rows.first(5).to_json
+    total      = (report_data.dig(:meta, :total) || rows.length).to_i
+    complete   = rows.length >= total && rows.length <= 5
+
+    scope_line =
+      if complete
+        "The query matched #{total} records, all shown here: #{sample}."
+      else
+        "The query matched #{total} records. You can see only the first #{[rows.length, 5].min} of them: #{sample}. " \
+          'If the question asks how many, answer with the number of records matched. If it asks for a total, sum, ' \
+          'average, highest or lowest, do NOT work one out: say how many records matched and that the full list ' \
+          'below has the details.'
+      end
 
     prompt = <<~PROMPT
       The user asked: #{question}
-      The query returned #{rows.length} rows with these fields: #{field_list}.
-      Here is a sample of the data: #{sample}.
-      Write a single concise sentence directly answering the question. If it is a count/sum/average, state the number clearly. Do not say "based on the data" or similar filler. Just answer directly.
+      Fields: #{field_list}.
+      #{scope_line}
+      Write a single concise sentence directly answering the question. Do not say "based on the data" or similar filler. Never use em dashes or en dashes.
     PROMPT
 
     response = call_claude(prompt, max_tokens: 150)
