@@ -158,11 +158,25 @@ module Guide
                        elsif plan then 'the plan for its salesperson, their role, or the company default'
                        end,
         figures: types.map { |t| explained_figure(basis.explain(t)) },
-        payments: payments.map do |p|
-          { person: @ctx.user_names[p.payee_user_id], amount: money(p.amount), status: p.status, role: p.try(:role) }.compact
-        end.presence || 'No commission payments yet (they are made when the deal becomes payable).',
+        payments: payments.map { |p| payment_line(p, plan) }.presence || 'No commission payments yet (they are made when the deal becomes payable).',
         adjustments: deal.commission_adjustments.active.map { |a| { person: @ctx.user_names[a.payee_user_id], amount: money(a.amount), reason: a.reason } }.presence,
         booked_in_books: (money(Accounting::DealCommissionAccrual.new(deal).booked_amount) if deal.gl_posted? && @ctx.can?('accounting', 'read'))
+      }.compact
+    end
+
+    # A payment, with the plan it was figured under. One made under another
+    # plan than the deal uses now (the plan changed after it was paid) says
+    # so, rather than leaving the difference to be guessed at.
+    def payment_line(payment, current_plan)
+      paid_plan = payment.commission_plan_id && (@plan_names ||= @company.commission_plans.pluck(:id, :name).to_h)[payment.commission_plan_id]
+      details = payment.try(:calculation_details)
+      {
+        person: @ctx.user_names[payment.payee_user_id], amount: money(payment.amount), status: payment.status,
+        figured_under_plan: paid_plan,
+        different_plan: (current_plan && payment.commission_plan_id && payment.commission_plan_id != current_plan.id) ?
+          "Made under #{paid_plan || 'another plan'}, not #{current_plan.name} which the deal uses now; a paid payment keeps its amount." : nil,
+        made_on: payment.created_at&.to_date&.iso8601, paid_on: (payment.try(:paid_date) || payment.paid_at)&.to_date&.iso8601,
+        how_figured: details.is_a?(Hash) && details.any? ? details.to_json.first(600) : nil
       }.compact
     end
 
