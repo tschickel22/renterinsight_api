@@ -1,0 +1,625 @@
+# "How it works" notes (backlog E118): the rules behind the screens, written
+# from the code on 2026-11-24 so the help assistant answers "how is this
+# posted" from fact. They publish without review (Tom, 2026-11-24), so they
+# state only what the code does; every claim was traced to a file and line.
+#
+# Loaded by db/migrate/20261124233000_load_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). When the code they describe
+# changes, bin/knowledge_impact lists them; change the text in Knowledge admin,
+# or give the note a new slug and list the old one under supersedes.
+# Write the product name as {{brand}}. No em or en dashes.
+
+articles:
+  - slug: how-it-works-deal-posting
+    module: accounting
+    title: "How it works: how a deal posts to your books"
+    article_type: concept
+    position: 200
+    excerpt: A closed deal reaches your general ledger when it is approved, in one closing entry plus its sales tax.
+    content: |
+      Closing a deal does not put it in your books by itself. A deal closed as won waits for approval under **Accounting > Deals & Commissions**, on the **Pending GL Approval** tab. Click **Review** on the deal, check the entry, then click **Approve & Post to GL**. Approved deals move to **Posted History**.
+
+      ## What approval checks first
+
+      - The deal must be closed as won, and not already posted.
+      - A deal with a selling price but no home cost is refused. Enter the cost on the deal's home line or on the home in inventory, then approve it. Posting without a cost would record no cost of goods.
+
+      ## The closing entry
+
+      Approval posts one journal entry dated the deal's close date.
+
+      | Line | Debit | Credit |
+      |---|---|---|
+      | Selling price | Accounts receivable (Default AR, 1110 on the default chart) | Sales revenue (Default Sales Revenue, 4010 New Home Sales) |
+      | Home cost | Cost of goods sold (Default COGS, 5010 New Home Cost) | Home inventory (1210 New Home Inventory) |
+      | Reconditioning | 5110 Reconditioning Materials | 1240 Reconditioning WIP |
+      | Other deal lines | Accounts receivable | The line's revenue account |
+      | A discount line | The sales revenue account | Accounts receivable |
+
+      A few details:
+
+      - If your chart does not have both 5110 and 1240, reconditioning is added to the cost line instead.
+      - A rule under **Account mappings** on the Accounting Settings page can send revenue or cost of goods to a different account than the defaults.
+      - F&I products go to the F&I accounts (4110 to 4140). Land or lot lines go to your land sales account, a document fee to your document fees account, and other lines such as delivery and setup to your delivery and setup income account, when your chart has one. Otherwise they go to sales revenue.
+
+      Sales tax posts right after, as separate entries. See [How it works: sales tax on deals and invoices](how-it-works-sales-tax).
+
+      ## The deal's invoice
+
+      When a deal closes, {{brand}} makes its sale invoice as a draft. Approval turns it into a sent invoice and applies any deposits. That invoice never posts on its own, because the closing entry already put the sale in receivables. Payments on it reduce the same receivable.
+
+      ## Changes after approval
+
+      When an approved deal changes in a way that moves money (a product added, a price or cost changed, a signed change order), {{brand}} posts only the difference, dated the day of the change, and updates the deal's invoice. If the difference cannot be posted (for example, the period is closed), the change is not saved.
+
+  - slug: how-it-works-invoice-posting
+    module: accounting
+    title: "How it works: how invoices post to your books"
+    article_type: concept
+    position: 201
+    excerpt: With Auto-post invoices on, an invoice posts to receivables, revenue and sales tax when it leaves draft.
+    content: |
+      Invoices post to your general ledger through the **Auto-post invoices** switch, under **Accounting > Settings**, in the **Auto-post** section. New companies start with it on.
+
+      ## When an invoice posts
+
+      An invoice posts when its status changes to finalized, sent, viewed, partial, paid or overdue. Clicking **Send Invoice** on a draft does this. A draft never posts, and a draft is never counted as overdue. Each invoice posts once, dated its invoice date.
+
+      These invoices never post on their own:
+
+      - A deal's own sale invoice. The deal's closing entry already booked the sale when the deal was approved. Other invoices linked to a deal, such as extra work billed later, do post.
+      - A loan installment. It is principal and interest on a loan, not a sale.
+      - An open invoice carried over by a QuickBooks switch. The opening entry already holds it.
+
+      ## What it posts
+
+      | Debit | Credit |
+      |---|---|
+      | Accounts receivable (Default AR), for the invoice total | Revenue for each line (Default Sales Revenue, or the account an **Account mappings** rule picks) |
+      | | Sales tax payable, for the invoice's tax |
+
+      Sales tax on an invoice goes to your **Default Sales Tax Payable** account (2210 State Sales Tax on the default chart). When an invoice's tax was worked out from tax codes that each have their own account, each code's tax goes to its account instead. Every line posts to the invoice's location.
+
+      ## When it does not post
+
+      If something stops the entry, such as no **Default AR** account, the invoice page shows a red notice: "This invoice isn't in the accounting ledger yet", followed by the reason. Fix the cause and the invoice posts the next time it is saved with a new status, or when a payment on it is posted.
+
+      ## Draw schedules on a deal
+
+      A deal's invoice can carry a draw schedule. The draws only divide what the customer owes. They post nothing themselves, and money received fills them in order.
+
+  - slug: how-it-works-payment-posting
+    module: accounting
+    title: "How it works: how customer payments post"
+    article_type: concept
+    position: 202
+    excerpt: A customer payment moves money from accounts receivable into your bank account, and only posts against an invoice that is in your books.
+    content: |
+      A customer payment posts one entry: your bank account goes up and accounts receivable goes down.
+
+      | Debit | Credit |
+      |---|---|
+      | Your bank account | Accounts receivable (Default AR) |
+
+      ## Which bank account
+
+      {{brand}} uses the first of these that is set:
+
+      1. The bank account chosen on the payment
+      2. The operating bank account of the payment's location
+      3. The **Default Bank Account** under **Accounting > Settings**
+
+      When your company pays the card processing fee, the bank side is the payment less the fee, and the fee is debited to a **Merchant Processing Fees** expense account ({{brand}} adds that account if your chart does not have it). When the customer pays the fee, the full payment goes to the bank.
+
+      ## The Auto-post payments switch
+
+      Payments recorded against an invoice post through the **Auto-post payments** switch, under **Accounting > Settings**, in the **Auto-post** section. New companies start with it on. The entry is dated the payment date.
+
+      Money recorded with **Record Payment** or **Record Deposit** on a deal, or with **Receive Payment** under **Accounting > Bills & Payments > Cash Receipts**, posts when it is saved, whatever the switch says.
+
+      ## Payments only post against receivables
+
+      A payment lowers accounts receivable, so the invoice it pays must already be there:
+
+      - A payment that pays no invoice is not posted.
+      - A payment on a loan installment is not posted. Loans keep their own balance, not receivables.
+      - If the invoice is not in your books yet, {{brand}} posts the invoice first. If the invoice cannot be posted (for example, **Auto-post invoices** is off), the payment is not posted either.
+      - A deal's invoice counts as in your books from the deal's approval, and an invoice carried over by a QuickBooks switch counts from its opening entry.
+
+      ## Refunds
+
+      A refunded payment posts the reverse (debit accounts receivable, credit the bank) for the amount refunded, dated the day it is refunded. A refund posts only if the original payment was posted.
+
+  - slug: how-it-works-customer-deposits
+    module: accounting
+    title: "How it works: customer deposits and down payments on a deal"
+    article_type: concept
+    position: 203
+    excerpt: Money taken before a deal is approved waits in your customer deposits account, then moves to receivables at approval.
+    content: |
+      Money a customer pays before their deal is approved is a deposit. It is not revenue yet and it does not reduce a receivable, because nothing has been billed. {{brand}} holds it in a customer deposits account, a liability, until the deal is approved.
+
+      ## Setting the account
+
+      Under **Accounting > Settings**, in **Default GL accounts**, pick **Customer Deposits**. It must be a liability account that takes postings. The seeded **2400 Customer Deposits** is a header and cannot be used.
+
+      If you leave it blank, {{brand}} uses **2410 Earnest Money Deposits** when your chart has it, otherwise the lowest numbered liability account with "deposit" in its name. If none is found, deposits cannot be taken until you pick one.
+
+      ## Taking a deposit
+
+      On a deal that has not been approved, the button reads **Record Deposit**. Pick the bank account the money went into. The deposit posts when it is saved:
+
+      | Debit | Credit |
+      |---|---|
+      | The bank account you picked | Customer deposits |
+
+      A bank account linked to a receivables account is refused, since the money would never show as received. Link it to its cash account first.
+
+      ## At approval
+
+      When the deal is approved, its invoice is made and the deposits held on the deal are applied to it, oldest first, up to what the invoice owes. Each one posts an entry dated the day it is applied:
+
+      | Debit | Credit |
+      |---|---|
+      | Customer deposits | Accounts receivable |
+
+      So the deposit leaves the liability and pays down the sale that approval put in receivables. If there is a draw schedule, deposits fill the draws in order. Any part of a deposit beyond what the invoice owes stays held on the deal.
+
+      ## After approval
+
+      Once the deal is approved, the button reads **Record Payment**. The money is applied to the deal's invoice (debit the bank, credit accounts receivable) and fills its draws in order. An amount larger than what the invoice still owes is refused.
+
+  - slug: how-it-works-sales-tax
+    module: accounting
+    title: "How it works: sales tax on deals and invoices"
+    article_type: concept
+    position: 204
+    excerpt: Deal sales tax posts at approval to your state, county and city tax accounts; invoice tax posts with the invoice.
+    content: |
+      Sales tax is set up under **Accounting > Settings**, in the **Sales Tax** section.
+
+      ## On a deal
+
+      Deal sales tax posts only when **Enable Sales Tax Tracking** is on. It posts when the deal is approved, right after the closing entry, as one entry per tax that applies, dated the deal's close date:
+
+      | Debit | Credit |
+      |---|---|
+      | Accounts receivable | State, county or city tax account |
+
+      No tax posts if the deal has no state, there is no **Default AR** account, or there is nothing to tax.
+
+      **Which state.** Where the home goes: the delivery state on the deal (or, without one, the billing state or your location's state). For a buyer who picks up at your lot, your lot's state.
+
+      **What is taxed.** The selling price plus the deal's other lines that carry tax. Lines with no tax on them are left out.
+
+      **Which rate.** The state's row under **Per-State Rates** (State %, County %, City %). A state without a row uses the **Default Rates**.
+
+      ## Home sale tax rules
+
+      For a manufactured home sale, the state's rules under **Home sale tax rules** also apply. Defaults:
+
+      - **Indiana:** tax on 65% of the price after trade-in, and a pre-owned home is exempt.
+      - **Ohio:** the dealer owes use tax on its cost, so no sales tax posts on the deal.
+      - **Michigan:** the buyer pays when the home is titled, so no sales tax posts on the deal.
+      - **Other states:** the whole price, collected by the dealer, with no trade-in deduction.
+
+      If a state with a standard rate (Indiana 7%, Michigan 6%) has no rates set, that state rate is used. You can change the rules for any state. They are starting points, not tax advice: confirm them with your accountant.
+
+      ## The tax accounts
+
+      Each part posts to its own liability account:
+
+      | Tax | Setting | Default |
+      |---|---|---|
+      | State | **State Tax Account** | 2210 State Sales Tax |
+      | County | **County Tax Account** | 2220 County Sales Tax |
+      | City | **City Tax Account** | 2230 City/Local Sales Tax |
+
+      If you do not pick one, {{brand}} uses the account with the default number. A tax with a rate but no account is not posted.
+
+      ## On an invoice
+
+      Invoices use the tax set on the invoice, not these rates. The tax posts with the invoice, credited to **Default Sales Tax Payable** (2210 State Sales Tax on the default chart), or to the accounts of the tax codes it was worked out from.
+
+  - slug: how-it-works-bill-posting
+    module: accounting
+    title: "How it works: how bills and bill payments post"
+    article_type: concept
+    position: 210
+    excerpt: A posted bill debits the accounts on its lines and credits accounts payable, and paying it moves the money from accounts payable to your bank.
+    content: |
+      Bills are under **Accounting > Bills & Payments**, on the **Bills** tab. Click **New Bill** to enter one.
+
+      ## Draft or posted
+
+      - **Save as draft** keeps the bill out of your books.
+      - **Post bill** (or **Save & post** when you edit a draft, or **Post Selected** for several drafts) puts it in your books, dated the bill date.
+
+      Invoices contractors send in for a job arrive as draft bills.
+
+      ## What a posted bill records
+
+      | Account | Debit | Credit |
+      |---|---|---|
+      | The account picked on each bill line (an expense, an inventory account or any other) | Line amount plus its share of the tax | |
+      | Accounts payable | | Bill total |
+
+      Tax is split across the lines in proportion to their amounts. Accounts payable is normally the **Default AP** account under **Accounting > Settings**, or, if none is picked, the first active accounts payable account in your chart.
+
+      A bill that could not post shows a **Not posted** badge in the list; hover over it for the reason.
+
+      Editing a posted bill rewrites its entry to match. In a closed period, a change to amounts, accounts or the date is refused: reopen the period, or void the bill and enter it again.
+
+      ## Bills for a job
+
+      Pick a **Project** on the bill, or a **Line project** on one line. That line's debit is tagged with the job and the job's deal; accounts payable is not. A posted bill also adds its cost, tax share included, to the job, and keeps it in step when the bill is edited, paid or voided.
+
+      ## Paying a bill
+
+      Click **Record payment** (the dollar icon) on a posted bill that still has a balance.
+
+      | Account | Debit | Credit |
+      |---|---|---|
+      | Accounts payable | Payment amount | |
+      | The bank account you pay from | | Payment amount |
+
+      The payment is dated the payment date, and the bill becomes **Partially paid** or **Paid**.
+
+      - **Manual / Handwritten Check** needs a check number and a bank account.
+      - **Queue for Check Printing** needs a bank account with check printing turned on. The payment posts right away; the check number is given when you print it from the **Check Writing** tab. Voiding that check voids the payment and puts the balance back on the bill.
+
+      ## Voiding and deleting
+
+      Voiding a bill posts reversing entries, dated the day you void it, for the bill and each of its payments. Only a bill with no payments can be deleted, and its entry is removed with it. A paid bill can't be edited, and a bill's total can't go below what has been paid.
+
+  - slug: how-it-works-purchase-orders
+    module: accounting
+    title: "How it works: purchase orders and receiving"
+    article_type: concept
+    position: 211
+    excerpt: Receiving a purchase order does not put anything in your books; what you owe the supplier is recorded when you enter their invoice as a bill.
+    content: |
+      Purchase orders are under **Inventory & Operations > Purchase Orders**. A purchase order is a record of what you ordered. It is not an entry in your books.
+
+      ## Receiving
+
+      As quantities are received on an order's lines, its status changes by itself: **Partially Received** when some has arrived, **Received** when every line is in full. The date it was first fully received is kept on the order.
+
+      ## A factory order for a home
+
+      When a factory order's home arrives, **Receive the home** records the home in inventory (or links one already there) and ties it to the deal. It posts nothing to your books. The home's cost reaches the books when you enter the factory's invoice as a bill.
+
+      ## Parts and other orders
+
+      Receiving a parts order does not post either. Posting a received order needs a parts inventory account, and **Accounting > Settings** has no place to choose one, so no receipt entry is made.
+
+      ## Where the cost goes in
+
+      Enter the supplier's invoice under **Accounting > Bills & Payments** with **New Bill**, and pick the account each line belongs to. The posted bill debits those accounts and credits accounts payable. See [How bills and bill payments post](how-it-works-bill-posting).
+
+  - slug: how-it-works-home-inventory-cost
+    module: accounting
+    title: "How it works: a home's cost in inventory and at the sale"
+    article_type: concept
+    position: 212
+    excerpt: A home's cost goes into inventory through the factory invoice you enter as a bill, and comes out to cost of sale when the deal is approved and posted.
+    content: |
+      ## Into inventory
+
+      Receiving a home, whether on a factory order or by adding it to inventory, posts nothing to your books. The cost goes in through the bill you enter for the factory's invoice under **Accounting > Bills & Payments**. Code that bill line to your home inventory account so the cost sits in inventory until the home sells.
+
+      {{brand}} uses **1210 New Home Inventory** on the standard dealer chart of accounts as the home inventory account, for new and used homes alike.
+
+      ## Out at the sale
+
+      When a deal is posted (for example with **Approve & Post to GL** under **Accounting > Deals & Commissions**), its closing entry, dated the deal's close date, includes:
+
+      | Account | Debit | Credit |
+      |---|---|---|
+      | Cost of sale | Home cost (plus reconditioning, see below) | |
+      | Home inventory (1210) | | Same amount |
+
+      Cost of sale is the account an **Account mappings** entry in **Accounting > Settings** gives for the deal, or else the **Default COGS** account.
+
+      ## Which cost is used
+
+      While a deal is open, the cost is the one on the deal's home line, or, if that is blank, the home's own cost in inventory.
+
+      A deal with a selling price but no home cost is refused, with a message asking you to enter the cost on the deal's home line or on the home. Posting without one would record no cost of goods and pay commission on the full price.
+
+      ## Reconditioning
+
+      If your chart has both **5110 Reconditioning Materials** and **1240 Reconditioning WIP** (the standard chart does), the deal's reconditioning cost posts as its own pair: debit 5110, credit 1240. Without both, it is added to the home's cost of sale and inventory relief instead.
+
+      ## What is not cost of sale
+
+      Floor plan interest is a carrying cost. It is never posted to cost of sale or inventory. See [Floor plan homes](how-it-works-floor-plan-homes).
+
+  - slug: how-it-works-parts-usage
+    module: accounting
+    title: "How it works: parts used on service and jobs"
+    article_type: concept
+    position: 213
+    excerpt: Using parts on a service ticket or a job does not post anything to your books; a part's cost reaches the books through the bill you enter for it.
+    content: |
+      ## Using parts posts nothing
+
+      Taking parts out of stock, whether for a service ticket, a job or a stock adjustment, does not post an entry to your books in {{brand}}. No cost of goods sold or inventory entry is made for the parts used.
+
+      **Accounting > Settings** has no switch for posting parts usage and no parts inventory account to choose. The **Default GL accounts** card lists accounts receivable, accounts payable, sales revenue, cost of goods sold, sales tax payable, customer deposits, retained earnings and the default bank account, and nothing for parts.
+
+      ## Receiving parts posts nothing
+
+      Receiving a parts purchase order does not post either. See [Purchase orders and receiving](how-it-works-purchase-orders).
+
+      ## How parts cost reaches your books
+
+      A part's cost goes into the books through the supplier's bill. Enter it under **Accounting > Bills & Payments** with **New Bill**, and pick the account for each line: **1230 Parts Inventory** on the standard chart if you carry the parts as inventory, or an expense account if you expense them when bought. The posted bill debits that account and credits accounts payable.
+
+      Parts carried in 1230 stay there until you move them with a journal entry (**Accounting > Journal Entries**), since using them does not move them.
+
+      ## Parts for a job
+
+      A bill line tagged with a **Project** (or a **Line project**) also counts toward that job's cost. See [How bills and bill payments post](how-it-works-bill-posting).
+
+  - slug: how-it-works-floor-plan-homes
+    module: accounting
+    title: "How it works: floor plan homes and interest"
+    article_type: concept
+    position: 214
+    excerpt: Each tracked floor plan home builds up interest once a day at its yearly rate, posted to Floor Plan Interest Expense and Floor Plan Interest Payable.
+    content: |
+      ## Turning it on
+
+      Under **Accounting > Settings**, the **Floor Plan Tracking** card has **Enable Floor Plan Interest Tracking**. With it on you can set a **Default Interest Rate (%)** (a yearly rate) and a **Default Lender**.
+
+      Turning tracking on puts no home on floor plan. Each home has to be tracked, from the list or on the home's own Floor Plan section. Whichever way a home goes on, a blank rate or lender is filled in from the defaults.
+
+      ## The list
+
+      Open it from **Reports**, under **Inventory**, **Floor Plan**, or with **Open the list** (or **Track homes**) on the Floor Plan Tracking card.
+
+      - **On floor plan** shows each tracked home's principal, rate, lender, start date, days and **Interest so far**, with **Change** and **Stop tracking**.
+      - **In stock, not on floor plan** lists homes that are available, reserved, pending or in service, with **Track** and **Track all**.
+
+      Tracking from the list needs the **Amount advanced** and a **Yearly rate (%)** (above 0, under 100). The **Start date** can't be in the future.
+
+      ## How interest builds up
+
+      Once a day, for each tracked home whose start date has come:
+
+      > interest = amount advanced × yearly rate ÷ 365, rounded to the cent
+
+      | Account | Debit | Credit |
+      |---|---|---|
+      | 5300 Floor Plan Interest Expense | Day's interest | |
+      | 2130 Floor Plan Interest Payable | | Day's interest |
+
+      Each home gets one entry per day, dated that day, and never two for the same day. Nothing posts while tracking is off, or if accounts 5300 or 2130 are missing from your chart.
+
+      ## Interest from before today
+
+      If you track a home with a start date in the past, {{brand}} asks about the interest since then. **Add it to the books now** posts one entry today for the days not yet posted; **Leave it out** posts nothing for them.
+
+      ## What does not post
+
+      Tracking a home posts nothing for the amount advanced. Only interest posts.
+
+      ## When it ends
+
+      A home stops building up interest and leaves the list once it is marked sold or delivered, or is deleted. **Stop tracking** takes a home off floor plan without recording a payoff; interest already posted stays in the books, and the rate and lender are kept for next time.
+
+      Floor plan interest is never part of a home's cost of sale.
+
+  - slug: how-it-works-bank-feed
+    module: accounting
+    title: "How it works: the bank feed"
+    article_type: concept
+    position: 220
+    excerpt: How bank and card lines reach Bank Transactions, how often, and how {{brand}} keeps them from coming in twice.
+    content: |
+      Bank and card lines reach **Accounting > Bank Transactions** in two ways: a bank feed through Stripe Financial Connections, or a file you bring in with **Import CSV**. Nothing else creates bank lines. The QuickBooks sync never adds lines here.
+
+      ## Connecting a bank
+
+      **Connect a bank** opens Stripe's window. You sign in to the bank once, and every checking, savings or credit card account you tick becomes a bank account in {{brand}} with its feed on. Other kinds of account (investments, loans) are skipped. The first pull runs straight away and reaches back up to 90 days.
+
+      ## How often new lines arrive
+
+      - **When Stripe has new lines**, it tells {{brand}}, and the account is pulled right away.
+      - **Every hour**, {{brand}} also reads any new lines Stripe already holds for every connected feed. This is the backup in case Stripe's notice never arrives. It does not ask the bank to fetch again.
+      - **Sync now** asks the bank for fresh lines, then reads them.
+
+      Each pull reads lines dated from the last sync onward. New lines arrive as **Unmatched**, and {{brand}} then tries to match them on its own (see "How it works: categorize, match and exclude").
+
+      **Get bank balance** asks the bank for a new balance. Each fetch is billed, so {{brand}} only asks when you press it, and a second press within 10 minutes reuses the first request. Syncing only reads the last balance Stripe already holds.
+
+      ## How duplicates are kept out
+
+      - **Feed lines** carry the bank's transaction id. A line already in the account is skipped, so overlapping pulls never bring it in twice.
+      - **CSV rows** are skipped when an earlier imported row had the same date, amount, description and reference. Rows with no date or a zero amount are skipped too.
+      - **The feed and CSV imports do not check against each other.** Importing a CSV for dates the feed already covers brings those lines in a second time. Exclude the copies.
+      - **In the books**, categorizing a line is refused when the money is already recorded (see the next note), so a payment entered by hand is not counted again.
+
+      ## The feed start date
+
+      When a bank account is matched to a QuickBooks account in the QuickBooks switch, its feed start date is set to the day after the cutover. The feed and CSV imports skip any line dated before it, because the opening balances already hold that money. Rolling back the switch puts the earlier start date back.
+
+      ## Disconnecting
+
+      Disconnecting stops new lines. The lines already brought in stay, and you can reconnect later.
+
+  - slug: how-it-works-categorize-match-exclude
+    module: accounting
+    title: "How it works: categorize, match and exclude"
+    article_type: concept
+    position: 221
+    excerpt: What each action on a bank line does to your books, how bank rules run, and how to undo.
+    content: |
+      Each line on **Accounting > Bank Transactions** has a menu with these actions.
+
+      ## Categorize
+
+      **Categorize** posts a journal entry on the line's date:
+
+      | Line | Debit | Credit |
+      |---|---|---|
+      | Money out | Account you picked | Bank's ledger account |
+      | Money in | Bank's ledger account | Account you picked |
+
+      The bank account must be linked to a ledger account. You can add a **Project** and **Phase**, and for money out a **Vendor**. Only an expense account adds to project cost.
+
+      Two checks run first:
+      - If the money is already in the books (an entry in this bank account for the same amount and date, or a bill payment or already paid expense within 7 days), categorizing is refused. Match the line to it instead.
+      - If a withdrawal equals the balance of an open bill from the vendor or on the project you picked, {{brand}} asks you to pay the bill and then match the line. **It's something else, categorize it** goes ahead anyway.
+
+      **Change category or project** voids the earlier entry and posts a new one.
+
+      ## Deposits paid on a deal or invoice
+
+      For money in, **Payment on a deal or invoice** lists deals still owed money and open invoices, same amount first. On a deal it fills the deal invoice's draws in order, or is held as a deposit before approval. On another invoice, a cash receipt is made in this bank account on the line's date. The line is matched to the receipt's entry.
+
+      ## Match to entry
+
+      **Match to entry** links the line to an entry already in the books, such as a bill payment. It posts nothing. Suggestions are unused entries on the bank's ledger account for exactly the same amount within 14 days.
+
+      ## Exclude
+
+      **Exclude** posts nothing, for duplicates or transfers already recorded.
+
+      ## Automatic matching and bank rules
+
+      New lines, and the **Auto-Match** button, try in turn: a single entry with the same date and amount; a check entry naming the line's reference; the first active rule; a single entry with the same amount within 3 days.
+
+      Rules are under **Accounting > Bank Rules**. Lower **Priority** runs first; the first rule that fits wins. An exclude rule excludes the line. A categorize rule fills in the category but leaves the line Unmatched for you to confirm, unless **Auto-create journal entry without review** is on. Even then, a line already booked or paying an open bill is held, with the reason shown.
+
+      ## Undo
+
+      **Unmatch** returns the line to Unmatched. An entry its categorization or rule posted is voided, as is a payment it applied. An entry it was only matched to stays. **Un-exclude** returns an excluded line to Unmatched.
+
+  - slug: how-it-works-bank-reconciliation
+    module: accounting
+    title: "How it works: bank reconciliation"
+    article_type: concept
+    position: 222
+    excerpt: What the reconciliation compares, how the difference is worked out, and what completing and undoing do.
+    content: |
+      A reconciliation checks your books against a bank or card statement. Start one under **Accounting > Reconciliation** with **Start New Reconciliation**, then pick the **Bank account**, **Statement date** and **Statement ending balance**.
+
+      ## What it lists
+
+      The reconciliation works from the ledger, not from the bank feed. It lists every journal entry line on the bank account's ledger account dated on or before the statement date that was not cleared in an earlier completed reconciliation. Voided entries and their reversals are left out.
+
+      For that reason a bank feed line only shows up here once it is in the books: categorized, matched, or applied as a payment.
+
+      ## The figures
+
+      - **Beginning Balance**: the statement ending balance of the last completed reconciliation for the account. The first reconciliation starts from the bank account's opening balance, or zero.
+      - **Cleared Deposits** and **Cleared Payments**: the items you tick.
+      - **Calculated Balance** = Beginning Balance + Cleared Deposits minus Cleared Payments.
+      - **Difference** = Statement Ending Balance minus Calculated Balance.
+
+      Tick each item that appears on the statement. **Save & continue later** keeps your work.
+
+      ## Adjustments
+
+      **Add adjustment** posts a journal entry dated the statement date between the bank's ledger account and the account you pick, and adds it as a cleared item. A positive amount is a debit to the bank account; a negative amount is a credit.
+
+      | Amount | Debit | Credit |
+      |---|---|---|
+      | Positive | Bank's ledger account | Account you picked |
+      | Negative | Account you picked | Bank's ledger account |
+
+      ## Completing
+
+      **Complete reconciliation** works only when the Difference is $0.00. It marks the reconciliation completed, records who completed it, and stamps the statement date on each cleared item. Its ending balance becomes the next reconciliation's beginning balance, and its cleared items are not listed again. A new reconciliation's statement date must be after the latest completed one.
+
+      ## Deleting and undoing
+
+      - An in-progress reconciliation can be deleted. A completed one cannot.
+      - **Undo reconciliation** reopens a completed one and unticks all its items, so you clear them again and complete it again. Only the most recent completed reconciliation for an account can be undone, and not while another reconciliation for that account is in progress.
+
+  - slug: how-it-works-period-and-year-close
+    module: accounting
+    title: "How it works: closing a month and the year"
+    article_type: concept
+    position: 223
+    excerpt: What closing a fiscal period stops, what Lock periods on close adds, and what Year-End Close posts.
+    content: |
+      Periods and the year are closed under **Accounting > Period Close**.
+
+      ## Fiscal periods
+
+      Pick the **Fiscal Year** and press **Generate periods**. {{brand}} makes twelve monthly periods, starting from the **Fiscal year start month** set under **Accounting > Settings**, in the **General** card. Each period is Open or Closed.
+
+      ## Closing a period
+
+      **Close** marks the period closed and records who closed it. From then on:
+
+      - No new journal entry can be dated in that period, and no entry can be moved into it. Whatever would post an entry dated there cannot post: categorizing a bank line dated in the period, for example, is refused with a message naming the closed period.
+      - With **Lock periods on close** turned on (Accounting > Settings, General), every entry already in the period is also locked when it closes, and a locked entry cannot be edited. With the setting off, entries already in the period are not locked.
+      - Voiding is still allowed. The original keeps its date and the reversing entry is dated today.
+
+      **Reopen** sets a closed period back to open and unlocks the entries in it.
+
+      ## Year-End Close
+
+      Year-End Close moves the year's profit or loss into Retained Earnings. It needs a **Retained Earnings** account chosen under Accounting > Settings, **Default GL accounts**.
+
+      1. Pick the year and press **Load Preview**. It lists every revenue and expense account with a balance for the fiscal year, and the net income.
+      2. Press **Close Fiscal Year** to post the closing entry.
+
+      The closing entry is one journal entry dated the last day of the fiscal year. It brings each revenue and expense account's balance for the year to zero, and puts the net amount in Retained Earnings:
+
+      | Result for the year | Retained Earnings |
+      |---|---|
+      | Profit | Credited |
+      | Loss | Debited |
+
+      After it posts, every period of that fiscal year that is still open is closed.
+
+      **Close the year before closing its last month.** The closing entry is dated the year's last day, so if that period is already closed the entry cannot post and the close fails. Reopen that period first.
+
+      The items under **Pre-Close Verification** are recommendations; the close runs even if some are not done. Reopening a period later does not remove the closing entry.
+
+  - slug: how-it-works-opening-balances-budgets
+    module: accounting
+    title: "How it works: opening balances and budgets"
+    article_type: concept
+    position: 224
+    excerpt: How an account's opening balance is posted, and how a budget is compared with what actually happened.
+    content: |
+      ## Opening balances
+
+      Give an account a starting balance in **Accounting > Chart of Accounts** with **Add Account** or **Edit Account**: fill in **Opening Balance** and its **Opening Balance Date**.
+
+      {{brand}} posts it as a real journal entry on that date, against an equity account named **Opening Balance Equity**. If the company has no account by that name, one is created. A positive amount is the account's normal side:
+
+      | Account | Debit | Credit |
+      |---|---|---|
+      | Asset or expense, positive amount | The account | Opening Balance Equity |
+      | Liability, equity or revenue, positive amount | Opening Balance Equity | The account |
+
+      A negative amount reverses the sides. Change the amount or the date and the old entry is replaced by a new one. Set it to zero and the entry is removed.
+
+      The save is refused if the date falls in a closed period. Opening Balance Equity's own description says to clear it into owner's equity or retained earnings once the opening balances are final.
+
+      ## Budgets
+
+      Budgets are under **Accounting > Budgets**. A budget is for one fiscal year, either company wide or for one location. A **Consolidated** budget adds up every location budget for the year. It is rebuilt each time a location budget is saved and cannot be edited directly.
+
+      **Statuses:**
+      - **Draft**: can be edited. Only a draft can be deleted.
+      - **Activate** makes it active and records who approved it and when. An active budget can still be edited. **Revert to Draft** (admins only) takes it back.
+      - **Lock** stops edits. **Unlock** (admins only) returns it to draft.
+
+      ## Budget vs Actual
+
+      Open it from **Accounting > Reports**, under **Financial Statements**. Pick the **Budget** and the **Period**: Month, Quarter, Year to Date or Full Year.
+
+      - **Actual** is what the ledger shows for each account in that period, in the account's natural direction. A location budget compares with entry lines tagged to that location; a company-wide or consolidated budget compares with all of them.
+      - Only revenue and expense accounts are compared.
+      - **Variance** is Actual minus Budget.
+      - **Status**: revenue at or above budget is favorable, within 10% below is caution, lower is unfavorable. An expense at or under budget is favorable, up to 10% over is caution, more is unfavorable. An account budgeted at zero shows as no budget.
+
+      The report opens on the year's consolidated budget when it is active or locked, then a locked budget, then an active one. You can pick any budget, including a draft.

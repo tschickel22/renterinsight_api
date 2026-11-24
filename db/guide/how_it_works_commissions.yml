@@ -1,0 +1,141 @@
+# "How it works" notes (backlog E118): the rules behind the screens, written
+# from the code on 2026-11-24 so the help assistant answers "how is this
+# posted" from fact. They publish without review (Tom, 2026-11-24), so they
+# state only what the code does; every claim was traced to a file and line.
+#
+# Loaded by db/migrate/20261124233000_load_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). When the code they describe
+# changes, bin/knowledge_impact lists them; change the text in Knowledge admin,
+# or give the note a new slug and list the old one under supersedes.
+# Write the product name as {{brand}}. No em or en dashes.
+
+articles:
+  - slug: how-it-works-commission-basis
+    module: commissions
+    title: "How it works: what commission is paid on"
+    article_type: concept
+    position: 230
+    excerpt: Which deal lines each commission figure counts, including freight, pack, doc fees and add-ons.
+    content: |
+      Each percent commission is paid on one figure from the deal, chosen per component with **Gross Type**. On a real deal, the **Commission worksheet** on the deal's **Commission** tab marks every line **Counts** or **Left out**, with the reason.
+
+      ## The figures
+
+      - **Front Gross**: the home's price less the home's cost (including any reconditioning), plus the margin (price less cost) on every other front-end line: freight charged to the buyer, delivery and set-up, add-ons, land and doc fees. F&I products are not in it.
+      - **Commissionable Front (minus pack)**: front gross less the dealer pack.
+      - **Total Gross**: front gross plus back-end gross.
+      - **Back Gross**: finance reserve plus F&I product margin only.
+      - **House Profit (home only, minus pack)**: the home's price less the home's cost, less the pack. Every other line is left out.
+      - **Add-on Gross**: the price (not the margin) of the add-on lines. The home, freight, doc fees and F&I are left out.
+      - **What this plan pays on (set on the plan)**: the lines you tick on the plan's **What this plan pays on** card.
+
+      Title and license fees never earn commission. Floor plan interest reduces none of these figures. What counts is decided by the kind of line, not a setting on each line.
+
+      ## Freight
+
+      - **Freight charged to the buyer.** The Deal Sheet writes it as its own line. It counts in front, commissionable and total gross, not in house profit or add-on gross. On the plan checklist it is **Freight charged to the buyer** (ticked to start).
+      - **Freight you pay.** The Deal Sheet keeps it inside the home's cost, so it comes off every figure that includes the home, house profit included. On the checklist, **Freight you pay** (ticked to start) takes it off; untick it to add it back on Deal Sheet deals.
+
+      So house profit leaves out the buyer's freight charge, but the freight you pay still lowers it.
+
+      On a deal not priced on the Deal Sheet, a line with "freight" in its name is treated as freight charged to the buyer, along with any cost typed on that line.
+
+      ## Example
+
+      Home sells for $100,000. Home and options cost $70,000, plus $4,000 freight you pay. The buyer is charged $5,000 freight. Set-up sells for $6,000 and costs $4,000. Pack is $1,000.
+
+      - Front gross: $26,000 + $5,000 + $2,000 = $33,000
+      - Commissionable front: $32,000
+      - House profit: $100,000 less $74,000 less $1,000 = $25,000
+      - Add-on gross: $6,000
+
+      ## Pack and doc fees
+
+      The pack is the deal's own, else the location's default, else the company's. It comes off commissionable front, house profit, and the checklist figure while **Dealer pack** is ticked. The doc fee counts in front, commissionable and total gross, never in add-on gross, and on the checklist only when **Document fee** is ticked (unticked to start).
+
+      With no home cost entered, front gross, commissionable front, house profit and the checklist figure show **Cost not entered**, and percent commissions on them pay nothing unless the component has a minimum.
+
+  - slug: how-it-works-commission-who-gets-paid
+    module: commissions
+    title: "How it works: which plan a deal uses and who gets paid"
+    article_type: concept
+    position: 231
+    excerpt: How a deal gets its commission plan, how each position is paid, and how splits, bonuses, limits and adjustments work.
+    content: |
+      ## Which plan a deal uses
+
+      When a deal has a salesperson and no plan yet, {{brand}} fills in a plan, looking in this order among active plans that are in date:
+
+      1. A plan assigned to that person (**Individual User**)
+      2. A plan assigned to one of their roles (**Role-based**)
+      3. The company default (**Default Plan**)
+
+      After that the plan stays until someone changes it: on the deal's **Commission** tab, click **Change who gets paid** and pick the **Plan**, or try another plan on the worksheet and click **Use this plan for the deal**. Once commission payments exist, the plan is locked.
+
+      ## Who gets paid
+
+      The primary salesperson is the deal owner. A deal can also have a **Secondary salesperson**, **Sales manager**, **Finance manager** and **Desk manager**. Each component on the plan says which position it pays (**Applies to Deal Position**). A component for **All Participants** pays everyone on the deal, once per person. Someone holding two positions gets one payment covering both.
+
+      ## Two salespeople
+
+      If the plan has no component for the secondary salesperson, the primary salesperson's components are split between the two: 50/50 unless the plan's **Primary salesperson's share on a split deal (%)** says otherwise, and a deal can set its own share under **Change who gets paid**. Leftover cents go to the primary. If the plan does have a secondary salesperson component, nothing is split: each person earns their own components.
+
+      Example: a $3,000 commission with a 60% primary share pays $1,800 and $1,200.
+
+      ## Component types
+
+      - **Percent of Gross**: a rate times the chosen figure. Nothing is paid on a figure of zero or less.
+      - **Flat Per Unit**: a set amount times the deal's quantity.
+      - **Add-on Commission**: a rate times add-on gross.
+      - **Volume Bonus**: a set amount paid once per month or quarter, on the deal that brings the person's closed deals in that position and period to exactly the **Units Threshold**. It is never split.
+
+      ## Limits, bands and fees
+
+      A percent or add-on component can have **At least ($ per deal)** and **At most ($ per deal)**. A minimum pays even when the deal makes little or loses money. With **Pay a different rate by how big the figure is**, each rate is paid on the part of the figure inside its band: 20% up to $10,000 and 25% above pays $2,500 on $12,000.
+
+      The plan's **Fees before commission** card can take an admin fee (a percent the company keeps) and flat fees off the figure before percent of gross components are worked out. A flat fee comes off only when someone holds that position on the deal.
+
+      ## One-off adjustments
+
+      On the worksheet, **Add an adjustment** adds an amount (a spiff or a correction, plus or minus) for one person on one deal, with a reason. It shows as its own line in that person's commission.
+
+  - slug: how-it-works-commission-payable-and-paid
+    module: commissions
+    title: "How it works: when commission is payable and how it is paid"
+    article_type: concept
+    position: 232
+    excerpt: When commission payments are made, how they are approved and marked paid, what reaches the books, and the 1099 report.
+    content: |
+      ## When commission becomes payable
+
+      Commission is payable either when accounting approves the deal or when the deal closes.
+
+      - The company setting is **Commissions become payable** at the top of **Accounting > Deals and Commissions > Plans**. It starts at **When accounting approves the deal**.
+      - A plan can override it with **Commission is payable** on its **What this plan pays on** card. **As the company setting says** follows the company.
+
+      Either way the deal has to be closed won.
+
+      ## When payments are made
+
+      - **When accounting approves the deal**: payments are made when the deal is approved with **Approve & Post to GL** on the **Pending GL Approval** tab.
+      - **When the deal closes**: payments are made as the deal moves to a won stage.
+
+      Each person with something to earn gets one payment, starting as **Pending**. A deal needs a plan and a primary salesperson. Until then the deal's **Commission** tab shows an **Estimate**.
+
+      ## Approving and paying
+
+      1. **Approve** a payment on the deal's **Commission** tab, or several at once with **Bulk Approve** on the **Commission Approval** tab. A payment cannot be approved before the deal is payable.
+      2. **Mark as paid**, choosing the payment method (Check, ACH, Direct Deposit, Cash, Wire Transfer or Payroll), the date paid and an optional reference. Paying less than the full amount leaves it **Partly paid**; **Pay the balance** finishes it.
+      3. **Reverse** a payment that was approved or paid, giving a reason.
+
+      ## When the deal changes afterward
+
+      If a closed deal is corrected, each person's commission follows it. An unpaid payment takes the new amount, and if the amount changed it goes back to Pending to be approved again. A paid payment stands: if more is owed a new payment is made, and if less is owed it is noted on the paid payment for a manager to settle.
+
+      ## The books
+
+      When accounting approves a deal, the closing journal entry includes the **Commission Amount** shown in the **Review & Approve Deal** window, when it is more than zero: a debit to account 6010 and a credit to account 2020, if your chart of accounts has both. Marking a commission payment paid does not write a journal entry.
+
+      ## Reports and 1099
+
+      The **Reports** tab under **Accounting > Deals and Commissions** counts paid and partly paid commission by the date it was paid. It has a **Payroll Export** and **Tax Reporting (1099 Preparation)**, which totals what each person was paid in the date range. **Export 1099 CSV** downloads it.

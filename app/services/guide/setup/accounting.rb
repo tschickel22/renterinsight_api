@@ -20,9 +20,17 @@ module Guide
         customer_deposits: :customer_deposits_account_id, retained_earnings: :retained_earnings_account_id
       }.freeze
 
-      AUTO_POST = {
-        invoices: :auto_post_invoices, payments: :auto_post_payments, bills: :auto_post_purchases,
-        purchase_orders: :auto_post_purchase_orders, parts_used: :auto_post_parts_usage, deals: :auto_post_deals
+      # Only the switches that change what posts. Bills post when they leave
+      # draft whatever auto_post_purchases says, and the purchase order, parts
+      # and deal switches have no screen and nothing behind them (found
+      # writing the how it works notes, 2026-11-24), so reporting them told
+      # dealers something false.
+      AUTO_POST = { invoices: :auto_post_invoices, payments: :auto_post_payments }.freeze
+
+      ALWAYS = {
+        deals: 'post when approved under Accounting, Deals & Commissions, Pending GL Approval (Approve & Post to GL)',
+        bills: 'post when saved as anything but a draft (Post bill)',
+        purchase_orders_and_parts_used: 'do not post; the cost reaches the books through the supplier bill'
       }.freeze
 
       def initialize(ctx)
@@ -39,6 +47,7 @@ module Guide
           fiscal_year_starts: settings.fiscal_year_start_month && Date::MONTHNAMES[settings.fiscal_year_start_month.to_i],
           posts_to_these_accounts: fact { default_accounts(settings) },
           posts_by_itself: fact { AUTO_POST.transform_values { |col| settings.try(col) ? 'yes' : 'no' } },
+          other_postings: ALWAYS,
           sales_tax: fact { sales_tax(settings) },
           floor_plan: fact { floor_plan(settings) },
           closed_periods: fact { closed_periods(settings) },

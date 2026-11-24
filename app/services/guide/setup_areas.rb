@@ -112,17 +112,17 @@ module Guide
       return { error: "No module #{key}. Use one of the listed module keys." } unless area
 
       name = PlatformModule::MODULES.dig(key.to_s, :name)
-      return { module: name, not_offered: NOT_OFFERED } if area[:not_offered]
-      return { module: name, note: 'Platform administration is for DealerTide staff only.' } if area[:platform_only]
+      return { plan_module: name, not_offered: NOT_OFFERED } if area[:not_offered]
+      return { plan_module: name, note: 'Platform administration is for DealerTide staff only.' } if area[:platform_only]
       unless ModuleAccessService.new(@company).has_module?(key.to_s)
-        return { module: name, on_plan: false, note: "#{name} is not on this account's plan. An admin can ask about adding it." }
+        return { plan_module: name, on_plan: false, note: "#{name} is not on this account's plan. An admin can ask about adding it." }
       end
       unless @ctx.can?(area[:resource], 'read')
-        return { module: name, not_allowed: "Your role does not include #{name}. Your admin can help." }
+        return { plan_module: name, not_allowed: "Your role does not include #{name}. Your admin can help." }
       end
 
       facts = area[:reader] ? area[:reader].constantize.new(@ctx).to_h : read_facts(area[:facts])
-      Guide::Fit.call({ module: name, on_plan: true }.merge(facts), max_chars: 6_000)
+      Guide::Fit.call({ plan_module: name, on_plan: true }.merge(facts), max_chars: 6_000)
     end
 
     private
