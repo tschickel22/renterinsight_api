@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_21_030000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_24_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2097,6 +2097,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_21_030000) do
     t.index ["user_id"], name: "index_commission_audit_entries_on_user_id"
   end
 
+  create_table "commission_adjustments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "deal_id", null: false
+    t.bigint "payee_user_id", null: false
+    t.decimal "amount", precision: 15, scale: 2, null: false
+    t.string "reason", null: false
+    t.bigint "created_by_user_id"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "deal_id"], name: "index_commission_adjustments_on_company_id_and_deal_id"
+  end
+
   create_table "commission_components", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -2116,6 +2129,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_21_030000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "commission_plan_id"
+    t.decimal "min_amount", precision: 15, scale: 2
+    t.decimal "max_amount", precision: 15, scale: 2
+    t.jsonb "tiers", default: [], null: false
     t.index ["applies_to_role"], name: "index_commission_components_on_role"
     t.index ["commission_plan_id"], name: "index_commission_components_on_commission_plan_id"
     t.index ["company_id", "is_active"], name: "index_commission_components_on_company_and_active"
@@ -3495,6 +3511,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_21_030000) do
     t.string "delivery_point", default: "deliver", null: false
     t.jsonb "sale_details", default: {}, null: false
     t.decimal "contract_down_payment", precision: 15, scale: 2
+    t.decimal "commission_split_primary_pct", precision: 5, scale: 2
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"

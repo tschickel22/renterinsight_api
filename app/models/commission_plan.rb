@@ -58,6 +58,35 @@ class CommissionPlan < ApplicationRecord
     Array(metadata.to_h.dig('before_commission', 'fee_component_ids')).map(&:to_i)
   end
 
+  # What a component set to "What this plan pays on" (gross_type plan_basis)
+  # counts, kept in metadata as pays_on. The home always counts; title and
+  # license fees never do. Costs: whether freight the dealer pays and the
+  # dealer pack come off. Unset keys take these defaults.
+  PAYS_ON_INCOME = %w[freight delivery_setup addons doc_fee land fi_products].freeze
+  PAYS_ON_COSTS = %w[freight_cost pack].freeze
+  PAYS_ON_DEFAULTS = {
+    'freight' => true, 'delivery_setup' => true, 'addons' => true, 'doc_fee' => false, 'land' => true,
+    'fi_products' => false, 'freight_cost' => true, 'pack' => true
+  }.freeze
+
+  def pays_on
+    saved = metadata.to_h['pays_on'].to_h.slice(*PAYS_ON_DEFAULTS.keys)
+    PAYS_ON_DEFAULTS.merge(saved.transform_values { |v| ActiveModel::Type::Boolean.new.cast(v) ? true : false })
+  end
+
+  # The primary salesperson's share when two salespeople split a deal (50 = 50/50).
+  def split_primary_pct
+    value = metadata.to_h.dig('split', 'primary_pct')
+    value.present? ? value.to_d : BigDecimal('50')
+  end
+
+  # When this plan's commissions become payable: 'gl_approval', 'deal_closed',
+  # or nil to follow the company setting (CommissionSettings).
+  def payable_at
+    value = metadata.to_h['payable_at']
+    CommissionSettings::PAYABLE_AT.include?(value) ? value : nil
+  end
+
   # Get active components
   def active_components
     commission_components
@@ -68,8 +97,9 @@ class CommissionPlan < ApplicationRecord
   private
 
   def company_fee_percent_in_range
-    return if company_fee_percent.between?(0, 100)
-
-    errors.add(:base, 'Admin fee must be between 0% and 100%')
+    errors.add(:base, 'Admin fee must be between 0% and 100%') unless company_fee_percent.between?(0, 100)
+    errors.add(:base, 'The primary salesperson\'s share must be between 0% and 100%') unless split_primary_pct.between?(0, 100)
+    value = metadata.to_h['payable_at']
+    errors.add(:base, 'When commission is paid must be at approval, at close, or the company setting') if value.present? && payable_at.nil?
   end
 end

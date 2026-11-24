@@ -57,6 +57,7 @@ class Company < ApplicationRecord
   has_many :commission_components, dependent: :destroy
   has_many :commission_plans, dependent: :destroy
   has_many :commission_payments, dependent: :destroy
+  has_many :commission_adjustments, dependent: :destroy
   has_many :sources, dependent: :destroy
   has_many :lead_statuses, dependent: :destroy
   has_many :tags, dependent: :destroy

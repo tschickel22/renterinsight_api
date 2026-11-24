@@ -22,8 +22,18 @@ class CommissionSettings
     company.present? && payable_at(company) == DEAL_CLOSED
   end
 
-  def self.not_payable_message(company)
-    return 'This commission can be approved once the deal is closed.' if at_close?(company)
+  # The deal's plan can say when its commissions are payable; otherwise the
+  # company setting decides.
+  def self.payable_at_for(deal)
+    deal.try(:commission_plan)&.payable_at || payable_at(deal.company)
+  end
+
+  def self.at_close_for?(deal)
+    deal.present? && deal.company.present? && payable_at_for(deal) == DEAL_CLOSED
+  end
+
+  def self.not_payable_message(company, deal: nil)
+    return 'This commission can be approved once the deal is closed.' if deal ? at_close_for?(deal) : at_close?(company)
 
     'Cannot approve commission: deal has not been GL-approved yet. Approve the deal first in Accounting > Deals & Commissions.'
   end

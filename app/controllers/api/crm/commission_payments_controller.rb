@@ -55,7 +55,7 @@ module Api
         return unless authorize_action!('commission_payments', 'create')
 
         unless @deal.commissions_payable?
-          return render json: { error: CommissionSettings.not_payable_message(@company) }, status: :unprocessable_entity
+          return render json: { error: CommissionSettings.not_payable_message(@company, deal: @deal) }, status: :unprocessable_entity
         end
 
         CommissionPaymentGeneratorService.new(@deal).recalculate
@@ -63,8 +63,106 @@ module Api
         render json: { payments: payments.map { |p| payment_json(p, detailed: true) } }
       end
 
+      # GET /api/crm/deals/:deal_id/commissions/worksheet[?commission_plan_id=]
+      # The commission worksheet: every line on the deal and whether the plan
+      # pays on it, the steps to the figure, the plan in plain words, and who
+      # gets paid. commission_plan_id tries another plan on this deal without
+      # saving anything.
+      def worksheet
+        return unless authorize_action!('commissions', 'read')
+        return unless apply_choices_on_screen
+
+        @deal.commission_plan ||= @deal.determine_commission_plan
+        result = CommissionPaymentGeneratorService.preview_for_deal(@deal)
+        render json: worksheet_json(result)
+      end
+
+      # POST /api/crm/deals/:deal_id/commissions/adjustments  { payee_user_id, amount, reason }
+      def create_adjustment
+        return unless authorize_action!('commission_payments', 'create')
+
+        payee = @company.users.find_by(id: params[:payee_user_id])
+        return render(json: { error: 'Choose who the adjustment is for' }, status: :unprocessable_entity) unless payee
+
+        adjustment = @company.commission_adjustments.new(deal: @deal, payee: payee, amount: params[:amount], reason: params[:reason].to_s.strip,
+                                                         created_by_user_id: current_user.id)
+        return render(json: { errors: adjustment.errors.full_messages }, status: :unprocessable_entity) unless adjustment.save
+
+        refresh_payments_after_adjustment
+        render json: { adjustment: adjustment_json(adjustment) }, status: :created
+      end
+
+      # DELETE /api/crm/deals/:deal_id/commissions/adjustments/:adjustment_id
+      def destroy_adjustment
+        return unless authorize_action!('commission_payments', 'create')
+
+        adjustment = @company.commission_adjustments.active.find_by(id: params[:adjustment_id], deal_id: @deal.id)
+        return render(json: { error: 'Adjustment not found' }, status: :not_found) unless adjustment
+
+        adjustment.update!(is_deleted: true)
+        refresh_payments_after_adjustment
+        head :no_content
+      end
+
       private
-      
+
+      # Payments already made follow the change (paid ones stand); before then
+      # the estimate shows it.
+      def refresh_payments_after_adjustment
+        return unless @deal.commissions_payable? && payments_locked?
+
+        CommissionPaymentGeneratorService.new(@deal).recalculate
+      end
+
+      def worksheet_json(result)
+        plan = @deal.commission_plan
+        components = plan ? plan.commission_components.where(is_active: true).ordered.to_a : []
+        types = components.filter_map do |c|
+          case c.component_type
+          when 'percent_of_gross', 'percentage' then c.gross_type.presence
+          when 'addon_commission' then 'addon'
+          end
+        end.uniq
+        types = ['commissionable_front'] if types.empty?
+        basis = CommissionBasis.new(@deal, plan)
+        preview = preview_json(result)
+        adjustments = @deal.commission_adjustments.active.includes(:payee, :created_by).order(:id)
+        preview.merge(
+          plan: plan && {
+            id: plan.id, name: plan.name, description: plan.description,
+            isDefault: plan.is_default, assignedRole: plan.assigned_role, assignedUserId: plan.assigned_user_id,
+            effectiveDate: plan.effective_date, expirationDate: plan.expiration_date,
+            paysOn: plan.pays_on, splitPrimaryPct: plan.split_primary_pct.to_f, payableAt: plan.payable_at,
+            adminFeePercent: plan.company_fee_percent.to_f,
+            components: components.map do |c|
+              { id: c.id, name: c.name, description: c.calculation_description, role: c.applies_to_role,
+                roleLabel: (c.applies_to_role || 'primary_salesperson').humanize, grossType: c.gross_type,
+                appliesHere: c.applies_to_deal?(@deal) }
+            end
+          },
+          savedPlanId: @deal.commission_plan_id_was || @deal.commission_plan_id,
+          figures: types.map { |t| basis.explain(t) },
+          splitPrimaryPct: @deal.commission_split_primary_pct&.to_f,
+          adjustments: adjustments.map { |a| adjustment_json(a) },
+          people: CommissionPaymentGeneratorService::ROLE_FIELDS.to_h do |role, field|
+            user = (id = @deal.public_send(field)) && @company.users.find_by(id: id)
+            [role, user && { userId: user.id, name: user.name }]
+          end,
+          estimate: !payments_locked?,
+          can: {
+            assign: can?('deals', 'update'),
+            adjust: can?('commission_payments', 'create'),
+            editPlan: can?('commission_plans', 'update')
+          }
+        )
+      end
+
+      def adjustment_json(adjustment)
+        { id: adjustment.id, payeeUserId: adjustment.payee_user_id, payeeName: adjustment.payee&.name,
+          amount: adjustment.amount.to_f, reason: adjustment.reason, createdBy: adjustment.created_by&.name,
+          createdAt: adjustment.created_at&.iso8601 }
+      end
+
       def set_deal
         @deal = @company.deals.find(params[:deal_id])
       rescue ActiveRecord::RecordNotFound
@@ -127,7 +225,7 @@ module Api
           commissionableGross: @deal.commission_gross('commissionable_front')&.to_f,
           totalCommission: result[:total_commission].to_f.round(2),
           payable: @deal.commissions_payable?,
-          payableAt: CommissionSettings.payable_at(@company),
+          payableAt: CommissionSettings.payable_at_for(@deal),
           reasons: result[:reasons],
           participants: result[:participants].map do |p|
             { role: p[:role], userId: p[:user_id], userName: p[:user_name], estimatedAmount: p[:estimated_amount],

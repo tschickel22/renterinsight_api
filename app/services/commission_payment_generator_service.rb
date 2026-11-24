@@ -20,8 +20,15 @@
 #
 # Split deals: when a secondary salesperson is on the deal and the plan says
 # nothing about what the secondary earns, the primary salesperson's components
-# (role primary_salesperson, or none) are split 50/50, cents left over going to
-# the primary. A plan with its own secondary_salesperson component has already
+# (role primary_salesperson, or none) are split by the plan's split (50/50
+# unless it says otherwise, and a deal can override it), cents left over going
+# to the primary.
+#
+# A percent component can pay by gross bands (tiers) and can pay at least or at
+# most a set amount per deal (CommissionComponent#percent_amount, #limit).
+#
+# Adjustments: a one-off amount for one person on one deal, with its reason
+# (CommissionAdjustment), is one more line in that person's commission. A plan with its own secondary_salesperson component has already
 # said what each person earns, so each is paid that and nothing is split. Volume
 # bonuses are personal and never split. Everyone on the deal is paid
 # all_participants components in full, once per person.
@@ -42,7 +49,6 @@ class CommissionPaymentGeneratorService
     secondary_salesperson: :secondary_salesperson_id
   }.freeze
 
-  SPLIT_SHARE = BigDecimal('0.5')
   VOLUME_NOT_SPLIT_NOTE = 'not split; volume bonuses pay in full to the person who reached the threshold'
 
   def self.generate_for_deal(deal)
@@ -97,6 +103,7 @@ class CommissionPaymentGeneratorService
     positions_by_person.each do |user_id, roles|
       seen = {}
       roles.each { |role| preview_position(role, user_id, seen, previews, unpaid) }
+      preview_adjustments(user_id, roles, previews)
     end
 
     {
@@ -182,24 +189,50 @@ class CommissionPaymentGeneratorService
     @plan_pays_secondary = components.any? { |c| c.applies_to_deal?(@deal) }
   end
 
-  # { user_id => [roles they hold on this deal] }
+  # { user_id => [roles they hold on this deal] }. Someone with an adjustment
+  # on the deal is in it with no position.
   def positions_by_person
-    ROLE_FIELDS.each_with_object({}) do |(role, field), people|
+    people = ROLE_FIELDS.each_with_object({}) do |(role, field), acc|
       user_id = @deal.public_send(field)
-      (people[user_id] ||= []) << role if user_id.present?
+      (acc[user_id] ||= []) << role if user_id.present?
     end
+    adjustments.each { |a| people[a.payee_user_id] ||= [] }
+    people
   end
 
-  # Everything the person earns across their positions. A component paid to
-  # all participants is paid to a person once, however many seats they hold.
-  def lines_for_person(roles)
+  # Everything the person earns across their positions, then their
+  # adjustments. A component paid to all participants is paid to a person
+  # once, however many seats they hold.
+  def lines_for_person(roles, user_id = nil)
     seen = {}
-    roles.flat_map { |role| lines_for_role(role) }.reject { |l| repeat_for_person?(l, seen) }
+    roles.flat_map { |role| lines_for_role(role) }.reject { |l| repeat_for_person?(l, seen) } + adjustment_lines(user_id)
+  end
+
+  def adjustments
+    return [] unless @deal.is_a?(Deal) && @deal.persisted?
+
+    @adjustments ||= @deal.commission_adjustments.active.order(:id).to_a
+  end
+
+  def adjustment_lines(user_id)
+    return [] if user_id.nil?
+
+    adjustments.select { |a| a.payee_user_id == user_id }
+               .map { |a| { component: nil, adjustment: a, amount: a.amount.to_d.round(2), note: a.reason } }
+  end
+
+  def split_primary_pct
+    (@deal.try(:commission_split_primary_pct).presence || @deal.commission_plan&.split_primary_pct || 50).to_d
+  end
+
+  def split_label
+    primary = split_primary_pct
+    "#{primary.to_s('F').sub(/\.0\z/, '')}/#{(100 - primary).to_s('F').sub(/\.0\z/, '')}"
   end
 
   def repeat_for_person?(line, seen)
     component = line[:component]
-    return false unless component.applies_to_role == 'all_participants'
+    return false unless component && component.applies_to_role == 'all_participants'
     return true if seen[component.id]
 
     seen[component.id] = true
@@ -229,9 +262,9 @@ class CommissionPaymentGeneratorService
     end
 
     full = line[:amount]
-    secondary_share = (full * SPLIT_SHARE).floor(2)
+    secondary_share = (full * (100 - split_primary_pct) / 100).floor(2)
     amount = side == :secondary ? secondary_share : full - secondary_share
-    line.merge(amount: amount, note: [line[:note], "split 50/50 with the #{side == :primary ? 'secondary' : 'primary'} salesperson"].compact.join('; '))
+    line.merge(amount: amount, note: [line[:note], "split #{split_label} with the #{side == :primary ? 'secondary' : 'primary'} salesperson"].compact.join('; '))
   end
 
   def line(component, role)
@@ -241,21 +274,25 @@ class CommissionPaymentGeneratorService
       when 'flat_per_unit'
         units = [@deal.try(:quantity).to_i, 1].max
         [component.flat_amount.to_d * units, units > 1 ? "#{units} units" : nil]
-      when 'addon_commission' then [percent_of(@deal.addon_gross, component.rate), nil]
+      when 'addon_commission' then [component.percent_amount(@deal.addon_gross), nil]
       when 'percent_of_gross', 'percentage' then percent_after_fees(component)
       else [BigDecimal('0'), "unknown component type #{component.component_type}"]
       end
+    if component.component_type.in?(%w[addon_commission percent_of_gross percentage])
+      amount, limited = component.limit(amount)
+      note = [note, limited].compact.join('; ').presence
+    end
     { component: component, amount: amount.to_d.round(2), note: note }
   end
 
   def percent_after_fees(component)
     gross = gross_for(component.gross_type)
     fees = gross.to_d.positive? ? fees_before_commission(gross.to_d) : []
-    return [percent_of(gross, component.rate), nil] if fees.empty?
+    return [component.percent_amount(gross), nil] if fees.empty?
 
     base = [gross.to_d - fees.sum { |f| f[:amount] }, BigDecimal('0')].max
     taken_off = fees.map { |f| "#{money(f[:amount])} #{f[:name]}" }.join(' and ')
-    [percent_of(base, component.rate), "paid on #{money(base)}: #{money(gross)} less #{taken_off}"]
+    [component.percent_amount(base), "paid on #{money(base)}: #{money(gross)} less #{taken_off}"]
   end
 
   def fees_before_commission(gross)
@@ -281,13 +318,6 @@ class CommissionPaymentGeneratorService
 
   def money(amount)
     ActiveSupport::NumberHelper.number_to_currency(amount)
-  end
-
-  def percent_of(base, rate)
-    base = base.to_d
-    return BigDecimal('0') if base <= 0
-
-    base * rate.to_d
   end
 
   def gross_for(gross_type)
@@ -339,7 +369,7 @@ class CommissionPaymentGeneratorService
   def process_person(user_id, roles, payments)
     return if CommissionPayment.where(deal_id: @deal.id, payee_user_id: user_id, is_deleted: [false, nil]).where.not(status: 'cancelled').exists?
 
-    lines = lines_for_person(roles)
+    lines = lines_for_person(roles, user_id)
     return if lines.empty?
 
     commission_amount = lines.sum(BigDecimal('0')) { |l| l[:amount] }.round(2)
@@ -361,7 +391,7 @@ class CommissionPaymentGeneratorService
   end
 
   def recalculate_person(roles, user_id, payments)
-    lines = lines_for_person(roles)
+    lines = lines_for_person(roles, user_id)
     target = lines.sum(BigDecimal('0')) { |l| l[:amount] }.round(2)
     paid, open = payments.partition { |p| %w[paid partially_paid].include?(p.status) }
     owed = (target - paid.sum { |p| p.amount.to_d }).round(2)
@@ -409,6 +439,24 @@ class CommissionPaymentGeneratorService
     }
   end
 
+  # A person's adjustments join their first position's estimate, or stand on
+  # their own when they hold no position on the deal.
+  def preview_adjustments(user_id, roles, previews)
+    lines = adjustment_lines(user_id)
+    return if lines.empty?
+
+    entry = previews.find { |p| p[:user_id] == user_id }
+    unless entry
+      user = User.find_by(id: user_id)
+      return unless user
+
+      entry = { role: 'adjustment', user_id: user_id, user_name: user.name, estimated_amount: 0.0, components: [] }
+      previews << entry
+    end
+    entry[:components] += lines.map { |l| component_detail(l) }
+    entry[:estimated_amount] = (entry[:estimated_amount].to_d + lines.sum(BigDecimal('0')) { |l| l[:amount] }).round(2).to_f
+  end
+
   def can_generate?
     @deal.stage_is_won? &&
       @deal.commission_plan.present? &&
@@ -424,6 +472,8 @@ class CommissionPaymentGeneratorService
   end
 
   def component_detail(line)
+    return adjustment_detail(line) if line[:adjustment]
+
     c = line[:component]
     {
       component_id: c.id,
@@ -451,8 +501,16 @@ class CommissionPaymentGeneratorService
 
   # component_id is what CommissionComponent#paid? looks for, so a component
   # that has been paid cannot be taken off its plan.
+  def adjustment_detail(line)
+    a = line[:adjustment]
+    { adjustment_id: a.id, name: "Adjustment: #{a.reason}", description: "Adjustment: #{a.reason}", type: 'adjustment',
+      component_type: 'adjustment', amount: line[:amount].to_f, note: a.created_by ? "added by #{a.created_by.name}" : nil }.compact
+  end
+
   def build_line_items(lines)
     lines.map do |l|
+      next adjustment_detail(l).except(:name, :type) if l[:adjustment]
+
       c = l[:component]
       {
         component_id: c.id,

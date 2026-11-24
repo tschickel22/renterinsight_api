@@ -21,7 +21,20 @@ class CommissionComponent < ApplicationRecord
     commissionable_front
     addon
     house_profit
+    plan_basis
   ].freeze
+
+  # How each figure reads to a person. plan_basis is "what this plan pays on",
+  # the checklist on the plan (CommissionPlan#pays_on).
+  GROSS_LABELS = {
+    'front' => 'front gross', 'back' => 'back-end gross', 'total' => 'total gross',
+    'commissionable_front' => 'commissionable gross (after pack)', 'addon' => 'add-on sales',
+    'house_profit' => 'house profit (the home only)', 'plan_basis' => 'what this plan pays on'
+  }.freeze
+
+  def self.gross_label(type)
+    GROSS_LABELS[type.to_s] || type.to_s.humanize.downcase
+  end
   
   # Roles (applies_to_role values)
   ROLES = %w[
@@ -70,6 +83,11 @@ class CommissionComponent < ApplicationRecord
     numericality: { greater_than: 0 },
     if: -> { component_type.in?(%w[flat_per_unit volume_bonus]) }
   
+  validates :min_amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :max_amount, numericality: { greater_than: 0 }, allow_nil: true
+  validate :min_not_over_max
+  validate :tiers_make_sense
+
   validates :units_threshold,
     presence: true,
     numericality: { greater_than: 0, only_integer: true },
@@ -130,7 +148,8 @@ scope :for_current_location, -> {
   def calculation_description
     case component_type
     when 'percent_of_gross'
-      "#{(rate * 100).round(2)}% of #{gross_type.humanize} gross"
+      base = tiered? ? "#{tier_description} of #{self.class.gross_label(gross_type)}" : "#{(rate * 100).round(2)}% of #{self.class.gross_label(gross_type)}"
+      [base, limits_description].compact.join(', ')
     when 'flat_per_unit'
       "#{money(flat_amount)} per unit (times the deal's quantity)"
     when 'volume_bonus'
@@ -142,6 +161,65 @@ scope :for_current_location, -> {
     end
   end
   
+  # Pays by gross bands: [{ 'up_to' => 10000, 'rate' => 0.2 }, { 'rate' => 0.25 }],
+  # each band's rate on the part of the gross inside it (like tax brackets).
+  def tiered?
+    component_type.in?(%w[percent_of_gross addon_commission]) && normalized_tiers.any?
+  end
+
+  def normalized_tiers
+    Array(tiers).filter_map do |t|
+      t = t.to_h.stringify_keys
+      next if t['rate'].blank?
+
+      { 'up_to' => t['up_to'].presence&.to_d, 'rate' => t['rate'].to_d }
+    end
+  end
+
+  # rate x base, or band by band when tiered. Nothing on a base of zero or less.
+  def percent_amount(base)
+    base = base.to_d
+    return BigDecimal('0') if base <= 0
+    return base * rate.to_d unless tiered?
+
+    floor = BigDecimal('0')
+    normalized_tiers.sum(BigDecimal('0')) do |t|
+      top = t['up_to'] || base
+      part = [[base, top].min - floor, BigDecimal('0')].max
+      floor = [floor, top].max
+      part * t['rate']
+    end
+  end
+
+  # The per-deal floor and ceiling: [amount, note]. The note says when one applied.
+  def limit(amount)
+    amount = amount.to_d
+    if min_amount.present? && amount < min_amount.to_d
+      [min_amount.to_d, "at least #{money(min_amount)} per deal"]
+    elsif max_amount.present? && amount > max_amount.to_d
+      [max_amount.to_d, "at most #{money(max_amount)} per deal"]
+    else
+      [amount, nil]
+    end
+  end
+
+  def tier_description
+    floor = BigDecimal('0')
+    normalized_tiers.map do |t|
+      pct = "#{(t['rate'] * 100).round(2).to_s('F').sub(/\.0\z/, '')}%"
+      text = t['up_to'] ? "#{pct} up to #{money(t['up_to'])}" : (floor.positive? ? "#{pct} above #{money(floor)}" : pct)
+      floor = t['up_to'] if t['up_to']
+      text
+    end.join(', ')
+  end
+
+  def limits_description
+    parts = []
+    parts << "at least #{money(min_amount)}" if min_amount.present?
+    parts << "at most #{money(max_amount)}" if max_amount.present?
+    parts.any? ? "#{parts.join(' and ')} per deal" : nil
+  end
+
   # Display name with context
   def display_name
     context = []
@@ -161,6 +239,25 @@ scope :for_current_location, -> {
   end
 
   private
+
+  def min_not_over_max
+    return unless min_amount.present? && max_amount.present? && min_amount.to_d > max_amount.to_d
+
+    errors.add(:base, 'The most per deal must be at least the least per deal')
+  end
+
+  # Bands go up in order, every band but the last has a top, rates are 0 to 100%.
+  def tiers_make_sense
+    list = Array(tiers)
+    return if list.empty?
+
+    bands = normalized_tiers
+    errors.add(:tiers, 'each band needs a rate') and return if bands.size != list.size
+    errors.add(:tiers, 'rates must be more than 0% and at most 100%') if bands.any? { |t| t['rate'] <= 0 || t['rate'] > 1 }
+    tops = bands[0...-1].map { |t| t['up_to'] }
+    errors.add(:tiers, 'every band but the last needs an "up to" amount') if tops.any?(&:nil?)
+    errors.add(:tiers, 'bands must go up in order') if tops.compact.each_cons(2).any? { |a, b| b <= a }
+  end
 
   def money(amount)
     ActiveSupport::NumberHelper.number_to_currency(amount)
