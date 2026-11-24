@@ -1,0 +1,17 @@
+<h2 style="font-family:sans-serif"><%= @label %></h2>
+<p style="font-family:sans-serif">
+  <strong>Company:</strong> <%= @company&.name %> (<%= @company&.id %>)<br>
+  <strong>Person:</strong> <%= [@user&.first_name, @user&.last_name].compact.join(' ') %> <%= @user&.email %><br>
+  <strong>Page:</strong> <%= @flag.page %><br>
+  <strong>Asked from:</strong> <%= @flag.source %>
+</p>
+<p style="font-family:sans-serif"><strong>They asked:</strong><br><%= simple_format(@flag.question) %></p>
+<p style="font-family:sans-serif"><strong>What looked off or what they want:</strong><br><%= @flag.assistant_reason.presence || '(not given)' %></p>
+<p style="font-family:sans-serif"><strong>They were told:</strong><br><%= simple_format(@flag.answer_shown.to_s) %></p>
+<p style="font-family:sans-serif"><strong>Lookups the assistant made:</strong></p>
+<ul style="font-family:sans-serif">
+<% Array(@flag.tool_trace).each do |t| %>
+  <li><%= t['tool'] || t[:tool] %> <code><%= (t['input'] || t[:input]).to_json.first(200) %></code></li>
+<% end %>
+</ul>
+<p style="font-family:sans-serif"><a href="<%= @admin_url %>">All help flags</a></p>

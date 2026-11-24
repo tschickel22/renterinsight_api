@@ -3681,6 +3681,10 @@ Rails.application.routes.draw do
       end
 
       # ==================== KNOWLEDGE BASE ADMIN (Platform Admin Only) ====================
+      # Questions the help assistant handed to support (E118).
+      get   'guide/flags',     to: 'guide_flags#index'
+      patch 'guide/flags/:id', to: 'guide_flags#update', constraints: { id: /\d+/ }
+
       # Release queue: help drafted for what changed in each build (E75).
       scope 'guide/releases', controller: :guide_releases do
         get  '',                     action: :index

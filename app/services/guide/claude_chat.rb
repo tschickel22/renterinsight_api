@@ -15,7 +15,12 @@ module Guide
       api_key = ENV['ANTHROPIC_API_KEY'].presence || Rails.application.credentials.dig(:anthropic, :api_key)
       raise Error, 'Anthropic API key not configured' if api_key.blank?
 
-      body = { model: model, max_tokens: max_tokens, system: system, tools: tools, messages: messages }.to_json
+      # One top-level cache marker caches tools, system prompt and the
+      # conversation so far. Each round of a question re-sends everything
+      # before it (tool list, earlier lookups), so later rounds read it at a
+      # tenth of the price. usage.cache_read_input_tokens shows it working.
+      body = { model: model, max_tokens: max_tokens, system: system, tools: tools, messages: messages,
+               cache_control: { type: 'ephemeral' } }.to_json
       3.times do |attempt|
         response = post(api_key, body)
         return JSON.parse(response.body) if response.code.to_i == 200

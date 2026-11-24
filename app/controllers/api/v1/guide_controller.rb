@@ -46,13 +46,17 @@ module Api
         conversation.append('role' => 'user', 'content' => question, 'at' => Time.current.iso8601)
         conversation.append('role' => 'assistant', 'content' => result.answer, 'at' => Time.current.iso8601,
                             'articles' => result.articles, 'places' => result.places, 'videos' => result.videos,
-                            'answered' => result.answered)
+                            'answered' => result.answered, 'outcome' => result.outcome)
         conversation.save!
         meter(question, result, started)
+        Guide::OutcomeRecorder.record!(result: result, question: question, user: current_user, company_id: @company.id,
+                                       source: 'help', page: params[:page], conversation: conversation,
+                                       notify: !impersonating?)
 
         render json: {
           conversation_id: conversation.id, answer: result.answer, articles: result.articles,
-          places: result.places, videos: result.videos, answered: result.answered, remaining: limits[:remaining] - 1
+          places: result.places, videos: result.videos, answered: result.answered, outcome: result.outcome,
+          remaining: limits[:remaining] - 1
         }
       rescue Guide::ClaudeChat::Error => e
         Rails.logger.error("[Guide::Assistant] #{e.message}")
@@ -183,17 +187,15 @@ module Api
         AiQueryLog.create!(
           company_id: metered_company_id, user_id: current_user.id, feature: 'help_assistant', module_key: 'help',
           question: question, user_question: question, execution_status: 'success',
-          resolved_intent: result.answered ? 'answered' : 'unanswered',
+          resolved_intent: result.answered ? 'answered' : 'unanswered', failure_reason: result.answered ? nil : result.outcome,
           result_count: result.articles.size + result.places.size,
           input_tokens: result.input_tokens, output_tokens: result.output_tokens,
           cost_cents: (Catalog::PriceBooks::ClaudeClient.cost_usd(result.input_tokens, result.output_tokens) * 100).round,
-          response_time_ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+          response_time_ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round,
+          # Which lookups ran, and whether caching is paying (E118).
+          generated_params: { 'outcome' => result.outcome, 'tools' => Array(result.trace).map { |t| t['tool'] },
+                              'cache_read_tokens' => result.cache_read_tokens.to_i }
         )
-        # The same list Knowledge admin shows as failed searches: questions
-        # the help could not answer are the help to write next.
-        Knowledge::Search.create(user_id: current_user.id, query: question.first(500), intent_detected: 'assistant',
-                                 result_count: result.answered ? result.articles.size + result.places.size : 0,
-                                 action_taken: 'assistant')
       end
     end
   end

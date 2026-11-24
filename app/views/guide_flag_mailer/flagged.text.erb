@@ -1,0 +1,20 @@
+<%= @label %>
+
+Company: <%= @company&.name %> (<%= @company&.id %>)
+Person: <%= [@user&.first_name, @user&.last_name].compact.join(' ') %> <%= @user&.email %>
+Page: <%= @flag.page %>
+Asked from: <%= @flag.source %>
+
+They asked:
+<%= @flag.question %>
+
+What looked off or what they want:
+<%= @flag.assistant_reason.presence || '(not given)' %>
+
+They were told:
+<%= @flag.answer_shown %>
+
+Lookups the assistant made:
+<% Array(@flag.tool_trace).each do |t| %>- <%= t['tool'] || t[:tool] %> <%= (t['input'] || t[:input]).to_json.first(200) %>
+<% end %>
+All help flags: <%= @admin_url %>
