@@ -197,9 +197,43 @@ module Api
         # template is picked, so the template usually arrives here, not in create.
         # Without this the agreement kept the template's form and boxes but lost the
         # link, and with it the template's sensitive flag (credit applications).
-        attach_template(@agreement, params.dig(:agreement, :agreement_template_id))
+        # (attach_template runs below, inside the lock.)
 
-        if @agreement.update(agreement_params)
+        # Two windows on one draft (two people, or one person in two tabs or while
+        # proxied in as someone else) each auto-save their own copy, and the last save
+        # silently put back whatever the other changed (agreement 94 lost its buyers'
+        # signature boxes that way). The builder sends the edit number it loaded; an
+        # older number means another window saved since, so this save is refused.
+        conflict = nil
+        saved = false
+        @agreement.with_lock do
+          expected = params[:edit_version]
+          if expected.present? && expected.to_i != @agreement.edit_version
+            conflict = @agreement.metadata.to_h['last_edited_by'] || {}
+            next
+          end
+
+          attach_template(@agreement, params.dig(:agreement, :agreement_template_id))
+          saved = @agreement.update(agreement_params)
+          next unless saved
+
+          @agreement.update_column(:metadata, @agreement.metadata.to_h.merge(
+            'edit_version' => @agreement.edit_version + 1,
+            'last_edited_by' => last_edited_by_stamp
+          ))
+        end
+
+        if conflict
+          return render json: {
+            error: edited_elsewhere_message(conflict),
+            code: 'edited_elsewhere',
+            edited_by: conflict['name'],
+            edited_at: conflict['at'],
+            edit_version: @agreement.edit_version
+          }, status: :conflict
+        end
+
+        if saved
           # Sync signers if provided (full replace while in draft)
           sync_signers(@agreement) if params.dig(:agreement, :signers).present?
 
@@ -1549,6 +1583,19 @@ module Api
         []
       end
 
+      # Who saved last, as the other window will read it. Proxied in, it names both.
+      def last_edited_by_stamp
+        name = current_user&.name.presence || current_user&.email
+        name = "#{original_user.name.presence || original_user.email} (as #{name})" if impersonating? && original_user && original_user != current_user
+        { 'name' => name, 'user_id' => current_user&.id, 'at' => Time.current.iso8601 }
+      end
+
+      def edited_elsewhere_message(by)
+        who = by['name'].presence || 'Someone'
+        at = by['at'].present? ? " at #{Time.zone.parse(by['at']).in_time_zone(@company&.time_zone || 'America/Denver').strftime('%-l:%M %p')}" : ''
+        "#{who} saved this agreement in another window#{at}. Reload to see their changes before you make more."
+      end
+
       def agreement_json(agreement, detailed: false)
         data = {
           id: agreement.id,
@@ -1589,7 +1636,8 @@ module Api
           # The Deal Sheet version it was made from, and whether the LIVE one has moved on.
           deal_sheet: agreement.deal_sheet_status,
           created_at: agreement.created_at,
-          updated_at: agreement.updated_at
+          updated_at: agreement.updated_at,
+          edit_version: agreement.edit_version
         }
 
         if detailed
