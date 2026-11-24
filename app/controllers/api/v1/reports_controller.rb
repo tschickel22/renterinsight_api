@@ -189,39 +189,22 @@ module Api
       end
 
       # GET /api/v1/reports/:id/export
-      # Server-side CSV export (full dataset, capped at MAX_PER_PAGE).
+      # Server-side CSV export: up to ReportEngine::MAX_PER_PAGE rows, with
+      # X-Export-Total and X-Export-Rows saying when the file was cut.
       def export
         @report = @company.reports.active.find(params[:id])
         cfg = @report.config || {}
         return unless authorize_report_module!(cfg['module_key'] || @report.module_key)
 
-        result = ReportEngine.run(
-          module:      cfg['module_key'] || @report.module_key,
-          fields:      cfg['fields'],
-          filters:     cfg['filters'] || {},
-          sort_by:     cfg['sort_by'],
-          sort_order:  cfg['sort_order'] || 'desc',
-          page:        1,
-          per_page:    ReportEngine::MAX_PER_PAGE,
-          company_id:  @company.id,
-          location_id: Current.location_id,
-          user:        current_user
+        export = ReportExport.call(
+          company: @company, user: current_user, location_id: Current.location_id, name: @report.name, ip: request.remote_ip,
+          query: { module: cfg['module_key'] || @report.module_key, fields: cfg['fields'], filters: cfg['filters'] || {},
+                   sort_by: cfg['sort_by'], sort_order: cfg['sort_order'] }
         )
-
-        headers_row = result[:columns].map { |c| c[:label] }.join(',')
-        data_rows = result[:rows].map { |row|
-          result[:columns].map { |c|
-            val = row[c[:key]]
-            val.nil? ? '' : "\"#{val.to_s.gsub('"', '""')}\""
-          }.join(',')
-        }
-        csv_content = ([headers_row] + data_rows).join("\n")
-
-        send_data csv_content,
-          filename: "#{@report.name.parameterize}-#{Date.current}.csv",
-          type: 'text/csv',
-          disposition: 'attachment'
-      rescue => e
+        send_export(export)
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Not found' }, status: :not_found
+      rescue ArgumentError => e
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
@@ -239,6 +222,12 @@ module Api
       end
 
       private
+
+      def send_export(export)
+        response.headers['X-Export-Total'] = export.total.to_s
+        response.headers['X-Export-Rows'] = export.rows.to_s
+        send_data export.csv, filename: export.filename, type: 'text/csv', disposition: 'attachment'
+      end
 
       # A report reads the same records as the module's own list, so it needs
       # the same read permission. Reports used to need none, which let anyone

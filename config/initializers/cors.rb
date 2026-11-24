@@ -43,7 +43,7 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              headers: :any,
              methods: [:get, :post, :put, :patch, :delete, :options, :head],
              credentials: true,
-             expose: ['Content-Type', 'Authorization', 'Content-Disposition']
+             expose: ['Content-Type', 'Authorization', 'Content-Disposition', 'X-Export-Total', 'X-Export-Rows']
   end
 
   # Tenant sites, on any hostname.
