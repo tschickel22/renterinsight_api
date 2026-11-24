@@ -4,7 +4,7 @@ module Api
       before_action :set_company_scope
       before_action :set_agreement, only: [
         :show, :update, :destroy, :send_agreement, :sign_in_person, :void, :remind, :remind_signer,
-        :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature, :preparer_sign,
+        :duplicate, :save_as_template, :audit_log, :download, :print_copy, :certificate, :prepare_signature, :preparer_sign,
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
         :calculate, :vision_scan, :upload_signed_document,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
@@ -636,6 +636,21 @@ module Api
         # inline: View opens the PDF in a browser tab; the default saves it.
         disposition = params[:disposition] == 'inline' ? 'inline' : 'attachment'
         render json: { url: PrivateFiles.url(url, filename: filename, disposition: disposition), filename: filename }
+      end
+
+      # GET /api/v1/agreements/:id/print_copy
+      # The agreement filled in and drawn into its real PDF, for printing. Printing
+      # used to send pictures of the pages made at screen resolution, and the small
+      # print on a dealer's contract came out blurry on paper.
+      def print_copy
+        return unless authorize_action!('agreements', 'read')
+
+        pdf = AgreementPdfService.new(@agreement).print_copy_pdf
+        return render json: { error: 'This agreement has no PDF to print' }, status: :not_found if pdf.blank?
+
+        AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_DOWNLOADED, performed_by: current_user,
+                               metadata: { 'via' => 'print' })
+        send_data pdf, type: 'application/pdf', disposition: 'inline', filename: "#{@agreement.agreement_number}.pdf"
       end
 
       # GET /api/v1/agreements/:id/share_options
