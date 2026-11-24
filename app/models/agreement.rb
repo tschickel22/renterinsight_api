@@ -65,8 +65,16 @@ class Agreement < ApplicationRecord
   validates :title, presence: true
   validate :linked_records_in_company
 
-  # Metadata the server writes about the Deal Sheet; clients never set it.
-  SERVER_METADATA_KEYS = %w[deal_sheet packet buyer_change_order deal_sheet_unlocked deal_sheet_not_applied].freeze
+  # Metadata the server writes (the Deal Sheet, and which save of the draft this is);
+  # clients never set it.
+  SERVER_METADATA_KEYS = %w[deal_sheet packet buyer_change_order deal_sheet_unlocked deal_sheet_not_applied
+                            edit_version last_edited_by].freeze
+
+  # How many times the builder has saved this draft. A window that saves with an older
+  # number is holding a stale copy: it would put back what someone else changed.
+  def edit_version
+    metadata.to_h['edit_version'].to_i
+  end
   validates :agreement_number, uniqueness: { scope: :company_id }, allow_nil: true
   before_validation :generate_agreement_number, on: :create
   before_validation :normalize_content_type
