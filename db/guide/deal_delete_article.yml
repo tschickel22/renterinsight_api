@@ -1,0 +1,42 @@
+# Delete a deal (backlog E118). Help said deals could not be deleted
+# (staging, 2026-11-24) because no article covered the Delete button.
+# Loaded by db/migrate/20261125030000_load_deal_delete_help_article.rb
+# (Guide::ArticleLoader, insert only by slug). Written from the code:
+# Deals::Deletion, Api::Crm::DealsController#destroy, DeleteDealButton.
+# Write the product name as {{brand}}. No em or en dashes.
+
+articles:
+  - slug: delete-a-deal
+    module: deals
+    title: Delete a deal
+    article_type: how_to
+    position: 60
+    excerpt: Delete a deal from its page or from the deals list, and what has to be undone first.
+    content: |
+      You can delete a deal for good. It cannot be undone. The buyer, the home and any project stay; only the deal goes.
+
+      ## Where
+
+      - **On the deal's page:** click **Delete** at the top, beside **Edit Deal**. {{brand}} checks the deal first. If nothing is in the way, click **Delete for good**.
+      - **From the deals list:** click the trash can (**Delete deal**) on the deal's row. To delete several, tick them and use the delete action for the selected deals.
+      - **On an account or contact:** the **Deals** section there can delete a deal too.
+
+      Deleting needs permission to delete deals. If you do not see **Delete**, your role does not include it; your admin can help.
+
+      ## When a deal can't be deleted yet
+
+      A deal that carries money or paperwork has to be cleared first. The deal's **Delete** tells you exactly what is in the way:
+
+      - Accounting entries posted for it (void or reverse them)
+      - Payments recorded on it (void them)
+      - Invoices past draft (cancel them)
+      - Bank feed lines applied to it (unapply them)
+      - Commissions on it (cancel them)
+      - Agreements signed or out for signature (void them)
+      - A loan against it (cancel it)
+
+      ## What goes with it
+
+      Draft or cancelled invoices made for the deal are removed with it. Agreements and voided accounting entries stay, no longer linked to the deal.
+
+      If you only want the deal out of your active pipeline, move it to a lost stage instead; that keeps its history.

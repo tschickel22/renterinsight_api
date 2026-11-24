@@ -78,3 +78,8 @@
   keywords: [paid when funded, paid after install, payable after funding, commission after full payment]
   offered: false
   nearest: "Commission becomes payable when the deal is approved to the books or when the deal closes (set per company or per plan). Managers approve payments before they are paid."
+
+- topic: "Delete a deal"
+  keywords: [delete a deal, delete deal, remove a deal, delete deals]
+  offered: true
+  nearest: "Delete on the deal's page, the trash can on the deals list, or the Deals section of an account or contact. Payments, posted entries, invoices past draft, commissions, signed agreements and loans must be undone first."

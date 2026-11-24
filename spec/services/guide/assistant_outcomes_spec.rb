@@ -43,9 +43,22 @@ RSpec.describe Guide::Assistant do
     expect(result.answer).to eq(described_class::FIXED_ANSWERS['needs_support'])
   end
 
-  it 'will not say "we don\'t offer that" without the list saying so' do
+  it 'will not say "we don\'t offer that" without the list saying so, in the outcome or the words' do
     result = ask({ 'answer_markdown' => 'We do not offer invoices.', 'outcome' => 'not_offered' })
     expect(result.outcome).to eq('no_help')
+    expect(result.answer).to eq(described_class::UNCONFIRMED)
+  end
+
+  it 'catches the claim under another outcome too (how do I delete a deal, staging 2026-11-24)' do
+    brand = Brand.current(company: company).name
+    result = ask({ 'answer_markdown' => "#{brand} does not offer a way to permanently delete a deal.", 'outcome' => 'no_help' })
+    expect(result.answer).to eq(described_class::UNCONFIRMED)
+  end
+
+  it 'leaves a fact about a record alone' do
+    result = ask({ 'answer_markdown' => "It doesn't have a selling price yet, so approving it would post no sale.", 'outcome' => 'answered' })
+    expect(result.answer).to include('selling price')
+    expect(result.outcome).to eq('answered')
   end
 
   it 'says a feature is not offered when the list says so' do
@@ -76,6 +89,10 @@ RSpec.describe Guide::ProductFacts do
   it 'knows what is offered' do
     matches = described_class.call('can we add followers to a deal')[:matches]
     expect(matches.first[:offered]).to be(true)
+  end
+
+  it 'knows deals can be deleted' do
+    expect(described_class.call('how do I delete a deal')[:matches].first).to include(offered: true)
   end
 
   it 'admits when it has nothing on record' do
