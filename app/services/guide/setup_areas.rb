@@ -24,7 +24,7 @@ module Guide
       'crm.prospecting' => { resource: 'leads', facts: %i[lead_sources lead_statuses intake_forms custom_fields_leads marketing_consent lead_feeds] },
       'crm.accounts' => { resource: 'crm', facts: %i[your_terms custom_fields_accounts account_count] },
       'crm.contacts' => { resource: 'crm', facts: %i[your_terms custom_fields_contacts contact_count] },
-      'crm.deals' => { resource: 'deals', facts: %i[deal_stages custom_fields_deals fee_templates package_templates lenders] },
+      'crm.deals' => { resource: 'deals', reader: 'Guide::Setup::DealSheet' },
       'crm.quotes' => { resource: 'quotes', facts: %i[quote_defaults] },
       'sales.configurator' => { resource: 'configurator', facts: %i[truebuild_factories markup_rules surcharge_rules truebuild_addons] },
       'sales.truebuild_embed' => { resource: 'configurator', facts: %i[embed_inventory] },
@@ -49,15 +49,15 @@ module Guide
       'marketing.campaigns' => { resource: 'campaigns', facts: %i[campaign_counts audiences email_sending] },
       'marketing.automation' => { resource: 'campaigns', facts: %i[campaign_counts] },
       'marketing.landing_pages' => { resource: 'websites', facts: %i[websites] },
-      'marketing.text_us' => { resource: 'websites', facts: %i[texting] },
-      'marketing.lead_assistant' => { resource: 'company_settings', facts: %i[lead_assistant texting] },
+      'marketing.text_us' => { resource: 'websites', reader: 'Guide::Setup::Texting' },
+      'marketing.lead_assistant' => { resource: 'company_settings', facts: %i[lead_assistant phone_and_texting] },
       'marketing.proactive_outreach' => { resource: 'company_settings', facts: %i[lead_assistant] },
       'marketing.ai_concierge' => { resource: 'company_settings', facts: %i[lead_assistant] },
       'marketing.sending_domain' => { resource: 'company_settings', facts: %i[email_sending] },
 
       # Finance
       'finance.loans' => { resource: 'loans', facts: %i[loan_counts] },
-      'finance.agreements' => { resource: 'agreements', facts: %i[agreement_templates] },
+      'finance.agreements' => { resource: 'agreements', reader: 'Guide::Setup::Agreements' },
       'finance.invoices' => { resource: 'invoices', facts: %i[invoice_posting invoice_templates draw_schedules] },
       'finance.documents' => { resource: 'documents', facts: %i[document_storage] },
       'finance.applications' => { resource: 'finance', facts: %i[lenders] },
@@ -82,7 +82,7 @@ module Guide
       'management.territories' => { resource: 'settings', facts: %i[territories] },
 
       # Administration
-      'admin.settings' => { resource: 'company_settings', facts: %i[company_profile your_terms business_hours texting email_sending] },
+      'admin.settings' => { resource: 'company_settings', facts: %i[company_profile your_terms business_hours phone_and_texting email_sending] },
       'admin.users' => { resource: 'users', facts: %i[users_by_role] },
       'admin.locations' => { resource: 'locations', facts: %i[locations] },
       'admin.roles' => { resource: 'users', facts: %i[roles] },
@@ -264,14 +264,9 @@ module Guide
         enabled: email['isEnabled'] }.compact
     end
 
-    # Named fields only: this setting also holds the Twilio auth token.
-    def texting
-      sms = ((setting('communications') || {})['sms'] || {})
-      numbers = @company.twilio_accounts.order(:id).map do |t|
-        { number: t.phone_number, status: t.status, location: t.location_id ? location_names[t.location_id] : 'whole company' }
-      end
-      { from_number_in_settings: sms['fromNumber'], enabled: sms['isEnabled'], connected_numbers: numbers }.compact
-    end
+
+    # Company Settings carries texting and the phone system too.
+    def phone_and_texting = Guide::Setup::Texting.new(@ctx).to_h
 
     def lead_assistant
       ModuleAccessService.new(@company).has_module?('marketing.lead_assistant') ? 'on the plan; settings under Marketing, Quinn AI' : 'not on the plan'
@@ -279,13 +274,6 @@ module Guide
 
     def loan_counts = live(@company.loans).group(:status).count
 
-    def agreement_templates
-      live(@company.agreement_templates).order(:name).limit(30).map do |t|
-        signers = Array(t.default_signers).map { |s| s.is_a?(Hash) ? (s['role'] || s['label'] || s['type']) : s }.compact
-        { name: t.name, status: t.status, form: [t.form_type, t.form_number].compact.join(' ').presence,
-          signers: signers.presence, fields_mapped: Array(t.merge_field_placements).size }.compact
-      end
-    end
 
     def invoice_posting
       s = AccountingSettings.for_company(@company)

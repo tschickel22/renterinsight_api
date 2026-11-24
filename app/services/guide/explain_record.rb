@@ -292,13 +292,6 @@ module Guide
 
     # ---- agreement -----------------------------------------------------------
 
-    SOURCE_WORDS = {
-      'contact' => "the buyer's contact record", 'co_buyer' => "the co-buyer's contact record", 'account' => 'the account',
-      'deal' => 'the deal', 'vehicle' => 'the home on the deal', 'home' => 'the home on the deal',
-      'company' => 'your company settings', 'location' => 'the location on the agreement', 'signer' => 'the signer, when they sign',
-      'date' => 'the date', 'quote' => 'the quote', 'custom' => 'a custom field typed on the agreement',
-      'company_logo' => 'your logo'
-    }.freeze
 
     def explain_agreement(id)
       @ctx.authorize!('agreements', 'read')
@@ -319,11 +312,10 @@ module Guide
     def field_source(placement, signers)
       p = placement.respond_to?(:to_h) ? placement.to_h.stringify_keys : {}
       key = p['fieldKey'].to_s
-      prefix = key.split('.').first.to_s
       signer = p['signerIndex'] && signers[p['signerIndex'].to_i]
       {
         label: p['fieldLabel'].presence || key, key: key, page: p['page'] && p['page'].to_i + 1,
-        filled_from: p['isCustomField'] ? SOURCE_WORDS['custom'] : (SOURCE_WORDS[prefix] || key),
+        filled_from: Guide::FieldSources.describe(key, custom: p['isCustomField']),
         filled_by_signer: p['isSignerField'] ? (signer ? "slot #{p['signerIndex'].to_i + 1} (#{signer.role})" : "slot #{p['signerIndex'].to_i + 1}, no signer there") : nil
       }.compact
     end
