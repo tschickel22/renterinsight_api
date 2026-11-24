@@ -1120,6 +1120,9 @@ module Truebuild
     end
 
     def add_line(**attrs)
+      # No book prices freight on a home typed by hand, so the line starts at 0 to the buyer
+      # instead of no price, which left the contract total Incomplete. The rep types the charge.
+      attrs = { unit_retail: 0, unit_cost: 0 }.merge(attrs) if attrs[:kind] == 'freight' && manual_home?
       @build.lines.create!(position: next_position, **attrs)
     end
 
