@@ -507,9 +507,11 @@ module Truebuild
     end
 
     # Lines the deal carries on their own: everything but the home itself.
-    # Freight is one of them (Easy Homesource, 2026-11-24): folded into the
-    # home's price it counted toward commission plans paid on the home only
-    # (house profit), and their reps are not paid on freight.
+    # Freight charged to the buyer is one of them (Easy Homesource,
+    # 2026-11-24): folded into the home's price it counted toward commission
+    # plans paid on the home only (house profit), and their reps are not paid
+    # on freight. What the dealer pays for freight stays in the home's cost,
+    # so that commission is the home's price less the total dealer cost.
     HOME_KINDS = %w[base option].freeze
 
     def write_deal!(deal)
@@ -1037,6 +1039,7 @@ module Truebuild
       # still unpriced there is no gross: the home carries what is priced so far.
       price = totals['gross'] ? totals['gross'].to_d - extras.sum { |l| l.retail.to_d } : core.sum { |l| l.retail.to_d }
       cost = core.sum { |l| l.cost.to_d }
+      cost += extras.select { |l| l.kind == 'freight' }.sum { |l| l.cost.to_d } # freight you pay is a cost of the home
       # A home on the lot keeps what it really cost the dealer.
       if (lot = lot_home_cost(core))
         cost += lot.to_d - core.find { |l| l.kind == 'base' }.cost.to_d
@@ -1061,7 +1064,8 @@ module Truebuild
                  else %w[setup delivery utility_connection].include?(line.tax_category) ? 'service' : (line.tax_category == 'fee' ? 'fee' : 'other')
                  end
       name = line.quantity == 1 ? line.label : "#{line.label} (#{line.quantity.to_d.to_s('F').sub(/\.0\z/, '')} #{line.unit})"
-      attrs = { product_name: name, unit_price: line.retail.to_d, cost: line.cost.to_d, quantity: 1, discount: 0,
+      # Freight's cost rides on the home line (write_home_line); this line is what the buyer pays for it.
+      attrs = { product_name: name, unit_price: line.retail.to_d, cost: line.kind == 'freight' ? 0 : line.cost.to_d, quantity: 1, discount: 0,
                 discount_type: 'fixed', source_type: line.kind == 'template' ? 'template' : 'home_build',
                 notes: tagged_notes(dp&.notes, category, line.id) }
       if dp
