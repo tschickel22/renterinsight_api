@@ -23,6 +23,9 @@ module Guide
     HISTORY = 12
     # Said when Claude replies without an answer: never stored empty.
     NO_ANSWER = 'I could not find an answer to that in the help. Try asking it another way, or open Help to search.'
+    # Said instead of an unconfirmed "we don't offer that".
+    UNCONFIRMED = "I couldn't find that in the help or the screens I can see, so I won't guess whether it can be done. " \
+                  "I've noted the question so the help gets written. Support can tell you in the meantime."
 
     OUTCOMES = %w[answered needs_detail no_help not_offered looks_wrong needs_support].freeze
 
@@ -40,7 +43,7 @@ module Guide
       - Use your tools before answering: find_place for where something is, search_help for how to do it and how the product works, search_videos for a how-to.
       - When the answer depends on how this dealership set something up (how their commissions are figured, which account a payment posts to, their tax setup, their texting numbers, their agreement templates), call my_setup for that module and answer from what it returns. Say what their setup actually is, not what it could be.
       - When they ask why a particular record came out the way it did (why is this deal's tax missing, how was this commission figured, why isn't this invoice in the books, what posted this entry, where does this agreement field come from), call explain_record for it. To find or list records, use look_up. The page they are on is given at the start of the question (for example /deals/659 or /accounting/journal-entries/16); use it to find the record they mean, and ask for the number only if the page does not show it.
-      - When they ask whether {{brand}} can do something, call product_facts. Say "{{brand}} doesn't do that today" ONLY when product_facts returns it with offered false, then give the nearest thing it does, and use outcome not_offered.
+      - When they ask whether {{brand}} can do something, or how to do something you find no article for, call find_place and product_facts before answering. A button, page or action find_place returns means it can be done: say where. Say "{{brand}} doesn't do that today" ONLY when product_facts returns it with offered false, then give the nearest thing it does, and use outcome not_offered. Never say it cannot be done because the help has no article on it.
       - Answer only from what the tools return and what the person told you. Never invent a menu path, button, field, report, setting or number. If the tools do not cover it, say plainly that you do not know and use outcome no_help. Do not guess, and do not offer a possible cause the tools did not give: when two figures do not agree and the tools do not say why, say that they differ and that you are passing it to support (outcome looks_wrong).
       - If you need one more thing from them to answer (which deal, which location), ask one short question and use outcome needs_detail.
       - Never say something is broken, a bug, or not working. If what they describe does not match what the help, the product or their own setup says, use outcome looks_wrong and put what looked off in assistant_reason.
@@ -316,8 +319,14 @@ module Guide
     def finish(input)
       outcome = outcome_of(input)
       answer = clean(input['answer_markdown'])
-      # "We don't offer that" only on the maintained list's word.
-      outcome = 'no_help' if outcome == 'not_offered' && !@not_offered_seen
+      # "We don't offer that" only on the maintained list's word. When the list
+      # did not say so, the claim goes too, not just the outcome: on staging
+      # "how do I delete a deal" showed "DealerTide does not offer a way to
+      # delete a deal" while Delete was on every deal.
+      if !@not_offered_seen && (outcome == 'not_offered' || claims_not_offered?(answer))
+        outcome = 'no_help'
+        answer = UNCONFIRMED
+      end
       outcome = 'no_help' if outcome == 'answered' && answer.blank?
       answer = FIXED_ANSWERS[outcome] if FIXED_ANSWERS.key?(outcome)
 
@@ -335,6 +344,14 @@ module Guide
         videos: videos, outcome: outcome, assistant_reason: input['assistant_reason'].to_s.first(1_000).presence,
         trace: @trace, input_tokens: billed_input_tokens, output_tokens: @usage[:output], cache_read_tokens: @usage[:cache_read]
       )
+    end
+
+    # "DealerTide does not offer a way to...": a claim the product cannot do
+    # something, whatever outcome it came with. About the product only, never
+    # a record ("it doesn't have a selling price" is a fact about a deal).
+    def claims_not_offered?(answer)
+      brand = Regexp.escape(Brand.current(company: @company).name.to_s)
+      answer.to_s.match?(/(#{brand}|the system|the app|the software)\s+(does not|doesn't|cannot|can't)\s+(offer|support|allow|let you|have a way)/i)
     end
 
     def clean(text)
