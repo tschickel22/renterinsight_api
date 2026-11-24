@@ -160,6 +160,49 @@ class AgreementPdfService
     }
   end
 
+  # A filled copy to print on paper. The browser used to print pictures of the pages
+  # made at screen resolution, which came out blurry (Coastal Breeze, 2026-11-24).
+  # This draws the same values the sealed copy carries into the real PDF as text, so
+  # it prints sharp at any size. Anyone who has signed already is drawn in; other
+  # signature lines stay blank for wet signatures. No certificate page, nothing saved.
+  # A completed agreement prints its sealed copy as it is.
+  #
+  # @return [String, nil] PDF bytes
+  def print_copy_pdf
+    return download_pdf(@agreement.sealed_document_url) if @agreement.sealed_document_url.present?
+
+    source_url = effective_document_url
+    return nil if source_url.blank?
+
+    source_data = download_pdf(source_url)
+    return nil unless source_data
+
+    values_map = build_values_map
+    signatures_map = build_signatures_map
+    placements_by_page = combined_field_placements.group_by { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }
+    return source_data if placements_by_page.empty?
+
+    begin
+      pdf = CombinePDF.parse(source_data)
+      pdf.pages.each_with_index do |page, page_index|
+        page_placements = placements_by_page[page_index]
+        next if page_placements.blank?
+
+        box = page[:MediaBox] || page[:CropBox] || [0, 0, 612, 792]
+        overlay = create_page_overlay(page_placements, (box[2] - box[0]).to_f, (box[3] - box[1]).to_f, values_map, signatures_map)
+        overlay_page = overlay && CombinePDF.parse(overlay).pages.first
+        page << overlay_page if overlay_page
+      end
+      pdf.to_pdf
+    rescue CombinePDF::ParsingError
+      # Forms with optional content (Form 500) need qpdf, as sealing does.
+      print_copy_with_qpdf(source_data, placements_by_page, values_map, signatures_map)
+    end
+  rescue => e
+    Rails.logger.error("[AgreementPdfService] Print copy failed for agreement #{@agreement.id}: #{e.class}: #{e.message}")
+    nil
+  end
+
   private
 
   def effective_document_url
@@ -679,6 +722,39 @@ class AgreementPdfService
   rescue => e
     Rails.logger.warn("[AgreementPdfService] Image download error: #{e.class}: #{e.message}")
     nil
+  end
+
+  # The qpdf path of print_copy_pdf: the same steps as seal_with_qpdf, without the
+  # certificate page or the upload.
+  def print_copy_with_qpdf(source_data, placements_by_page, values_map, signatures_map)
+    Dir.mktmpdir('print') do |tmpdir|
+      source_path = File.join(tmpdir, 'source.pdf')
+      File.binwrite(source_path, source_data)
+      flat_path = File.join(tmpdir, 'flattened.pdf')
+      _out, _err, status = Open3.capture3('qpdf', source_path, '--flatten-annotations=all', flat_path)
+      current_path = status.success? ? flat_path : source_path
+      reader = PDF::Reader.new(current_path)
+
+      placements_by_page.sort.each do |page_index, page_placements|
+        next if page_placements.blank? || page_index >= reader.page_count
+
+        box = reader.pages[page_index].attributes[:MediaBox] || [0, 0, 612, 792]
+        overlay = create_page_overlay(page_placements, (box[2] - box[0]).to_f, (box[3] - box[1]).to_f, values_map, signatures_map)
+        next unless overlay
+
+        overlay_path = File.join(tmpdir, "overlay_#{page_index}.pdf")
+        File.binwrite(overlay_path, overlay)
+        output_path = File.join(tmpdir, "stamped_#{page_index}.pdf")
+        _out, err, status = Open3.capture3('qpdf', current_path, '--overlay', overlay_path, '--from=1', "--to=#{page_index + 1}", '--', output_path)
+        unless status.success?
+          Rails.logger.error("[AgreementPdfService] Print copy qpdf overlay failed on page #{page_index}: #{err.strip}")
+          return nil
+        end
+        current_path = output_path
+      end
+
+      File.binread(current_path)
+    end
   end
 
   # ── Upload to the private bucket ─────────────────────────────────────

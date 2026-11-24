@@ -2348,6 +2348,8 @@ Rails.application.routes.draw do
           post :save_as_template
           get :audit_log
           get :download
+          # A filled copy drawn as real PDF text, for printing on paper.
+          get :print_copy
           get :share_options
           post :share
           post :locked_copy
