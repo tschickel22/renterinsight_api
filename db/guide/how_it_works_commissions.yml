@@ -134,7 +134,9 @@ articles:
 
       ## The books
 
-      When accounting approves a deal, the closing journal entry includes the **Commission Amount** shown in the **Review & Approve Deal** window, when it is more than zero: a debit to account 6010 and a credit to account 2020, if your chart of accounts has both. Marking a commission payment paid does not write a journal entry.
+      Commission is booked once, when accounting approves the deal with **Approve & Post to GL**: right after the closing entry, one entry debits **6010 Sales Commissions** and credits **2020 Accrued Expenses** for what the deal's commission payments add up to. A deal with no plan books the **Commission Amount** typed in the **Review & Approve Deal** window.
+
+      If what is owed changes after approval (an adjustment, a correction to the deal, a payment cancelled or reversed), {{brand}} books only the difference, dated that day. **Approve** on the **Commission Approval** tab never books it a second time. Marking a commission payment paid does not write a journal entry: the amount stays in 2020 until your payroll entry clears it.
 
       ## Reports and 1099
 

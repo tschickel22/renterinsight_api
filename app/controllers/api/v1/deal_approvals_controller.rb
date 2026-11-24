@@ -216,11 +216,22 @@ class Api::V1::DealApprovalsController < ApplicationController
         Rails.logger.error("[DealApprovals] Commission generation failed for deal #{@deal.id}: #{e.message}")
       end
 
+      funding_errors = []
+      # Commission is booked here, once, at approval (Tom, 2026-11-24). It is
+      # no longer in the closing entry. A deal with no plan books the
+      # commission amount typed at approval.
+      begin
+        accrual = Accounting::DealCommissionAccrual.new(@deal.reload).sync!(user: current_user)
+        funding_errors << accrual[:error] if accrual[:error]
+      rescue => e
+        Rails.logger.error("[DealApprovals] Commission accrual failed for deal #{@deal.id}: #{e.message}")
+        funding_errors << 'Commission was not booked. Use Approve on the Commission Approval tab to book it.'
+      end
+
       # Auto-create invoice with draw schedule. GL posting succeeded; treat invoice
       # creation as best-effort so a failure here never reverts the approval.
       invoice_id = nil
       invoice = nil
-      funding_errors = []
       replaced = replacing.filter_map do |inv|
         replace_invoice!(inv)
         inv.invoice_number
@@ -697,127 +708,27 @@ class Api::V1::DealApprovalsController < ApplicationController
     permitted
   end
 
-  # Resolves the GL account to use for a commission posting.
-  # Strategy: prefer an account whose name matches "<preferred_name>" (case-insensitive
-  # exact), else any account whose name contains "commission" with the matching type,
-  # else create at the preferred number if free, else create at the next available number.
-  def ensure_commission_account!(preferred_number:, preferred_name:, account_type:, sub_type:)
-    by_name = @company.chart_of_accounts.where('LOWER(name) = ?', preferred_name.downcase).first
-    return by_name if by_name
-
-    by_keyword = @company.chart_of_accounts
-                          .where(account_type: account_type)
-                          .where('LOWER(name) LIKE ?', '%commission%')
-                          .order(:account_number)
-                          .first
-    return by_keyword if by_keyword
-
-    if @company.chart_of_accounts.find_by(account_number: preferred_number).nil?
-      return @company.chart_of_accounts.create!(
-        account_number: preferred_number,
-        name: preferred_name,
-        account_type: account_type,
-        sub_type: sub_type,
-        normal_balance: account_type == 'expense' ? 'debit' : 'credit',
-        is_active: true,
-        is_header: false,
-        is_system: true
-      )
-    end
-
-    next_number = next_available_number(preferred_number)
-    return nil if next_number.nil?
-
-    @company.chart_of_accounts.create!(
-      account_number: next_number,
-      name: preferred_name,
-      account_type: account_type,
-      sub_type: sub_type,
-      normal_balance: account_type == 'expense' ? 'debit' : 'credit',
-      is_active: true,
-      is_header: false,
-      is_system: true
-    )
-  rescue ActiveRecord::RecordInvalid => e
-    Rails.logger.error("[DealApprovals] commission account creation failed: #{e.message}")
-    nil
-  end
-
-  def next_available_number(start_number)
-    base = start_number.to_i
-    (base + 1..base + 50).each do |candidate|
-      return candidate.to_s unless @company.chart_of_accounts.exists?(account_number: candidate.to_s)
-    end
-    nil
-  end
-
-  def deal_label(deal)
-    vehicle = deal.try(:vehicle)
-    title = deal.try(:title) || deal.try(:name)
-    vehicle ? "#{vehicle.try(:year)} #{vehicle.try(:make)} #{vehicle.try(:model)} — #{title}" : (title || "Deal ##{deal.id}")
-  end
-
-  def deal_close_date(deal)
-    (deal.try(:closed_at) || deal.try(:won_at) || deal.try(:actual_close_date))&.to_date || Date.current
-  end
-
-  # Posts the commission accrual JE for a single deal. Returns either
-  # { journal_entry: {...} } on success or { error: '...' } on failure.
+  # Books the deal's commission (Accounting::DealCommissionAccrual), the same
+  # single place approval books it, so approving commission here after the
+  # deal was approved never books it a second time. Returns
+  # { journal_entry: {...} } or { error: '...' }.
   def post_commission_for_deal(deal)
-    commission = (deal.try(:commission_amount) || 0).to_d
-    return { error: 'Deal has no commission to post' } if commission <= 0
-    return { error: 'Commission already posted' } if deal.try(:commission_posted)
+    accrual = Accounting::DealCommissionAccrual.new(deal)
+    return { error: 'Deal has no commission to post' } if accrual.owed_amount <= 0
 
-    expense_account = ensure_commission_account!(
-      preferred_number: '5200',
-      preferred_name: 'Commission Expense',
-      account_type: 'expense',
-      sub_type: 'operating_expense'
-    )
-    payable_account = ensure_commission_account!(
-      preferred_number: '2120',
-      preferred_name: 'Commission Payable',
-      account_type: 'liability',
-      sub_type: 'current_liability'
-    )
+    result = accrual.sync!(user: current_user)
+    return { error: result[:error] } if result[:error]
+    return { error: 'Commission already posted' } if result[:unchanged]
+    return { error: result[:skipped] } if result[:skipped]
 
-    return { error: 'Could not resolve commission GL accounts' } if expense_account.nil? || payable_account.nil?
-
-    service = Accounting::ManualPostingService.new(@company)
-    je = service.post_simple!(
-      debit_account: expense_account,
-      credit_account: payable_account,
-      amount: commission,
-      memo: "Commission accrual — #{deal_label(deal)}",
-      entry_date: deal_close_date(deal),
-      source_entity: deal,
-      location_id: deal.try(:location_id),
-      department: 'sales',
-      contact_id: deal.try(:contact_id),
-      deal_id: deal.id,
-      vehicle_id: deal.try(:vehicle_id),
-      posted_by: current_user
-    )
-
-    return { error: 'Failed to post commission journal entry' } if je.nil?
-
-    deal.update!(
-      commission_posted: true,
-      commission_posted_at: Time.current,
-      commission_journal_entry_id: je.id
-    )
-
+    je = result[:journal_entry]
+    line_for = ->(debit) { je.journal_entry_lines.detect { |l| (debit ? l.debit_amount : l.credit_amount).to_d.positive? }&.chart_of_account }
+    account_json = ->(a) { a && { id: a.id, account_number: a.account_number, name: a.name } }
     {
       journal_entry: {
-        id: je.id,
-        entry_date: je.entry_date,
-        memo: je.memo,
-        amount: commission,
-        debit_account: { id: expense_account.id, account_number: expense_account.account_number, name: expense_account.name },
-        credit_account: { id: payable_account.id, account_number: payable_account.account_number, name: payable_account.name }
+        id: je.id, entry_date: je.entry_date, memo: je.memo, amount: result[:posted].abs,
+        debit_account: account_json.call(line_for.call(true)), credit_account: account_json.call(line_for.call(false))
       }
     }
-  rescue ActiveRecord::RecordInvalid => e
-    { error: e.message }
   end
 end

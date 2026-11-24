@@ -73,6 +73,7 @@ class CommissionPaymentGeneratorService
     payments = []
     positions_by_person.each { |user_id, roles| process_person(user_id, roles, payments) }
     sync_deal_commission_amount
+    sync_commission_accrual
     payments.compact
   end
 
@@ -95,6 +96,7 @@ class CommissionPaymentGeneratorService
     end
     cancel_unpaid_for_people_off_the_deal(people.keys)
     sync_deal_commission_amount
+    sync_commission_accrual
   end
 
   def preview
@@ -246,6 +248,17 @@ class CommissionPaymentGeneratorService
 
     total = CommissionPayment.where(deal_id: @deal.id, is_deleted: [false, nil]).where.not(status: %w[reversed cancelled]).sum(:amount)
     @deal.update_columns(commission_amount: total) if total.positive?
+  end
+
+  # An approved deal's books follow its commission: a change after approval
+  # (an adjustment, a correction, a person added) books the difference.
+  def sync_commission_accrual
+    return unless @deal.is_a?(Deal) && @deal.persisted? && @deal.gl_posted?
+
+    result = Accounting::DealCommissionAccrual.new(@deal).sync!(user: Current.user)
+    Rails.logger.warn("[Commission] Deal #{@deal.id}: #{result[:error]}") if result[:error]
+  rescue StandardError => e
+    Rails.logger.error("[Commission] Deal #{@deal.id} accrual failed: #{e.class} #{e.message}")
   end
 
   def cancel_unpaid_for_people_off_the_deal(user_ids)

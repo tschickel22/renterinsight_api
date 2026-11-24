@@ -348,6 +348,8 @@ class Deal < ApplicationRecord
     # the gate consistent: commissions are generated on GL post, never merely on close.
     reload
     generate_commission_payments! if gl_posted?
+    # Commission is booked once, at approval, not in the closing entry.
+    Accounting::DealCommissionAccrual.new(self).sync!(user: try(:owner) || try(:user)) if gl_posted?
     # The approve action makes the deal's invoice; an auto-posted deal skips
     # that action, so it never got one and could not take a deal payment.
     begin
