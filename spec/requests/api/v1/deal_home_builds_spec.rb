@@ -199,12 +199,12 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
 
     products = deal.reload.deal_products.order(:id)
     home = products.find(&:home_line_item?)
-    expect(home).to have_attributes(unit_price: 68_156.25 - 2500 - 3600, cost: 49_645, discount: 10_985.4)
+    expect(home).to have_attributes(unit_price: 68_156.25 - 2500 - 3600, cost: 49_645 + 3000, discount: 10_985.4)
     expect(home.notes).to include('category:home', 'deal_sheet:home')
     expect(deal.selling_price.to_f).to eq((62_056.25 - 10_985.4).round(2))
     # Freight is its own line, so a plan paid on the home only leaves it out.
     freight = products.find { |dp| dp.product_name == 'Freight' }
-    expect(freight).to have_attributes(unit_price: 3600, cost: 3000)
+    expect(freight).to have_attributes(unit_price: 3600, cost: 0) # what freight costs the dealer stays on the home
     expect(freight.notes).to include('category:service', 'deal_sheet:')
     setup = products.find { |dp| dp.product_name == 'Set-up and blocking' }
     expect(setup).to have_attributes(unit_price: 2500, source_type: 'template')
@@ -237,12 +237,15 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     deal.reload
     home = deal.home_line_item
     freight_line = deal.deal_products.find { |dp| dp.product_name == 'Freight' }
-    expect(freight_line).to have_attributes(unit_price: 11_000, cost: 1500)
+    expect(freight_line).to have_attributes(unit_price: 11_000, cost: 0)
+    expect(home.cost).to eq(deal.home_build.lines.select { |l| %w[base option freight].include?(l.kind) }.sum { |l| l.cost.to_d })
 
+    # Easy Homesource: commission is the home's price less the total dealer cost (freight they pay
+    # included); the freight they charge the buyer is not in it.
     home_margin = (home.unit_price - home.discount - home.cost).round(2)
-    expect(deal.house_profit).to eq(home_margin)                       # Easy Homesource: no commission on freight
+    expect(deal.house_profit).to eq(home_margin)
     expect(deal.commission_gross('house_profit')).to eq(home_margin)
-    expect(deal.front_gross).to eq((home_margin + 11_000 - 1500).round(2)) # the books still count it
+    expect(deal.front_gross).to eq((home_margin + 11_000).round(2)) # the books still count it
     expect(deal.addon_gross).to eq(0)
 
     # The margin panel is told the plan pays on the home only.
@@ -412,8 +415,8 @@ RSpec.describe 'Api::V1::DealHomeBuilds', type: :request do
     home = line('Apex (2856H32P01)')
     patch "#{path}/lines/#{home['id']}", headers: headers, params: { unit_cost: 48_000 }.to_json
     expect(line('Apex (2856H32P01)')).to include('cost' => 48_000.0, 'set_cost' => true)
-    expect(deal.reload.deal_products.find(&:home_line_item?).cost.to_f).to eq(48_000 + 1100) # freight is its own line
-    expect(deal.deal_products.find { |dp| dp.product_name == 'Freight' }.cost.to_f).to eq(1650)
+    expect(deal.reload.deal_products.find(&:home_line_item?).cost.to_f).to eq(48_000 + 1100 + 1650) # freight you pay stays a cost of the home
+    expect(deal.deal_products.find { |dp| dp.product_name == 'Freight' }.cost.to_f).to eq(0)
 
     patch "#{path}/lines/#{id}", headers: headers, params: { unit_cost: nil, unit_retail: nil }.to_json
     expect(line(insulation.name)).to include('cost' => 1295.0, 'set_cost' => false, 'set_retail' => false)

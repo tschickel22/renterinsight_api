@@ -258,8 +258,7 @@ RSpec.describe 'Deal Sheet review fixes', type: :request do
       expect(response).to have_http_status(:ok)
       expect(body.dig('build', 'totals', 'contract_total')).to eq(before)
       freight = deal.home_build.reload.lines.find_by(kind: 'freight')&.cost.to_d
-      expect(deal.reload.home_line_item.cost).to eq(40_000) # freight is its own line
-      expect(deal.deal_products.find { |dp| dp.product_name == 'Freight' }&.cost.to_d).to eq(freight) if freight.positive?
+      expect(deal.reload.home_line_item.cost).to eq(40_000 + freight) # freight you pay stays a cost of the home
       expect(deal.home_build).to be_locked
     end
 
