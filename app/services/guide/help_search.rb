@@ -4,7 +4,9 @@ module Guide
   # Article lookup for the help assistant: the published articles that share
   # the most words with the question, with enough of each body to answer from.
   # Keyword based until an embedding provider is chosen (the pgvector column
-  # on knowledge_articles is waiting for it).
+  # on knowledge_articles is waiting for it). Scores up to 150 matches: with
+  # the how it works notes (E118) the old 40 could drop the best one before
+  # it was scored.
   class HelpSearch
     STOP = Knowledge::SmartSearchService::STOP_WORDS
 
@@ -15,7 +17,7 @@ module Guide
       clauses = terms.map { '(title ILIKE ? OR excerpt ILIKE ? OR content ILIKE ?)' }
       binds = terms.flat_map { |t| ["%#{Knowledge::Article.sanitize_sql_like(t)}%"] * 3 }
       candidates = Knowledge::Article.published.standalone
-                                     .where(clauses.join(' OR '), *binds).limit(40)
+                                     .where(clauses.join(' OR '), *binds).limit(150)
 
       candidates.map do |a|
         title = a.title.to_s.downcase
