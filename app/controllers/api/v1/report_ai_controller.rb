@@ -728,15 +728,20 @@ module Api
       def help_answer(question, log, required: false)
         answer = Guide::Assistant.new(user: current_user, company: @company, data_assistant: true)
                                  .ask(question, page: params[:page])
+        Guide::OutcomeRecorder.record!(result: answer, question: question, user: current_user, company_id: @company.id,
+                                       source: 'sparkle', page: params[:page], notify: !impersonating?)
         log.update_columns(
           resolved_intent: AiActionService::INTENT_HELP,
           execution_status: answer.answered ? 'success' : 'no_match',
-          failure_reason: answer.answered ? nil : 'help_not_found',
+          failure_reason: answer.answered ? nil : (answer.outcome == 'no_help' ? 'help_not_found' : answer.outcome),
           input_tokens: log.input_tokens.to_i + answer.input_tokens.to_i,
           output_tokens: log.output_tokens.to_i + answer.output_tokens.to_i,
           cost_cents: log.cost_cents.to_i + (Catalog::PriceBooks::ClaudeClient.cost_usd(answer.input_tokens.to_i, answer.output_tokens.to_i) * 100).round
         )
-        { answer: answer.answer, articles: answer.articles, places: answer.places, videos: answer.videos, answered: answer.answered }
+        # No conversation here to answer a follow-up in: a clarifying question
+        # offers to continue in the Help panel, where the thread is kept.
+        { answer: answer.answer, articles: answer.articles, places: answer.places, videos: answer.videos, answered: answer.answered,
+          outcome: answer.outcome, continue_in_help: answer.outcome == 'needs_detail' }
       rescue StandardError => e
         Rails.logger.error("[ReportAI#help_answer] #{e.class} #{e.message}")
         log.update_columns(execution_status: 'error', failure_reason: 'help_unavailable') if required

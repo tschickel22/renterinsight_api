@@ -1,0 +1,80 @@
+# What DealerTide does and does not do, for the help assistant's product_facts
+# tool (E118). Every plan module is already described by PlatformModule::MODULES;
+# this file adds what is NOT offered (so the assistant can say so plainly and log
+# a feature request) and notes that answer common "can it do X" questions.
+#
+# The assistant may only say "DealerTide doesn't do that" when an entry here says
+# offered: false. Keep entries short and true. When something ships, flip it to
+# offered: true with a line on where it lives, or delete it.
+#
+# keywords: words a dealer would use when asking.
+
+- topic: Lot map
+  keywords: [lot map, lot layout, site map of the lot, where homes sit on the lot]
+  offered: false
+  nearest: "Inventory shows each home's location; there is no visual lot map."
+
+- topic: PDI checklist module
+  keywords: [pdi, pre delivery inspection, pre-delivery inspection]
+  offered: false
+  nearest: "Track PDI as a phase or task on the home's project (Projects)."
+
+- topic: Delivery tracker module
+  keywords: [delivery tracker, delivery tracking, delivery schedule board]
+  offered: false
+  nearest: "Track delivery and setup as phases on the home's project (Projects), with dates and contractors."
+
+- topic: Property mapping
+  keywords: [property map, map of land, parcel map, map of lots for sale]
+  offered: false
+  nearest: "Land and lots are tracked as land parcels and land-home packages, without a map view."
+
+- topic: Multi-language
+  keywords: [spanish, multi language, multi-language, translate, translation, bilingual]
+  offered: false
+  nearest: "None today. Websites, forms, the portal and Quinn AI are in English."
+
+- topic: Collecting payments online
+  keywords: [take payments online, card payments, pay online, collect deposit online, ach payment, credit card processing, stripe payments]
+  offered: false
+  nearest: "Record payments and deposits on invoices and deals. Customers cannot pay by card or bank through DealerTide yet."
+
+- topic: Managed ad service
+  keywords: [run our ads for us, managed ads, ad agency, manage our facebook ads]
+  offered: false
+  nearest: "Social Media and Ads lets the dealer create and track Facebook ads and boosted posts themselves."
+
+- topic: Followers on records
+  keywords: [followers, follow a lead, secondary rep, watchers]
+  offered: true
+  nearest: "Leads, contacts, accounts and deals have followers, notified like the owner, with owner and follower filters on the lists."
+
+- topic: 3CX phone system
+  keywords: [3cx, phone system, call logging, caller id, pbx]
+  offered: true
+  nearest: "Settings, Phone System connects 3CX: caller lookup, calls logged to the lead or contact, and 3CX text conversations saved to the record."
+
+- topic: Office phone with extension for reps
+  keywords: [office number, extension, personal cell, rep phone shown to customers]
+  offered: true
+  nearest: "Each user can show customers the office number and extension instead of their own mobile."
+
+- topic: Hide serial numbers on the website
+  keywords: [hide serial, serial number on website, vin on website]
+  offered: true
+  nearest: "A website inventory setting (hide serial numbers) keeps serial numbers and VINs off the website."
+
+- topic: Commission splits, adjustments and payable timing
+  keywords: [split commission, 60/40, chargeback, commission adjustment, minimum commission, commission tiers]
+  offered: true
+  nearest: "Plan components can pay a minimum or maximum per deal and pay by gross bands (tiers). A deal can change the split between its two salespeople, a manager can add a one-off adjustment on the deal, and the company or the plan sets when commission becomes payable (when the deal is approved to the books, or when it closes)."
+
+- topic: Bulk change of inventory location
+  keywords: [move homes to another location, bulk location, change location for many homes]
+  offered: false
+  nearest: "Change the location on each home's record. Bulk edit does not change location."
+
+- topic: Commission payable only after funding or install
+  keywords: [paid when funded, paid after install, payable after funding, commission after full payment]
+  offered: false
+  nearest: "Commission becomes payable when the deal is approved to the books or when the deal closes (set per company or per plan). Managers approve payments before they are paid."

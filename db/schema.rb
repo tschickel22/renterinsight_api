@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_24_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_24_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3778,6 +3778,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_24_190000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "feature_key"], name: "index_guide_feature_usages_on_company_id_and_feature_key"
     t.index ["user_id", "feature_key"], name: "index_guide_feature_usages_on_user_id_and_feature_key", unique: true
+  end
+
+  create_table "guide_flags", force: :cascade do |t|
+    t.bigint "company_id"
+    t.bigint "user_id"
+    t.bigint "guide_conversation_id"
+    t.string "kind", null: false
+    t.string "status", default: "new", null: false
+    t.text "question", null: false
+    t.string "page"
+    t.string "source", default: "help", null: false
+    t.text "assistant_reason"
+    t.text "answer_shown"
+    t.jsonb "tool_trace", default: [], null: false
+    t.text "notes"
+    t.bigint "resolved_by_id"
+    t.datetime "resolved_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "created_at"], name: "index_guide_flags_on_company_id_and_created_at"
+    t.index ["kind", "status", "created_at"], name: "index_guide_flags_on_kind_and_status_and_created_at"
   end
 
   create_table "import_jobs", force: :cascade do |t|
