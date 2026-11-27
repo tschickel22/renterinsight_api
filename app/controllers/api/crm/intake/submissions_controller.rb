@@ -5,13 +5,15 @@ module Api
         include RbacAuthorization
         rbac_resource :crm,
           read_actions: [:index],
-          create_actions: [],
+          create_actions: [:create, :bulk],
           update_actions: [],
           delete_actions: []
 
-        # Public endpoints for external form submissions
-        skip_before_action :authenticate, only: [:create, :bulk]
-        before_action :set_company_scope, only: [:index]
+        # Signed in only, this company's forms only (2026-11-27). These were
+        # open to anyone and skipped the form's captcha; public pages submit
+        # through Public::FormsController (/f/:public_id), which checks it.
+        # The app's own Leads screen is the caller here.
+        before_action :set_company_scope
         
         def index
           # Get submissions through company's forms only
@@ -27,7 +29,7 @@ module Api
         
         # Public endpoint - form submissions from external sites
         def create
-          @form = IntakeForm.find_by(id: submission_params[:intake_form_id], is_active: true)
+          @form = @company.intake_forms.find_by(id: submission_params[:intake_form_id], is_active: true)
           
           unless @form
             render json: { 
@@ -67,7 +69,7 @@ module Api
           
           submissions_data.each do |sub_data|
             form_id = sub_data[:formId] || sub_data[:intake_form_id]
-            form = IntakeForm.find_by(id: form_id, is_active: true)
+            form = @company.intake_forms.find_by(id: form_id, is_active: true)
             
             unless form
               errors << { form_id: form_id, error: 'Form not found or inactive' }
@@ -138,9 +140,10 @@ module Api
 
         def submission_params
           params.permit(:intake_form_id, :formId, payload: {}).tap do |p|
-            if params[:payload].blank? && params.except(:intake_form_id, :formId, :controller, :action).any?
-              p[:payload] = params.except(:intake_form_id, :formId, :controller, :action)
-            end
+            # Fields posted at the top level are the payload (Parameters has
+            # no any?, so this used to raise on every such post).
+            loose = params.to_unsafe_h.except('intake_form_id', 'formId', 'controller', 'action', 'format', 'submission')
+            p[:payload] = loose if params[:payload].blank? && loose.any?
           end
         end
 
