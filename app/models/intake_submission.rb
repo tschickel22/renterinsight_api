@@ -82,8 +82,12 @@ class IntakeSubmission < ApplicationRecord
     #   2. location bound to the form itself (one-form-per-location setups)
     #   3. vehicle_location_id from an inventory embed
     #   4. company default location (safety net) so the lead stays visible
-    if submission_data['location_id'].present?
-      lead_data[:location_id] = submission_data['location_id'].to_i
+    # A posted location counts only if it is one of the form's company's
+    # (any location id used to be taken as given, 2026-11-27).
+    posted_location = submission_data['location_id'].presence &&
+                      Location.find_by(id: submission_data['location_id'].to_i, company_id: intake_form.company_id)
+    if posted_location
+      lead_data[:location_id] = posted_location.id
       Rails.logger.info "[IntakeSubmission] Assigning location_id from form picker: #{lead_data[:location_id]}"
     elsif form.respond_to?(:location_id) && form.location_id.present?
       lead_data[:location_id] = form.location_id

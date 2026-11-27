@@ -87,6 +87,12 @@ module Api
       
       # DELETE /api/portal/documents/:id
       def destroy
+        # A buyer may delete only what they uploaded, never a file the dealer
+        # shared with them (2026-11-27: any document on their portal).
+        unless @document.uploaded_by == 'buyer'
+          return render json: { ok: false, error: 'Only files you uploaded can be deleted' }, status: :forbidden
+        end
+
         @document.file.purge if @document.file.attached?
         @document.destroy
         
@@ -117,7 +123,7 @@ module Api
       end
       
       def document_params
-        params.permit(:file, :category, :description, :related_to_type, :related_to_id, :document_name, :notes, :admin_notes)
+        params.permit(:file, :category, :description, :related_to_type, :related_to_id, :document_name, :notes)  # admin_notes are the dealer's
       end
     end
   end

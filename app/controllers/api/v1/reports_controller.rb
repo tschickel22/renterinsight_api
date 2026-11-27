@@ -4,7 +4,8 @@ module Api
   module V1
     class ReportsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_report, only: %i[show update destroy]
+      before_action :set_report, only: %i[update destroy]
+      before_action :set_visible_report, only: %i[show]
 
       # GET /api/v1/reports
       def index
@@ -13,19 +14,7 @@ module Api
         #   location → everyone at the same location
         #   company  → everyone in the company
         #   platform → everyone (cross-company; admin-only to set)
-        reports = @company.reports.active
-          .includes(:user)
-          .where(
-            "visibility = 'company' " \
-            "OR visibility = 'platform' " \
-            "OR (visibility = 'location' AND location_id = ?) " \
-            "OR user_id = ? " \
-            "OR shared_user_ids @> ?::jsonb",
-            Current.location_id,
-            current_user&.id,
-            [current_user&.id].to_json
-          )
-          .order(updated_at: :desc)
+        reports = visible_reports.includes(:user).order(updated_at: :desc)
 
         render json: reports.map { |r|
           creator = r.user
@@ -193,7 +182,7 @@ module Api
       # Server-side CSV export: up to ReportEngine::MAX_PER_PAGE rows, with
       # X-Export-Total and X-Export-Rows saying when the file was cut.
       def export
-        @report = @company.reports.active.find(params[:id])
+        @report = visible_reports_for_open.find(params[:id])
         cfg = @report.config || {}
         return unless authorize_report_module!(cfg['module_key'] || @report.module_key)
 
@@ -261,6 +250,33 @@ module Api
 
       def set_report
         @report = @company.reports.active.find(params[:id])
+      end
+
+      # Reports this person may see, the list's rule: company and platform
+      # ones, their location's, their own, and ones shared with them.
+      def visible_reports
+        @company.reports.active.where(
+          "visibility = 'company' " \
+          "OR visibility = 'platform' " \
+          "OR (visibility = 'location' AND location_id = ?) " \
+          "OR user_id = ? " \
+          "OR shared_user_ids @> ?::jsonb",
+          Current.location_id,
+          current_user&.id,
+          [current_user&.id].to_json
+        )
+      end
+
+      # Opening one by id follows the same rule (anyone in the company could
+      # open a private report by its id, 2026-11-27); admins, who can edit
+      # and delete any report, can open any.
+      def visible_reports_for_open
+        current_user&.effective_admin? ? @company.reports.active : visible_reports
+      end
+
+      def set_visible_report
+        @report = visible_reports_for_open.find_by(id: params[:id])
+        render json: { error: 'Report not found' }, status: :not_found unless @report
       end
 
       def report_params

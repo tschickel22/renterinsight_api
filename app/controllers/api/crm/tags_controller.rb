@@ -11,7 +11,16 @@ module Api
         delete_actions: [:destroy, :remove_assignment, :remove_from_lead]
 
       before_action :set_company_scope
-      before_action :set_tag, only: [:update, :destroy, :analytics]
+      before_action :set_tag, only: [:analytics]
+      # Editing or deleting a tag: this company's own tags only. Global tags
+      # (no company) are shared by every dealer, so only a platform admin
+      # may change them (2026-11-27: any company could).
+      before_action :set_own_tag, only: [:update, :destroy]
+
+      # Record types a tag can go on, each found through this company so an
+      # id from another dealer is never read or changed.
+      TAGGABLE = { 'Lead' => :leads, 'Contact' => :contacts, 'Account' => :accounts, 'Deal' => :deals,
+                   'Quote' => :quotes, 'Vehicle' => :vehicles }.freeze
 
       # ---------- Tag catalog ----------
       def index
@@ -93,35 +102,53 @@ module Api
         entity = resolve_entity!(params)
         tag    = resolve_tag!(params)
         a = TagAssignment.find_or_create_by!(tag: tag, entity_type: entity[:type], entity_id: entity[:id]) do |rec|
+          rec.company_id = @company.id
           rec.assigned_by = current_user&.id&.to_s || 'system'
           rec.assigned_at = Time.current
         end
         render json: assignment_json(a), status: :created
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Not found' }, status: :not_found
       rescue => e
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
       def remove_assignment
-        if params[:id]
-          TagAssignment.find(params[:id]).destroy!
+        # DELETE /tag_assignments/:id names an assignment. The lead, account
+        # and contact wrappers put the RECORD id in params[:id] too, so it is
+        # an assignment id only when no record is named (it used to delete
+        # assignment #<lead id>).
+        named_record = %i[lead_id leadId account_id accountId contact_id contactId entity_type entityType].any? { |k| params[k].present? }
+        if params[:id] && !named_record
+          assignment = TagAssignment.find(params[:id])
+          # The assignment's record must be this company's.
+          entity_scope(assignment.entity_type).find(assignment.entity_id)
+          assignment.destroy!
         else
           entity = resolve_entity!(params)
           tag    = resolve_tag!(params)
           TagAssignment.where(tag_id: tag.id, entity_type: entity[:type], entity_id: entity[:id]).delete_all
         end
         head :no_content
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Not found' }, status: :not_found
       end
 
       def entity_tags
         entity = resolve_entity!(params)
         assignments = TagAssignment.includes(:tag).for_entity(entity[:type], entity[:id])
         render json: assignments.map(&:tag).map { |t| tag_json(t) }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Not found' }, status: :not_found
       end
 
       # ---------- Analytics ----------
       def analytics
-        # Get all assignments for this tag
-        assignments = TagAssignment.where(tag_id: @tag.id)
+        # This company's uses of the tag only (a global tag is on every
+        # dealer's records). Older assignments have no company, so the
+        # record they are on decides.
+        mine = TAGGABLE.map { |type, assoc| TagAssignment.where(entity_type: type, entity_id: @company.public_send(assoc).select(:id)) }
+        assignments = TagAssignment.where(tag_id: @tag.id).where(id: mine.reduce { |a, b| a.or(b) }.select(:id))
         
         # Calculate entity breakdown
         entity_breakdown = {}
@@ -253,31 +280,56 @@ module Api
         end
       end
 
+      def set_own_tag
+        scope = current_user&.platform_admin? || current_user&.super_admin? ? Tag.for_company(@company.id) : @company.tags
+        @tag = scope.find_by(id: params[:id])
+        return if @tag
+
+        render json: { error: 'Tag not found or access denied' }, status: :not_found
+      end
+
       # Normalize entity inputs and classify the type ("lead" -> "Lead")
       def resolve_entity!(p)
         # Check for specific entity ID params first
         lead_id = p[:lead_id] || p[:leadId]
-        return { type: 'Lead', id: lead_id.to_i } if lead_id
-        
+        return checked_entity('Lead', lead_id) if lead_id
+
         account_id = p[:account_id] || p[:accountId]
-        return { type: 'Account', id: account_id.to_i } if account_id
-        
+        return checked_entity('Account', account_id) if account_id
+
         contact_id = p[:contact_id] || p[:contactId]
-        return { type: 'Contact', id: contact_id.to_i } if contact_id
+        return checked_entity('Contact', contact_id) if contact_id
         
         # Fallback to generic entity_type/entity_id
         etype = p[:entity_type] || p[:entityType]
         eid   = p[:entity_id]   || p[:entityId] || p[:id]
-        return { type: etype.to_s.classify, id: eid.to_i } if etype && eid
+        return checked_entity(etype.to_s.classify, eid) if etype && eid
 
         raise ArgumentError, "Missing entity (lead_id, account_id, contact_id, or entity_type/entity_id)"
+      end
+
+      # The record, found through this company, or RecordNotFound.
+      def checked_entity(type, id)
+        entity_scope(type).find(id.to_i)
+        { type: type, id: id.to_i }
+      end
+
+      def entity_scope(type)
+        assoc = TAGGABLE[type.to_s]
+        raise ActiveRecord::RecordNotFound, "Cannot tag #{type}" unless assoc
+
+        @company.public_send(assoc)
       end
 
       def resolve_tag!(p)
         tag_id = p[:tag_id] || p[:tagId] || (p[:tag].is_a?(Hash) && (p[:tag][:id] || p[:tag]['id'])) || p[:id]
         name   = p[:name] || (p[:tag].is_a?(Hash) && (p[:tag][:name] || p[:tag]['name']))
-        return Tag.find(tag_id) if tag_id.present?
-        return Tag.where('LOWER(name)=?', name.downcase).first || Tag.create!(name: name, color: '#6B7280', is_active: true, created_by: current_user&.id&.to_s || 'system') if name.present?
+        # This company's tags and the shared global ones, never another dealer's.
+        return Tag.for_company(@company.id).find(tag_id) if tag_id.present?
+        if name.present?
+          return Tag.for_company(@company.id).where('LOWER(name)=?', name.downcase).order(Arel.sql('company_id IS NULL')).first ||
+                 @company.tags.create!(name: name, color: '#6B7280', is_active: true, created_by: current_user&.id&.to_s || 'system')
+        end
         raise ArgumentError, "Provide tag_id or name"
       end
 

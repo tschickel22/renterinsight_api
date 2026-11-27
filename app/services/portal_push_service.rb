@@ -174,10 +174,12 @@ class PortalPushService
     # back to a portal login. Scoped by company because the same person can be a
     # customer of two dealers on the platform.
     def access_for_email(company_id, email)
-      return nil if email.blank?
+      return nil if email.blank? || company_id.blank?
 
-      BuyerPortalAccess.find_by(company_id: company_id, email: email.to_s.strip.downcase) ||
-        BuyerPortalAccess.find_by(email: email.to_s.strip.downcase)
+      # This company's login only. A fallback to any company's login with the
+      # same email used to push one dealer's documents and notices to the
+      # buyer's portal at another dealer (2026-11-27).
+      BuyerPortalAccess.find_by(company_id: company_id, email: email.to_s.strip.downcase)
     end
 
     def access_for_buyer(buyer)
