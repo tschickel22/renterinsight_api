@@ -1,0 +1,417 @@
+# "How it works" notes for marketing (backlog E118), written from the code on
+# 2026-11-27, every claim traced to a file and line. Published without review
+# (Tom, 2026-11-24): they state only what the code does.
+#
+# Loaded by db/migrate/20261127210000_load_module_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). covers_modules names the plan
+# modules each note covers; spec/services/guide/how_it_works_coverage_spec.rb
+# fails when an offered module has none. Write the product name as {{brand}}.
+# No em or en dashes.
+
+articles:
+  - slug: how-it-works-email-campaigns
+    module: communications
+    covers_modules: [marketing.campaigns]
+    title: "How it works: email campaigns"
+    article_type: concept
+    position: 340
+    excerpt: Who a campaign sends from, who it skips, and how fast it goes out.
+    content: |
+      **Marketing > Email Campaigns** sends email and text campaigns. It sends only while running: **Start**, **Pause** and **Resume** control it. **Send test** works on a draft and skips the consent check and sending schedule.
+
+      ## Who it sends from
+
+      - You choose the sender: a user, a location, the company, or **Recipient's owner (resolves at send time)**, which sends each email from that person's rep.
+      - If the sender's address is on a domain you verified under **Settings > Domains**, the email goes out through that domain with the same From address.
+      - Campaign email never goes out through a connected Google (Gmail) mailbox. A Gmail sender needs a verified sending domain. A connected Outlook mailbox can still send.
+      - With the recipient's owner as sender, a person whose owner has no working email connection is skipped for that email. (A Weekly homes email play instead sends it through your normal email settings.)
+      - If a single fixed sender stops working, the campaign pauses and records why. Everyone stays at their step until you fix it and click **Resume**.
+      - Texts send from your company's number, or the location's number.
+
+      ## Who it skips
+
+      - Anyone on the **Suppressions** list (in the Email Campaigns page menu): people who unsubscribed, replied STOP to a campaign text, hard bounced or reported spam. A hard bounce or spam report also blocks everyday email to that address. Only suppressions you added yourself can be removed.
+      - Every email carries an unsubscribe link and a one-click unsubscribe header. Unsubscribing also ends that address's other pending campaigns with you.
+      - Marketing consent is required unless turned off for your account: a person with no marketing opt-in (such as your form's consent box) is skipped. **Confirm (number) already opted in** records consent gathered elsewhere, under your name. People who opted out cannot be confirmed.
+      - Texts go only to people opted in to texts, unless written consent was acknowledged for the audience.
+
+      ## Pace and timing
+
+      - **Throttle per day** caps each campaign (500 by default).
+      - Each mailbox has limits shared by every campaign using it: by default 10 a minute and 200 an hour for a connected mailbox, 50 a minute and 2,000 an hour for a verified sending domain. Over a limit, sends wait.
+      - **Only send during business hours** (9 to 6 for email unless you set hours, with **Skip weekends**) uses the recipient's time zone.
+      - Texts never go out before 8 am or after 9 pm in the recipient's time.
+      - Once your monthly email allowance is used, campaign email waits for the first of next month.
+      - A soft bounce is retried an hour later, up to three times.
+
+  - slug: how-it-works-sending-domain
+    module: communications
+    covers_modules: [marketing.sending_domain]
+    title: "How it works: your email sending domain"
+    article_type: concept
+    position: 341
+    excerpt: Verify your own domain so campaign email goes out under your name and your DKIM instead of through a personal mailbox.
+    content: |
+      A sending domain lets campaigns send as your own business domain, signed with your own DKIM, so your sender reputation stays yours and a large send cannot get a rep's real mailbox blocked. It is set up under **Settings > Domains**, on the **Email Sending Domains** card.
+
+      ## Who has it
+
+      - A sending domain comes with Email Campaigns, Landing Pages, the Website Builder and Campaign Desk. Without one of those the card asks you to turn one on first.
+      - Setting it up needs permission to change company settings.
+
+      ## Setting it up
+
+      - Click **Add Sending Domain** and enter your domain. {{brand}} registers it with Amazon SES and shows the DNS records to publish at your DNS provider.
+      - The records include DKIM signing records. {{brand}} also sets a bounce subdomain (bounce.yourdomain) for return mail, but skips it if that subdomain already receives mail, so your existing mail is never replaced.
+      - Click **Check Status** to ask whether the domain is verified. Amazon SES decides; {{brand}} does not guess from its own DNS lookups.
+      - You do not have to come back: {{brand}} checks pending domains every 15 minutes on its own, for up to 7 days after the domain was added. Verification usually takes minutes but can take up to 72 hours.
+
+      ## Once it is verified
+
+      - The card says **Campaigns are sending from this domain.**
+      - Any campaign whose sender address is on that domain (or one of its subdomains) sends through it. The From address recipients see does not change.
+      - A sender on the domain can send campaigns even without a connected mailbox, because the address can come from the user, location or company record.
+      - This is the only way a dealer on Google (Gmail) can send campaigns, since campaign email never goes out through a connected Gmail mailbox.
+      - Sending through a domain is paced at up to 50 emails a minute, 2,000 an hour and 50,000 a day by default, instead of the lower mailbox limits.
+
+      ## Turning it off
+
+      - **Disable** removes the domain from Amazon SES. Campaigns fall back to connected mailboxes.
+      - If your plan changes, a domain you already verified keeps sending. The plan only controls verifying a new domain.
+
+  - slug: how-it-works-starter-plays
+    module: workflow_automation
+    covers_modules: [marketing.automation]
+    title: "How it works: Starter Plays (Campaign Desk)"
+    article_type: concept
+    position: 342
+    excerpt: A play turns on a full lead response, landing page or recurring email with a few answers, and builds the workflow, forms and follow-ups for you.
+    content: |
+      **Marketing > Starter Plays** is Campaign Desk. Each play is ready-made follow-up you turn on with a few answers. Click **Preview** to see every step and message first, then **Turn on**. After that, **Customize** changes any message or timing, **Duplicate** makes your own copy, and **Turn off** stops it. **Journey board** shows where leads are.
+
+      ## The plays
+
+      - **New Facebook lead**, **New website lead**, **Walk-in visit** and **Saved home design** (for dealers pricing with TrueBuild) respond to new leads.
+      - **Promo landing page** builds a page for one offer, with a form that files leads under the source Promo landing page.
+      - **Weekly homes email** sends homes on your lot every week, by default from each lead's rep.
+      - **Wake up cold leads** emails leads who go quiet.
+      - **Deal to sold** follows a won deal with onboarding emails, a review request and a referral ask.
+
+      ## What turning on a lead play builds
+
+      - An active workflow that starts when a new lead arrives from the play's sources, and a second one that starts when a lead gets the play's tag. **Start a play** on a lead does the same by hand.
+      - The intake forms, sources, tags and round robin lists it needs, or it runs on a form you already have.
+      - A follow-up email sequence that stops when the lead replies or converts.
+
+      ## What a lead play does to each lead
+
+      - Assigns a rep (keeping the rep a form already gave the lead), by location when you set rotations per location.
+      - Texts only a lead who ticked the box agreeing to texts about their inquiry (or gave the older combined consent before November 7, 2026). Marketing consent alone is not enough. Follow-up emails never text.
+      - Emails the lead, with the rep's booking link when the rep has one.
+      - Gives the rep a high priority call task (due 1 to 1,440 minutes later, or next day at a set time).
+      - Waits 1 to 168 hours for a reply. A reply gives the rep a follow-up task due within the hour; no reply starts the follow-up emails (up to 8).
+      - Tags the lead for the weekly homes email, at the end or, if you choose, as soon as a rep is assigned.
+
+      ## Rules worth knowing
+
+      - The same play cannot be turned on twice. Customize it instead.
+      - Customizing rebuilds the play in place. A lead already partway through keeps the version they started with.
+      - Turning off a lead play cancels messages already scheduled, stops its forms taking submissions and pauses its follow-up emails. Leads, tags, history and any form you already had stay.
+
+  - slug: how-it-works-website
+    module: website_builder
+    covers_modules: [marketing.website, marketing.text_us]
+    title: "How it works: your website"
+    article_type: concept
+    position: 345
+    excerpt: Your website is built and published in {{brand}}, shows your inventory, and sends every enquiry into your leads.
+    content: |
+      Your website is built and served by {{brand}}. Open it under **Marketing > Website**.
+
+      ## Its address
+
+      - Every new site gets an address on {{brand}}'s domain, made from the site name (or your company name).
+      - To use your own domain, click **Manage Domains** in the **Publish & Share** panel, which opens **Website Domains** in Company Settings.
+      - Your own domain is used once it is verified and its security certificate is active. {{brand}} checks a waiting domain every 10 minutes for 7 days after it was added, so you do not need to press anything once your DNS records are right.
+      - Only a published site answers at its address. **Unpublish** takes it offline at every address.
+
+      ## What it connects to
+
+      - **Leads:** the contact block on your site submits to one of your lead forms. When a site is created and you have no general contact form that asks for an email or phone, {{brand}} makes one called **Contact Us** (first name, last name, email, phone, message) that creates a lead for each enquiry. It has no one set to be notified until you choose someone on the form. A submission from someone already in your CRM is matched by email or phone instead of making a duplicate.
+      - **Inventory:** inventory sections show homes from your inventory. On the site's **Inventory** tab, **Show asking prices on this website** is one switch for every inventory section on that site, and **Hide from this website** rules or a single home's switch leave homes off that site only. The home stays in your inventory.
+      - **Hide serial numbers** leaves serial numbers and VINs out of everything public for the whole company, not just that site.
+
+      ## Who can change what
+
+      Your plan (or a level chosen for one site) sets your access: **View Only (Managed)** (preview, plus the blog, popup, featured homes, events and lot rent), **Content Editor** (also text, images and links) or **Full Editor** (the full builder).
+
+      Search settings and custom scripts on a site are changed by {{brand}} staff only. Your own saves keep what is there.
+
+      ## Text Us button
+
+      The **Floating Button** block (or the **Text Us Button** and **Call Now Button** in the library) pins a button to a corner of every page. **What the button does** can be **Text us (opens their SMS app)**, **Call us (dials the number)**, **Email us** or **Open a link**. A Text Us button opens the visitor's own messaging app addressed to the phone number you enter, with your **Pre-filled Message (optional)** already typed. The visitor sends it from their own phone; the website does not send or record it.
+
+  - slug: how-it-works-landing-pages
+    module: website_builder
+    covers_modules: [marketing.landing_pages]
+    title: "How it works: landing pages"
+    article_type: concept
+    position: 346
+    excerpt: A landing page is a single offer page with its own lead form, visitor tracking and Workqueue follow-up, and it does not need a website.
+    content: |
+      A landing page is a one-offer page with a form, under **Marketing > Landing Pages**. You do not need a {{brand}} website to publish one.
+
+      ## Where it lives
+
+      - The first time you create one, {{brand}} sets up a hidden home for all your landing pages, already published, with an address made from your company name ending in **-pages**. It never appears in your website list.
+      - A page is a **Draft** until you click **Publish**. If a page says it is published but there is no domain pointing there yet, nobody can reach it.
+      - Landing pages are kept out of site menus and are marked **noindex** when created, so search engines do not list them. They are meant for traffic from email, texts and ads.
+
+      ## Building one
+
+      - **New Landing Page** asks **What is this page for?** and can **Build from a scanned document**. **Build it** writes the page with AI, then **Pick a design** shows the same content in every layout. AI builds are limited per company each month (50 by default); past the limit the build is refused until the next month.
+      - **Import design** brings in a page designed elsewhere as it is. Images are stored by {{brand}} and scripts are removed, so a design that draws itself with scripts arrives blank.
+
+      ## Leads from the page
+
+      - Every new page gets its own lead form named after the page. Its leads are filed under the source **Landing Page** unless another source was chosen. The person who created the page is notified and becomes the owner of each new lead.
+      - Each submission creates a lead and an activity, or is matched to the existing person by email or phone.
+
+      ## Copies and locations
+
+      - **Duplicate** and **Clone to locations** make copies that start as drafts, so nothing goes live by itself. Clone to locations keeps the copy identical and changes only location details, uses no AI, and gives each location its own form unless you choose to share one. If one location fails, the others are still made.
+
+      ## Visitor tracking and follow-up
+
+      - {{brand}} records each visit: how far the visitor scrolled, video progress and whether they started the form. Obvious bots are flagged and left out of the Workqueue lists below.
+      - When a visitor submits the form, their earlier anonymous visits from the same browser (60 days back by default) are added to that lead.
+      - The Workqueue lists your own leads who visited a landing page today, and leads who in the last 7 days scrolled past 75%, watched half a video or started the form without sending it.
+      - **Compare performance** shows your pages side by side.
+
+  - slug: how-it-works-quinn-ai
+    module: ai
+    covers_modules: [marketing.lead_assistant, marketing.ai_concierge]
+    title: "How it works: Quinn AI texting, email and website chat"
+    article_type: concept
+    position: 350
+    excerpt: Quinn AI answers your leads by text, email and website chat from your own facts and homes, follows up until a visit is set, and hands buyers to your team.
+    content: |
+      Quinn AI is two add-ons outside every plan: **Quinn AI: Texting and Email** and **Quinn AI: Website Chat**. Both use **Company Settings > Customize > Marketing**. Conversations show in the **Inbox**.
+
+      ## Who Quinn texts
+
+      - Nothing is texted until you turn on **Answer new leads by text**.
+      - Quinn texts only leads who agreed to texts about their inquiry and have not opted out, never leads from partners with their own assistant. **Which leads** can limit it to chosen sources.
+      - With **Text new leads first** on, Quinn texts a new lead from a form, Facebook or the API two minutes after it arrives, unless someone already texted them. Imported and typed in leads are not texted first.
+      - It texts from your number, or a shared number naming your dealership. The first text ends with "Reply STOP to opt out."
+      - With **Quinn AI leads** chosen, text steps in your plays and nurtures are skipped for a lead Quinn is talking with.
+
+      ## How it answers
+
+      - A text is answered 20 to 45 seconds later; the website chat answers right away.
+      - Quinn answers only from your hours, address, brands, homes in stock, **Anything else it may tell buyers**, your saved answers and your websites' FAQ and About text.
+      - Each text is checked in code: 320 characters at most, no web address except a home's page on a number registered for links, and never a payment, rate, down payment or approval. A reply that fails twice goes to a person.
+
+      ## Follow-ups
+
+      - **Light** follows up on days 1, 4 and 10. **Standard** on days 1, 3, 7, 14, 21 and 30. **Persistent** adds days 45, 60 and 90.
+      - They stop for a booked visit, a person taking over, an opt out, or a closed lead, and wait out **Quiet hours** (9pm to 8am unless changed).
+
+      ## Visits and handing off
+
+      - With **Book visits** on, Quinn offers two open times and books a normal appointment with the lead's owner or the person under **Book with**.
+      - Quinn hands off when a buyer asks for a person, sounds upset, or asks about payments, credit, legal, warranty or a trade in value, plus your **Handing off** choices. **Who takes over** gets a notice. Once a rep replies, Quinn stays quiet.
+
+      ## Website chat
+
+      - It shows on sites {{brand}} hosts. For your own site, list it under **Your own website** and add the line shown; it answers only on listed sites.
+      - A lead is made once a visitor gives a name and email, or a mobile number with a yes to texts.
+      - A chat quiet for a day closes by itself.
+
+  - slug: how-it-works-proactive-outreach
+    module: communications
+    covers_modules: [marketing.proactive_outreach]
+    title: "How it works: Proactive Outreach"
+    article_type: concept
+    position: 351
+    excerpt: Proactive Outreach starts email and text conversations with a chosen group of new leads, sends only messages a person approved, and books demos.
+    content: |
+      Proactive Outreach starts conversations with leads nobody is working yet, answers their replies and books demos. It is not part of any plan; {{brand}} turns it on for an account. It is under **Marketing > Proactive Outreach**, with the tabs **Results**, **Audience and messages** and **Setup**.
+
+      ## Building a wave
+
+      - Click **Build an audience** and describe who you want. AI turns that into a filter and ranks the matches.
+      - A wave holds up to 100 people and sends at most 50 first messages a day.
+      - About half of the best matches are held back at random and never contacted, so **Results** can compare the two groups.
+      - Left out: converted leads, leads no longer New or with no owner, anyone opted out, on a campaign, nurture or workflow, in an open conversation, with a demo booked, in another wave, or with activity or a message from them in the last 30 days. Some can be added back by hand; opt outs, open conversations and booked demos cannot.
+      - Texts go only to leads who agreed to texts about their inquiry. A number or address that already failed or bounced is not used.
+
+      ## Nothing sends without approval
+
+      - Every first message is drafted for review. **Start the wave** works only once each is approved or skipped.
+      - **Setup** must be complete: a sender with a connected mailbox and video meeting link, a texting number, approved content, the objections playbook, product facts and a mailing address.
+      - Each message is checked in code: no prices, never claiming to be a person, never implying you have met.
+
+      ## When it sends
+
+      - First messages and follow-ups go out weekdays, 9am to 5pm in the lead's time zone (from their state, else yours).
+      - Follow-ups come 1, 2, 4, 7, 7 and 9 days apart while the lead is quiet, taking turns between email and text when both are allowed. After two unanswered texts, email only.
+      - The first text ends with "Reply STOP to opt out." Emails carry your mailing address, an unsubscribe link and the sender's booking page.
+      - Replies are answered 30 to 90 seconds later, between 8am and 9pm their time.
+
+      ## Stopping and handing off
+
+      - Follow-ups stop when a lead converts, closes, opts out, joins other automation or books a demo.
+      - Demos are booked as video calls on the sender's calendar, for the length set in **Setup**.
+      - A spam complaint, or too many bounces, unsubscribes or undelivered texts, sends the sender a notice. The wave keeps sending until you click **Pause**.
+      - Turning Proactive Outreach off pauses running waves.
+
+  - slug: how-it-works-home-listings
+    module: listings
+    covers_modules: [marketing.listings, marketing.syndication]
+    title: "How it works: home listings and listing partners"
+    article_type: concept
+    position: 352
+    excerpt: A listing is the public face of one home in your inventory, and published listings are what listing partner sites receive.
+    content: |
+      A listing is built from a home already in your inventory. You manage them under **Marketing > Home Listings**.
+
+      ## What a listing needs
+
+      - An offer type: for sale, for rent, or both.
+      - A sale listing needs a sale price above zero. A rental needs a rent price and a period (monthly, weekly or daily).
+      - A description is optional while you work, but if you enter one it must be 20 to 5,000 characters.
+      - **Publish** is refused until the listing has a description and the right price for its offer type.
+
+      ## Published or not
+
+      - A listing is either a draft, active (published), inactive, sold or rented. **Unpublish** sets it to inactive.
+      - Deleting a listing hides it and marks it inactive.
+      - The public listing page only opens for a published listing.
+
+      ## Sharing one listing
+
+      The **Share Link** card gives you the public link. **Send Listing** sends it by email, text or both. The home must have a published listing first.
+
+      - The email carries the first photo, the price, the location, up to five features, the description and a **View Full Listing** button.
+      - The text carries the home's year, make and model, the price and the link.
+      - Sent from a lead or a contact, the send is logged on that record.
+
+      ## Listing partners
+
+      Listing partner sites (such as MH Village or RVT) are set up by {{brand}} for every dealer and switched on or off for everyone. You cannot add or remove one yourself. See them under **Settings > Listing Partners**.
+
+      - When a partner is on, your published listings of the kinds it takes are sent to it. Switched off, it receives nothing.
+      - Manufactured home feeds carry homes for sale. The RVT feed carries RVs for sale. Rental feeds carry listings for rent.
+      - The feed is built fresh every time the site reads it, so publishing or unpublishing changes what the site gets on its next read.
+      - If you have your own account with a site that uses one, add your account number so the site can match the homes to you. Without one, your {{brand}} company number is sent. Only a company administrator can save it.
+      - Each listing's contact email and phone come from the listing itself, then the home's location, then your company.
+  - slug: how-it-works-brochures
+    module: brochures
+    covers_modules: [marketing.brochures]
+    title: "How it works: brochures"
+    article_type: concept
+    position: 353
+    excerpt: A brochure is a branded collection of homes with its own public link, and sending one tells you who opened it and which homes they clicked.
+    content: |
+      A brochure is a collection of homes laid out from a template. You make them under **Marketing > Brochures** with **Generate New Brochure**.
+
+      ## Prices
+
+      The **Prices** setting on each brochure is one of:
+
+      - **As the template says**
+      - **Show prices on this brochure**
+      - **Hide prices on this brochure**
+
+      Hidden prices are left out of the brochure page, its print and its email, and the payment calculator is turned off. A payment is a price, so it is hidden too.
+
+      The calculator otherwise uses your company's loan settings. Where those are blank it starts at 6.99% interest, a 240 month term and 10% down.
+
+      ## The public link
+
+      - The link opens only while the brochure is active. An inactive or deleted brochure's link stops working.
+      - Deleting a brochure archives it.
+      - Every open of the public page adds one to its **Views**. Every successful send adds one to its **Shares**.
+
+      ## Sending a brochure
+
+      **Share Brochure** sends it by email, text or both.
+
+      - Sent to a lead or a contact, the link is tracked for that person, with a separate link for email and for text. Each home inside the brochure gets its own tracked link too, so you can see which homes they clicked.
+      - The send is logged on the lead or contact.
+      - Sending to many leads at once skips leads that were already converted and leads with no email address.
+
+      ## Who is looking
+
+      - The brochure's engagement shows opens, clicks on homes, the people who viewed it and the homes clicked most.
+      - When a named person opens a brochure you sent or clicks a home in it, they appear in your **Workqueue** for the next 48 hours. One click is enough, because a brochure goes to one person on purpose.
+      - Clicks from someone who just has the plain link count toward the brochure's totals but never reach a rep's Workqueue.
+  - slug: how-it-works-social-posts
+    module: communications
+    covers_modules: [marketing.social_media]
+    title: "How it works: social posts, schedules and comments"
+    article_type: concept
+    position: 354
+    excerpt: Posts go to your connected Facebook page or Instagram account, either by hand or from schedules that write them for you, and comments come back into {{brand}}.
+    content: |
+      Social posts live under **Marketing > Social Media**, on the **Posts**, **Schedule**, **Calendar**, **Comments**, **Attribution** and **Advisor** tabs. Publishing needs a Facebook page connected under **Settings > Integrations**.
+
+      ## Approval
+
+      - **Publish**, **Schedule** and **Approve** all need permission to edit social posts. That permission is what makes someone an approver.
+      - Someone without it saves a draft and submits it for approval. That emails everyone who can approve it, or the company admins when no role grants it.
+      - A post goes out when you click **Publish**, or at the time you pick with **Schedule**. Scheduled posts are checked every five minutes.
+
+      ## What gets published
+
+      - Facebook: a video wins over photos, several photos become a carousel, one photo is a photo post.
+      - Instagram needs a linked Instagram Business account and at least one image. Instagram video is not supported yet.
+      - Once a post is live, only its text can change, and the change is pushed to Facebook. The images, video, platform and link cannot change. Deleting a live post removes it from Facebook first.
+
+      ## Schedules
+
+      - Schedules are checked every hour. A due schedule has AI write a post and picks a home for it.
+      - Photos come from the home first, then the schedule's own images, then your logo if the schedule allows it.
+      - With **Auto-Approve** on, the post publishes by itself. With it off, an email goes to the schedule's chosen person (or the first admin) with **Approve & Publish**, **Decline** and **Skip this post**. Once approved, it publishes within about five minutes.
+      - Drafts a schedule wrote that nobody approved are removed after the time you choose (3, 7, 14 or 30 days, or **Never expire**). Posts you wrote by hand are never removed.
+
+      ## Links, numbers and comments
+
+      - A post's link goes to your lead form, tagged with the platform, "social", the post's topic and the post number. Leads from that form keep those tags, and **Attribution** counts them (the last 30 days unless you pick dates).
+      - Likes, comments, shares and link clicks are refreshed once a day.
+      - Comments on posts published in the last 30 days sync every 15 minutes, unless comment sync is turned off. **Sync now** checks your 15 newest posts even when it is off.
+      - A new comment from someone other than your page notifies the people you chose and the post's author, in the app and by email, as your settings say.
+      - A post with a blog version publishes that version to your website once the post is live.
+  - slug: how-it-works-facebook-ads
+    module: communications
+    covers_modules: [marketing.social_media]
+    title: "How it works: the Facebook ad builder"
+    article_type: concept
+    position: 355
+    excerpt: The ad builder creates the campaign, ad set and ad in your own Facebook ad account, with a stop date, and tags the link so its leads can be counted.
+    content: |
+      The ad builder is on the **Ads** tab of **Marketing > Social Media**. You need permission to view Facebook ads to see the tab and permission to create them to launch one. The steps are **Content**, **Audience & Budget** and **Review & Launch**.
+
+      ## Before you start
+
+      - A Facebook page must be connected under **Settings > Integrations**, with an ad account linked.
+      - The connection must include ads access. If it does not, you are asked to reconnect Facebook before anything is sent.
+
+      ## What launching does
+
+      Launching creates a campaign, an ad set and an ad in your Facebook ad account, all billed by Facebook.
+
+      - **Budget and dates.** A new ad set needs a daily budget above zero. It starts now and stops after the number of days you chose, so it does not keep spending.
+      - **Where it shows.** The audience is a circle around your first location, 50 miles and ages 25 to 65 unless you change them.
+      - **Existing campaigns.** You can add the ad to an ad set you already run. It then shares that ad set's budget, schedule and audience. Joining an existing campaign never switches a paused campaign on.
+      - **Lead forms.** With a Facebook lead form attached, the button becomes **Sign Up**. Choosing leads as the goal without a lead form runs the ad for traffic instead, because the ad sends people to your website form.
+      - **Housing and other special categories.** Housing is suggested for manufactured housing and property management dealers. In a special category Facebook forbids interest and age targeting, so interests are not applied and ages widen to 18 to 65+.
+      - **Tracking.** The ad's link is tagged with the campaign, so leads that come through your lead form can be credited to it.
+
+      ## After launch
+
+      - Spend is pulled from Facebook once a day and each ad's return is worked out again.
+      - **Pause** and **Resume** change the campaign on Facebook too.
+      - Deleting an ad campaign deletes it on Facebook. If Facebook refuses, it is still removed from {{brand}}, so check Ads Manager.
+      - If your Facebook connection has expired, the action stops and the connection is marked expired until you reconnect.

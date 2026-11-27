@@ -1,0 +1,372 @@
+# "How it works" notes for inventory and service (backlog E118), written from the code on
+# 2026-11-27, every claim traced to a file and line. Published without review
+# (Tom, 2026-11-24): they state only what the code does.
+#
+# Loaded by db/migrate/20261127210000_load_module_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). covers_modules names the plan
+# modules each note covers; spec/services/guide/how_it_works_coverage_spec.rb
+# fails when an offered module has none. Write the product name as {{brand}}.
+# No em or en dashes.
+
+articles:
+  - slug: how-it-works-homes-inventory
+    module: inventory
+    covers_modules: [inventory.vehicles]
+    title: "How it works: homes in inventory"
+    article_type: concept
+    position: 320
+    excerpt: What each home status means, what changes a status without anyone touching it, and how locations and catalog homes behave.
+    content: |
+      Homes live under **Inventory & Operations > Inventory**.
+
+      ## Statuses
+
+      A home is **In Stock**, **Reserved**, **Sold**, **Pending**, **In Service**, **Available to Order**, **Ordered**, **On Order**, **RSO (Retail Sold Order)** or **Trade-In**. You can rename these under **Company Settings > Customize > Labels**; only the words change.
+
+      ## What changes a status on its own
+
+      - When a deal moves into a won stage, the home on that deal is marked **Sold** and linked to that deal.
+      - If that deal later leaves the won stage, the home goes back to **In Stock**, but only when this deal is the one that sold it. A home already sold through a different deal is never taken over by a second deal.
+      - When an invoice that lists a home is paid, the home is marked **Sold**.
+      - Every hour, a sale price whose end date has passed is turned off and the home shows its regular price again.
+
+      ## Catalog homes
+
+      Homes from the Champion feed or a manufacturer catalog arrive as **Available to Order**. When they have no location, every location sees them.
+
+      - Giving a catalog home a status, or editing its details, makes your own copy of the home with that status. The catalog home stays as it is, ready for the next buyer. Adding or reordering photos and videos does not make a copy.
+      - If more than one deal is waiting on that model when you give it a status, {{brand}} asks which buyer the home is for.
+      - A won deal on a catalog home sells your copy, never the catalog home, and the deal moves onto the copy.
+
+      ## Locations
+
+      A new home gets the location you have selected. If none is selected and you only have access to certain locations, it gets the first of them. People limited to certain locations see those locations' homes plus the catalog homes that have no location.
+
+      ## What is required
+
+      - Year, make and model, always.
+      - A manufactured home needs a serial number (unique in your company), bedrooms and bathrooms. An RV needs a VIN.
+      - Leave **Stock #** blank and {{brand}} makes one (MH or RV, the date, and a short code).
+      - Adding a home whose serial number, VIN or stock number already exists updates that home instead of adding a second one, and brings it back if it was deleted.
+
+      ## Cost
+
+      A home's cost is its total cost when one is entered. Otherwise {{brand}} adds up the home cost, freight and the other cost lines. No cost entered reads as "no cost", never as zero. Floor plan financing has its own note.
+
+  - slug: how-it-works-parts-stock
+    module: inventory
+    covers_modules: [inventory.parts]
+    title: "How it works: parts, stock and purchase orders"
+    article_type: concept
+    position: 321
+    excerpt: How part stock is counted per location, what each stock movement records, and how a purchase order moves from draft to received.
+    content: |
+      Parts are under **Inventory & Operations > Parts** (tabs **Parts** and **Warehouse Bins**). Purchase orders are under **Inventory & Operations > Purchase Orders**.
+
+      ## A part
+
+      - A part needs a SKU (unique in your company), a name and a unit of measure.
+      - Suppliers are linked to a part, and one can be marked preferred.
+      - The part's current cost is its last cost, then its average cost, then its default cost, whichever is filled in first.
+
+      ## Stock
+
+      Stock is counted per location (and per bin, when you use bins). **Available** is on hand minus reserved.
+
+      Every change to stock is a numbered transaction (TXN-00001 and up): receive, transfer in, transfer out, adjustment, consume, return, sale or waste. A transaction can never be edited or deleted. To fix a mistake, record another one.
+
+      - Receiving with a unit cost sets the part's last cost and recalculates its average cost.
+      - A transfer or a consume is refused when the location does not have enough available.
+      - When an invoice is paid, the parts on it come out of stock as a sale, at the invoice's location (or the location with the most available).
+
+      ## Purchase orders
+
+      A purchase order needs a supplier. {{brand}} numbers it PO-000001 and up. Its total is the lines (quantity times cost, less any line discount) plus tax and shipping.
+
+      Statuses: **Draft**, **Sent**, **Partially Received**, **Received**, **Cancelled**.
+
+      - **Mark as Sent** moves a draft to Sent. Emailing a draft with **Email PO** also marks it Sent.
+      - Receiving parts against a purchase order's lines (**Receive Stock**) updates each line's received quantity. When some is received the order becomes Partially Received; when every line is fully received it becomes Received and gets its received date.
+      - A received purchase order cannot be cancelled.
+      - A factory home purchase order gets its lines from the Deal Sheet. Receiving it adds the home to inventory (or links one already there) and links it to the deal. It posts nothing to your books; the home's cost reaches the books when you enter the factory invoice as a bill.
+
+      ## Reorder rules
+
+      A reorder rule is set for one part at one location, with a reorder point and an optional reorder quantity or maximum. When available stock at that location drops to the reorder point or below, {{brand}} sends a `parts.low_stock` webhook event. It never places an order by itself.
+
+  - slug: how-it-works-land-parcels
+    module: inventory
+    covers_modules: [inventory.land]
+    title: "How it works: land parcels and land + home packages"
+    article_type: concept
+    position: 322
+    excerpt: How land parcels are numbered, sized and shown on your website, and how a land + home package is priced and hidden when it can no longer be sold.
+    content: |
+      Land is on the **Land Management** tab of **Inventory & Operations > Inventory**.
+
+      ## A land parcel
+
+      - Each parcel needs a parcel number, unique in your company. Leave it blank and {{brand}} makes one (LP, the date and a short code).
+      - Statuses: **Available**, **Pending**, **Under Contract**, **Sold**, **Withdrawn**.
+      - Size can be in acres or square feet. {{brand}} fills in the other unit for you (43,560 square feet to an acre) and works out the price per acre.
+      - Zoning types come from a list you can change under **Company Settings > Customize > Land Zoning**.
+      - Parcels belong to the whole company, not to a location.
+      - Deleting a parcel hides it; it is not erased.
+
+      ## On your website
+
+      If **Show the exact location on the website** is off, visitors see only the city, state, ZIP and county. When it is on, they also see the address, map position and Street View link.
+
+      ## Selling a parcel
+
+      When an invoice that lists a parcel is paid, the parcel is marked **Sold**.
+
+      ## Land + home packages
+
+      A package offers one lot and one home together at one price. One lot can be paired with several homes and one home with several lots, but the same home can be paired with a given lot only once.
+
+      - Add one from **Land + Home Packages** on the Land Management tab or on a parcel, or from **Offer with land** on a home.
+      - **Package price** starts at the lot's price plus the home's price (its sale price, or MSRP when there is none). If either has no price, it starts blank. Change it to your package price.
+      - The lot and the home keep their own prices. The package price is only what the buyer is quoted for the two together.
+
+      ## When a package shows on your website
+
+      A package appears on your website only when all of these are true:
+
+      - **Show on website** is on for the package.
+      - Public inventory is turned on for your company.
+      - The lot is still **Available** and not deleted.
+      - The home is not deleted and is **In Stock** or **Available to Order**.
+
+      When the lot or the home sells, the package drops off the website by itself. The package card then reads "Lot no longer available" or "Home no longer for sale". Nobody has to remember to remove it.
+
+      Who can see and change parcels and packages follows the **Inventory** permission.
+
+  - slug: how-it-works-champion-feed
+    module: champion_ims
+    covers_modules: [inventory.champion_ims]
+    title: "How it works: the Champion inventory feed"
+    article_type: concept
+    position: 323
+    excerpt: What the Champion Homes feed brings into your inventory, when it runs, what it leaves out, and when it removes a home.
+    content: |
+      The Champion feed brings Champion Homes models into your inventory as catalog homes. Set it up on the **Feeds** tab of **Inventory & Operations > Inventory** with **Add Retailer**. The tab appears only when your plan includes the Champion feed.
+
+      ## Setting up a retailer
+
+      - **Navision Retailer ID** is required. Champion provides it: 4 digits and 2 capital letters (for example 0551KS). Each ID can be added once per company.
+      - Pick a location for the homes, or turn on **Apply to all locations** so every location sees them.
+      - **Sync Frequency**: **Weekly (automatic)** or **Manual only**.
+
+      ## When it runs
+
+      - Weekly retailers sync every Sunday at 2am UTC, once their next sync is due. After a successful sync, the next one is due 7 days later.
+      - **Sync Now** runs it any time, for any active retailer.
+      - An inactive retailer never syncs.
+
+      ## What it brings in
+
+      Model name, bedrooms, bathrooms, square feet, number of sections, building code, series and brand, photos and floor plan pictures. From each model's page on championhomes.com it also takes the gallery, floor plans, elevations, a Matterport tour and a video when there is one.
+
+      ## What it does not carry
+
+      - No price.
+      - No options.
+      - No model year. A new home gets the current year.
+      - No serial number. A placeholder (CHAMP and the model ID) is used until the home becomes yours.
+
+      ## How catalog homes behave
+
+      - Every sync sets each catalog home back to **Available to Order** and rewrites its details from the feed. Photos you added yourself are kept.
+      - Giving a catalog home a status or editing its details makes your own copy. The feed never touches your copies.
+      - The Champion lead connection is separate from this feed.
+
+      ## When a home is removed
+
+      A catalog home that has not been seen in the feed for 14 days is removed from inventory, unless you have worked on it (a copy, a deal, a quote, a listing or a package). Those stay as a record even if Champion drops the model. A sync that returns no homes at all removes nothing.
+
+      ## History
+
+      Every run is recorded. **View sync history** shows each home that was added, updated, unchanged, removed, kept because of your work on it, or skipped, with the fields that changed.
+
+      Adding, editing and deleting retailers follows the **Inventory** permission.
+
+  - slug: how-it-works-manufacturer-catalog
+    module: inventory
+    covers_modules: [inventory.manufacturer_catalog]
+    title: "How it works: manufacturer catalogs in your inventory"
+    article_type: concept
+    position: 324
+    excerpt: How a manufacturer's catalog fills your inventory with available-to-order homes, when it refreshes, and what it never overwrites.
+    content: |
+      A manufacturer catalog puts that manufacturer's homes into your inventory as **Available to Order** homes.
+
+      ## Who turns it on
+
+      Catalogs are set up for you by {{brand}} staff. The card **Include manufacturer catalog in inventory** under **Company Settings > Integrations** is shown only to them. Ask {{brand}} to add a catalog, change its locations, or change which homes you carry.
+
+      ## Where the homes appear
+
+      Each catalog can show at chosen locations, or at all of them. With all locations, one company-wide copy of each home is added. With chosen locations, each of those locations gets its own copy.
+
+      Turning a catalog on fills your inventory right away from the catalog's latest copy, or starts a fresh read of the manufacturer's site when there is none.
+
+      ## Which homes you carry
+
+      - Homes can be ticked or unticked one by one. Unticked homes come off your inventory.
+      - **Homes new to this catalog**: **Add them automatically**, or **Hold them until someone ticks them here**.
+
+      ## When it refreshes
+
+      Each catalog is read overnight on its own schedule: daily, weekly, or only when {{brand}} runs it. After each read, your homes are updated.
+
+      ## What a refresh never changes
+
+      A refresh updates the catalog's own details (model, bedrooms, bathrooms, square feet, size, description, photos, floor plans, tours, features, building code), and only those you have not edited yourself. It never changes a home's status, price, stock number or custom fields.
+
+      Giving a catalog home a status, or editing its details, makes your own copy, the same as with Champion homes.
+
+      ## When a home comes off
+
+      A home that leaves the catalog, or that you untick, is removed from inventory unless you have worked on it: it is on a deal or quote, listed, has your own copy, has a status other than Available to Order, or has a price. Those stay.
+
+      If one read loses most of a catalog at once, {{brand}} treats it as a failed read and holds those homes for up to 21 days before removing them. A read that finds no homes at all removes nothing.
+
+      ## Turning a catalog off
+
+      The catalog's homes are removed from your inventory. Homes you already had that only received catalog details stay, with those details.
+
+  - slug: how-it-works-service-tickets
+    module: service
+    covers_modules: [service.operations]
+    title: "How it works: service tickets"
+    article_type: concept
+    position: 325
+    excerpt: Ticket statuses, issues and pay types, who gets notified, how vendors are assigned, and how tickets turn into invoices.
+    content: |
+      Service tickets are under **Service & Support > Service Operations**.
+
+      ## A ticket
+
+      - A ticket needs a title and a description. {{brand}} numbers it ST, the date and a count for that day (for example ST-20261127-0001).
+      - Statuses: **Pending review**, **Open**, **In progress**, **Waiting on manufacturer**, **Waiting parts**, **Completed**, **Cancelled**. A new ticket from your team starts **Open**.
+      - Priority is **Low**, **Medium**, **High** or **Urgent**. Medium is the default.
+      - A ticket is overdue when its scheduled date has passed and it is not completed.
+      - A new ticket gets the location you have selected.
+      - A ticket a customer sends from the client portal starts as **Pending review**.
+
+      Status changes are made by people. A vendor marking their work done does not change the ticket's status.
+
+      ## Issues
+
+      Every ticket starts with one issue made from its title and description, unless you entered the issues yourself. Each issue has its own parts and labor and a pay type: **Customer Pay**, **Warranty** or **Internal**.
+
+      - Pricing reads **Not priced**, **Estimate** or **Final**. A blank amount stays "not priced"; it is never counted as zero.
+      - **Vendor sees…**: **Yes, share** or **No, internal**. The customer sees an issue in the portal only when it is shared and portal visible.
+      - A dealer-only ticket is hidden from the portal until you choose to show it.
+
+      ## Issue templates
+
+      Saved issues live under **Company Settings > Service Issue Templates**. A template fills in the issue's title, complaint, correction, pay type, labor and parts. When it carries hours and rate (or part quantities and costs) the issue starts as an **Estimate**, otherwise **Not priced**. A template can be limited to one location.
+
+      ## Notifications
+
+      - The person a ticket is assigned to is notified when it is created or reassigned to them.
+      - When a ticket is completed, the person who created it and the contact's owner are notified. Other status changes notify the assignee.
+      - Nobody is notified about their own change.
+
+      ## Vendors
+
+      Assigning a vendor needs the **Contractors** permission. A service ticket assignment emails the vendor right away, unless notify was unchecked. You can resend it.
+
+      ## Invoices
+
+      From a ticket you can generate a customer invoice for the customer pay items, and a warranty claim for the warranty items. Invoices are created as drafts. When an invoice is paid, the inventory parts on it come out of stock.
+
+      Tickets follow the **Service** permission (read, create, update, delete).
+
+  - slug: how-it-works-client-portal
+    module: portal
+    covers_modules: [service.portal]
+    title: "How it works: the client portal"
+    article_type: concept
+    position: 326
+    excerpt: How a buyer gets a portal login, how signing in works, and what a buyer can see and do there.
+    content: |
+      The client portal is where your buyers see their paperwork, pay invoices and send service requests. You manage it under **Service & Support > Client Portal** (tabs **Portal Users** and **Settings**).
+
+      ## Giving a buyer access
+
+      - On the contact's page, the **Portal Access** card has **Invite to Portal**. The contact needs an email address.
+      - An email can belong to only one portal login across {{brand}}.
+      - The invitation link works for 7 days. The buyer sets their name and a password (at least 6 characters).
+      - The card reads **Invitation Sent**, then **Active Portal User**. **Resend** sends it again.
+      - A buyer who saved a TrueBuild design already has a design-only login. Inviting them upgrades it to the full portal and keeps their designs.
+      - **View as Client** opens the portal as that buyer. The session lasts 1 hour.
+      - Managing portal users follows the **Portal** permission.
+
+      ## Signing in
+
+      - Buyers sign in on the **Client Portal** page with email and password.
+      - **Use magic link** emails a sign-in link that works for 15 minutes, once.
+      - **Forgot password?** emails a reset link that works for 1 hour.
+      - Sign-in, magic link and reset requests are limited to 5 per 15 minutes from one internet address.
+      - Turning a buyer's portal access off blocks sign-in. Changing their password or turning access off also ends Face ID or fingerprint unlock on their phones.
+
+      ## What a buyer sees
+
+      The menu can include **Dashboard**, **Loans**, **Invoices**, **Quotes**, **Documents**, **Agreements**, **Finance Applications**, **Home Progress**, **Service Tickets**, **My Designs** and **Settings**. Pages turned off under **Settings > Portal Modules** are left out of the menu. **My Designs** shows only when the buyer has a saved design.
+
+      - **Invoices**: draft invoices never show. A buyer can pay up to the amount due.
+      - **Quotes**: draft quotes never show. A quote can be accepted only while it is sent or viewed and not past its valid-until date.
+      - **Documents**: buyers can upload their own files and delete them.
+
+      ## Service requests from the portal
+
+      - A buyer sees only tickets marked visible in the portal, on their own account or contact.
+      - A new request starts as **Pending review** and is visible to the buyer.
+      - A buyer can pick a home only if it is on one of their deals.
+      - Files they attach are visible to them, not to the manufacturer.
+      - The request is assigned to the location's **Default Service Ticket Assignee** (the location's **Operational Settings**). If there is none, it goes to the contact's owner, then the account's owner, then the first active staff user. That person is notified.
+      - Buyers can add notes to their tickets.
+
+  - slug: how-it-works-warranty-claims
+    module: warranty
+    covers_modules: [service.warranty]
+    title: "How it works: warranty claims and manufacturer AR"
+    article_type: concept
+    position: 327
+    excerpt: How a service ticket becomes a warranty claim, what has to be true to submit it, how the manufacturer answers, and how payment closes it.
+    content: |
+      Warranty claims are under **Service & Support > Warranty Claims**, and what manufacturers owe you is under **Service & Support > Manufacturer AR**.
+
+      ## From ticket to claim
+
+      - Marking a ticket as warranty needs a manufacturer. Each ticket has at most one claim.
+      - The claim carries the ticket's warranty items. While the claim is a draft, it updates itself when the ticket's parts or labor change.
+      - Generating the claim from the ticket also makes a draft warranty invoice addressed to the manufacturer. Generating again brings the claim back to draft with the ticket's current lines.
+      - The claim's owner starts as the ticket's assignee. Claim numbers look like WC-2026-1A2B3C4D.
+      - A ticket can be unmarked only while its claim is a draft and its warranty invoice is still a draft.
+
+      ## Statuses
+
+      **Draft**, **Submitted**, **Under review**, **Approved**, **Denied**, **Short paid**, **Resubmitted**, **Closed**.
+
+      ## Submitting
+
+      **Submit to Manufacturer** works only when the claim is a draft, has parts or labor, has a manufacturer, and a claim email is on file. {{brand}} uses your claim email for that manufacturer first, then the manufacturer's claim email, then its contact email. A $0 claim can be submitted.
+
+      Submitting emails the manufacturer a link to the claim. You can copy yourself on it. **Resubmit to Manufacturer** works on any claim that is not a draft or closed.
+
+      ## How the manufacturer answers
+
+      The manufacturer opens the link without signing in. While the claim is submitted, under review or resubmitted, they can approve it with an amount, deny it with a reason, or ask for more information (which moves it to **Under review**). Their answer emails you.
+
+      ## Getting paid
+
+      - Approval opens a Manufacturer AR item for the approved amount.
+      - **Record Payment** works only on an approved claim. Part payment marks the AR item **Partial**; paying it in full marks it **Paid** and closes the claim automatically.
+      - An AR item can also be marked short paid (the claim's approved amount becomes what was paid) or written off.
+      - **Close Claim** closes it by hand. **Reopen Claim** sends a closed claim back to **Submitted**.
+
+      Claims and Manufacturer AR follow the **Service** permission.

@@ -1,0 +1,364 @@
+# "How it works" notes for CRM and sales (backlog E118), written from the code on
+# 2026-11-27, every claim traced to a file and line. Published without review
+# (Tom, 2026-11-24): they state only what the code does.
+#
+# Loaded by db/migrate/20261127210000_load_module_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). covers_modules names the plan
+# modules each note covers; spec/services/guide/how_it_works_coverage_spec.rb
+# fails when an offered module has none. Write the product name as {{brand}}.
+# No em or en dashes.
+
+articles:
+  - slug: how-it-works-leads
+    module: leads
+    covers_modules: [crm.prospecting]
+    title: "How it works: leads"
+    article_type: concept
+    position: 300
+    excerpt: Where leads come from, who gets them, what their status means, and what converting one does.
+    content: |
+      Leads live under **CRM & Sales > Prospecting**.
+
+      ## Where leads come from
+
+      - **Typed in by hand.** {{brand}} refuses a new lead whose email matches an open lead you already have. A matching phone only warns you. You own it unless you pick someone else.
+      - **Intake forms.** With **Auto-create lead on submission** on, each submission becomes a lead with status New. Before making one, {{brand}} looks for the person by email and phone. An open lead gets the new details added to its empty fields and a note about the repeat inquiry. A contact, account or converted lead gets a note instead. No duplicate lead is made in either case.
+      - A submission with no email, phone or first name makes no lead.
+
+      ## Source
+
+      A form lead takes the source the link names, then a source matching its utm_source (a new source is made if none is close), then the form's **Lead Source**. If none of those apply, it goes to a source called Web Form.
+
+      ## Who gets the lead
+
+      On a form, **Who gets new leads?** is either **One person** (the **Lead owner**) or **Rotate between reps**. A rotation hands each new lead to the next active rep in turn. When every rep in it is inactive, the person under **If nobody in the rotation is available** gets it. A repeat inquiry that lands on an existing record does not use up anyone's turn.
+
+      With **Auto-create activity notification** on, that person gets a task, a pop-up and an email for each lead. The lead's location comes from the form's location picker, then **Assign Leads to Location**, then the home the visitor asked about, then a company default.
+
+      You are told when someone else assigns you a lead. A status change notifies the owner and followers, except whoever made it.
+
+      ## Statuses
+
+      Each company keeps its own list on the **Lead Statuses** tab. A status marked **Dead-end** is left out of **All Active**. Deleting a status that leads still use only hides it from new choices.
+
+      ## Consent
+
+      A form can ask two separate questions: **Ask to text them about their inquiry** and **Ask for marketing consent**. An unticked box counts as no. On a lead, **Text Consent** > **Record consent** needs a reason, and is refused for a number that texted STOP.
+
+      ## Converting
+
+      **Convert Lead** needs permission to update leads. The lead leaves your list, and its notes, open tasks, tags, consent and TrueBuild designs carry over to the account and its contacts. See [Converting a Lead to a Customer](lead-conversion).
+
+      ## Deleting
+
+      **Delete Lead** needs delete permission. Its form submissions are kept; its tasks are removed.
+
+  - slug: how-it-works-accounts
+    module: accounts
+    covers_modules: [crm.accounts]
+    title: "How it works: accounts"
+    article_type: concept
+    position: 301
+    excerpt: The rules behind accounts, the customer record that holds contacts, deals and quotes.
+    content: |
+      An account is the customer: a household or a business. It is found under **CRM & Sales > Accounts**. Its contacts, deals, quotes, invoices and documents all hang from it. For the screens, see [Managing Accounts](managing-accounts).
+
+      ## Permissions
+
+      Accounts and contacts share one permission set (CRM). Reading, adding, editing, deleting and exporting are each checked separately.
+
+      ## Adding an account
+
+      - Names do not have to be unique. If an account you can see already has the name, {{brand}} shows it and asks whether to open it or make a new account with the same name.
+      - The owner is you unless you pick someone. Anyone else you make the owner is notified, and so are the account's followers when the owner changes.
+      - Its location comes from the location you have selected. If you can only see some locations and none is selected, it goes to your first one.
+      - A new account with no status is **active**, and with no type is a **prospect**.
+      - Any field your layout marks as required has to be filled in.
+
+      ## From a lead
+
+      Converting a lead makes an account of type **Converted Lead**, with the lead's owner, location, source, notes, deposit, email, phone and address. Joining an existing account instead only fills in details it is missing, and only sets an owner when it has none. It never takes ownership from a rep.
+
+      ## Who sees which accounts
+
+      Admins see every account. Someone limited to certain locations sees accounts at those locations, accounts with no location, and any account they follow. The location picker at the top narrows the list further.
+
+      ## Deleting
+
+      Deleting an account takes it out of your lists. Its contacts and deals are not deleted with it.
+
+      ## Duplicates
+
+      **Find & Merge Duplicates** folds one account into another. The merged one disappears from every list and report, and keeps a pointer to the account it was merged into.
+
+      ## Totals on the account
+
+      The deal total counts deals in a won stage of your pipeline. Open deals are deals in any stage that is not won or lost.
+
+  - slug: how-it-works-contacts
+    module: contacts
+    covers_modules: [crm.contacts]
+    title: "How it works: contacts"
+    article_type: concept
+    position: 302
+    excerpt: The rules behind contacts, the people on your accounts and deals.
+    content: |
+      A contact is one person, found under **CRM & Sales > Contacts**. Each contact belongs to an account, and a deal's Buyer, Co-Buyer, Co-Signer and Guarantor are picked from the account's contacts. For the screens, see [Managing Contacts](managing-contacts).
+
+      ## Permissions
+
+      Contacts use the same CRM permissions as accounts: read, create, update, delete and export.
+
+      ## Adding a contact
+
+      - {{brand}} refuses a new contact whose email is already on another contact in your company. It tells you which one. A matching phone does not block it.
+      - With no owner picked, the contact takes its account's owner. With no account, or an account with no owner, you are the owner.
+      - Anyone else made the owner is told, and so are followers when the owner changes.
+      - Its location comes from the location you have selected, or your first location if you are limited to some and none is selected.
+      - Fields your layout marks as required have to be filled in.
+
+      ## From a lead
+
+      Converting a lead makes the lead's person the account's primary contact, with the lead's address, owner and location. A second person on the lead becomes a second contact on the same account, sharing the address. Marketing consent and consent to texts about the inquiry carry over to the contact.
+
+      ## Who sees which contacts
+
+      Admins see everyone. Someone limited to certain locations sees contacts at those locations and contacts they follow in the list. They can also open a contact that has no location. One account's **Contacts** tab shows all of that account's people.
+
+      ## On deals
+
+      The person's role belongs to each deal, not to the contact. Their name, email and phone are read from the contact, so fix them on the contact and the deal, the Deal Sheet and agreements follow. See [People on a deal](deal-people).
+
+      ## Changing the email
+
+      When you change a contact's email, any mark that the old address bounced is cleared, so the new address can be mailed.
+
+      ## Deleting
+
+      Deleting a contact is permanent. Deals that named the person stay, without the person linked. Merging duplicates with **Find & Merge Duplicates** keeps the merged contact on record but out of every list.
+
+  - slug: how-it-works-deals
+    module: deals
+    covers_modules: [crm.deals]
+    title: "How it works: deals and your pipeline"
+    article_type: concept
+    position: 303
+    excerpt: Your own pipeline stages, the people on a deal, and everything that happens when a deal closes.
+    content: |
+      Deals live under **CRM & Sales > Sales Deals**, on the **Pipeline** board and the **Deals** list.
+
+      ## Your stages
+
+      Each company sets its own stages under **Company Settings > Pipeline**, with a probability for each. Without a saved list, the stages are Prospecting, Qualification, Needs Analysis, Proposal, Negotiation, Closed Won and Closed Lost.
+
+      - A stage at 100% counts as won and a stage at 0% as lost. The settings refuse to save unless at least one stage is at 100 and one at 0.
+      - Closed Won and Closed Lost cannot be removed, renamed or turned off.
+      - A deal's probability always comes from its stage. Change a stage's % and existing deals are updated in the background.
+      - Removing a stage that holds deals asks where to move them.
+      - A deal made from a lead conversion lands in your first active stage unless you pick one.
+
+      ## What a deal needs
+
+      A name, and an account or a contact. The owner is you unless you pick someone. Every stage change is kept in the deal's stage history.
+
+      ## People
+
+      The **Buyers** card holds the Buyer, Co-Buyers, Co-Signers and Guarantors. A Co-Buyer must be a contact on the deal's account, and cannot be the Buyer too. See [People on a deal](deal-people).
+
+      ## When a deal closes won
+
+      Moving a deal to a won stage, any way (board, **Edit Deal**, the API), does this:
+
+      - Records the won date and the close date, on your company's calendar day.
+      - Freezes the home's cost on the deal. The home price also stops following the home line from then on.
+      - Marks the home sold. A home ordered from a catalog stays orderable; a copy of it is sold instead. A home already sold on another deal is left alone.
+      - Starts the deal's sale invoice as a draft, unless your books post deals automatically.
+      - With Deal Desk, writes the selected scenario's structure onto the deal.
+
+      Posting to the books and commissions follow their own rules: see [How it works: how a deal posts to your books](how-it-works-deal-posting) and [How it works: commission basis](how-it-works-commission-basis).
+
+      ## Moving it back out of won
+
+      The home goes back to available, if this deal is the one that sold it. A draft sale invoice is cancelled, as long as the deal has not been posted to the books.
+
+      ## Closing lost
+
+      A lost stage records the lost date and close date.
+
+      ## Signed paperwork
+
+      Once the Deal Sheet is signed or out for signature, the trade and payment figures cannot be changed on the deal. Unlock the sheet first.
+
+      ## Deleting
+
+      See [Delete a deal](delete-a-deal).
+
+  - slug: how-it-works-quotes
+    module: quotes
+    covers_modules: [crm.quotes]
+    title: "How it works: quotes"
+    article_type: concept
+    position: 304
+    excerpt: Quote statuses, the link a buyer opens, acceptance, expiry, and how a quote relates to a deal.
+    content: |
+      Quotes live under **CRM & Sales > Quotes**. A quote moves through Draft, Sent, Viewed, Accepted, Rejected and Expired.
+
+      ## Making a quote
+
+      - **Valid Until** starts 30 days out and is required. A new quote cannot be dated in the past.
+      - Pick a **Linked Deal** and the quote fills from it. A deal with a Deal Sheet gives the quote the sheet's lines, discounts, trade-in and tax, so its total matches the contract. A deal without one gives the deal's line items.
+      - Building a quote never changes the deal. Accepting one does not move the deal's stage either.
+
+      ## Sending
+
+      **Send Quote** sends it by email, text or both, and marks it Sent. Sending again keeps the first sent date and counts the resend. Only Draft, Sent and Viewed quotes can be sent.
+
+      ## The buyer's link
+
+      The quote has a private link that needs no sign in. A Draft quote does not open from it. The first time the buyer opens a Sent quote, it becomes Viewed.
+
+      From the link or their portal, the buyer can accept or reject a quote that is Sent or Viewed.
+
+      - A quote past its Valid Until date cannot be accepted by the buyer. They are asked to get an updated quote from you.
+      - When the quote has terms, the buyer must tick that they agree before accepting. The wording they agreed to is saved with the acceptance.
+      - Acceptance records the time, the address it came from, the buyer's name and whether it came from the link, the portal or the dealership.
+      - Any note the buyer leaves when accepting or rejecting is saved on the quote.
+
+      ## Accepting from the dealership
+
+      Someone with permission to update quotes can mark a Sent or Viewed quote accepted or rejected.
+
+      ## Expiry
+
+      There is no nightly sweep. A Draft, Sent or Viewed quote whose Valid Until date has passed becomes Expired the next time it is saved. The buyer's accept is blocked from the day after Valid Until either way.
+
+      ## Projects
+
+      When a quote linked to a deal changes its lines or status, projects that share quote details with installers get a fresh copy.
+
+      ## Deleting
+
+      Deleting a quote takes it out of your lists; it is not erased.
+
+  - slug: how-it-works-truebuild
+    module: configurator
+    covers_modules: [sales.configurator]
+    title: "How it works: TrueBuild pricing and what buyers see"
+    article_type: concept
+    position: 305
+    excerpt: How TrueBuild turns factory price books into your retail prices, and what a buyer sees and saves.
+    content: |
+      TrueBuild prices homes from factory price books. Set it up under **Company Settings > TrueBuild** (needs permission to update company settings).
+
+      ## Which homes can be designed
+
+      - Only factories {{brand}} has turned on for you, and only models a published price book covers.
+      - A model with a factory price needs your pricing set up first (a markup rule or saved terms).
+      - A home on your lot can be designed only while it is not built yet (to order, or ordered and on its way), and once its TrueView pictures are drawn.
+
+      ## How a price is built
+
+      - Your cost is the factory base plus surcharge, less your **Program discount off factory price (%)**.
+      - Home retail is cost plus your **Dealer pack per home ($)**, through your markup rule.
+      - Options are marked up by your rule. An option with no rule uses the factory's suggested retail.
+      - Add-ons marked **Always in the price** are included, **Buyer can add it** ones are optional, and **On the quote only** ones never reach a buyer.
+      - Totals round up to your **Round retail prices up to** step.
+
+      **Markup rules**: the closest rule wins (one option or home, then a group, series, manufacturer, then all); a location rule beats a company-wide one. A home no rule covers has no retail price.
+
+      **Surcharges**: a row for one plant beats all plants, one home type beats any, one section count beats any. A surcharge set on one home, on your price list or a Deal Sheet, beats a row.
+
+      ## New price books
+
+      With **Hold new price books until I review them**, retail stays on the book you accepted while cost follows the current one, with a warning until you review it.
+
+      ## What a buyer sees
+
+      - Never your cost, margin, pack or freight (add freight on the Deal Sheet).
+      - Prices follow **Price shown to buyers**: full, "starting at", monthly payment only, or no price. A {{brand}} site's **Show asking prices on this website** switch overrides it there.
+      - Turning off **Let buyers design homes on your websites** hides the designer on every website; the Deal Sheet and quotes still use TrueBuild.
+
+      ## When a buyer saves a design
+
+      Saving needs a first name and a valid email. The design comes to you as a lead through your TrueBuild intake form (source TrueBuild; {{brand}} makes one named **TrueBuild saved design** if you have none), so its rotation and duplicate matching apply. The buyer can get a portal login to see their designs. A buyer with an open deal also gets the design on that deal: a draft Deal Sheet version, or a design to start the sheet from, and the rep is told.
+
+  - slug: how-it-works-truebuild-own-website
+    module: configurator
+    covers_modules: [sales.truebuild_embed]
+    title: "How it works: TrueBuild on your own website"
+    article_type: concept
+    position: 306
+    excerpt: What it takes for buyers to design homes on your own website, not only on your {{brand}} site.
+    content: |
+      TrueBuild always works on your {{brand}} website. Offering it on your own website (a page you host, with the inventory embed or the Design Your Home embed) is a separate add-on, **TrueBuild on your own website**, that {{brand}} turns on dealer by dealer. It is not part of any plan.
+
+      ## What you need
+
+      - TrueBuild set up, with homes that can be designed. See [How it works: TrueBuild pricing and what buyers see](how-it-works-truebuild).
+      - **Let buyers design homes on your websites** left on under **Company Settings > TrueBuild**. Off, no website offers the designer, yours or ours.
+      - Your public inventory turned on.
+      - The add-on.
+
+      ## Getting the code
+
+      Go to **Inventory**, click **Share & Embed**, and open the **Embed Code** tab. With the add-on, a **Design Your Home embed code** card gives you the code for a list of the homes buyers can design. Homes in your inventory embed also open the designer.
+
+      ## How {{brand}} tells the sites apart
+
+      Your {{brand}} site identifies itself as one of your websites. Anything else that uses your public inventory link counts as your own website.
+
+      ## Without the add-on
+
+      On your own website:
+
+      - Homes are listed without the designer, and a list of only designable homes comes back empty.
+      - A home that could be designed points buyers to the same home on your published {{brand}} site, if you have one.
+      - The designer itself answers "Design this home on our website".
+
+      ## With the add-on
+
+      - Designable homes carry a link to a hosted designer page for that home.
+      - That page opens only while the home can still be designed. Otherwise it says the home cannot be designed online.
+      - A buyer who saves a design becomes a lead, exactly as on your {{brand}} site: same intake form, rotation, duplicate matching, consent questions and portal login.
+
+      ## Prices
+
+      On your own website, prices follow your **Price shown to buyers** setting. The **Show asking prices on this website** switch belongs to each {{brand}} site and does not apply to your own website. Freight and your cost are never shown.
+
+  - slug: how-it-works-deal-desk
+    module: deals
+    covers_modules: [sales.deal_desk]
+    title: "How it works: Deal Desk"
+    article_type: concept
+    position: 307
+    excerpt: Scenarios, selecting a pencil, applying it to the deal, sharing with the buyer, and what happens at close.
+    content: |
+      Deal Desk is where you structure a deal at the point of sale: solve for a payment, compare homes and present a pencil. It is under **CRM & Sales > Deal Desk**, and only works when Deal Desk is on your plan.
+
+      ## Scenarios
+
+      - A deal can have many scenarios, each with its own home, price, trade, down payment, fees, F&I products and financing. Click **New scenario** to add one. Changes save as you go.
+      - A new scenario starts from the deal: its home and line items.
+      - A scenario is good for 30 days by default. After that it is hidden; **History** shows it again.
+      - Deleting a scenario only expires it. Scenarios are never erased.
+      - Changing the home on a scenario drops the old home's packages, brings in the new home's, and clears a desk price set for the old home.
+
+      ## Selecting and applying
+
+      - **Select / mark presented** marks the pencil you showed the buyer. Only one scenario per deal is selected at a time, and a selected one never expires. Selecting does not change the deal.
+      - **Apply to Deal** is the step that changes the deal. It adds the scenario's line items, fees and F&I products and writes its price, trade, down payment and financing. It never removes anything. Setting a new home price this way needs permission to update deals.
+      - When the deal closes won, the selected scenario's price, cost, trade, down payment, lender and financed amount are written onto the deal. Its line items and F&I products are added only by **Apply to Deal**.
+
+      ## Swapping the home
+
+      **Apply unit swap** puts a scenario's home on the deal, and **Revert to original unit** puts the first one back. Both need their own permission and are blocked once the deal is posted to the books.
+
+      ## Locks
+
+      While the Deal Sheet is signed or out for signature, Apply to Deal and unit swaps are refused.
+
+      ## What the buyer sees
+
+      - Dealer gross and cost show only to people allowed to see deal cost details.
+      - **Print summary** and **Print package** never show margin.
+      - **Share** texts or emails the buyer a link to the scenarios you pick. The link shows a copy taken when you share, so later edits do not change it, and by default it stops working after 30 days.

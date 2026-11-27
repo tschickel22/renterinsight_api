@@ -16,9 +16,12 @@ module Guide
       @entries = nil if Rails.env.development?
       @entries ||= begin
         listed = YAML.safe_load_file(FILE).map do |e|
-          { topic: e['topic'], offered: e['offered'] != false, about: e['nearest'], keywords: Array(e['keywords']) }
+          { topic: e['topic'], module: e['module'], offered: e['offered'] != false, about: e['nearest'], keywords: Array(e['keywords']) }.compact
         end
-        modules = PlatformModule::MODULES.map do |key, m|
+        # An entry naming a module replaces that module's own description, which
+        # can describe what was planned rather than what works (Text Us).
+        replaced = listed.filter_map { |e| e[:module] }
+        modules = PlatformModule::MODULES.except(*replaced).map do |key, m|
           not_offered = SetupAreas::AREAS.dig(key, :not_offered)
           { topic: m[:name], module: key, offered: !not_offered, about: m[:description].to_s,
             keywords: [m[:name], key.split('.').last.tr('_', ' ')] }

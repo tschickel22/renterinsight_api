@@ -1,0 +1,657 @@
+# "How it works" notes for finance and management (backlog E118), written from the code on
+# 2026-11-27, every claim traced to a file and line. Published without review
+# (Tom, 2026-11-24): they state only what the code does.
+#
+# Loaded by db/migrate/20261127210000_load_module_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). covers_modules names the plan
+# modules each note covers; spec/services/guide/how_it_works_coverage_spec.rb
+# fails when an offered module has none. Write the product name as {{brand}}.
+# No em or en dashes.
+
+articles:
+  - slug: how-it-works-loans
+    module: loans
+    covers_modules: [finance.loans]
+    title: "How it works: loans, installments and payments"
+    article_type: concept
+    position: 360
+    excerpt: A loan you carry yourself starts as Pending, makes one installment invoice per month when activated, and keeps its own balance outside your books.
+    content: |
+      Loans you carry for a buyer live under **Finance & Agreements > Finance**, on the **Loans** tab. Click **New Loan** to start one.
+
+      ## Statuses
+
+      A loan is **Pending**, **Active**, **Paid Off**, **Defaulted** or **Cancelled**. A new loan starts as Pending.
+
+      ## What is worked out for you
+
+      - The monthly payment comes from the principal, interest rate and term.
+      - The maturity date is the origination date plus the term in months.
+      - If you leave the first payment date blank, it is one payment period after the origination date.
+
+      ## Activating a loan
+
+      Click **Activate Loan** on a pending loan. It becomes Active, and when the borrower is a contact {{brand}} makes one invoice for each month of the term:
+
+      - Each is due a month after the one before, starting on the first payment date, and is dated 15 days before it is due.
+      - Each has an **Interest** line and a **Principal** line, and is numbered from the loan (LN-A1B2C3-P01, P02 and so on).
+      - An installment already past due starts as overdue, one due within 7 days as sent, and later ones as drafts.
+
+      A loan whose borrower is an account gets no installment invoices. Once a loan is Active, its principal, interest rate, term and balance cannot be changed.
+
+      ## Recording a payment
+
+      **Record Payment** works only on an active loan. A card or bank payment runs through your payment processor; cash, a check or a money order is recorded by hand, and a check or money order needs its number.
+
+      - The payment pays the month's interest on the current balance first; the rest reduces principal.
+      - The loan's total paid, balance and payments remaining update, and the next payment date moves one period past the payment date.
+      - When the balance reaches zero the loan becomes **Paid Off**.
+      - Refunding a loan payment puts that principal back on the loan.
+
+      The **Amortization Schedule** applies payments interest first, counting each toward the installment due within 15 days of it.
+
+      ## What reaches your books
+
+      Nothing. Installment invoices never post as sales, and loan payments do not post as invoice payments. The loan keeps its own balance, not accounts receivable.
+
+      ## Late fees
+
+      The late fee and grace period you set under **Settings > Finance** are shown on each loan. {{brand}} does not add a late fee to a loan by itself.
+
+      ## Deleting
+
+      A loan with payments cannot be deleted. Deleting one without payments removes its installment invoices and marks it Cancelled.
+
+      Viewing loans needs the Finance read permission; creating loans and recording payments need create, changes need update, and deleting needs delete.
+
+  - slug: how-it-works-agreements
+    module: agreements
+    covers_modules: [finance.agreements]
+    title: "How it works: agreements and signing"
+    article_type: concept
+    position: 361
+    excerpt: An agreement goes from Draft to Sent, Viewed and Partially Signed, completes when every signer and counter-signer has signed, and expires or is voided otherwise.
+    content: |
+      Agreements live under **Finance & Agreements > Agreements**.
+
+      ## Templates and signers
+
+      A template holds the document and its default signers. Each signer has a role:
+
+      - **Signer**: a buyer or anyone else who signs.
+      - **Counter-Signer**: someone at your company, picked from your users.
+      - **Preparer**: fields you fill and sign before sending.
+      - **CC Only**: gets copies, never signs.
+
+      An agreement made from a template copies its document, fields and signers. Any new agreement expires 30 days after it is made unless you set an **Expiration Date**.
+
+      ## Sending
+
+      **Send** works only on a draft. It is refused until the preparer's signature and initials are in, every signer has an email address, and at least one Signer or Counter-Signer is listed. Every signer is invited at the same time, by email, text or both (the **Delivery Method**), and CC recipients are told it went out. A failed send is shown on that signer.
+
+      No email? Use **Sign in Person** at the desk, or sign on paper and click **Upload Signed**, which completes it.
+
+      ## Statuses
+
+      - **Sent**, then **Viewed** when a signer opens their link.
+      - **Partially Signed** after each signature until the last one.
+      - **Completed** when every Signer and Counter-Signer has signed. {{brand}} then makes the signed PDF and emails the person who prepared it, each signer and each CC.
+      - **Declined** if any signer declines.
+      - **Expired**: checked every hour, for agreements still out past their expiration date.
+      - **Voided**: click **Void** on one out for signature. A reason is required.
+
+      Only a draft can be edited or deleted. Correcting a waiting signer's email or phone retires the old link and sends a new one.
+
+      ## Reminders
+
+      Once a day at 10 am Mountain time, {{brand}} reminds signers who have not signed, spaced by the agreement's reminder frequency (3 days by default). Automatic reminders stop 30 days after sending, or after 3 per signer. **Remind All** has no limit.
+
+      ## Sensitive agreements
+
+      Tick **Holds personal financial information** for credit applications. A template with it ticked makes every agreement from it sensitive.
+
+      - What signers type is stored encrypted and deleted once the signed PDF is made.
+      - Signers never see each other's answers and get no download link; CC recipients get no completion email.
+      - **Share** sends a password protected PDF. Sharing stays open 30 days after signing; a company admin can click **Allow 30 more days**.
+
+      ## Deals
+
+      An agreement on a deal records which Deal Sheet version it was made from. When it completes, that version locks, or a change order applies to the deal.
+
+      Permissions: Agreements read to view, create to make one, update to send, void or upload, delete to delete.
+
+  - slug: how-it-works-documents
+    module: buyers_documents
+    covers_modules: [finance.documents]
+    title: "How it works: customer documents"
+    article_type: concept
+    position: 362
+    excerpt: Documents you upload for a customer appear in their portal and notify their portal app; files they upload come back to you marked Client Uploaded.
+    content: |
+      **Finance & Agreements > Documents** opens **Document Management**: every file kept for your customers, leads, accounts and deals, in one list you can search and filter by category and source.
+
+      ## Uploading for a customer
+
+      Click **Upload Document**, then choose the **Client**, a **Category**, a **Document Name** and the **File**.
+
+      - The client list holds your contacts that have an email address.
+      - The file is filed on that contact, so it shows in their customer portal.
+      - If the customer has a portal login, they get a notice in the portal app: "New document available".
+      - **Notes to Client** are shown to the customer with the file. The description is internal.
+
+      Categories include Insurance, Contract, Warranty, Receipt, Photo and Other.
+
+      ## Files a customer uploads
+
+      Customers can upload files from their portal. These show in your list as **Client Uploaded**; yours show as **Admin Uploaded**. Click either tile to filter by it.
+
+      ## Files on a deal
+
+      On a deal's documents, a file is kept for staff only unless you turn on **Share with** the buyer. Shared, it is filed on the deal's contact, shows in their portal and notifies them. A deal with no contact cannot share a file.
+
+      ## File rules
+
+      - PDF, PNG, JPEG, GIF, Word and Excel files only.
+      - Up to 10 MB each.
+
+      Loans have their own **Loan Documents** list on the loan page.
+
+      ## Permissions
+
+      The page checks the Documents permission: read to see and download, create to upload, update to edit a file's name, category or notes, and delete to remove one.
+
+  - slug: how-it-works-client-applications
+    module: agreements
+    covers_modules: [finance.applications]
+    title: "How it works: finance and credit applications"
+    article_type: concept
+    position: 363
+    excerpt: The Client Applications page is a preview that does not save applications; collect a credit application as a sensitive agreement instead.
+    content: |
+      The **Client Applications** page under **Finance & Agreements** is a preview of an application screen. It does not save applications:
+
+      - The applications and templates it shows are samples, the same for every company.
+      - Applications you create, statuses you change and notes you add there are not saved to {{brand}}. They are gone when you leave the page.
+      - Nothing is sent to the customer when you invite one from that page, even though it says Invitation Sent.
+
+      Do not use it to collect a real application.
+
+      ## Collecting a credit application
+
+      Use an agreement instead, under **Finance & Agreements > Agreements**:
+
+      1. Make or pick a template for your credit application, and tick **Holds personal financial information**. Every agreement made from that template is then sensitive.
+      2. Make an agreement from it for the buyer, add the buyers as signers and click **Send**, or click **Sign in Person** at the desk.
+      3. The buyers fill in their answers and sign from their link.
+
+      ## How the answers are protected
+
+      - What the buyers type (such as a Social Security number, birth date or income) is stored encrypted, and deleted once the signed PDF is made. The signed PDF is then the one copy.
+      - Signers never see each other's answers and cannot download the signed copy from their link.
+      - The signed copy is not emailed to the buyers or to CC recipients. The person who prepared it is told it was signed.
+      - To send it to a lender, click **Share** on the completed agreement. It goes as a password protected PDF, and you give the password separately by phone or text.
+      - Sharing stays open 30 days after signing. A company admin can click **Allow 30 more days**.
+
+      See [How it works: agreements and signing](how-it-works-agreements) for sending, reminders and statuses.
+
+      ## Files from the buyer
+
+      Pay stubs and other papers the buyer uploads in their customer portal appear under **Finance & Agreements > Documents**, marked **Client Uploaded**.
+  - slug: how-it-works-reports
+    module: reports
+    covers_modules: [management.reports]
+    title: "How it works: building, saving and sharing reports"
+    article_type: concept
+    position: 364
+    excerpt: A report reads one module, shows only the records that module's list would show you, and can be grouped, totalled, saved, shared and exported.
+    content: |
+      Open **Reports**, then **Report Builder** under **Build Your Own**. Pick a **Module**, choose your fields and **Filters**, then click **Run Report**.
+
+      ## What a report can show
+
+      - A report reads one module at a time, such as leads, contacts, deals, invoices, payments, service tickets, homes, bills or bank transactions.
+      - You need the same read permission the module's own list needs. The **Module** list shows only modules you can read, and running a report checks it again.
+      - Rows are narrowed to the locations you can see, the same way the module's list is, and to the location you have selected.
+      - Your company's custom fields for the module can be added as columns and filters. Sorting works on standard fields only.
+
+      ## Group and total
+
+      - Under **Group and total**, change **No grouping (list every record)** to **By** a field. Custom fields cannot be used to group.
+      - A date field can be grouped **By day**, **By week**, **By month**, **By quarter** or **By year**. Periods read as 2026-01, 2026-Q1, 2026 or Week of 2026-01-05.
+      - **Add a total** gives up to three: **Count**, **Total**, **Average**, **Lowest** or **Highest**. **Total** and **Average** work only on number fields.
+      - Records with no value are grouped as (none). A grouped report shows at most 200 groups, and the count badge then counts groups instead of records.
+      - A grouped report can show a **Bar chart**, **Line chart** or **Pie chart (6 groups or fewer)**.
+
+      ## Saving and sharing
+
+      - **Save** asks for a **Name**, a **Description** and a **Visibility**: **Private**, **Location** or **Company**. Saved reports are listed under **Saved Reports**.
+      - A saved report keeps its fields, filters, sort and grouping, and reads current data each time it runs.
+      - **Location** shows the report to people while they are working in the location it was saved from.
+      - Only the person who made a report, or a company admin, can change, share or delete it.
+      - **Share** (on a saved report) adds people by email under **Share with User** (users in your company only), or opens it up with **Location Access** or **Company Access**. **Make Private** removes everyone and sets it back to private.
+      - Sharing does not grant module permission: without read permission for the module, a report cannot be run.
+
+      ## Exports
+
+      - **Export** offers **Export as CSV**, **Export as XLSX** and **Print / Save as PDF**.
+      - CSV and XLSX files hold every page of the report, not only the page on screen.
+      - Every export is recorded in the activity log with who exported it, and each row carries an export_ref column that ties the file back to that record.
+
+  - slug: how-it-works-report-ai
+    module: reports
+    covers_modules: [management_ai_reports, management.reports]
+    title: "How it works: asking AI for a report"
+    article_type: concept
+    position: 365
+    excerpt: The AI panel turns a question into a report on one module, says what it could not cover, and draws on a monthly allowance shared with other AI features.
+    content: |
+      With the AI Report Queries add-on, the Report Builder shows **Build with AI**, which opens the AI panel (titled **Ask Your Data** on report pages and **AI Assistant** elsewhere). Type a question such as "deals closed this month by salesperson".
+
+      ## What it does with your question
+
+      - It builds a normal report from your question: one module, with fields, filters, sorting and, when you ask for something "by" a field, grouping and totals.
+      - It uses your company's own deal stages for "won" or "open".
+      - It follows the same rules as the Report Builder. You need read permission for the module, and rows are narrowed to the locations you can see. If you cannot read the module, it says so instead of answering.
+      - A question with no business words in it (such as leads, deals, invoices or "this month") is turned away before it reaches the AI.
+      - The one sentence summary gives exact figures for a grouped report. For a long list it gives the number of records matched, but it does not work out a total or average from the few rows it can see.
+
+      ## What it cannot do
+
+      - Read two modules at once.
+      - Calculate across fields, such as margin percent or days between two dates.
+      - Report a field the module does not have.
+
+      When part of a question cannot be covered, it builds the closest report, says what was left out, and passes that part to the {{brand}} support team. If the grouping it chose cannot be run, it shows the plain list and says so.
+
+      ## Using an answer
+
+      - **Show all** opens a list answer in the Report Builder.
+      - **Export** downloads a CSV of up to 500 rows or 200 groups. When there are more, it tells you the file holds only the first part. The export is recorded like any other.
+      - **Save as report** saves it under **Reports**, **Saved Reports** as private to you until you share it.
+
+      ## The monthly allowance
+
+      - The panel shows the count used, such as 12 / 100 this month.
+      - The allowance is for the whole company, not per person, and is shared with Deal Desk AI and help assistant questions.
+      - A question counts once it reaches the AI, even if it finds nothing.
+      - The allowance is set for your company by {{brand}}. When no other amount is set, the AI Report Queries add-on gives 100 a month. Without the add-on and with no amount set, AI reporting is off.
+      - When it runs out, the panel says you have used all your queries and when they reset: at the end of the calendar month.
+
+  - slug: how-it-works-tags
+    module: tags
+    covers_modules: [management.tags]
+    title: "How it works: tags"
+    article_type: concept
+    position: 366
+    excerpt: Tags are your company's labels for leads, contacts, accounts, deals, quotes and homes, and adding one can start workflows and campaigns.
+    content: |
+      Tags are short labels you put on records so you can find, filter and act on them together. Manage them under **Management**, **Tags**, on the **Tag Manager** page.
+
+      ## Where tags come from
+
+      - Click **New Tag** in Tag Manager to make one with a name, color, type and category.
+      - Typing a new tag name on a contact, account, deal, quote or home creates the tag for your company at the same time, in a plain gray color.
+      - Creating a tag with a name your company already has gives you the existing tag instead of a copy.
+      - On the lead and contact lists you can add a tag to every record that matches your filters at once, across all pages. Records that already have the tag are skipped.
+
+      ## What adding a tag sets off
+
+      - Tagging a lead, contact, account or deal fires a "tagged" trigger that workflow automations can start from, with the tag's name passed along. A workflow can be narrowed to one tag with a condition.
+      - A tag added by a workflow step does not fire another workflow, so a rule cannot loop on itself.
+      - Campaigns with a dynamic audience that are running or scheduled re-check their audience right away, so a newly tagged record that now matches is enrolled without waiting.
+      - These only happen when a tag is added. Removing a tag does not fire anything.
+
+      ## Tag Manager
+
+      - The tiles show **Total Tags** (with how many are active), **System Tags** (built-in tags) and **Total Usage** (how many times tags are applied).
+      - Filter the list by type (**Lead**, **Deal**, **Client**, **Inventory**, **Custom**) or by category, such as **Status**, **Priority** or **Source**.
+      - A tag's analytics show how many records carry it, by record type, how many times it was added each day over the last 30 days, and the 10 records tagged most recently.
+
+      ## Deleting a tag
+
+      - Deleting a tag removes it from every record that has it. This cannot be undone.
+      - You can delete several at once from the list.
+
+      ## Permissions
+
+      Tags use the CRM permission: reading tags needs CRM read, creating and applying tags needs CRM create, editing needs CRM update, and deleting or removing tags needs CRM delete. Adding or removing a tag on a contact or account checks CRM update, and on a deal, Deals update.
+
+  - slug: how-it-works-tasks
+    module: tasks
+    covers_modules: [management.tasks]
+    title: "How it works: tasks and the Task Center"
+    article_type: concept
+    position: 367
+    excerpt: The Task Center lists your tasks from every part of the system, and the person a task is assigned to is notified before it is due and while it is overdue.
+    content: |
+      Open **Tasks** to reach the **Task Center**, a single list of tasks across the system.
+
+      ## What the list holds
+
+      - Tasks made in the Task Center.
+      - Tasks added on the Activities of leads, contacts, accounts and deals.
+      - When you make a task in the Task Center and pick a record under **Related To**, the task links to that record and a matching task is added to that record's Activities. The list shows it once, not twice.
+
+      ## Who sees which tasks
+
+      - People who are not company admins see only tasks assigned to them, and the tiles count only those. Company admins see everyone's.
+      - Tasks on one record, such as the reminders on a service ticket, show to anyone who can see that record.
+      - Tasks are limited to the locations you can see and to the location you have selected.
+
+      ## Fields and statuses
+
+      - A task needs a **Task Title** and **Assigned To**. It can also have a **Description**, **Priority** (**Low**, **Medium**, **High**, **Urgent**) and a **Due Date & Time**.
+      - **Status** is **Pending**, **In Progress**, **On Hold**, **Completed** or **Cancelled**.
+      - Setting a task to **Completed** stamps the time it was finished. Reopening it sets it back to **Pending** and clears that time.
+      - A task is overdue when its due time has passed and it is not **Completed** or **Cancelled**.
+      - The list sorts urgent tasks first, then overdue ones, then by due date.
+      - A new task takes the location you have selected. If none is selected it takes the location of the record it is linked to.
+
+      ## Closing a task
+
+      **Close** opens **Close Task**, where you write **Outcome Notes** and can tick **Create follow-up task** to set the next one.
+
+      ## Notifications
+
+      {{brand}} checks every hour:
+
+      - A task due within the next 24 hours sends its assignee a notification saying when it is due.
+      - An overdue task sends its assignee a notification saying how many days overdue it is.
+      - Each of these goes at most once in 24 hours for the same task. Tasks with nobody assigned send nothing.
+
+      Open tasks also appear on the **Calendar** for the people allowed to see them.
+
+      ## Permissions
+
+      The Task Center uses the Tasks permission: read to see tasks, create to add them, update to edit, complete or reopen them, and delete to remove them.
+
+  - slug: how-it-works-calendar-appointments
+    module: calendar
+    covers_modules: [management.calendar]
+    title: "How it works: calendar, appointments, invites and reminders"
+    article_type: concept
+    position: 368
+    excerpt: An appointment sends calendar invites that follow every change, texts the customer when it is booked or moved, and reminds them at the times your company sets.
+    content: |
+      An appointment is a **Meeting** activity with a start time on a lead, contact, account or deal. It belongs to the person it is assigned to, or to whoever made it when nobody is assigned.
+
+      ## The Calendar
+
+      **Calendar** shows activities, open tasks, service tickets, project work and busy times from reps' own calendars. Which views you get (**My Calendar**, **Team Calendar**, **All Company**, **All Service Tickets**, **Unassigned Tickets**) depends on your calendar permissions.
+
+      ## Calendar invites
+
+      - The assigned person always gets an invite.
+      - The customer gets one when **Send the customer a calendar invite** is ticked, **Send customers calendar invites** is on for the company, the customer has an email address, and that address is not blocked from mail.
+      - The customer's invite goes from the rep's connected mailbox, or else the company address, and shows on the customer's timeline.
+      - Changing the time, place, title, description, status or assignee updates the same event in both calendars. Cancelling or deleting the appointment sends a cancellation, and a rep taken off it gets one too.
+      - Changes made in Google or Outlook do not come back, so change appointments in {{brand}}.
+      - When the customer accepts, declines or replies, the answer is recorded on the appointment and passed to the assigned rep.
+
+      ## Texts when booked, moved or cancelled
+
+      When **Remind the customer** is ticked, reminders are on for the company with **Text message** chosen, and the customer has a phone number, the customer gets a text when the appointment is booked, when its time moves, and when it is cancelled. Opt-outs are honored.
+
+      ## Customer reminders
+
+      Set them under **Company Settings**, **Customize**, **Appointments** (this needs permission to update company settings):
+
+      - **Remind customers of their appointments**: on unless you turn it off.
+      - **When**: **The day before (24 hours)**, **2 hours before**, **1 hour before**. The day before and 1 hour before are chosen to start.
+      - **How**: **Text message**, **Email**. Both are chosen to start.
+
+      {{brand}} checks every 5 minutes. Only pending appointments with **Remind the customer** ticked are reminded, each reminder goes once, and an appointment booked too late for an earlier one gets only the latest due. Reminders go out as the assigned rep, and opt-outs are honored.
+
+      ## Your own reminders
+
+      A **Reminder** activity alerts the person it is assigned to up to 5 minutes before its reminder time, by bell and pop-up unless their notification settings say otherwise. A reminder missed by less than 24 hours is still sent.
+
+      ## Your calendar app
+
+      Under **Account settings**, **Availability**, **Put {{brand}} on your calendar** gives a private, read only link to your appointments.
+  - slug: how-it-works-contractors
+    module: contractors
+    covers_modules: [management.contractors]
+    title: "How it works: contractors and their portal access"
+    article_type: concept
+    position: 369
+    excerpt: A contractor is a vendor you give work to, who signs in to the Contractor Portal with an emailed code and sends finished work back for your review.
+    content: |
+      A contractor is a vendor record of the contractor type, kept under **Management > Vendors**. You give them tasks on projects or service tickets, and they work in the Contractor Portal with their own sign-in. See [What your contractors do in the Contractor Portal](contractor-portal-for-contractors).
+
+      ## Status decides access
+
+      - A vendor is active, inactive or suspended. Only an active, undeleted vendor can sign in, and the portal checks this on every request, so setting a contractor inactive or suspended, or deleting them, cuts them off straight away.
+      
+      ## How they sign in
+
+      - Their assignment email carries a sign-in link that works for 7 days, plus a 6-digit code. A contractor who has set a password is sent to the login page instead.
+      - A code asked for on the login page expires after 30 minutes and works once.
+      - If the email never arrives, open the vendor and click **Generate Access Code** on the **Portal Access** card, then read the code to them. It follows the same 30 minute rule, and only works for an active contractor.
+      - A sign-in lasts 7 days.
+      - If the same email is on an active vendor at more than one company, one sign-in shows the work from all of them.
+
+      ## Texts need recorded consent
+
+      Contractors get notices by email. They are texted only once consent is on file under **Text Message Notifications** on the vendor. Recording it needs a phone number and an answer to **How did this contractor agree to receive texts?** The note, the time and who recorded it are kept.
+
+      ## When you give them work
+
+      Project task assignments wait 10 minutes, so several made at once arrive in one email. A service ticket assignment is sent right away.
+
+      ## When they finish
+
+      - **Submit for Review** in the portal marks their work complete and sends it to **Projects > Review Updates**, on the **Contractor work** tab.
+      - **Approve** ticks off the task. If it was the last open task in its phase, the phase completes too.
+      - **Request Revision** needs a note and puts the work back in progress. **Reject** closes the review as rejected. The contractor is emailed either way, and on approval.
+      - With **Require customer approval of completed contractor work** turned on (Company Settings, **Project Management** tab), the customer is asked first, and your team confirms after. It only applies to tasks and phases the customer can see.
+
+      ## Permissions
+
+      The Vendors list and its changes use the **Contractors** permission. Generating a code and recording text consent need Contractors update. Giving a project task to a contractor needs Contractors create, and taking it away needs Contractors delete. Approving their work needs Projects update.
+
+  - slug: how-it-works-projects
+    module: projects
+    covers_modules: [management.projects]
+    title: "How it works: project phases, tasks and status"
+    article_type: concept
+    position: 370
+    excerpt: What starts and completes a phase, when a project counts as complete, and which permissions each project action checks.
+    content: |
+      A project tracks the work on a home after the sale. Someone starts it on the deal's **Progress** tab with **Create Project** and a template. Each project gets a number of the form P-1, P-2 and so on. For the screens, see [How projects work](projects-overview).
+
+      ## Statuses
+
+      - A project is active, completed, on hold or cancelled.
+      - A phase is not started, in progress, completed or skipped.
+      - A task (step) is pending or completed.
+
+      ## What changes a phase
+
+      - Ticking the first task of a phase that hasn't started puts that phase in progress.
+      - Ticking the last task does not complete the phase by itself. Click **Mark Phase Complete**. Approving a contractor's submitted work is the exception: if that was the phase's last open task, the phase completes.
+      - **Mark Phase Complete** can also tick off the phase's open tasks. If you leave them open, an item goes to **Review Updates**, and it closes once the last step is ticked or the phase is reopened.
+      - **Reopen Phase** sets a completed phase back to not started, and **Unskip** does the same for a skipped phase.
+      - A phase marked required on its template can't be skipped. Skipping the current phase starts the next phase that isn't skipped.
+      - A phase sent to a linked installer takes its status from them. You can't complete, skip or tick tasks on it from your side.
+      - On an installer's copy of a priced job, a phase can't start while a price, change order or scope change waits for an answer.
+
+      ## When the project is complete
+
+      The project becomes completed, with today as its completion date, when every phase is completed or skipped. Reopening or resetting a phase on a completed project makes it active again. Progress is the share of phases completed or skipped.
+
+      ## Who hears
+
+      A phase emails the customer when it starts or finishes only if that phase is set to notify them, the phase and the project are visible to the customer, and it hasn't already sent that email. On a new template phase, the finish notice is on and the start notice is off. See [How it works: bids and customer updates on projects](how-it-works-project-bids-customers).
+
+      ## Permissions
+
+      Most project actions use the **Deals** permission: read to see a project, the grid and bids; update to change phases, tick tasks, assign owners, ask for bids or send work to an installer; create and delete to add or remove a project. Giving a task to a contractor needs **Contractors** create, and removing them needs Contractors delete. The **Projects** menu shows to people with Projects read, and reviewing contractor work needs Projects update.
+
+  - slug: how-it-works-project-bids-customers
+    module: projects
+    covers_modules: [management.projects]
+    title: "How it works: bids and customer updates on projects"
+    article_type: concept
+    position: 371
+    excerpt: The rules behind asking for, awarding and undoing bids, and what your customer sees and hears about their project.
+    content: |
+      ## Bid requests
+
+      - A request needs at least one contractor. A phase that already has open bids can't get a second request: add contractors to the open one with **Ask more**.
+      - A bid must be more than zero. Files on a bid can be up to 25 MB each.
+      - Changing a bid the contractor sent needs a reason, and they are told.
+      - Once a request is awarded or cancelled, bidding on it is closed.
+      - Steps are in [Get bids on a phase](get-bids-on-a-phase) and [Award, change or undo a bid](award-a-bid).
+
+      ## Awarding
+
+      - Only a bid with an amount can be awarded, and only while the contractor is still an active vendor.
+      - Awarding adds a committed cost line for the bid amount on **Costs & Budget** and gives the phase (or project) to the winner.
+      - The other bids that came in are marked not awarded.
+
+      ## Undoing an award
+
+      **Undo award** is refused when:
+
+      - The awarded cost is already billed or paid.
+      - The contractor has started work.
+      - The work is now with a linked installer. Take the job back from them first.
+
+      Otherwise it removes the cost line and reopens bidding.
+
+      ## Cancelling
+
+      **Cancel request** works only on an open request. Contractors who were invited or had bid get an email that it was closed.
+
+      ## What the customer sees
+
+      - Each project has a private progress page. Copy it with **Copy Link** beside **Client portal link:** on the deal's **Progress** tab. Anyone with the link can open it, so share it only with the buyer.
+      - The page shows only phases and tasks marked visible to the customer (the eye icon). If the project itself is hidden from the customer, the page doesn't open and the link isn't offered.
+      - With **Require customer approval of completed contractor work** on, finished contractor work on a visible task waits for the customer on that page. They can approve it, or ask for changes with a note. Your team still gives the final approval in **Review Updates**.
+
+      ## What the customer hears
+
+      - An email when a phase starts or finishes, if that phase is set to notify them and both the phase and the project are visible to them.
+      - Each of those emails goes once per phase. Reopening a phase and finishing it again doesn't send it again.
+
+  - slug: how-it-works-linked-installers
+    module: projects
+    covers_modules: [management.linked_companies]
+    title: "How it works: linked installers"
+    article_type: concept
+    position: 372
+    excerpt: Linked Installers lets a dealer hand whole jobs to an install company that runs its own company on {{brand}}, with the price agreed before work starts.
+    content: |
+      **Linked Installers** connects your vendor record for an install company to that company's own {{brand}} account. You send it a project, or some of its phases, for one price. It works its own copy of the job, and status, dates and photos flow back to yours. You don't need this to give an ordinary contractor work. For step by step help, see [Link an installer](link-an-installer) and [Send a job to your installer](send-job-to-installer).
+
+      ## Who can use it
+
+      - Only a dealer that has the Linked Installers add-on can invite an installer. The installer doesn't need to buy it: it gets the page for as long as a link is open or an invitation waits for one of its admins.
+      - Inviting needs the **Vendors** update permission. Accepting a link takes an admin at the installer.
+      - The invitation must go to the sign-in email of an admin at a company already on {{brand}}. Any other email is refused and nothing is sent.
+      - A vendor can have only one open link at a time.
+
+      ## Link status
+
+      A link is invited, active or ended. Either company can click **End link**. No new jobs can be sent after that.
+
+      ## Job status
+
+      A job you send is offered, accepted, declined, cancelled (taken back) or done.
+
+      - The installer's copy of the job is made only when they accept.
+      - A job sent with **Ask them to quote** needs a price from them when they accept, and you approve it.
+      - The job is done on both sides once every phase on it is completed or skipped on the installer's side.
+
+      ## The price is agreed first
+
+      - Pricing comes from their approved rate card, a price you set, or a quote from them.
+      - On the installer's copy, a phase can't start while a price, a change order for that phase, or a scope change you sent waits for an answer.
+      - Only one price request can wait at a time. A change order needs a description and can't be for a phase that is already finished.
+      - The installer can bill only the approved total: the price plus approved change orders. Their bill arrives as a draft bill in your accounting.
+
+      ## Taking a job back
+
+      **Take it back** works while the job is offered or accepted, and not once the installer has billed it. Their copy is closed and marked taken back, and they are told.
+
+      ## What stays private
+
+      Each company keeps its own records. The installer never sees your deal price or your costs. See [Rate cards, quotes and change orders](installer-prices).
+
+  - slug: how-it-works-workflows
+    module: workflow_automation
+    covers_modules: [management.workflows]
+    title: "How it works: workflow automation"
+    article_type: concept
+    position: 373
+    excerpt: A workflow runs its steps when something happens to a lead, deal, contact, account or service ticket, but only once it has been activated.
+    content: |
+      Workflows live under **Management > Workflow Automation**, with the tabs **Workflows**, **Templates**, **Runs** and **Approvals**. A workflow has a trigger (what starts it), optional conditions, and steps such as **Send Email**, **Send SMS**, **Wait**, **Branch**, **Add Tag**, **Assign Owner** or **Require Approval**.
+
+      ## Draft first, then Activate
+
+      - A workflow is draft, active, paused or archived. Every new workflow starts as a draft, including one made from a template or by the AI builder. Drafts never run.
+      - **Activate** checks the workflow first. If a step is missing something it needs, activation is refused and the problems are listed. **Resume** on a paused workflow runs the same check.
+      - Saving changes to an active workflow is refused if the change would stop it working. Pause it to keep editing.
+      - **Pause** and archiving stop new runs. Runs already under way keep going. Deleting a workflow cancels its runs that are still under way.
+
+      ## What starts a run
+
+      - The trigger event happens, for example **New Lead**, **Lead Status Changed**, **Deal Won**, **Deal Stage Changed**, **Lead Tagged** or **Campaign Link Clicked**.
+      - The workflow's conditions are checked against the record at that moment. If they don't match, no run starts.
+      - Changes a workflow step makes don't start other workflows, so a workflow can't set itself off in a loop.
+
+      ## While it runs
+
+      - Each run follows the steps as they were when it started. Edits apply to runs that start afterwards.
+      - **Send Email** sends from the record owner's connected email account. If the To address comes out blank, it goes to the owner.
+      - **Send SMS** is skipped for a lead whose conversation Quinn AI is handling.
+      - With **Halt on reply** set to **Yes**, a run stops when the person replies to a message it sent. **Wait for Reply** steps go down **On Reply** or **On Timeout**.
+      - **Require Approval** pops up a notice for the approver and waits, 24 hours unless set otherwise, then follows the approved, rejected or expired path. Pending approvals are on the **Approvals** tab.
+
+      ## History
+
+      Runs that finished, failed or were cancelled are deleted after 90 days, and each workflow keeps at most its 1,000 most recent runs.
+
+      ## Permissions and add-ons
+
+      The pages need the Workflow Automation or Marketing Automation add-on and the **Workflow Automation** permission: read to view, create to build (including with AI), update to edit, activate, pause, resume or archive, and delete to delete. Activating or pausing also sends a webhook to any webhook endpoint you have set up for those events.
+
+  - slug: how-it-works-territories
+    module: territories
+    covers_modules: [management.territories]
+    title: "How it works: territories"
+    article_type: concept
+    position: 374
+    excerpt: Territories group deals by area or team for pipeline and win rate figures, and are set up by the {{brand}} team rather than in your own screens.
+    content: |
+      A territory groups deals by area or team, so you can see the pipeline, wins and losses for each.
+
+      ## Who manages them
+
+      - The **Territories** tab on **Sales Deals** is shown only to {{brand}} platform admins. Dealers don't see it, and the Territories tile is hidden too, so territories are set up and changed by the {{brand}} team.
+      - On a deal's overview, the **Territory** field reads **No Territory** when none is set.
+      - A deal gets a territory only when one is put on the deal. Nothing assigns it automatically.
+      - Behind the screens, territories use the **CRM** permission: read to view, create to add, update to change or assign reps, delete to remove.
+
+      ## What a territory holds
+
+      - A name, which must be unique in your company, plus a description and a region.
+      - A type, which is geographic unless another is chosen.
+      - One or more sales reps.
+      - Active or inactive.
+      - Rules: a field, an operator (equals, not equals, contains, starts with, ends with, or in a comma separated list) and a value. Rules are saved and shown with the territory, but {{brand}} does not use them to place deals or accounts in a territory.
+
+      Saving a territory with a new list of reps or rules replaces the old list.
+
+      ## The figures
+
+      - Deal count and open deal value: the deals with this territory, in your company only.
+      - Win rate: won deals divided by won plus lost deals. Open deals don't count, and a territory with no closed deals shows 0.
+      - Average deal value: open deal value divided by the number of open deals.
+      - The deal forecast can be split by territory, with each deal's value weighted by its probability.
+
+      ## Deleting
+
+      A territory that still has deals can't be deleted. Its deals have to be taken off it first.

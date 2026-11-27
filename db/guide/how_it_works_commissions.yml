@@ -12,6 +12,7 @@
 articles:
   - slug: how-it-works-commission-basis
     module: commissions
+    covers_modules: [management.commissions]
     title: "How it works: what commission is paid on"
     article_type: concept
     position: 230

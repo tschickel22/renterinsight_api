@@ -99,3 +99,12 @@ RSpec.describe Guide::ProductFacts do
     expect(described_class.call('zzzz qqqq')[:found]).to be(false)
   end
 end
+
+RSpec.describe Guide::ProductFacts, 'sold but not built' do
+  it "says Text Us replies are not offered, not the module's planned description" do
+    matches = described_class.call('do texts from the website text us widget get routed to a rep')[:matches]
+    text_us = matches.select { |m| m[:module] == 'marketing.text_us' }
+    expect(text_us).not_to be_empty
+    expect(text_us).to all(include(offered: false))
+  end
+end
