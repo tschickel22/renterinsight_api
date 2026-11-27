@@ -319,6 +319,31 @@ module Websites
       "<ul>\n#{items.join("\n")}\n</ul>\n"
     end
 
+    # The units open now, with rent, size and the date each opens, then how to
+    # apply. Said plainly when nothing is open, since "no vacancies, join the
+    # waitlist" is itself an answer a renter is looking for.
+    def rental_list(content)
+      listings = RentalListings.listings_for([content['listingId'].to_s])
+      if listings.empty?
+        text = content['emptyText'].presence || 'Nothing is open right now. Contact us to join the waitlist.'
+        return "<p>#{esc(text)}</p>\n"
+      end
+
+      items = listings.first(MAX_ITEMS).map do |l|
+        facts = [l[:beds_label], ("#{whole(l[:baths])} bath" if l[:baths].to_f.positive?),
+                 ("about #{number_with_delimiter(l[:sqft])} sq ft" if l[:sqft].to_i.positive?),
+                 RentalListings.rent_label(l), RentalListings.availability_label(l)].compact
+        about = l[:description].to_s.squish.truncate(400, separator: ' ').presence
+        "<li><h3>#{esc(l[:title])}</h3><p>#{esc(facts.join(', '))}</p>#{"<p>#{esc(about)}</p>" if about}</li>"
+      end
+      apply = content['applyUrl'].to_s
+      apply_link = apply.match?(%r{\Ahttps://}i) ? %(<p><a href="#{esc(apply)}">#{esc(content['applyText'].presence || 'Apply now')}</a></p>\n) : ''
+      "<ul>\n#{items.join("\n")}\n</ul>\n#{apply_link}"
+    rescue StandardError => e
+      Rails.logger.warn("[BodyRenderer] rental listings failed for #{@website&.id}: #{e.message}")
+      ''
+    end
+
     def featured_picks
       @featured_picks ||= Array(@website.try(:featured_homes)&.includes(:vehicle)).select do |pick|
         vehicle = pick.vehicle
@@ -440,6 +465,14 @@ module Websites
                                  : "<h1>#{esc(title.presence || 'Homes for sale')}</h1>\n")
           heading_used = true
           parts << listing
+          next
+        end
+
+        if type == RentalListings::BLOCK_TYPE
+          parts << (heading_used ? "<h2>#{esc(title.presence || 'Available apartments')}</h2>\n"
+                                 : "<h1>#{esc(title.presence || 'Available apartments')}</h1>\n")
+          heading_used = true
+          parts << rental_list(content)
           next
         end
 

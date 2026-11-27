@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_11_25_030000) do
+ActiveRecord::Schema[8.0].define(version: 2026_11_27_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3879,6 +3879,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_11_25_030000) do
     t.boolean "hide_description", default: false, null: false
     t.string "assignment_mode"
     t.bigint "round_robin_list_id"
+    t.string "forward_to_emails", default: [], null: false, array: true
     t.index ["company_id"], name: "index_intake_forms_on_company_id"
     t.index ["location_id"], name: "index_intake_forms_on_location_id"
     t.index ["notified_user_id"], name: "index_intake_forms_on_notified_user_id"

@@ -24,6 +24,9 @@ class IntakeSubmission < ApplicationRecord
   after_create :create_lead_from_submission
   after_create :identify_landing_page_visitor
   after_create :increment_form_count
+  # After commit, so an inquiry rolled back never reaches an outside inbox, and
+  # declared last so the lead (or the existing record it matched) is known.
+  after_create_commit :forward_to_outside_inboxes
   
   scope :recent, -> { order(submitted_at: :desc) }
   scope :with_leads, -> { where(lead_created: true) }
@@ -274,6 +277,7 @@ class IntakeSubmission < ApplicationRecord
     Rails.logger.info "[IntakeSubmission] Lead created successfully: #{new_lead.id}"
 
     self.resolved_entity = new_lead
+    @made_new_lead = true # absorbing into an existing lead also sets lead_created
     update_columns(lead_id: new_lead.id, lead_created: true)
     record_marketing_consent!(new_lead)
     record_sms_consent!(new_lead)
@@ -687,8 +691,195 @@ class IntakeSubmission < ApplicationRecord
     end
   end
   
+  # Every inquiry, in full, to the form's outside inboxes (IntakeForm#forward_to_emails).
+  #
+  # For people who never sign in: The James reads its inquiries in Gmail. So
+  # this runs whatever else the form is set to do (no notified user, no lead
+  # created, an existing customer matched), carries every answer rather than a
+  # link into a CRM the reader cannot open, and sets Reply-To to the person who
+  # asked so answering them is one click.
+  #
+  # A forwarding failure is logged and swallowed. The inquiry is already saved;
+  # losing the email must never cost the submission.
+  def forward_to_outside_inboxes
+    form = intake_form
+    recipients = Array(form&.forward_to_emails).map { |e| e.to_s.strip.downcase }.reject(&:blank?).uniq
+    return if recipients.empty?
+
+    # The rep the CRM already emails gets that one, not a second copy.
+    already_told = forward_already_notified_email(form)
+    recipients -= [already_told] if already_told
+
+    recipients.each { |address| send_forwarded_inquiry(form, address) }
+  rescue StandardError => e
+    Rails.logger.error "[IntakeSubmission] forward_to_outside_inboxes failed for submission #{id}: #{e.class} #{e.message}"
+  end
+
+  # Keys a visitor never typed: spam checks, consent flags, attribution and the
+  # embed's own bookkeeping. The unit of interest is shown on its own line.
+  FORWARD_INTERNAL_KEY = /\A(captcha|cf[-_]turnstile|turnstile|marketing_?consent|sms_?consent|utm_?|source|source_?id|location_?id|vehicle_?location_?id|visitor_?token|_visitor_?token|landing_?page|page_?id|website_?id|form_?id|public_?id|session|referrer|page_?url|vehicle_?)/i
+
+  def forwarded_inquiry_subject(contact, repeat)
+    who = contact[:name].presence || contact[:email].presence || contact[:phone].presence || 'someone'
+    "#{repeat ? 'Repeat inquiry' : 'New inquiry'} from #{who}"
+  end
+
   private
-  
+
+  def send_forwarded_inquiry(form, address)
+    submission_data = (data || {}).to_h.stringify_keys
+    contact = forwarded_contact(form, submission_data)
+    repeat = forwarded_repeat?
+    company = form.company
+    zone = ActiveSupport::TimeZone[company&.time_zone.to_s] || Time.zone
+    sent_at = (submitted_at || created_at || Time.current).in_time_zone(zone)
+    h = ->(value) { ERB::Util.html_escape(value.to_s) }
+
+    contact_lines = []
+    contact_lines << "<strong>Name:</strong> #{h.(contact[:name])}" if contact[:name].present?
+    if contact[:email].present?
+      contact_lines << "<strong>Email:</strong> <a href=\"mailto:#{h.(contact[:email])}\">#{h.(contact[:email])}</a>"
+    end
+    if contact[:phone].present?
+      digits = contact[:phone].to_s.gsub(/[^\d+]/, '')
+      contact_lines << "<strong>Phone:</strong> <a href=\"tel:#{h.(digits)}\">#{h.(contact[:phone])}</a>"
+    end
+
+    unit = submission_data['vehicle_title'].presence
+    answer_rows = forwarded_answers(form, submission_data).map do |label, value|
+      "<tr><td style=\"padding:6px 12px 6px 0;vertical-align:top;color:#6b7280;white-space:nowrap\">#{h.(label)}</td>" \
+        "<td style=\"padding:6px 0;vertical-align:top\">#{h.(value).gsub("\n", '<br>')}</td></tr>"
+    end
+
+    consent = []
+    consent << (marketing_consent? ? 'Agreed to receive marketing emails and texts.' : 'Did not agree to marketing emails or texts.') if form.marketing_consent?
+    consent << (sms_consent? ? 'Agreed to texts about this inquiry.' : 'Did not agree to texts about this inquiry.') if form.sms_consent?
+
+    intro = repeat ? 'This person has written to you before. Here is their new inquiry.' : 'Someone sent an inquiry from your website.'
+    reply_hint = contact[:email].present? ? "Reply to this email to answer #{h.(contact[:name].presence || contact[:email])} directly." : 'They left no email address, so call or text them back.'
+
+    body = <<~HTML
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#111827;max-width:640px">
+        <h2 style="margin:0 0 8px">#{repeat ? 'Repeat inquiry' : 'New inquiry'}</h2>
+        <p style="margin:0 0 16px">#{intro} #{reply_hint}</p>
+        #{contact_lines.any? ? "<p style=\"margin:0 0 16px\">#{contact_lines.join('<br>')}</p>" : ''}
+        #{unit ? "<p style=\"margin:0 0 16px\"><strong>Asking about:</strong> #{h.(unit)}</p>" : ''}
+        #{answer_rows.any? ? "<table style=\"border-collapse:collapse;margin:0 0 16px\">#{answer_rows.join}</table>" : ''}
+        <p style="margin:0 0 4px;color:#6b7280;font-size:13px">Sent #{h.(sent_at.strftime('%B %-d, %Y at %-l:%M %p %Z'))} from the form "#{h.(form.name)}"#{referrer.present? ? " on #{h.(referrer)}" : ''}.</p>
+        #{consent.any? ? "<p style=\"margin:0;color:#6b7280;font-size:13px\">#{h.(consent.join(' '))}</p>" : ''}
+      </div>
+    HTML
+
+    CommunicationService.send_email(
+      # On the form, not the customer: a copy to the dealer's inbox on the
+      # customer's timeline reads as a failed email TO the customer (the same
+      # lesson as send_existing_customer_email). The form carries the company
+      # and location the sender resolves from.
+      communicable: form,
+      to: address,
+      subject: forwarded_inquiry_subject(contact, repeat),
+      body: body,
+      category: 'system',
+      content_type: 'text/html',
+      skip_preference_check: true,
+      reply_to: contact[:email].presence,
+      metadata: {
+        source: 'intake_form_forward',
+        form_id: form.id,
+        form_name: form.name,
+        submission_id: id,
+        repeat_inquiry: repeat
+      }
+    )
+  rescue StandardError => e
+    Rails.logger.error "[IntakeSubmission] forwarding submission #{id} to #{address} failed: #{e.class} #{e.message}"
+  end
+
+  # Repeat when it landed on someone already on file (absorbed into their lead
+  # or attached to their contact or account). A new lead, or no lead at all
+  # (auto-create off), reads as new.
+  def forwarded_repeat?
+    return false if @made_new_lead
+
+    resolved_entity.present?
+  end
+
+  # The address create_activity_and_notify / notify_existing_customer_inquiry
+  # already mails, when they will run at all.
+  def forward_already_notified_email(form)
+    return nil unless form.auto_create_activity
+
+    user_id = (form.rotates? && lead&.owner_id.presence) || form.notified_user_id
+    owner = resolved_entity.try(:owner) if forwarded_repeat? && !resolved_entity.is_a?(Lead)
+    email = (owner || (user_id && User.find_by(id: user_id, company_id: form.company_id)))&.email
+    email.to_s.strip.downcase.presence
+  end
+
+  # Name, email and phone as the person typed them: the form's own mappings
+  # first, then the usual field names.
+  def forwarded_contact(form, submission_data)
+    mapped = {}
+    form.fields.each do |field|
+      field = field.to_h.stringify_keys
+      target = field['leadField'].to_s
+      next if target.blank?
+
+      value = submission_data[field['name'].to_s]
+      mapped[target] ||= value if value.present? && !value.is_a?(Hash)
+    end
+    pick = lambda do |*keys|
+      keys.each do |key|
+        found = submission_data.find { |k, v| k.to_s.downcase == key && v.present? && !v.is_a?(Hash) }
+        return found[1].to_s if found
+      end
+      nil
+    end
+
+    first = mapped['first_name'].presence || pick.('first_name', 'firstname', 'first', 'first name')
+    last = mapped['last_name'].presence || pick.('last_name', 'lastname', 'last', 'last name')
+    full = [first, last].compact.join(' ').strip.presence || pick.('name', 'full_name', 'fullname', 'full name')
+    email = mapped['email'].presence || pick.('email', 'email_address', 'email address') ||
+            submission_data.values.find { |v| v.is_a?(String) && v.match?(/\A[^@\s]+@[^@\s]+\.[a-z]{2,}\z/i) }
+    phone = mapped['phone'].presence || pick.('phone', 'phone_number', 'mobile', 'cell', 'phone number')
+
+    { name: full.to_s, email: email.to_s.strip, phone: phone.to_s.strip }
+  end
+
+  # Every answer, labelled as the form labels it, in the form's order; then
+  # anything sent that the form does not define, minus internal keys.
+  def forwarded_answers(form, submission_data)
+    rows = []
+    seen = []
+    fields = form.fields.map { |f| f.to_h.stringify_keys }.sort_by { |f| f['order'].to_i }
+    fields.each do |field|
+      name = field['name'].to_s
+      next if name.blank?
+
+      seen << name
+      next if %w[heading paragraph divider consent].include?(field['type'].to_s)
+
+      value = forwarded_value(submission_data[name])
+      rows << [field['label'].presence || name.humanize, value] if value.present?
+    end
+    submission_data.each do |key, raw|
+      next if seen.include?(key.to_s) || key.to_s.match?(FORWARD_INTERNAL_KEY)
+
+      value = forwarded_value(raw)
+      rows << [key.to_s.humanize, value] if value.present?
+    end
+    rows
+  end
+
+  def forwarded_value(raw)
+    case raw
+    when Hash then raw.values.map(&:to_s).reject(&:blank?).join(', ')
+    when Array then raw.map(&:to_s).reject(&:blank?).join(', ')
+    when true then 'Yes'
+    when false then 'No'
+    else raw.to_s.strip
+    end
+  end
+
   # Deterministic fallback location for a company so intake leads are never
   # orphaned (a null location_id hides the lead from location-scoped users).
   # It used to prefer the Corporate location, which is usually an

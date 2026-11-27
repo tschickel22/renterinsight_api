@@ -205,7 +205,10 @@ Rails.application.routes.draw do
     # A dealer's name, logo and brand colour, for the sign-in page their own
     # website sends visitors to. Pre-auth by necessity — see the controller.
     get 'branding', to: 'branding#show'
-    
+
+    # Vacancies from Renter Insight, for a landlord's rental listings block.
+    get 'rental_listings', to: 'rental_listings#index'
+
     # ==================== PUBLIC INVENTORY (Vehicle Catalog) ====================
     # A lead form's visitor view, for a form embedded in a dealer's site.
     get 'intake_forms/:id', to: 'intake_forms#show', as: :intake_form

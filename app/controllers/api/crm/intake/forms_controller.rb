@@ -321,6 +321,9 @@ module Api
             # The rotation is saved as reps, never as a list id from the browser.
             :assignment_mode, :assignmentMode,
             rotation_user_ids: [], rotationUserIds: [],
+            # Outside inboxes that get every inquiry in full. An array from the
+            # builder, or one comma list from anything simpler.
+            :forward_to_emails, :forwardToEmails, forward_to_emails: [], forwardToEmails: [],
             field_mappings: {},
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
@@ -392,7 +395,8 @@ module Api
               p[key] = ActiveModel::Type::Boolean.new.cast(p[key]) if p.key?(key)
             end
 
-            { assignmentMode: :assignment_mode, rotationUserIds: :rotation_user_ids }.each do |camel, snake|
+            { assignmentMode: :assignment_mode, rotationUserIds: :rotation_user_ids,
+              forwardToEmails: :forward_to_emails }.each do |camel, snake|
               if p.key?(snake)
                 p.delete(camel)
               elsif p.key?(camel)
