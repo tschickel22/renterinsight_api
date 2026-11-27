@@ -976,6 +976,10 @@ class Api::V1::WebsitesController < ApplicationController
       seo_config: [
         :default_title,
         :default_description,
+        # What kind of place the site describes (ApartmentComplex for a single
+        # building). Websites::StructuredData allowlists the values; this was
+        # missing, so the design's choice was dropped on every create.
+        :business_type,
         :og_title,
         :og_description,
         :og_image_url,
