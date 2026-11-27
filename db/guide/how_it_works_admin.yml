@@ -1,0 +1,327 @@
+# "How it works" notes for administration (backlog E118), written from the code on
+# 2026-11-27, every claim traced to a file and line. Published without review
+# (Tom, 2026-11-24): they state only what the code does.
+#
+# Loaded by db/migrate/20261127210000_load_module_how_it_works_notes.rb
+# (Guide::ArticleLoader, insert only by slug). covers_modules names the plan
+# modules each note covers; spec/services/guide/how_it_works_coverage_spec.rb
+# fails when an offered module has none. Write the product name as {{brand}}.
+# No em or en dashes.
+
+articles:
+  - slug: how-it-works-company-settings
+    module: companies
+    covers_modules: [admin.settings]
+    title: "How it works: Company Settings"
+    article_type: concept
+    position: 380
+    excerpt: Company Settings holds your profile, labels, pipeline stages, sending setup and integrations, and some tabs show only to admins.
+    content: |
+      Open **Administration > Company Settings** in the side menu. The menu item shows to people whose role can update company settings.
+
+      ## Who sees which tab
+
+      - Everyone who opens the page sees tabs such as **General**, **Branding**, **Communications**, **Integrations**, **Users**, **Portal Users**, **Finance**, **Item Templates**, **Manufacturer/Warranty** and **Locations**.
+      - Only admins see **Customize**, **Conversion Tracking**, **Domains**, **Pipeline**, **Accounting Settings**, **Service Issue Templates**, **Warranty Policy** and **Listing Partners**.
+      - Saving most settings needs the company settings Update permission. Company administrators can always save.
+
+      ## Labels
+
+      Under **Customize > Labels** you rename the words {{brand}} uses, such as Homes, Customers or Deals.
+
+      - Every company starts from the defaults for its industry. A label you change replaces that one word for everyone in your company.
+      - **Reset** on a row puts that label back to the industry default. **Reset All** puts every label back.
+      - Everyone in the company sees your labels. Changing them needs the company settings Update permission.
+      - If you rename Contact, the second person on a lead reads "Second" plus your new word, unless you set that label yourself.
+
+      ## Pipeline stages
+
+      The **Pipeline** tab sets your deal stages, their order, **Probability**, **Color** and whether each is **Active**.
+
+      - At least one stage must be at 100% (won) and one at 0% (lost), or the save is refused. A deal reaching a 100% stage is what triggers commissions, accounting posts and marking the home sold.
+      - Closed Won and Closed Lost are locked: they cannot be removed, renamed or switched off.
+      - A deal's probability always comes from its stage. When you change a stage's percentage, {{brand}} updates the deals on it in the background.
+      - If you remove a stage that still holds deals, you are asked to move those deals to another stage first (**Move deals & save**).
+      - A newly converted deal lands on the first active stage.
+
+      ## Sending and integrations
+
+      - **Communications** sets the email and texting your company sends from. See [How it works: email and texting setup](how-it-works-email-texting-setup).
+      - **Integrations** holds **API Keys**, **Webhooks** and **AI Apps**. See [How it works: API keys](how-it-works-api-keys), [How it works: webhooks](how-it-works-webhooks) and [How it works: connecting Claude or ChatGPT](how-it-works-ai-connector).
+      - A 3CX phone system is connected by the {{brand}} team, not from your screen, because downloading a new template breaks the one already in your 3CX.
+
+  - slug: how-it-works-email-texting-setup
+    module: communications
+    covers_modules: [admin.settings]
+    title: "How it works: email and texting setup"
+    article_type: concept
+    position: 381
+    excerpt: Email goes out from the sender's own mailbox first, then the location's, the company's and the platform's; texts skip the personal level.
+    content: |
+      Sending setup lives under **Company Settings > Communications**. Admins see **Set up your texting number** at the top. Below it, **Communication Settings** has three tabs: **Email**, **SMS** and **Templates**.
+
+      ## Who can change it
+
+      - Only company administrators can change the email and SMS sending settings, for the company or for a location. A role with the company settings Update permission is not enough, because these settings decide the mailbox and number everyone sends as.
+      - Leave a setting empty and {{brand}}'s platform default is used.
+
+      ## Which mailbox an email leaves from
+
+      {{brand}} uses the first one that is set up:
+
+      1. The sender's own connected mailbox. Each person connects theirs under their name menu, **Account Settings**, **Email** tab.
+      2. The location's email settings.
+      3. The company's email settings (**Email** tab, **Quick Connect** with **Microsoft 365** or **Google Workspace**, or set up by hand).
+      4. The platform default.
+
+      Campaign email never goes out through a connected Google account, whichever level it comes from. To send a campaign, verify a sending domain or use a mailbox that is not Google.
+
+      ## Which number a text leaves from
+
+      Texts follow the same order without the personal level: the location's SMS settings, then the company's, then the platform's.
+
+      ## Registering your texting number
+
+      Carriers approve business texting by business name. Click **Start**, answer the questions about your business and where buyers agree to texts, and submit.
+
+      - Filling it in and submitting needs the company settings Update permission.
+      - Once submitted, the answers cannot be changed while the carriers have them. The screen shows where it stands: submitted, in review, approved, then live with your number.
+      - If the carriers send it back, the reason shows on the screen. Fix what they asked for and submit again.
+      - The screen says approval usually takes one to three weeks.
+
+  - slug: how-it-works-users-invitations
+    module: users
+    covers_modules: [admin.users]
+    title: "How it works: adding and removing users"
+    article_type: concept
+    position: 382
+    excerpt: Users are invited by email, count against your user limit once active, and can be disabled or deleted without losing their history.
+    content: |
+      People are managed under **Company Settings > Users**, with **Add User**, **Add Several** and, when anyone has not signed in yet, **Send Invitations to All Pending**.
+
+      ## Inviting
+
+      - **Add User** sends an invitation. The person shows as Invited until they accept and set a password.
+      - An invitation link works for 7 days. **Resend Invite** sends a fresh one.
+      - **Send Invitations to All Pending** emails the standard invitation to everyone who has never signed in.
+      - A deleted person's email cannot be invited again. Turn on **Include deleted users** in the filters and restore them instead.
+      - A Disabled person must be set back to Active before you can resend their invitation.
+
+      ## Add Several
+
+      - Paste up to 50 people, one per line, with a name and email in any order. Lines with no email are skipped.
+      - Everyone in the list gets the role you pick. Someone already in your company is left alone and nothing is sent.
+      - An email that already signs in to another company on {{brand}} gets your company added to that same login.
+      - No locations are picked for them, so they reach every location until you edit them.
+
+      ## Who can give which role
+
+      - You can only give a role below your own level. A Company Administrator can also make another Company Administrator. See [How it works: roles and permissions](how-it-works-roles-permissions).
+      - Nobody can change their own role.
+      - You cannot edit, delete or restore someone whose role is higher than yours.
+
+      ## The user limit
+
+      - When your company has a user limit, every active user counts, except {{brand}} staff and customers who sign in to the portal.
+      - Invitations not yet accepted count too, so a new invitation is refused when the seats are already promised.
+      - Making someone active again, or restoring them, also needs a free seat.
+      - The Users screen warns you at 80% of the limit.
+
+      ## Disabling and deleting
+
+      - Set **Status** to **Disabled** to stop someone signing in. Anyone already signed in is turned away on their next action. A disabled person no longer takes a seat.
+      - **Delete User** asks for a reason, keeps the person and everything they touched, and removes their location access. **Restore User** brings them back with those locations.
+      - Deleting and restoring need the users Delete permission. You cannot delete your own account.
+
+  - slug: how-it-works-locations
+    module: locations
+    covers_modules: [admin.locations]
+    title: "How it works: locations and the location picker"
+    article_type: concept
+    position: 383
+    excerpt: Each person reaches every location or only the ones picked for them, and the Location picker narrows what you see to one lot.
+    content: |
+      Locations are your lots and offices. Manage them under **Administration > Locations** (or **Company Settings > Locations**, **Manage Locations**) with **Add Location**.
+
+      ## Setting up a location
+
+      - **Location Name** and **Timezone** are required. A **Location Code** is up to 10 characters and must be unique in your company.
+      - **Cross-sell Inventory With** shares inventory between locations that sell from the same lot. It works both ways: picking a location here also adds this location to its list.
+      - A location's email and texting settings can be changed only by company administrators. When a location has its own, they are used for that location ahead of the company's. See [How it works: email and texting setup](how-it-works-email-texting-setup).
+      - Adding, editing and deleting locations need the locations Create, Update and Delete permissions.
+
+      ## Which locations a person reaches
+
+      - Company administrators reach every location.
+      - A role set to every location (company tier) reaches every location.
+      - Otherwise, the locations ticked under **Location Access** on the person's user record decide. **All locations** means every one.
+      - A location role given with no location picked works as every location.
+      - A change to someone's locations counts straight away.
+      - When a person has more than one location, **Default Location** sets the one they see first after signing in.
+
+      ## The Location picker
+
+      The **Location** picker at the top of the screen shows **All Locations** or one location.
+
+      - Admins can pick any location in the company. Everyone else can pick only locations they reach.
+      - With one location picked, most lists show that location's records plus records that have no location at all.
+      - The choice is remembered in that browser tab.
+
+      ## Leads that arrive without a person
+
+      An API key that creates leads, with inbound lead routing set up, must name at least one location. A lead with no location would be hidden from everyone limited to their own locations. See [How it works: API keys](how-it-works-api-keys).
+
+  - slug: how-it-works-roles-permissions
+    module: rbac_admin
+    covers_modules: [admin.roles]
+    title: "How it works: roles and permissions"
+    article_type: concept
+    position: 384
+    excerpt: A role is a set of permissions that reaches every location or only a person's own; standard roles are shared and you duplicate them to change them.
+    content: |
+      Roles live under **Company Settings > Users > Roles & Permissions**, on two tabs: **Permission Matrix** and **Role Management**.
+
+      ## Who can change roles
+
+      Only company administrators can create, edit, duplicate, hide or delete roles.
+
+      ## Standard roles and your own
+
+      - **System Roles** are shared by every company on {{brand}}, so you cannot change their permissions. Click **Duplicate role** to make your own copy. The copy starts with the same permissions and from then on is yours alone.
+      - The eye icon on a system role hides it from the role list when adding or editing users.
+      - System roles cannot be deleted. A custom role can be deleted only when nobody holds it.
+      - **Create Role** or **From Template** starts a new one. **Locations** sets its reach: **Every location** (company tier) or **Only the locations picked for each person** (location tier).
+
+      ## Role levels
+
+      You can give only a role below your own level, and a Company Administrator can also make another Company Administrator.
+
+      | Level | Standard roles |
+      |---|---|
+      | 50 | Company Administrator |
+      | 40 | Company Manager, Location Administrator |
+      | 30 | Company Staff, Location Manager |
+      | 20 | Sales Representative, Finance Staff, CRM Specialist, Inventory Manager, Location Staff, Service Technician |
+      | 10 | Read-Only User |
+
+      ## Permissions
+
+      - The **Permission Matrix** turns actions (such as read, create, update, delete) on or off per area for each role. Click **Save Changes** to apply.
+      - {{brand}} checks the new permissions on the next request. The screen asks people to log out and back in so their menus catch up.
+      - A Company Administrator can do everything in the company, whatever the matrix shows.
+      - A person with several roles gets everything any of their roles allows.
+
+      ## Dealer cost is visible to deal readers
+
+      Anyone whose role can read deals across the company sees dealer cost, gross and margin on deals and in the cost columns of reports. This is by design, so reps understand the margin on what they sell.
+
+  - slug: how-it-works-api-keys
+    module: api_keys
+    covers_modules: [admin.api_keys]
+    title: "How it works: API keys"
+    article_type: concept
+    position: 385
+    excerpt: An API key lets another system read or write your company's records, only the parts you switch on, and is shown in full only once.
+    content: |
+      API keys let another system (Zapier, Make, a lead vendor, your website) work with your records. Find them under **Company Settings > Integrations > API Keys**, and click **Generate New API Key**. The tab shows to company admins when API Keys is on your plan.
+
+      ## The key itself
+
+      - The full key is shown once, when you create it. After that only a masked preview shows, so save it right away.
+      - New keys start with `dt_live_`. Older keys that start with `ri_live_` keep working.
+      - A key reaches only your company's records.
+      - The other system sends it as `Authorization: Bearer` followed by the key.
+
+      ## Permissions
+
+      - Each area has a **Read** and a **Write** switch. **Write** allows creating, updating and deleting.
+      - The areas are leads, contacts, accounts, deals, quotes, invoices, payments, loans, homes, service tickets, locations, users (read only), webhooks and websites (write only).
+      - A key with no permissions switched on cannot be created.
+      - Managing keys needs the API keys Read, Create, Update and Delete permissions.
+
+      ## Inbound lead routing
+
+      For a key that sends leads in, you can set a **Default Lead Source**, the **Locations** new leads go to, who new leads are assigned to, and **Skip duplicates**.
+
+      - Assign new leads to one user, one user per location, round-robin among selected users, or leave them unassigned for a workflow to handle.
+      - Once routing is set up on a key that can write leads, at least one location is required.
+      - With one user per location, every chosen location needs a user.
+      - **How should the keys be structured?** offers one shared key for all locations, or one key per location.
+
+      ## Limits and switching off
+
+      - Each key has a **Rate Limit** of requests per hour (1,000 unless you change it). Past it, requests are refused until the hour drains.
+      - Revoking a key stops it on its next request. Deleting it is permanent.
+      - **Last Used** and **Requests** show how much it is used.
+      - While your account is suspended, every key is refused.
+
+  - slug: how-it-works-webhooks
+    module: webhooks
+    covers_modules: [admin.webhooks]
+    title: "How it works: webhooks"
+    article_type: concept
+    position: 386
+    excerpt: A webhook posts a signed message to your address when something happens in {{brand}}, retries on failure and pauses itself after repeated failures.
+    content: |
+      A webhook sends a message to another system the moment something happens, such as a new lead or a won deal. Set one up under **Company Settings > Integrations > Webhooks** with **Add Webhook**. The tab shows to company admins when Webhooks is on your plan.
+
+      ## Setting one up
+
+      - The **Endpoint URL** must start with `https://`.
+      - Pick the **Events** to send, for example lead created, deal won, invoice paid, agreement signed or campaign completed.
+      - **Location Filter (Optional)** limits it to some locations. It still receives events that have no location, such as campaigns and parts.
+      - The **Signing Secret** is shown once, when you create the webhook. Save it.
+      - Managing webhooks needs the webhooks Read, Create, Update and Delete permissions.
+
+      ## What is sent
+
+      Each event is a POST with a JSON body holding an id, the event name, the time, the record's data, and your company and location ids.
+
+      - The `X-Webhook-Signature` header is an HMAC SHA-256 of the body made with your signing secret. Check it to be sure the message came from {{brand}}.
+      - The `X-Webhook-Id` header names the delivery.
+
+      ## Failures
+
+      - Any 2xx answer counts as delivered. {{brand}} waits up to 10 seconds to connect and 30 seconds for an answer.
+      - A failed delivery is tried up to 5 times, waiting longer each time.
+      - Every failed try adds to the webhook's **Failures** count, and a success sets it back to zero. At 10 failures the webhook pauses itself.
+      - Click **Activate** to turn it back on, or **Pause** to stop it yourself.
+      - **Send Test** sends a test message right away and shows the HTTP code your system answered with. It works only on an active webhook.
+      - Nothing is sent while your account is suspended. Events from that time are dropped, not saved for later.
+
+  - slug: how-it-works-ai-connector
+    module: ai
+    covers_modules: [admin.ai_connector]
+    title: "How it works: connecting Claude or ChatGPT"
+    article_type: concept
+    position: 387
+    excerpt: Each person connects Claude or ChatGPT as themselves, it sees only what they can see, and every change it makes can be undone.
+    content: |
+      You can connect Claude or ChatGPT to {{brand}} under **Company Settings > Integrations > AI Apps**. Copy the **Connection URL**, add it as a connector in the AI app, and sign in to {{brand}} as yourself.
+
+      ## Two things must be on
+
+      1. **The add-on.** The AI connector is an add-on {{brand}} turns on for your company. Without it the screen says it is not part of your plan yet.
+      2. **Your role.** The role permission **AI Connector (Claude, ChatGPT)**: Read lets a person connect, Update also lets the AI make changes. Only the Company Administrator role has it to start with, so turn it on for other roles under **Users > Roles & Permissions**.
+
+      Both are checked on every request. Turning either off, deactivating the person or suspending the account stops their AI app on its next call.
+
+      ## What it can see and do
+
+      - It works as the person who signed in, with their permissions and locations. A person limited to certain locations who has none they can use sees nothing.
+      - When signing in, a person whose role has Update can tick **Also let it make changes**. The connection then shows as **Read and change**, otherwise **Read only**. Taking Update off the role makes it read only without disconnecting it.
+      - It cannot send emails or texts, or delete records. Workflows and campaigns it builds are saved as drafts: a person activates or starts them in {{brand}}.
+
+      ## Undo
+
+      - Every change is recorded. Click **Undo** on one change, or **Undo recent changes** on a connection for the **Last hour** or **Last 24 hours**.
+      - Undo leaves alone anything a person has changed since. Notes it added are deleted; tasks and tickets it opened are cancelled. A deal it moved to won or lost is not undone.
+      - Admins can undo and disconnect anyone's. Everyone else sees and manages their own.
+
+      ## Limits per person
+
+      Admins set **Records read per day** (2,000 to start), **Changes per hour** (30) and **Changes per day** (200). They count per person across all their AI apps; the daily ones reset at midnight. 0 pauses that kind of use. Hitting a limit alerts every admin.
+
+      ## Dealer cost
+
+      Dealer cost and gross stay hidden from AI apps until an admin ticks **Let AI apps see dealer cost and gross**. Then each person sees what {{brand}} already shows them. Commission is never shared.

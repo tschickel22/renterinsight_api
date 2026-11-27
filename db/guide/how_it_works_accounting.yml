@@ -12,6 +12,7 @@
 articles:
   - slug: how-it-works-deal-posting
     module: accounting
+    covers_modules: [finance.accounting]
     title: "How it works: how a deal posts to your books"
     article_type: concept
     position: 200
@@ -54,6 +55,7 @@ articles:
 
   - slug: how-it-works-invoice-posting
     module: accounting
+    covers_modules: [finance.invoices]
     title: "How it works: how invoices post to your books"
     article_type: concept
     position: 201

@@ -83,3 +83,15 @@
   keywords: [delete a deal, delete deal, remove a deal, delete deals]
   offered: true
   nearest: "Delete on the deal's page, the trash can on the deals list, or the Deals section of an account or contact. Payments, posted entries, invoices past draft, commissions, signed agreements and loans must be undone first."
+
+- topic: "Two-way texting from the website (Text Us replies)"
+  module: marketing.text_us
+  keywords: [text us widget, web to text, website texting, text us replies, round robin texts from website]
+  offered: false
+  nearest: "The website's Text Us button opens a text message to your number on the visitor's phone. Replies are not routed to a rep inside {{brand}} yet."
+
+- topic: "Online finance applications from buyers (Client Applications screen)"
+  module: finance.applications
+  keywords: [finance application, credit application, client applications, loan application online, buyer applies for financing]
+  offered: false
+  nearest: "The Client Applications screen does not save applications yet. A buyer can fill in a credit application as a sensitive agreement (for example a lender's credit app template), which keeps their answers encrypted."
