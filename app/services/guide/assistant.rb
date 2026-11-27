@@ -242,7 +242,7 @@ module Guide
         when 'search_help' then search_help(input['query'].to_s)
         when 'search_videos' then search_videos(input['query'].to_s)
         when 'my_account' then Guide::AccountState.new(@user, @company).to_h
-        when 'my_setup' then Guide::SetupAreas.new(app_ctx).call(input['module'])
+        when 'my_setup' then my_setup(input['module'])
         when 'look_up' then Guide::LookUp.new(app_ctx).call(input['tool'], input['arguments'])
         when 'explain_record' then Guide::ExplainRecord.new(app_ctx).call(input['type'], input['id'])
         when 'product_facts' then product_facts(input['topic'])
@@ -254,6 +254,14 @@ module Guide
       Rails.logger.warn("[Guide::Assistant] #{use['name']} failed: #{e.class} #{e.message}")
       record_trace(use['name'], input, { error: 'failed' })
       { error: 'That lookup failed.' }
+    end
+
+    # A module sold but not built says so here too, and that counts as the
+    # backing a "not offered" answer needs.
+    def my_setup(key)
+      result = Guide::SetupAreas.new(app_ctx).call(key)
+      @not_offered_seen ||= result.is_a?(Hash) && (result[:not_built].present? || result[:not_offered].present?)
+      result
     end
 
     def record_trace(name, input, result)

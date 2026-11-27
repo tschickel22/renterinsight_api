@@ -39,6 +39,14 @@ RSpec.describe Guide::SetupAreas do
       })
     end
 
+    it 'says a sold but not built module is not offered, ahead of the setup it shares' do
+      out = described_class.new(ctx).call('marketing.text_us')
+      expect(out[:not_built]).to include('not offered')
+      expect(out.keys.index(:not_built)).to be < out.keys.size - 1
+      expect(described_class.new(ctx).call('finance.applications')[:not_built]).to include('not offered')
+      expect(described_class.new(ctx).call('crm.prospecting')).not_to have_key(:not_built)
+    end
+
     it 'reads every module without a lookup failing' do
       skipped = []
       allow(Rails.logger).to receive(:info).and_wrap_original do |orig, msg|

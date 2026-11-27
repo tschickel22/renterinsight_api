@@ -68,6 +68,14 @@ RSpec.describe Guide::Assistant do
     expect(result.trace.map { |t| t['tool'] }).to eq(['product_facts'])
   end
 
+  it "takes my_setup's word that a sold module is not built (Text Us, staging 2026-11-27)" do
+    allow_any_instance_of(Guide::SetupAreas).to receive(:call).and_return({ plan_module: 'Text Us Widget', on_plan: true, not_built: 'not offered' })
+    result = ask({ 'answer_markdown' => "DealerTide doesn't route Text Us replies to a rep today.", 'outcome' => 'not_offered' },
+                 tool: ['my_setup', { 'module' => 'marketing.text_us' }])
+    expect(result.outcome).to eq('not_offered')
+    expect(result.answer).to include('Text Us')
+  end
+
   it 'counts cached input at a tenth' do
     result = ask({ 'answer_markdown' => 'Open Settings.', 'outcome' => 'answered' })
     expect(result.input_tokens).to eq(100 + 100)

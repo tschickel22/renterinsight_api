@@ -122,6 +122,11 @@ module Guide
       end
 
       facts = area[:reader] ? area[:reader].constantize.new(@ctx).to_h : read_facts(area[:facts])
+      # Sold but not built: say so first, or the setup it shares (Text Us
+      # reads the texting setup) gets taken for what the module does.
+      if (gap = Guide::ProductFacts.not_built(key))
+        facts = { not_built: "#{gap[:topic]}: not offered. #{gap[:about]} Answer with outcome not_offered." }.merge(facts)
+      end
       Guide::Fit.call({ plan_module: name, on_plan: true }.merge(facts), max_chars: 6_000)
     end
 
