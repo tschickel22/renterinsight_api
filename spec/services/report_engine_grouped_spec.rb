@@ -28,6 +28,14 @@ RSpec.describe ReportEngine do
     expect(out[:rows].first).to eq('owner_id' => 'Ana Rep', 'count' => 2, 'sum_selling_price' => 150_000.0, 'avg_selling_price' => 75_000.0)
     expect(out[:rows].last['owner_id']).to eq('Bo Rep')
     expect(out[:meta]).to include(grouped: true, total: 2)
+    expect(out[:columns].first[:type]).to eq('string')
+  end
+
+  it 'totals a group with no prices as 0' do
+    company.deals.create!(name: 'No price', contact_id: buyer.id, owner_id: bo.id, stage: 'closed_won', actual_close_date: Date.parse('2026-10-01'))
+    company.deals.where(owner_id: bo.id).where.not(name: 'No price').delete_all
+    out = run(group_by: 'owner_id', aggregates: [{ fn: 'sum', field: 'selling_price' }])
+    expect(out[:rows].find { |r| r['owner_id'] == 'Bo Rep' }['sum_selling_price']).to eq(0)
   end
 
   it 'groups a date by month, oldest first' do
@@ -39,6 +47,18 @@ RSpec.describe ReportEngine do
     expect(out[:columns].first[:label]).to eq('Actual Close Date (month)')
     quarters = run(group_by: 'actual_close_date', group_period: 'quarter')[:rows].map { |r| r['actual_close_date'] }
     expect(quarters).to eq(%w[2026-Q3 2026-Q4])
+  end
+
+  it 'shows a month with nothing in it as 0, not skipped' do
+    company.deals.create!(name: 'D Dec', contact_id: buyer.id, owner_id: bo.id, selling_price: 10_000,
+                          stage: 'closed_won', actual_close_date: Date.parse('2026-12-02'))
+    out = run(group_by: 'actual_close_date', group_period: 'month', aggregates: [{ fn: 'count' }, { fn: 'avg', field: 'selling_price' }])
+    expect(out[:rows].map { |r| [r['actual_close_date'], r['count']] }).to eq([['2026-09', 1], ['2026-10', 2], ['2026-11', 0], ['2026-12', 1]])
+    expect(out[:rows][2]['avg_selling_price']).to be_nil
+    newest_first = run(group_by: 'actual_close_date', group_period: 'month', sort_by: 'actual_close_date', sort_order: 'desc')
+    expect(newest_first[:rows].map { |r| r['actual_close_date'] }).to eq(%w[2026-12 2026-11 2026-10 2026-09])
+    by_count = run(group_by: 'actual_close_date', group_period: 'month', sort_by: 'count')
+    expect(by_count[:rows].size).to eq(3)
   end
 
   it 'counts by default and keeps filters' do

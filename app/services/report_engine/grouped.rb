@@ -43,18 +43,23 @@ class ReportEngine
       records = grouped.select(*selects).reorder(Arel.sql(order_clause(aggregates, period))).limit(MAX_GROUPS)
 
       rows = records.map do |r|
-        value = r['group_value']
-        value = period_label(value.to_date, period) if period && value.respond_to?(:to_date)
-        row = { group.to_s => value }
+        row = { group.to_s => r['group_value'] }
         aggregates.each { |a| row[a[:key]] = round(r[a[:key]], a[:fn]) }
         row
+      end
+      if period
+        rows = fill_empty_periods(rows, group, period, aggregates) if total_groups <= MAX_GROUPS && in_period_order?(aggregates)
+        total_groups = [total_groups, rows.size].max
+        rows.each { |row| row[group] = period_label(row[group].to_date, period) if row[group].respond_to?(:to_date) }
       end
       # Names instead of ids for people, accounts and contacts.
       @klass.resolve_references!(rows, [@defs[group]].compact) unless period
       rows.each { |row| row[group] = '(none)' if row[group].nil? }
 
       {
-        columns: [{ key: group, label: group_label(group, period), type: period ? 'string' : @defs[group][:type].to_s }] +
+        # A period label or a resolved name is text, whatever the column holds.
+        columns: [{ key: group, label: group_label(group, period),
+                    type: period || @defs[group][:resolve_as] ? 'string' : @defs[group][:type].to_s }] +
                  aggregates.map { |a| { key: a[:key], label: a[:label], type: 'number' } },
         rows: rows,
         meta: { total: total_groups, page: 1, per_page: MAX_GROUPS, total_pages: 1, grouped: true,
@@ -134,6 +139,39 @@ class ReportEngine
       end
     end
 
+    # Listed in date order (the default for a period, or sorted by the group).
+    def in_period_order?(aggregates)
+      sort = @params[:sort_by].to_s
+      aggregates.none? { |a| a[:key] == sort }
+    end
+
+    # A month with nothing in it is still a month: without it the table skips
+    # it and a line chart slopes straight across, reading as if it had values.
+    # Counts and sums read 0; an average, minimum or maximum has none.
+    def fill_empty_periods(rows, group, period, aggregates)
+      dated = rows.select { |r| r[group].respond_to?(:to_date) }
+      return rows if dated.size < 2
+
+      by_date = dated.index_by { |r| r[group].to_date }
+      first, last = by_date.keys.minmax
+      step = { 'day' => 1.day, 'week' => 1.week, 'month' => 1.month, 'quarter' => 3.months, 'year' => 1.year }[period]
+      all = []
+      d = first
+      while d <= last
+        all << d
+        return rows if all.size > MAX_GROUPS
+
+        d += step
+      end
+      filled = all.map do |date|
+        by_date[date] || aggregates.each_with_object({ group => date }) do |a, row|
+          row[a[:key]] = %w[count sum].include?(a[:fn]) ? 0 : nil
+        end
+      end
+      filled.reverse! if dated.first[group].to_date > dated.last[group].to_date
+      filled + (rows - dated) # the (none) group stays last
+    end
+
     def group_label(field, period)
       label = @defs[field][:label]
       period ? "#{label} (#{period})" : label
@@ -152,7 +190,9 @@ class ReportEngine
     end
 
     def round(value, fn)
-      return nil if value.nil?
+      # A total of nothing is 0 (deals with no price entered); an average,
+      # minimum or maximum of nothing has no value.
+      return (fn == 'sum' ? 0 : nil) if value.nil?
       return value.to_i if fn == 'count'
 
       value.to_d.round(2).to_f

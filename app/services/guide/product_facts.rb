@@ -30,6 +30,12 @@ module Guide
       end
     end
 
+    # A capabilities.yml entry that names this module and says it is not
+    # offered (Text Us replies, Client Applications), or nil.
+    def self.not_built(module_key)
+      entries.find { |e| e[:module] == module_key.to_s && !e[:offered] && e[:topic] }
+    end
+
     def self.call(topic)
       words = topic.to_s.downcase.scan(/[a-z0-9&]+/).reject { |w| w.length < 3 }
       return { error: 'Say what feature to look up.' } if words.empty?
