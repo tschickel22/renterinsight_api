@@ -82,6 +82,18 @@ class IntakeForm < ApplicationRecord
   validate :assignees_belong_to_company
   validate :redirect_url_is_web_address
   normalizes :redirect_url, with: ->(url) { url.strip.presence }
+
+  # Outside inboxes that get every inquiry in full (IntakeSubmission#forward_to_outside_inboxes),
+  # for people who never sign in. Kept short: this is "also tell Natalie", not a mailing list.
+  MAX_FORWARD_EMAILS = 5
+  FORWARD_EMAIL_FORMAT = /\A[^@\s,;<>]+@[^@\s,;<>]+\.[a-z]{2,}\z/i
+  normalizes :forward_to_emails, with: lambda { |list|
+    Array(list).flat_map { |entry| entry.to_s.split(/[\s,;]+/) }
+               .map { |email| email.strip.downcase }
+               .reject(&:blank?)
+               .uniq
+  }
+  validate :forward_to_emails_are_addresses
   
   scope :active, -> { where(is_active: true) }
   scope :inactive, -> { where(is_active: false) }
@@ -151,6 +163,8 @@ class IntakeForm < ApplicationRecord
     # The builder reads redirectUrl. Missing, the box opened empty and the next
     # Save sent null, wiping the address (EHS's Cascade link, 2026-11-10).
     json['redirectUrl'] = json['redirect_url']
+    json['forward_to_emails'] = Array(forward_to_emails)
+    json['forwardToEmails'] = json['forward_to_emails']
     # Site key travels with the form so the public page can render the widget
     # without any FE ENV wiring. Site keys are public by design (Cloudflare
     # binds them to allowlisted domains at their edge).
@@ -355,6 +369,15 @@ class IntakeForm < ApplicationRecord
 
   # After a submit the visitor's browser is sent to this address, so it must
   # be a web page: a javascript: address would run on the dealer's site.
+  def forward_to_emails_are_addresses
+    list = Array(forward_to_emails)
+    if list.size > MAX_FORWARD_EMAILS
+      errors.add(:forward_to_emails, "can list up to #{MAX_FORWARD_EMAILS} addresses")
+    end
+    bad = list.reject { |email| email.match?(FORWARD_EMAIL_FORMAT) }
+    errors.add(:forward_to_emails, "has an address that is not an email: #{bad.join(', ')}") if bad.any?
+  end
+
   def redirect_url_is_web_address
     return if redirect_url.blank? || !will_save_change_to_redirect_url?
 

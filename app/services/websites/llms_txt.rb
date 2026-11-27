@@ -25,6 +25,7 @@ module Websites
 
       section(out, 'Pages', page_links)
       section(out, 'Homes for sale', home_links)
+      section(out, 'Apartments available now', rental_links)
       section(out, 'Blog', post_links)
       out << "## Optional\n\n- [Sitemap](#{base_url}/sitemap.xml)\n"
       out
@@ -118,6 +119,25 @@ module Websites
           (v.try(:sale_price).to_f.positive? ? "$#{ActiveSupport::NumberHelper.number_to_delimited(v.sale_price.to_i)}" : nil)
         ].compact
         link(name, url, specs.join(', '))
+      end
+    rescue StandardError
+      []
+    end
+
+    # Open units with rent and the date each opens, linking to the page that
+    # lists them. Read through the same source the vacancies block shows.
+    def rental_links
+      page = @website.website_pages.publicly_servable.order(:order)
+                     .detect { |p| RentalListings.blocks_on(p).any? }
+      return [] if page.nil?
+
+      path = page.path.to_s.start_with?('/') ? page.path : "/#{page.path}"
+      url = "#{base_url}#{path == '/' ? '' : path}"
+      RentalListings.for_page(page).first(MAX_HOMES).map do |l|
+        facts = [l[:beds_label],
+                 (l[:sqft].to_i.positive? ? "about #{l[:sqft]} sq ft" : nil),
+                 RentalListings.rent_label(l), RentalListings.availability_label(l)].compact
+        link(l[:title], url, facts.join(', '))
       end
     rescue StandardError
       []

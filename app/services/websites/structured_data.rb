@@ -39,6 +39,16 @@ module Websites
     }.freeze
     DEFAULT_BUSINESS_TYPE = 'LocalBusiness'
 
+    # A site can say what kind of place it is when the industry is too broad.
+    # Property management covers a firm managing hundreds of doors and a single
+    # apartment building; the building is an ApartmentComplex, which is what
+    # "apartments in North Admiral" is matched against. Allowlisted, because a
+    # free-text type is how HomeGoodsStore happened.
+    SITE_BUSINESS_TYPES = %w[
+      ApartmentComplex RealEstateAgent LocalBusiness AutoDealer SelfStorage
+      HomeAndConstructionBusiness GeneralContractor
+    ].freeze
+
     # Day order matters: Google reads openingHoursSpecification as written.
     DAYS = %w[monday tuesday wednesday thursday friday saturday sunday].freeze
 
@@ -70,7 +80,7 @@ module Websites
 
     def graph
       [website_node, store_node, web_page_node, breadcrumb_node, product_node, item_list_node,
-       blog_posting_node, faq_node].compact
+       rental_list_node, blog_posting_node, faq_node].compact
     end
 
     private
@@ -124,7 +134,14 @@ module Websites
     end
 
     def business_type
-      BUSINESS_TYPE_BY_INDUSTRY.fetch(company.try(:industry).to_s, DEFAULT_BUSINESS_TYPE)
+      site_business_type ||
+        BUSINESS_TYPE_BY_INDUSTRY.fetch(company.try(:industry).to_s, DEFAULT_BUSINESS_TYPE)
+    end
+
+    def site_business_type
+      seo = (@website.seo_config.presence || {}).to_h
+      chosen = seo['businessType'].presence || seo['business_type'].presence
+      chosen if SITE_BUSINESS_TYPES.include?(chosen.to_s)
     end
 
     def store_node
@@ -171,7 +188,7 @@ module Websites
     # spread of what this dealer sells.
     def price_range
       prices = servable_homes.filter_map { |v| v.sale_price.to_f if v.sale_price.to_f.positive? }
-      return nil if prices.empty?
+      return rent_range if prices.empty?
 
       low = prices.min.round
       high = prices.max.round
@@ -239,6 +256,90 @@ module Websites
       end
     rescue StandardError
       @servable_homes = []
+    end
+
+    # The same idea for a landlord: the spread of rents open right now.
+    def rent_range
+      rents = site_rentals.filter_map { |l| l[:rent].to_f if l[:rent].to_f.positive? }
+      return nil if rents.empty?
+
+      low = rents.min.round
+      high = rents.max.round
+      return "$#{number_with_delimiter(low)}/month" if low == high
+
+      "$#{number_with_delimiter(low)} to $#{number_with_delimiter(high)}/month"
+    end
+
+    def site_rentals
+      @site_rentals ||= RentalListings.for_website(@website)
+    rescue StandardError
+      @site_rentals = []
+    end
+
+    def page_rentals
+      return [] if @page.nil? || @vehicle || @blog_post
+
+      @page_rentals ||= RentalListings.for_page(@page)
+    rescue StandardError
+      @page_rentals = []
+    end
+
+    # The units open on this page, each an Apartment with a monthly rent offer,
+    # inside the building. Rent, size and the date it opens are what a renter
+    # asks an assistant, and prose in a description answers none of them.
+    def rental_list_node
+      listings = page_rentals
+      return nil if listings.empty?
+
+      page_url = "#{base_url}#{normalized_path(@page.path.to_s.presence || '/')}"
+      {
+        '@type' => 'ItemList',
+        '@id' => "#{page_url}#vacancies",
+        'name' => 'Available apartments',
+        'numberOfItems' => listings.size,
+        'itemListElement' => listings.each_with_index.map do |listing, i|
+          { '@type' => 'ListItem', 'position' => i + 1, 'item' => apartment_node(listing, page_url) }
+        end
+      }
+    end
+
+    def apartment_node(listing, page_url)
+      beds = listing[:beds]
+      {
+        '@type' => 'Apartment',
+        '@id' => "#{page_url}#unit-#{listing[:id]}",
+        'name' => [listing[:title], site_name].compact.join(' at '),
+        'description' => listing[:description].to_s.squish.truncate(500).presence,
+        'image' => listing[:photo_url].presence,
+        'numberOfRooms' => beds.nil? ? nil : [beds, 1].max,
+        'numberOfBedrooms' => beds,
+        'numberOfBathroomsTotal' => positive_number(listing[:baths]),
+        'floorSize' => (listing[:sqft].to_i.positive? ? { '@type' => 'QuantitativeValue', 'value' => listing[:sqft].to_i, 'unitCode' => 'FTK' } : nil),
+        'containedInPlace' => (store_node ? { '@id' => store_id } : nil),
+        'offers' => rent_offer(listing, page_url)
+      }.compact
+    end
+
+    def rent_offer(listing, page_url)
+      return nil unless listing[:rent].to_f.positive?
+
+      {
+        '@type' => 'Offer',
+        'url' => page_url,
+        'businessFunction' => 'http://purl.org/goodrelations/v1#LeaseOut',
+        'price' => listing[:rent],
+        'priceCurrency' => 'USD',
+        'priceSpecification' => {
+          '@type' => 'UnitPriceSpecification',
+          'price' => listing[:rent],
+          'priceCurrency' => 'USD',
+          'unitCode' => 'MON',
+          'unitText' => 'month'
+        },
+        'availability' => 'https://schema.org/InStock',
+        'availabilityStarts' => listing[:available_on].presence,
+        'offeredBy' => (store_node ? { '@id' => store_id } : nil)
+      }.compact
     end
 
     def number_with_delimiter(value)
