@@ -52,7 +52,7 @@ class ReportEngine
     klass = available_modules[module_key.to_s]
     return [] unless klass && klass.respond_to?(:reportable_config)
 
-    standard = klass.reportable_config[:fields].dup
+    standard = klass.reportable_config[:fields].map { |f| f.merge(groupable: ReportEngine::Grouped.groupable?(f)) }
 
     # Merge custom fields when company_id is provided and model has the JSONB column
     if company_id.present? && klass.column_names.include?("custom_field_values")
