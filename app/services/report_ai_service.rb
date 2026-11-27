@@ -96,6 +96,19 @@ class ReportAiService
       "  #{mod_key}: #{field_list}"
     end.join("\n")
 
+    stages = Array(context[:deal_stages])
+    stage_lines =
+      if stages.any?
+        won = stages.select { |st| st[:kind] == 'won' }.map { |st| st[:key] }
+        lost = stages.select { |st| st[:kind] == 'lost' }.map { |st| st[:key] }
+        open = stages.select { |st| st[:kind] == 'open' }.map { |st| st[:key] }
+        "THIS COMPANY'S DEAL STAGES (use these exact keys for the deals stage field, never closed_won or closed_lost unless listed):\n" \
+          "#{stages.map { |st| "  #{st[:key]} (#{st[:label]}, #{st[:kind]})" }.join("\n")}\n" \
+          "  won: #{won.to_json}  lost: #{lost.to_json}  open (pending, in the pipeline): #{open.to_json}"
+      else
+        'Deal stages: won is "closed_won", lost is "closed_lost"; the rest are open.'
+      end
+
     <<~PROMPT
       You are a report query builder for #{company_name}, a manufactured housing and RV dealership management system.
       Today's date is #{today}.
@@ -109,6 +122,9 @@ class ReportAiService
       - number fields: support gt/lt/eq operators
 
       Supported filter operators: eq, contains, gt, lt, in
+
+      #{stage_lines}
+      Wherever the shorthand or examples below say closed_won, closed_lost or list open stages, use this company's won, lost and open keys instead. For a deal stage of won, use "in" with the won keys.
 
       GROUPING AND TOTALS. When the question asks for counts, totals, averages, highest or lowest
       BY something (by salesperson, by month, by status, by source), build a grouped report:
@@ -236,6 +252,7 @@ class ReportAiService
 
       Rules:
       - Never use em dashes or en dashes in explanation or not_covered. Use a period, comma or colon.
+      - In explanation and not_covered, name fields as a person would ("salesperson", "selling price"), never by their keys (owner_id).
       - Only use fields that exist in the modules_summary above (skip any that aren't listed).
       - If a date range is implied (e.g., "this week", "past 7 days", "this month"), calculate exact dates from today.
       - If the phrasing is ambiguous, pick the most reasonable interpretation and build the query. Do NOT bail with null.

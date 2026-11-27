@@ -33,3 +33,13 @@ RSpec.describe ReportAiService, '#summarize_results' do
     expect(prompt).not_to include('do NOT work one out')
   end
 end
+
+# The AI filters on the company's own stage keys (Summit Park: won, lost),
+# not closed_won, which matched nothing for a company with its own pipeline.
+RSpec.describe ReportAiService, 'deal stages in the prompt' do
+  it "lists this company's won, lost and open stage keys" do
+    stages = [{ key: 'lead', label: 'Lead', kind: 'open' }, { key: 'won', label: 'Won', kind: 'won' }, { key: 'lost', label: 'Lost', kind: 'lost' }]
+    prompt = described_class.allocate.send(:build_prompt, 'deals won this year', { 'deals' => [] }, { deal_stages: stages, today: '2026-11-27' })
+    expect(prompt).to include('won: ["won"]').and include('lost: ["lost"]').and include('open (pending, in the pipeline): ["lead"]')
+  end
+end

@@ -61,7 +61,8 @@ module Api
           service = ReportAiService.new(api_key)
           result = service.translate(question, field_defs, {
             today: Date.current.to_s,
-            company_name: @company.name
+            company_name: @company.name,
+            deal_stages: deal_stage_context
           })
 
           query_params = result[:query_params]
@@ -890,6 +891,23 @@ module Api
 
         render json: { error: "You don't have access to #{module_key.to_s.humanize.downcase}." }, status: :forbidden
         false
+      end
+
+      # This company's deal stages, so "won", "open" or "pending" filter on its
+      # own stage keys. The prompt used to say closed_won, which a company with
+      # its own pipeline (Summit Park: won, lost) never matched.
+      def deal_stage_context
+        won = @company.won_stage_keys
+        lost = @company.lost_stage_keys
+        @company.pipeline_stages.filter_map do |s|
+          key = (s['key'] || s[:key]).to_s
+          next if key.blank?
+
+          label = s['label'] || s[:label] || s['name'] || s[:name] || key
+          { key: key, label: label, kind: won.include?(key) ? 'won' : (lost.include?(key) ? 'lost' : 'open') }
+        end
+      rescue StandardError
+        []
       end
 
       def check_ai_enabled
