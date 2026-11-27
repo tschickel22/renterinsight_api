@@ -66,12 +66,20 @@ RSpec.describe ReportEngine do
     expect(out[:rows].map { |r| r['count'] }).to eq([1, 1])
   end
 
+  it 'will not group by something different on every record' do
+    expect { run(group_by: 'selling_price') }.to raise_error(ArgumentError, /different on every record/)
+    expect { run(group_by: 'id') }.to raise_error(ArgumentError, /different on every record/)
+    groupable = described_class.field_definitions('deals').select { |f| f[:groupable] }.map { |f| f[:key].to_s }
+    expect(groupable).to include('stage', 'owner_id', 'actual_close_date')
+    expect(groupable).not_to include('id', 'deal_number', 'name', 'selling_price', 'probability')
+  end
+
   it 'refuses fields, functions and periods it does not know' do
     expect { run(group_by: 'name; DROP TABLE deals') }.to raise_error(ArgumentError, /Cannot group by/)
     expect { run(group_by: 'owner_id', aggregates: [{ fn: 'sum', field: 'selling_price) FROM users --' }]) }.to raise_error(ArgumentError, /Cannot total/)
     expect { run(group_by: 'owner_id', aggregates: [{ fn: 'pg_sleep', field: 'selling_price' }]) }.to raise_error(ArgumentError, /Unknown total/)
     expect { run(group_by: 'actual_close_date', group_period: "month', now()) --") }.to raise_error(ArgumentError, /Unknown period/)
-    expect { run(group_by: 'name', group_period: 'month') }.to raise_error(ArgumentError, /Only a date field/)
+    expect { run(group_by: 'stage', group_period: 'month') }.to raise_error(ArgumentError, /Only a date field/)
     expect { run(group_by: 'owner_id', aggregates: [{ fn: 'sum', field: 'name' }]) }.to raise_error(ArgumentError, /number fields/)
   end
 

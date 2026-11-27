@@ -24,6 +24,19 @@ class ReportEngine
     MAX_AGGREGATES = 3
     MAX_GROUPS = 200
 
+    # Fields that sort records into a few kinds: a person, status, source,
+    # stage, reason or date. An id, a record number, a name, an email or an
+    # amount is different on every record, so grouping by it gives one group
+    # per record.
+    UNIQUE_KEY = /\A(id|name|title)\z|_number\z|email|phone/
+
+    def self.groupable?(field)
+      key = field[:key].to_s
+      return false if key.start_with?('cf_') || key.match?(UNIQUE_KEY)
+
+      field[:type].to_s != 'number' || field[:resolve_as].present?
+    end
+
     def initialize(klass, scope, params)
       @klass = klass
       @scope = scope
@@ -85,6 +98,7 @@ class ReportEngine
     def group_field
       field = @params[:group_by].to_s
       raise ArgumentError, "Cannot group by #{field}: it is not a field of this report." unless usable?(field)
+      raise ArgumentError, "Cannot group by #{@defs[field][:label]}: it is different on every record. Group by a person, status, stage, source or date." unless self.class.groupable?(@defs[field])
 
       field
     end

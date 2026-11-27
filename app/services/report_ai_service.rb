@@ -128,7 +128,7 @@ class ReportAiService
 
       GROUPING AND TOTALS. When the question asks for counts, totals, averages, highest or lowest
       BY something (by salesperson, by month, by status, by source), build a grouped report:
-        "group_by": one field of the module,
+        "group_by": one field of the module that sorts records into a few kinds (a person, status, stage, source, reason or date), never an id, record number, name, email, phone or amount,
         "group_period": "day" | "week" | "month" | "quarter" | "year" (only when group_by is a date field),
         "aggregates": up to 3 of { "fn": "count" | "sum" | "avg" | "min" | "max", "field": a number field } ({"fn":"count"} needs no field).
       Sort a grouped report with sort_by set to an aggregate key ("sum_selling_price", "avg_selling_price", "count") or the group field.
