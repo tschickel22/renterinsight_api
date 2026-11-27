@@ -320,10 +320,12 @@ module Api
             # Who new leads go to: one person (notified_user_id) or a rotation.
             # The rotation is saved as reps, never as a list id from the browser.
             :assignment_mode, :assignmentMode,
+            # Outside inboxes that get every inquiry in full. One comma list
+            # from anything simpler (scalar), or an array from the builder
+            # (below). Scalars must come before the keyword entries.
+            :forward_to_emails, :forwardToEmails,
             rotation_user_ids: [], rotationUserIds: [],
-            # Outside inboxes that get every inquiry in full. An array from the
-            # builder, or one comma list from anything simpler.
-            :forward_to_emails, :forwardToEmails, forward_to_emails: [], forwardToEmails: [],
+            forward_to_emails: [], forwardToEmails: [],
             field_mappings: {},
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
