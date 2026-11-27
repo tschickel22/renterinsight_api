@@ -460,6 +460,8 @@ Rails.application.routes.draw do
       # ==================== AI REPORT QUERY ====================
       scope 'report-ai', as: 'report_ai' do
         post 'ask',               to: 'report_ai#ask'
+        post 'export',            to: 'report_ai#export_answer'
+        post 'save',              to: 'report_ai#save_answer'
         post 'classify',          to: 'report_ai#classify'
         post 'execute',           to: 'report_ai#execute'
         post 'contextual',        to: 'report_ai#contextual'

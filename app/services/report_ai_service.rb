@@ -23,6 +23,9 @@ class ReportAiService
     {
       query_params: parsed[:query_params],
       explanation: parsed[:explanation],
+      fully_answered: parsed[:fully_answered],
+      not_covered: parsed[:not_covered],
+      chart: parsed[:chart],
       input_tokens: response.dig('usage', 'input_tokens').to_i,
       output_tokens: response.dig('usage', 'output_tokens').to_i,
       cost_cents: calculate_cost_cents(
@@ -48,9 +51,15 @@ class ReportAiService
     sample     = rows.first(5).to_json
     total      = (report_data.dig(:meta, :total) || rows.length).to_i
     complete   = rows.length >= total && rows.length <= 5
+    grouped    = report_data.dig(:meta, :grouped)
 
     scope_line =
-      if complete
+      if grouped
+        shown = rows.first(20)
+        "The report is already grouped and totalled by the database, sorted as shown, with #{total} groups" \
+          "#{total > shown.size ? ", of which these are the first #{shown.size}" : ''}: #{shown.to_json}. " \
+          'The figures are exact; you may state them.'
+      elsif complete
         "The query matched #{total} records, all shown here: #{sample}."
       else
         "The query matched #{total} records. You can see only the first #{[rows.length, 5].min} of them: #{sample}. " \
@@ -101,10 +110,25 @@ class ReportAiService
 
       Supported filter operators: eq, contains, gt, lt, in
 
+      GROUPING AND TOTALS. When the question asks for counts, totals, averages, highest or lowest
+      BY something (by salesperson, by month, by status, by source), build a grouped report:
+        "group_by": one field of the module,
+        "group_period": "day" | "week" | "month" | "quarter" | "year" (only when group_by is a date field),
+        "aggregates": up to 3 of { "fn": "count" | "sum" | "avg" | "min" | "max", "field": a number field } ({"fn":"count"} needs no field).
+      Sort a grouped report with sort_by set to an aggregate key ("sum_selling_price", "avg_selling_price", "count") or the group field.
+      A question for one overall number ("how many leads this month", "total sales this year") is a list report; the count comes with it.
+      A chart helps a grouped report: add "chart": { "type": "bar" | "line" | "pie" } (line for a date grouped by period, pie only for 6 groups or fewer).
+
+      SAY WHAT YOU COULD NOT DO. Always include "fully_answered": true or false. Set it false when the report
+      leaves out part of what was asked: a field or comparison the modules do not have, two modules at once
+      (a report reads one module), a calculation across fields (margin percent, days between two dates),
+      or a figure the fields do not hold. Then set "not_covered" to one short sentence saying what is left out,
+      and still build the closest report you can.
+
       The user asks: "#{question}"
 
       TREAT REPORT-BUILDING PHRASING AS REPORT QUERIES.
-      A user who says any of the following is asking you to build a report — not asking
+      A user who says any of the following is asking you to build a report, not asking
       an ambiguous question. Never bail with module_key=null just because the phrasing
       is imperative rather than interrogative:
         - "build me a ___ report"          - "make me a ___ report"
@@ -126,7 +150,7 @@ class ReportAiService
         - "customers" / "buyers"                   -> module_key: "contacts"
         - "top rep" / "salesperson performance"    -> module_key: "deals", sort_by primary_salesperson
 
-      EXAMPLES (respond with ONLY a JSON object — no markdown, no prose outside JSON):
+      EXAMPLES (respond with ONLY a JSON object: no markdown, no prose outside JSON):
 
       Question: "Show me deals closed in the past 7 days"
       {
@@ -154,6 +178,50 @@ class ReportAiService
         "explanation": "Open (pending) deals still in the sales pipeline, soonest expected close first."
       }
 
+      Question: "Average selling price by salesperson this year"
+      {
+        "module_key": "deals",
+        "fields": ["owner_id", "selling_price"],
+        "filters": {
+          "date_range": { "field": "actual_close_date", "from": "2026-01-01", "to": "2026-12-31" },
+          "where": [{ "field": "stage", "operator": "eq", "value": "closed_won" }]
+        },
+        "group_by": "owner_id",
+        "aggregates": [{ "fn": "count" }, { "fn": "avg", "field": "selling_price" }, { "fn": "sum", "field": "selling_price" }],
+        "sort_by": "avg_selling_price",
+        "sort_order": "desc",
+        "chart": { "type": "bar" },
+        "fully_answered": true,
+        "explanation": "Deals won this year by salesperson: how many, the average and the total selling price."
+      }
+
+      Question: "Leads by month this year"
+      {
+        "module_key": "leads",
+        "fields": ["created_at"],
+        "filters": { "date_range": { "field": "created_at", "from": "2026-01-01", "to": "2026-12-31" } },
+        "group_by": "created_at",
+        "group_period": "month",
+        "aggregates": [{ "fn": "count" }],
+        "chart": { "type": "line" },
+        "fully_answered": true,
+        "explanation": "New leads each month this year."
+      }
+
+      Question: "Gross margin percent by salesperson"
+      {
+        "module_key": "deals",
+        "fields": ["owner_id", "selling_price"],
+        "filters": { "where": [{ "field": "stage", "operator": "eq", "value": "closed_won" }] },
+        "group_by": "owner_id",
+        "aggregates": [{ "fn": "count" }, { "fn": "sum", "field": "selling_price" }],
+        "sort_by": "sum_selling_price",
+        "sort_order": "desc",
+        "fully_answered": false,
+        "not_covered": "Reports cannot work out margin percent; this shows deals and sales by salesperson instead.",
+        "explanation": "Deals won and total sales by salesperson."
+      }
+
       Question: "Make me a report of unpaid invoices"
       {
         "module_key": "invoices",
@@ -163,14 +231,15 @@ class ReportAiService
         },
         "sort_by": "due_date",
         "sort_order": "asc",
-        "explanation": "Invoices that are sent, overdue, or partially paid — oldest due date first."
+        "explanation": "Invoices that are sent, overdue, or partially paid, oldest due date first."
       }
 
       Rules:
+      - Never use em dashes or en dashes in explanation or not_covered. Use a period, comma or colon.
       - Only use fields that exist in the modules_summary above (skip any that aren't listed).
       - If a date range is implied (e.g., "this week", "past 7 days", "this month"), calculate exact dates from today.
-      - If the phrasing is ambiguous, pick the most reasonable interpretation and build the query — do NOT bail with null.
-      - Only set module_key to null when the question truly can't map to any available module. In that case, set explanation to what you would need to answer it (e.g., "I need a module to query — try asking about leads, deals, invoices, or inventory.").
+      - If the phrasing is ambiguous, pick the most reasonable interpretation and build the query. Do NOT bail with null.
+      - Only set module_key to null when the question truly can't map to any available module. In that case, set explanation to what you would need to answer it (e.g., "I need a module to query. Try asking about leads, deals, invoices, or inventory.").
     PROMPT
   end
 
@@ -194,7 +263,7 @@ class ReportAiService
     response = http.request(request, body.to_json)
 
     unless response.code == '200'
-      raise AiError, "Claude API error: #{response.code} — #{response.body&.slice(0, 200)}"
+      raise AiError, "Claude API error: #{response.code}: #{response.body&.slice(0, 200)}"
     end
 
     JSON.parse(response.body)
@@ -224,14 +293,32 @@ class ReportAiService
         sort_order: parsed['sort_order'] || 'desc',
         page: 1,
         per_page: 50
-      }
+      }.merge(grouping(parsed))
     else
       nil
     end
 
-    { query_params: query_params, explanation: explanation }
+    { query_params: query_params, explanation: explanation,
+      fully_answered: parsed['fully_answered'] != false,
+      not_covered: parsed['not_covered'].to_s.strip.first(300).presence,
+      chart: chart(parsed) }
   rescue JSON::ParserError => e
     raise AiError, "Could not parse Claude response as JSON: #{e.message}"
+  end
+
+  # Grouping as the engine takes it (ReportEngine::Grouped checks every field).
+  def grouping(parsed)
+    return {} if parsed['group_by'].blank?
+
+    { group_by: parsed['group_by'].to_s, group_period: parsed['group_period'].presence,
+      aggregates: Array(parsed['aggregates']).first(3).map { |a| a.to_h.slice('fn', 'field') }.presence }.compact
+  end
+
+  CHART_TYPES = %w[bar line pie].freeze
+
+  def chart(parsed)
+    type = parsed.dig('chart', 'type').to_s
+    CHART_TYPES.include?(type) && parsed['group_by'].present? ? { type: type } : nil
   end
 
   # Claude Sonnet 4 pricing:
