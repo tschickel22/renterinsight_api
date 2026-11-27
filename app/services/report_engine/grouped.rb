@@ -44,7 +44,7 @@ class ReportEngine
 
       rows = records.map do |r|
         value = r['group_value']
-        value = value.to_date.iso8601 if period && value.respond_to?(:to_date)
+        value = period_label(value.to_date, period) if period && value.respond_to?(:to_date)
         row = { group.to_s => value }
         aggregates.each { |a| row[a[:key]] = round(r[a[:key]], a[:fn]) }
         row
@@ -54,7 +54,7 @@ class ReportEngine
       rows.each { |row| row[group] = '(none)' if row[group].nil? }
 
       {
-        columns: [{ key: group, label: group_label(group, period), type: period ? 'date' : @defs[group][:type].to_s }] +
+        columns: [{ key: group, label: group_label(group, period), type: period ? 'string' : @defs[group][:type].to_s }] +
                  aggregates.map { |a| { key: a[:key], label: a[:label], type: 'number' } },
         rows: rows,
         meta: { total: total_groups, page: 1, per_page: MAX_GROUPS, total_pages: 1, grouped: true,
@@ -137,6 +137,18 @@ class ReportEngine
     def group_label(field, period)
       label = @defs[field][:label]
       period ? "#{label} (#{period})" : label
+    end
+
+    # 2026-01 for a month, 2026-Q1, 2026, "Week of 2026-01-05", or the day.
+    # Sorts the same as the date, so a chart's axis stays in order.
+    def period_label(date, period)
+      case period
+      when 'month' then date.strftime('%Y-%m')
+      when 'quarter' then "#{date.year}-Q#{((date.month - 1) / 3) + 1}"
+      when 'year' then date.year.to_s
+      when 'week' then "Week of #{date.iso8601}"
+      else date.iso8601
+      end
     end
 
     def round(value, fn)

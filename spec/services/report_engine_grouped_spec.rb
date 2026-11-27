@@ -33,10 +33,12 @@ RSpec.describe ReportEngine do
   it 'groups a date by month, oldest first' do
     out = run(group_by: 'actual_close_date', group_period: 'month', aggregates: [{ fn: 'sum', field: 'selling_price' }])
     expect(out[:rows]).to eq([
-      { 'actual_close_date' => '2026-09-01', 'sum_selling_price' => 100_000.0 },
-      { 'actual_close_date' => '2026-10-01', 'sum_selling_price' => 130_000.0 }
+      { 'actual_close_date' => '2026-09', 'sum_selling_price' => 100_000.0 },
+      { 'actual_close_date' => '2026-10', 'sum_selling_price' => 130_000.0 }
     ])
     expect(out[:columns].first[:label]).to eq('Actual Close Date (month)')
+    quarters = run(group_by: 'actual_close_date', group_period: 'quarter')[:rows].map { |r| r['actual_close_date'] }
+    expect(quarters).to eq(%w[2026-Q3 2026-Q4])
   end
 
   it 'counts by default and keeps filters' do
