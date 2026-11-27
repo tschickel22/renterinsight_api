@@ -105,13 +105,21 @@ module Api
             }
           end
 
-          report_data = ReportEngine.run(
-            query_params.merge(
-              company_id: @company.id,
-              location_id: effective_location_id,
-              user: current_user
-            )
-          )
+          run_params = { company_id: @company.id, location_id: effective_location_id, user: current_user }
+          fully_answered = result[:fully_answered] != false
+          not_covered = result[:not_covered]
+          begin
+            report_data = ReportEngine.run(query_params.merge(run_params))
+          rescue ArgumentError => e
+            raise unless query_params[:group_by].present?
+
+            # The AI asked for a grouping the engine refuses (a field it does
+            # not have): show the plain list and say what is missing.
+            query_params = query_params.except(:group_by, :group_period, :aggregates)
+            report_data = ReportEngine.run(query_params.merge(run_params))
+            fully_answered = false
+            not_covered = "This could not be grouped the way you asked (#{e.message}), so here is the list."
+          end
 
           status = report_data[:rows].any? ? 'success' : 'no_results'
 
@@ -137,11 +145,22 @@ module Api
 
           summary = service.summarize_results(question, report_data) rescue nil
 
+          # Part of the question a report could not cover goes to support's
+          # list (Knowledge admin, Handed to support) to decide what to build.
+          unless fully_answered
+            GuideFlag.create(company_id: @company.id, user_id: current_user&.id, kind: 'not_expressible', source: 'report_ai',
+                             question: question, page: params[:page].presence, assistant_reason: not_covered,
+                             answer_shown: result[:explanation], tool_trace: [{ 'tool' => 'report', 'input' => query_params }])
+          end
+
           render json: {
             explanation: result[:explanation],
             summary: summary,
             query: query_params,
             data: report_data,
+            fully_answered: fully_answered,
+            not_covered: (not_covered unless fully_answered),
+            chart: (result[:chart] if report_data.dig(:meta, :grouped)),
             usage: ai_report_usage,
             query_id: log.id
           }
@@ -162,6 +181,49 @@ module Api
           Rails.logger.error "[ReportAI] Unexpected error: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
           render json: { error: 'AI query failed unexpectedly. Please try again.' }, status: :internal_server_error
         end
+      end
+
+      # POST /api/v1/report-ai/export  { query, all_locations? }
+      # The CSV of an AI answer: the same query rerun at up to 500 rows (or
+      # 200 groups), recorded like every export (ReportExport). Uses the same
+      # module permission and location rule the answer used.
+      def export_answer
+        query = answer_query
+        return unless query
+        return unless authorize_answer_module!(query[:module])
+
+        location_id = params[:all_locations].to_s == 'true' ? nil : Current.location_id
+        export = ReportExport.call(company: @company, user: current_user, query: query, location_id: location_id,
+                                   name: params[:name].presence || "AI report #{query[:module]}", ip: request.remote_ip)
+        response.headers['X-Export-Total'] = export.total.to_s
+        response.headers['X-Export-Rows'] = export.rows.to_s
+        send_data export.csv, filename: export.filename, type: 'text/csv', disposition: 'attachment'
+      rescue ArgumentError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/v1/report-ai/save  { name, query, chart? }
+      # Keeps an AI answer as a saved report (private to the person), so it
+      # can be run again, shared and exported from Reports.
+      def save_answer
+        query = answer_query
+        return unless query
+        return unless authorize_answer_module!(query[:module])
+        return render(json: { error: 'Give the report a name.' }, status: :unprocessable_entity) if params[:name].to_s.strip.blank?
+
+        chart = params[:chart].respond_to?(:to_unsafe_h) ? params[:chart].to_unsafe_h.slice('type') : nil
+        chart = nil unless chart && ReportAiService::CHART_TYPES.include?(chart['type'].to_s) && query[:group_by].present?
+        config = {
+          module_key: query[:module], fields: query[:fields], filters: query[:filters] || {},
+          sort_by: query[:sort_by], sort_order: query[:sort_order],
+          group_by: query[:group_by], group_period: query[:group_period], aggregates: query[:aggregates], chart: chart
+        }.compact.deep_stringify_keys
+        report = @company.reports.create!(name: params[:name].to_s.strip.first(150), module_key: query[:module], user_id: current_user.id,
+                                          location_id: Current.location_id, visibility: 'private', config: config,
+                                          description: params[:question].to_s.strip.first(500).presence)
+        render json: { report: { id: report.id, name: report.name } }, status: :created
+      rescue ActiveRecord::RecordInvalid => e
+        render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
       end
 
       # GET /api/v1/report-ai/usage
@@ -807,6 +869,27 @@ module Api
 
       def get_ai_report_limit
         AiQueryLog.monthly_limit_for(@company, user: current_user)
+      end
+
+      # The query an AI answer ran, as the browser sends it back. Only the
+      # keys a report takes; the engine checks every field in them.
+      def answer_query
+        raw = params[:query]
+        raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+        query = (raw || {}).to_h.with_indifferent_access.slice(:module, :fields, :filters, :sort_by, :sort_order, :group_by, :group_period, :aggregates)
+        if query[:module].blank?
+          render json: { error: 'No report to use.' }, status: :unprocessable_entity
+          return nil
+        end
+        query
+      end
+
+      def authorize_answer_module!(module_key)
+        resource = ReportEngine.read_resource_for(module_key)
+        return true if resource && can?(resource, 'read')
+
+        render json: { error: "You don't have access to #{module_key.to_s.humanize.downcase}." }, status: :forbidden
+        false
       end
 
       def check_ai_enabled

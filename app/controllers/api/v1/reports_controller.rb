@@ -121,7 +121,8 @@ module Api
           per_page:    params[:per_page] || 50,
           company_id:  @company.id,
           location_id: (defined?(Current) && Current.respond_to?(:location_id) ? Current.location_id : nil),
-          user:        current_user
+          user:        current_user,
+          **grouping(params)
         )
         render json: result
       rescue => e
@@ -199,7 +200,7 @@ module Api
         export = ReportExport.call(
           company: @company, user: current_user, location_id: Current.location_id, name: @report.name, ip: request.remote_ip,
           query: { module: cfg['module_key'] || @report.module_key, fields: cfg['fields'], filters: cfg['filters'] || {},
-                   sort_by: cfg['sort_by'], sort_order: cfg['sort_order'] }
+                   sort_by: cfg['sort_by'], sort_order: cfg['sort_order'], **grouping(cfg) }
         )
         send_export(export)
       rescue ActiveRecord::RecordNotFound
@@ -222,6 +223,17 @@ module Api
       end
 
       private
+
+      # A grouped report's settings (ReportEngine::Grouped), from a request or
+      # a saved report's config. The engine checks every field.
+      def grouping(source)
+        source = source.respond_to?(:to_unsafe_h) ? source.to_unsafe_h : source.to_h
+        source = source.with_indifferent_access
+        return {} if source[:group_by].blank?
+
+        aggregates = Array(source[:aggregates]).map { |a| a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.to_h }
+        { group_by: source[:group_by].to_s, group_period: source[:group_period].presence, aggregates: aggregates.presence }.compact
+      end
 
       def send_export(export)
         response.headers['X-Export-Total'] = export.total.to_s

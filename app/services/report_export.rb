@@ -23,7 +23,8 @@ class ReportExport
       module: query[:module], fields: query[:fields], filters: query[:filters] || {},
       sort_by: query[:sort_by], sort_order: query[:sort_order] || 'desc',
       page: 1, per_page: ReportEngine::MAX_PER_PAGE,
-      company_id: company.id, location_id: location_id, user: user
+      company_id: company.id, location_id: location_id, user: user,
+      **query.slice(:group_by, :group_period, :aggregates).compact.symbolize_keys
     )
     columns = result[:columns]
     total = result.dig(:meta, :total).to_i

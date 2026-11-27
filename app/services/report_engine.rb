@@ -98,9 +98,13 @@ class ReportEngine
     per_page   = 50  if per_page <= 0
     per_page   = MAX_PER_PAGE if per_page > MAX_PER_PAGE
 
-    # Separate standard vs custom (cf_-prefixed) fields
+    # Separate standard vs custom (cf_-prefixed) fields. A custom field is
+    # read as custom_field_values->>'key' in raw SQL, so only keys of this
+    # company's own custom fields for the module are allowed: the key used to
+    # go into the SQL as given, from a saved report, Report AI or the run
+    # endpoint (2026-11-27).
     standard_fields = all_fields.reject { |f| f.start_with?("cf_") }
-    custom_fields   = all_fields.select { |f| f.start_with?("cf_") }
+    custom_fields   = allowed_custom_fields(all_fields.select { |f| f.start_with?("cf_") }, params[:module], company_id)
 
     scope = klass.all
     scope = scope.where(company_id: company_id) if company_id.present? && klass.column_names.include?("company_id")
@@ -108,6 +112,10 @@ class ReportEngine
     # the rows exactly as the module's list does.
     scope = VisibleRecords.restrict(scope, user: params[:user], module_key: params[:module]) if params.key?(:user)
     scope = klass.apply_report_filters(scope, filters)
+
+    if params[:group_by].present?
+      return ReportEngine::Grouped.new(klass, scope, params).run
+    end
 
     total       = scope.count
     total_pages = (total.to_f / per_page).ceil
@@ -195,6 +203,15 @@ class ReportEngine
 
     cf_keys = klass.column_names.include?("custom_field_values") ? custom_fields : []
     std_keys + cf_keys
+  end
+
+  # cf_ keys that name an active custom field of this company for the module.
+  # Without a company there are none to check against, so none are allowed.
+  def self.allowed_custom_fields(keys, module_key, company_id)
+    return [] if keys.empty? || company_id.blank?
+
+    known = CustomField.active.for_module(module_key.to_s).where(company_id: company_id).pluck(:field_key).map { |k| "cf_#{k}" }
+    keys & known
   end
 
   # Maps CustomField.field_type to the ReportFieldType enum the frontend understands
